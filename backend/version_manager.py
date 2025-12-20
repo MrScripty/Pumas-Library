@@ -66,6 +66,8 @@ class VersionManager:
         # Cancellation flag (Phase 6.2.5d)
         self._cancel_installation = False
         self._installing_tag = None
+        self._current_process = None  # Track active subprocess for immediate kill
+        self._current_downloader = None  # Track active downloader for immediate cancel
 
     def get_installation_progress(self) -> Optional[Dict]:
         """
@@ -80,12 +82,34 @@ class VersionManager:
         """
         Cancel the currently running installation (Phase 6.2.5d)
 
+        Immediately kills any running subprocess and cancels downloads.
+
         Returns:
             True if cancellation was requested
         """
         if self._installing_tag:
-            print(f"Cancellation requested for {self._installing_tag}")
+            print(f"⚠️  CANCELLATION REQUESTED for {self._installing_tag}")
             self._cancel_installation = True
+
+            # Immediately cancel any active download
+            if self._current_downloader:
+                try:
+                    print("Cancelling active download...")
+                    self._current_downloader.cancel()
+                    print("✓ Download cancelled")
+                except Exception as e:
+                    print(f"Error cancelling download: {e}")
+
+            # Immediately kill any running process
+            if self._current_process:
+                try:
+                    print(f"Killing active subprocess (PID: {self._current_process.pid})...")
+                    self._current_process.kill()
+                    self._current_process.wait(timeout=1)
+                    print("✓ Subprocess killed")
+                except Exception as e:
+                    print(f"Error killing subprocess: {e}")
+
             self.progress_tracker.set_error("Installation cancelled by user")
             return True
         return False
@@ -365,18 +389,27 @@ class VersionManager:
             # TODO: Enhance DownloadManager to provide progress callbacks
             # For now, just update progress at start and end
             downloader = DownloadManager()
-            success = downloader.download_with_retry(download_url, archive_path)
+            self._current_downloader = downloader  # Track for cancellation
 
-            if not success:
-                error_msg = "Download failed"
-                print(error_msg)
-                self.progress_tracker.set_error(error_msg)
-                return False
+            try:
+                success = downloader.download_with_retry(download_url, archive_path)
+
+                if not success:
+                    error_msg = "Download failed"
+                    print(error_msg)
+                    self.progress_tracker.set_error(error_msg)
+                    return False
+            finally:
+                self._current_downloader = None  # Clear reference
 
             # Get archive size
             archive_size = archive_path.stat().st_size
             self.progress_tracker.update_download_progress(archive_size, archive_size)
             self.progress_tracker.add_completed_item(archive_path.name, 'archive', archive_size)
+
+            # Check for cancellation after download
+            if self._cancel_installation:
+                raise InterruptedError("Installation cancelled after download")
 
             # Step 2: Extract archive
             self.progress_tracker.update_stage(InstallationStage.EXTRACT, 0, "Extracting archive")
@@ -757,15 +790,43 @@ class VersionManager:
             )
 
         # Use UV to install requirements
-        # Note: UV doesn't provide per-package callbacks, so we track overall progress
-        success, stdout, stderr = run_command(
+        # Use Popen to allow immediate cancellation
+        print("Starting dependency installation...")
+        self._current_process = subprocess.Popen(
             [
                 'uv', 'pip', 'install',
                 '-r', str(requirements_file),
                 '--python', str(venv_python)
             ],
-            timeout=600  # 10 minute timeout for large installs
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
+
+        try:
+            # Wait for process to complete, checking cancellation flag
+            # The cancel_installation() method will kill the process immediately
+            import time
+            while self._current_process.poll() is None:
+                time.sleep(0.1)  # Check every 100ms
+
+                # Check if process was killed by cancel_installation()
+                if self._cancel_installation:
+                    raise InterruptedError("Installation cancelled during dependency installation")
+
+            # Process completed, get output
+            stdout, stderr = self._current_process.communicate()
+            success = self._current_process.returncode == 0
+
+        except InterruptedError:
+            raise  # Re-raise to be caught by install_version
+        except Exception as e:
+            print(f"Error during dependency installation: {e}")
+            if self._current_process:
+                self._current_process.kill()
+            return False
+        finally:
+            self._current_process = None  # Clear process reference
 
         if success:
             # Mark all dependencies as completed

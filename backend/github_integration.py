@@ -197,6 +197,12 @@ class DownloadManager:
         """Initialize download manager"""
         self.last_progress_time = 0
         self.progress_update_interval = 0.5  # Update progress every 500ms
+        self._cancel_requested = False  # Cancellation flag
+
+    def cancel(self):
+        """Request cancellation of current download"""
+        self._cancel_requested = True
+        print("Download cancellation requested")
 
     def download_file(
         self,
@@ -215,6 +221,9 @@ class DownloadManager:
         Returns:
             True if successful, False otherwise
         """
+        # Reset cancellation flag at start of download
+        self._cancel_requested = False
+
         try:
             # Create parent directory if needed
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -230,6 +239,11 @@ class DownloadManager:
 
                 with open(destination, 'wb') as f:
                     while True:
+                        # Check for cancellation before reading next chunk
+                        if self._cancel_requested:
+                            print("Download cancelled by user")
+                            raise InterruptedError("Download cancelled")
+
                         chunk = response.read(8192)  # 8KB chunks
                         if not chunk:
                             break

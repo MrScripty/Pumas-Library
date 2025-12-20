@@ -86,6 +86,148 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    # ==================== Version Management Methods (Phase 5) ====================
+
+    def get_available_versions(self, force_refresh=False):
+        """Get list of available ComfyUI versions from GitHub"""
+        try:
+            versions = self.api.get_available_versions(force_refresh)
+            return {"success": True, "versions": versions}
+        except Exception as e:
+            return {"success": False, "error": str(e), "versions": []}
+
+    def get_installed_versions(self):
+        """Get list of installed ComfyUI version tags"""
+        try:
+            versions = self.api.get_installed_versions()
+            return {"success": True, "versions": versions}
+        except Exception as e:
+            return {"success": False, "error": str(e), "versions": []}
+
+    def install_version(self, tag):
+        """Install a ComfyUI version"""
+        try:
+            # Note: progress_callback not supported via PyWebView API
+            # Frontend should poll get_version_status() for progress
+            success = self.api.install_version(tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def remove_version(self, tag):
+        """Remove an installed ComfyUI version"""
+        try:
+            success = self.api.remove_version(tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def switch_version(self, tag):
+        """Switch to a different ComfyUI version"""
+        try:
+            success = self.api.switch_version(tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_active_version(self):
+        """Get currently active ComfyUI version"""
+        try:
+            version = self.api.get_active_version()
+            return {"success": True, "version": version}
+        except Exception as e:
+            return {"success": False, "error": str(e), "version": ""}
+
+    def check_version_dependencies(self, tag):
+        """Check dependency installation status for a version"""
+        try:
+            status = self.api.check_version_dependencies(tag)
+            return {"success": True, "dependencies": status}
+        except Exception as e:
+            return {"success": False, "error": str(e), "dependencies": {"installed": [], "missing": []}}
+
+    def install_version_dependencies(self, tag):
+        """Install dependencies for a ComfyUI version"""
+        try:
+            success = self.api.install_version_dependencies(tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_version_status(self):
+        """Get comprehensive status of all versions"""
+        try:
+            status = self.api.get_version_status()
+            return {"success": True, "status": status}
+        except Exception as e:
+            return {"success": False, "error": str(e), "status": {}}
+
+    def get_version_info(self, tag):
+        """Get detailed information about a specific version"""
+        try:
+            info = self.api.get_version_info(tag)
+            return {"success": True, "info": info}
+        except Exception as e:
+            return {"success": False, "error": str(e), "info": {}}
+
+    def launch_version(self, tag, extra_args=None):
+        """Launch a specific ComfyUI version"""
+        try:
+            success = self.api.launch_version(tag, extra_args)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    # ==================== Resource Management Methods (Phase 5) ====================
+
+    def get_models(self):
+        """Get list of models in shared storage"""
+        try:
+            models = self.api.get_models()
+            return {"success": True, "models": models}
+        except Exception as e:
+            return {"success": False, "error": str(e), "models": {}}
+
+    def get_custom_nodes(self, version_tag):
+        """Get list of custom nodes for a specific version"""
+        try:
+            nodes = self.api.get_custom_nodes(version_tag)
+            return {"success": True, "nodes": nodes}
+        except Exception as e:
+            return {"success": False, "error": str(e), "nodes": []}
+
+    def install_custom_node(self, git_url, version_tag, node_name=None):
+        """Install a custom node for a specific version"""
+        try:
+            success = self.api.install_custom_node(git_url, version_tag, node_name)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def update_custom_node(self, node_name, version_tag):
+        """Update a custom node to latest version"""
+        try:
+            success = self.api.update_custom_node(node_name, version_tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def remove_custom_node(self, node_name, version_tag):
+        """Remove a custom node from a specific version"""
+        try:
+            success = self.api.remove_custom_node(node_name, version_tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def scan_shared_storage(self):
+        """Scan shared storage and get statistics"""
+        try:
+            result = self.api.scan_shared_storage()
+            return {"success": True, "result": result}
+        except Exception as e:
+            return {"success": False, "error": str(e), "result": {}}
+
 
 def get_entrypoint():
     """

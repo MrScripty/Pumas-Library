@@ -373,6 +373,15 @@ class ResourceManager:
 
         return (files_moved, conflicts, conflict_paths)
 
+    def get_models(self) -> dict:
+        """
+        Get all models from shared storage
+
+        Returns:
+            Dict mapping model paths to model info
+        """
+        return self.metadata_manager.load_models()
+
     def add_model(
         self,
         source_path: Path,

@@ -54,6 +54,35 @@ class ComfyUISetupAPI:
         self.apps_file = self.apps_dir / "ComfyUI.desktop"
         self.desktop_file = Path.home() / "Desktop" / "ComfyUI.desktop"
 
+        # Initialize version management components (Phase 2-4)
+        self._init_version_management()
+
+    def _init_version_management(self):
+        """Initialize version management components"""
+        try:
+            from backend.metadata_manager import MetadataManager
+            from backend.github_integration import GitHubReleasesFetcher
+            from backend.resource_manager import ResourceManager
+            from backend.version_manager import VersionManager
+
+            launcher_data_dir = self.script_dir / "launcher-data"
+
+            self.metadata_manager = MetadataManager(launcher_data_dir)
+            self.github_fetcher = GitHubReleasesFetcher(self.metadata_manager)
+            self.resource_manager = ResourceManager(self.script_dir, self.metadata_manager)
+            self.version_manager = VersionManager(
+                self.script_dir,
+                self.metadata_manager,
+                self.github_fetcher,
+                self.resource_manager
+            )
+        except Exception as e:
+            print(f"Warning: Version management initialization failed: {e}")
+            self.metadata_manager = None
+            self.github_fetcher = None
+            self.resource_manager = None
+            self.version_manager = None
+
     def _find_comfyui_root(self, start_path: Path) -> Path:
         """
         Search upward from start_path to find ComfyUI root directory.
@@ -640,3 +669,247 @@ Categories=Graphics;ArtificialIntelligence;
         except Exception as e:
             print(f"Error launching ComfyUI: {e}")
             return False
+
+    # ==================== Version Management API (Phase 5) ====================
+
+    def get_available_versions(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+        """
+        Get list of available ComfyUI versions from GitHub
+
+        Args:
+            force_refresh: Force refresh from GitHub API (bypass cache)
+
+        Returns:
+            List of release dictionaries
+        """
+        if not self.version_manager:
+            return []
+        return self.version_manager.get_available_releases(force_refresh)
+
+    def get_installed_versions(self) -> List[str]:
+        """
+        Get list of installed ComfyUI version tags
+
+        Returns:
+            List of version tags (e.g., ['v0.2.0', 'v0.1.5'])
+        """
+        if not self.version_manager:
+            return []
+        return self.version_manager.get_installed_versions()
+
+    def install_version(self, tag: str, progress_callback=None) -> bool:
+        """
+        Install a ComfyUI version
+
+        Args:
+            tag: Version tag to install (e.g., 'v0.2.0')
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            True if installation successful
+        """
+        if not self.version_manager:
+            return False
+        return self.version_manager.install_version(tag, progress_callback)
+
+    def remove_version(self, tag: str) -> bool:
+        """
+        Remove an installed ComfyUI version
+
+        Args:
+            tag: Version tag to remove
+
+        Returns:
+            True if removal successful
+        """
+        if not self.version_manager:
+            return False
+        return self.version_manager.remove_version(tag)
+
+    def switch_version(self, tag: str) -> bool:
+        """
+        Switch to a different ComfyUI version
+
+        Args:
+            tag: Version tag to switch to
+
+        Returns:
+            True if switch successful
+        """
+        if not self.version_manager:
+            return False
+        return self.version_manager.set_active_version(tag)
+
+    def get_active_version(self) -> str:
+        """
+        Get currently active ComfyUI version
+
+        Returns:
+            Active version tag or empty string if none
+        """
+        if not self.version_manager:
+            return ""
+        return self.version_manager.get_active_version() or ""
+
+    def check_version_dependencies(self, tag: str) -> Dict[str, Any]:
+        """
+        Check dependency installation status for a version
+
+        Args:
+            tag: Version tag to check
+
+        Returns:
+            Dict with 'installed' and 'missing' lists
+        """
+        if not self.version_manager:
+            return {"installed": [], "missing": []}
+        return self.version_manager.check_dependencies(tag)
+
+    def install_version_dependencies(self, tag: str, progress_callback=None) -> bool:
+        """
+        Install dependencies for a ComfyUI version
+
+        Args:
+            tag: Version tag to install dependencies for
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            True if installation successful
+        """
+        if not self.version_manager:
+            return False
+        return self.version_manager.install_dependencies(tag, progress_callback)
+
+    def get_version_status(self) -> Dict[str, Any]:
+        """
+        Get comprehensive status of all versions
+
+        Returns:
+            Dict with version status information
+        """
+        if not self.version_manager:
+            return {
+                "installedCount": 0,
+                "activeVersion": None,
+                "versions": {}
+            }
+        return self.version_manager.get_version_status()
+
+    def get_version_info(self, tag: str) -> Dict[str, Any]:
+        """
+        Get detailed information about a specific version
+
+        Args:
+            tag: Version tag
+
+        Returns:
+            Dict with version information
+        """
+        if not self.version_manager:
+            return {}
+        return self.version_manager.get_version_info(tag)
+
+    def launch_version(self, tag: str, extra_args: List[str] = None) -> bool:
+        """
+        Launch a specific ComfyUI version
+
+        Args:
+            tag: Version tag to launch
+            extra_args: Optional additional command line arguments
+
+        Returns:
+            True if launch successful
+        """
+        if not self.version_manager:
+            return False
+        success, process = self.version_manager.launch_version(tag, extra_args)
+        return success
+
+    # ==================== Resource Management API (Phase 5) ====================
+
+    def get_models(self) -> Dict[str, Any]:
+        """
+        Get list of models in shared storage
+
+        Returns:
+            Dict mapping model paths to model info
+        """
+        if not self.resource_manager:
+            return {}
+        return self.resource_manager.get_models()
+
+    def get_custom_nodes(self, version_tag: str) -> List[str]:
+        """
+        Get list of custom nodes for a specific version
+
+        Args:
+            version_tag: Version tag to get custom nodes for
+
+        Returns:
+            List of custom node names
+        """
+        if not self.resource_manager:
+            return []
+
+        return self.resource_manager.list_version_custom_nodes(version_tag)
+
+    def install_custom_node(self, git_url: str, version_tag: str, node_name: str = None) -> bool:
+        """
+        Install a custom node for a specific version
+
+        Args:
+            git_url: Git repository URL
+            version_tag: ComfyUI version tag
+            node_name: Optional custom node name
+
+        Returns:
+            True if installation successful
+        """
+        if not self.resource_manager:
+            return False
+        return self.resource_manager.install_custom_node(git_url, version_tag, node_name)
+
+    def update_custom_node(self, node_name: str, version_tag: str) -> bool:
+        """
+        Update a custom node to latest version
+
+        Args:
+            node_name: Custom node directory name
+            version_tag: ComfyUI version tag
+
+        Returns:
+            True if update successful
+        """
+        if not self.resource_manager:
+            return False
+        return self.resource_manager.update_custom_node(node_name, version_tag)
+
+    def remove_custom_node(self, node_name: str, version_tag: str) -> bool:
+        """
+        Remove a custom node from a specific version
+
+        Args:
+            node_name: Custom node directory name
+            version_tag: ComfyUI version tag
+
+        Returns:
+            True if removal successful
+        """
+        if not self.resource_manager:
+            return False
+        return self.resource_manager.remove_custom_node(node_name, version_tag)
+
+    def scan_shared_storage(self) -> Dict[str, Any]:
+        """
+        Scan shared storage and get statistics
+
+        Returns:
+            Dict with scan results
+        """
+        if not self.resource_manager:
+            return {
+                "modelCount": 0,
+                "totalSize": 0,
+                "categoryCounts": {}
+            }
+        return self.resource_manager.scan_shared_storage()

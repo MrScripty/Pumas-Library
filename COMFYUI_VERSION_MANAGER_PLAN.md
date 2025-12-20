@@ -163,7 +163,7 @@
   - ✅ Fixed incorrect "installed" status for interrupted/deleted installations
   - ✅ Fixed orphaned directories not being cleaned up after cancellation
   - ✅ Fixed "directory exists" error when reinstalling after cancelled install
-- ⚠️ Size display per release - Deferred (infrastructure exists, frontend integration pending)
+- ✅️ Size display per release
 
 **Sub-phase 6.2.5d: Installation Control** ✅ Completed
 - ✅ Backend cancellation support ([backend/version_manager.py](backend/version_manager.py))

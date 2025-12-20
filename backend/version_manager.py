@@ -5,6 +5,7 @@ Handles installation, switching, and launching of ComfyUI versions
 """
 
 import json
+import os
 import shutil
 import tarfile
 import zipfile
@@ -88,29 +89,71 @@ class VersionManager:
             True if cancellation was requested
         """
         if self._installing_tag:
+            print("\n" + "=" * 60)
             print(f"⚠️  CANCELLATION REQUESTED for {self._installing_tag}")
+            print("=" * 60)
             self._cancel_installation = True
 
             # Immediately cancel any active download
             if self._current_downloader:
                 try:
-                    print("Cancelling active download...")
+                    print("→ Cancelling active download...")
                     self._current_downloader.cancel()
                     print("✓ Download cancelled")
                 except Exception as e:
-                    print(f"Error cancelling download: {e}")
+                    print(f"✗ Error cancelling download: {e}")
 
-            # Immediately kill any running process
+            # Immediately kill any running process and all its children
             if self._current_process:
                 try:
-                    print(f"Killing active subprocess (PID: {self._current_process.pid})...")
-                    self._current_process.kill()
-                    self._current_process.wait(timeout=1)
-                    print("✓ Subprocess killed")
+                    pid = self._current_process.pid
+                    print(f"→ Terminating subprocess (PID: {pid}) and all child processes...")
+
+                    # Kill the entire process group to ensure all children are terminated
+                    try:
+                        if hasattr(os, 'killpg'):
+                            # Send SIGTERM first for graceful shutdown
+                            os.killpg(os.getpgid(pid), 15)
+                            # Wait a moment
+                            import time
+                            time.sleep(0.5)
+                            # Check if still alive - need to check if process object is still valid
+                            try:
+                                still_alive = self._current_process.poll() is None
+                            except Exception:
+                                # Process object might be invalid, assume it's dead
+                                still_alive = False
+
+                            if still_alive:
+                                # Force kill with SIGKILL
+                                os.killpg(os.getpgid(pid), 9)
+                        else:
+                            self._current_process.kill()
+
+                        # Wait for process to die
+                        try:
+                            self._current_process.wait(timeout=2)
+                        except Exception:
+                            pass  # Process might already be gone
+                        print("✓ All processes terminated")
+                    except ProcessLookupError:
+                        print("✓ Process already terminated")
+                    except Exception as kill_error:
+                        print(f"✗ Error killing process group: {kill_error}")
+                        # Fallback: try killing just the main process
+                        try:
+                            self._current_process.kill()
+                            self._current_process.wait(timeout=1)
+                            print("✓ Main process killed")
+                        except Exception:
+                            pass
                 except Exception as e:
-                    print(f"Error killing subprocess: {e}")
+                    print(f"✗ Error terminating subprocess: {e}")
 
             self.progress_tracker.set_error("Installation cancelled by user")
+            print("=" * 60)
+            print("✓ INSTALLATION CANCELLED")
+            print("=" * 60 + "\n")
             return True
         return False
 
@@ -800,7 +843,9 @@ class VersionManager:
             ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            # Create new process group so we can kill the entire tree
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None
         )
 
         try:
@@ -823,7 +868,14 @@ class VersionManager:
         except Exception as e:
             print(f"Error during dependency installation: {e}")
             if self._current_process:
-                self._current_process.kill()
+                # Kill entire process group
+                try:
+                    if hasattr(os, 'killpg'):
+                        os.killpg(os.getpgid(self._current_process.pid), 9)
+                    else:
+                        self._current_process.kill()
+                except Exception:
+                    pass
             return False
         finally:
             self._current_process = None  # Clear process reference

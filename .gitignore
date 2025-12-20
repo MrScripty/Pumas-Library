@@ -43,3 +43,6 @@ comfyui.pid
 
 # ComfyUI version installations
 comfyui-versions/
+
+#misc
+notes.txt

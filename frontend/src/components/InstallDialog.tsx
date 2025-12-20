@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Download, Check, AlertCircle, Loader2, Calendar, Tag, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, HardDrive } from 'lucide-react';
 import { VersionRelease } from '../hooks/useVersions';
@@ -87,6 +87,9 @@ export function InstallDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
   const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
+  const [cancellationNotice, setCancellationNotice] = useState<string | null>(null);
+  const [noticeTimeout, setNoticeTimeout] = useState<NodeJS.Timeout | null>(null);
+  const cancellationRef = useRef(false);
 
   // Filter versions based on user preferences
   const filteredVersions = availableVersions.filter((release) => {
@@ -126,13 +129,22 @@ export function InstallDialog({
               clearInterval(pollInterval);
               setPollInterval(null);
             }
-            // Reset after showing completion
+            // Check if this was a cancellation vs a real failure
+            const wasCancelled = result?.error?.toLowerCase().includes('cancel');
+            // Reset quickly for cancellations (1.5s), slower for success/failure (3s)
+            const resetDelay = wasCancelled ? 1500 : 3000;
+
             setTimeout(() => {
               setInstallingVersion(null);
               setProgress(null);
               setShowDetails(false);
-            }, 3000);
+            }, resetDelay);
           }, 1000);
+        }
+
+        if (result?.error?.toLowerCase().includes('cancel')) {
+          cancellationRef.current = true;
+          showCancellationNotice();
         }
       } catch (error) {
         console.error('Failed to fetch installation progress:', error);
@@ -151,18 +163,52 @@ export function InstallDialog({
     };
   }, [installingVersion]);
 
+  useEffect(() => {
+    return () => {
+      if (noticeTimeout) {
+        clearTimeout(noticeTimeout);
+      }
+    };
+  }, [noticeTimeout]);
+
+  const showCancellationNotice = () => {
+    if (noticeTimeout) {
+      clearTimeout(noticeTimeout);
+    }
+
+    setCancellationNotice('Installation canceled');
+    const timeoutId = setTimeout(() => setCancellationNotice(null), 3000);
+    setNoticeTimeout(timeoutId);
+  };
+
   const handleInstall = async (tag: string) => {
     setInstallingVersion(tag);
     setErrorVersion(null);
     setErrorMessage(null);
     setShowDetails(false);
+    cancellationRef.current = false;
+    if (noticeTimeout) {
+      clearTimeout(noticeTimeout);
+      setNoticeTimeout(null);
+    }
+    setCancellationNotice(null);
 
     try {
       await onInstallVersion(tag);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      setErrorVersion(tag);
-      setErrorMessage(message);
+
+      // Check if this was a cancellation - if so, don't show error in version list
+      // The progress UI will already show the cancellation message
+      const isCancellation = cancellationRef.current || message.toLowerCase().includes('cancel');
+
+      if (!isCancellation) {
+        setErrorVersion(tag);
+        setErrorMessage(message);
+      } else {
+        showCancellationNotice();
+      }
+
       setInstallingVersion(null);
       setProgress(null);
     }
@@ -178,6 +224,8 @@ export function InstallDialog({
       const result = await (window as any).pywebview.api.cancel_installation();
       if (result.success) {
         console.log('Installation cancelled successfully');
+        cancellationRef.current = true;
+        showCancellationNotice();
       } else {
         console.error('Failed to cancel installation:', result.error);
       }
@@ -347,6 +395,22 @@ export function InstallDialog({
 
               {/* Version List or Installation Progress */}
               <div className="flex-1 overflow-y-auto p-4">
+                <AnimatePresence>
+                  {cancellationNotice && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      className="mb-3 rounded border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-400"
+                    >
+                      <div className="flex items-center gap-2">
+                        <AlertCircle size={14} />
+                        <span>{cancellationNotice}</span>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
                 {installingVersion && progress ? (
                   /* Installation Progress View */
                   <div className="space-y-4">
@@ -494,11 +558,31 @@ export function InstallDialog({
                       </div>
                     )}
 
-                    {/* Error Message */}
+                    {/* Error or Cancellation Message */}
                     {progress.error && (
-                      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
-                        <p className="text-red-400 text-sm">{progress.error}</p>
-                      </div>
+                      <>
+                        {progress.error.toLowerCase().includes('cancel') ? (
+                          /* Cancellation Message */
+                          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex items-center gap-3">
+                            <AlertCircle size={20} className="text-yellow-400" />
+                            <div>
+                              <p className="text-yellow-400 font-medium text-sm">Installation Cancelled</p>
+                              <p className="text-xs text-gray-400 mt-1">
+                                The installation was stopped and incomplete files have been removed
+                              </p>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Error Message */
+                          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-3">
+                            <AlertCircle size={20} className="text-red-400" />
+                            <div>
+                              <p className="text-red-400 font-medium text-sm">Installation Failed</p>
+                              <p className="text-xs text-gray-400 mt-1">{progress.error}</p>
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {/* Success Message */}

@@ -62,11 +62,23 @@ class JavaScriptAPI:
     def close_window(self):
         """Close the application window and terminate the process"""
         try:
+            # Cancel any ongoing installation before closing
+            print("\nCleaning up before exit...")
+            if self.api.version_manager:
+                # Check if there's an active installation
+                progress = self.api.get_installation_progress()
+                if progress and not progress.get('completed_at'):
+                    print("Active installation detected - cancelling...")
+                    self.api.cancel_installation()
+                    # Give it a moment to clean up
+                    import time
+                    time.sleep(1)
+
             # Destroy all windows
             for window in webview.windows:
                 window.destroy()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
         # Exit the application
         sys.exit(0)
 

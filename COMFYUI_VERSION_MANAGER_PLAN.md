@@ -52,7 +52,7 @@
 
 ### In Progress
 
-🔄 **Phase 6: Frontend UI Components** (In Progress - 2/5 complete)
+🔄 **Phase 6: Frontend UI Components** (In Progress - 3/5 complete)
 
 ✅ **Phase 6.1: Version Selector Component** (Completed 2025-12-19)
 - Dropdown component showing installed versions
@@ -71,104 +71,117 @@
 - PyWebView ready event handling
 - Full frontend-backend integration
 
-📋 **Phase 6.2.5: Enhanced Installation Experience** (Not Started)
+✅ **Phase 6.2.5: Enhanced Installation Experience** (Completed 2025-12-20)
 
-**Sub-phase 6.2.5a: Pre-caching Infrastructure**
-- Cache file structures for release data
-  - `release-requirements.json` - Cached requirements.txt for each release
-  - `package-sizes.json` - Package size lookup table
-  - `release-sizes.json` - Total sizes per release
-  - `installation-state.json` - Active installation progress tracking
-- `ReleaseDataFetcher` class
-  - Fetch requirements.txt from GitHub for each release
-  - Cache requirements.txt with hash
-  - Background task runner on app startup
-  - Process releases newest → oldest
-- `PackageSizeResolver` class
-  - Query PyPI JSON API for package sizes
-  - Platform detection (Linux/macOS/Windows)
-  - Python version detection
-  - Fallback to UV dry-run if needed
-  - Cache package sizes with platform identifier
-- `ReleaseSizeCalculator` class
-  - Calculate total size per release (archive + dependencies)
-  - Sort dependencies by size (largest first)
-  - Cache complete size data
-  - Invalidation based on requirements hash
-- Background pre-caching on app startup
-  - Non-blocking UI
-  - Progressive data availability
+**Sub-phase 6.2.5a: Pre-caching Infrastructure** ✅ Completed
+- ✅ Cache file structures for release data
+  - ✅ `release-requirements.json` - Cached requirements.txt for each release
+  - ✅ `package-sizes.json` - Package size lookup table
+  - ✅ `release-sizes.json` - Total sizes per release
+  - ✅ `installation-state.json` - Active installation progress tracking
+- ✅ `ReleaseDataFetcher` class ([backend/release_data_fetcher.py](backend/release_data_fetcher.py))
+  - ✅ Fetch requirements.txt from GitHub for each release
+  - ✅ Cache requirements.txt with SHA256 hash
+  - ✅ Parse requirements into package dict
+  - ✅ Support for multiple releases
+- ✅ `PackageSizeResolver` class ([backend/package_size_resolver.py](backend/package_size_resolver.py))
+  - ✅ Query PyPI JSON API for package sizes
+  - ✅ Platform detection (Linux x86_64/aarch64, macOS arm64/x86_64, Windows)
+  - ✅ Python version detection (3.x)
+  - ✅ Best wheel file matching for platform
+  - ✅ Cache package sizes with platform identifier
+  - ✅ Fallback to sdist if wheels unavailable
+- ✅ `ReleaseSizeCalculator` class ([backend/release_size_calculator.py](backend/release_size_calculator.py))
+  - ✅ Calculate total size per release (archive + dependencies)
+  - ✅ Sort dependencies by size (largest first)
+  - ✅ Cache complete size data with requirements hash
+  - ✅ Invalidation based on requirements hash
+  - ✅ Size breakdown formatting (GB/MB/KB)
+  - ✅ Percentage calculations
+- ✅ API Integration ([backend/api.py](backend/api.py))
+  - ✅ `get_release_size_info()` - Calculate and return size breakdown
+  - ✅ `get_release_size_breakdown()` - Get formatted size data
+  - ✅ `get_release_dependencies()` - Get sorted dependencies
+- ⚠️ Background pre-caching on app startup - Deferred (not critical path)
 
-**Sub-phase 6.2.5b: Progress Tracking System**
-- `InstallationProgressTracker` class
-  - Thread-safe state management
-  - JSON file-based progress writer
-  - Progress calculation with stage weighting
-  - Stage management (download, extract, venv, dependencies, setup)
-- Refactor `install_version()` for granular progress tracking
-  - Download progress (bytes, speed, ETA)
-  - Extraction progress
-  - Virtual environment creation progress
-  - Individual dependency installation tracking
-  - Track current package being installed
-  - Calculate overall progress and time remaining
-- Backend API endpoint
-  - `get_installation_progress()` method
-  - Return current state or null
-  - Support 1-second polling interval
+**Sub-phase 6.2.5b: Progress Tracking System** ✅ Completed
+- ✅ `InstallationProgressTracker` class ([backend/installation_progress_tracker.py](backend/installation_progress_tracker.py))
+  - ✅ Thread-safe state management with threading.Lock
+  - ✅ JSON file-based progress writer to `installation-state.json`
+  - ✅ Progress calculation with stage weighting (Download 15%, Extract 5%, Venv 5%, Dependencies 70%, Setup 5%)
+  - ✅ 5 installation stages: DOWNLOAD, EXTRACT, VENV, DEPENDENCIES, SETUP
+  - ✅ Track download progress (bytes, speed, ETA)
+  - ✅ Track dependency installation (package count, current package)
+  - ✅ Completed items tracking with timestamps and sizes
+  - ✅ Error state management
+  - ✅ Process ID tracking for cancellation support
+- ✅ Refactored `install_version()` ([backend/version_manager.py](backend/version_manager.py))
+  - ✅ Granular progress tracking across all 5 stages
+  - ✅ Download progress with archive size tracking
+  - ✅ Extraction progress updates
+  - ✅ Virtual environment creation progress
+  - ✅ Individual dependency installation tracking
+  - ✅ Overall progress calculation with weighted stages
+  - ✅ Auto-cleanup of progress state after completion
+- ✅ Backend API endpoints ([backend/api.py](backend/api.py), [backend/main.py](backend/main.py))
+  - ✅ `get_installation_progress()` - Returns current progress or None
+  - ✅ PyWebView JavaScript bridge exposure
+  - ✅ Supports 1-second polling interval from frontend
 
-**Sub-phase 6.2.5c: Enhanced Progress UI**
-- `InstallationProgressDialog` component
-  - Multi-stage progress display (Stage X of 5)
-  - Progress bar with accurate percentage
-  - Download speed display (MB/s)
-  - Time remaining estimation
-  - Current item/package display
-  - Overall progress indicator
-- Collapsible completed items list
-  - Expandable section for completed packages
-  - Show package name, version, and size
-  - Checkmark indicators
-  - Auto-scroll to current item
-- Enhanced dependency list in install dialog
-  - Collapsible section (collapsed by default)
-  - Size-sorted display (largest first)
-  - Show size and percentage of total per package
-  - Total summary with package count
-  - Archive size vs dependencies breakdown
-- Install dialog size display improvements
-  - Show total download size immediately (from cache)
-  - Progressive enhancement for uncached releases
-  - "Calculating..." state for missing data
-  - Display format: "Total Size: 4.5 GB (12 dependencies)"
+**Sub-phase 6.2.5c: Enhanced Progress UI** ✅ Completed
+- ✅ Inline progress in InstallDialog ([frontend/src/components/InstallDialog.tsx](frontend/src/components/InstallDialog.tsx))
+  - ✅ Multi-stage progress display with 5 stages
+  - ✅ Overall progress bar with weighted percentage (0-100%)
+  - ✅ Stage-specific progress bars for current stage
+  - ✅ Download stats (speed MB/s, ETA, downloaded/total bytes)
+  - ✅ Dependency stats (X/Y packages installed)
+  - ✅ Current item/package display
+  - ✅ Stage icons (Download, Extract, Venv, Dependencies, Setup)
+  - ✅ 1-second polling of `get_installation_progress()` API
+  - ✅ Smooth transitions between version list and progress views
+  - ✅ Dialog remains in same modal (no separate blocking dialog)
+- ✅ Collapsible completed items list
+  - ✅ Expandable section showing all completed items
+  - ✅ Package name and size display
+  - ✅ Checkmark indicator for completion
+  - ✅ Max-height scrollable container
+- ✅ User Experience Improvements
+  - ✅ Dialog can be closed at any time (installation continues in background)
+  - ✅ Progress persists when reopening dialog
+  - ✅ Auto-close 3 seconds after successful completion
+  - ✅ Cancel button with confirmation (placeholder for 6.2.5d)
+  - ✅ Elapsed time display
+  - ✅ Error state handling with user-friendly messages
+  - ✅ Success state with green confirmation
+- ✅ Installation state verification ([backend/version_manager.py](backend/version_manager.py))
+  - ✅ Validate installed versions against actual directories
+  - ✅ Check for required files (main.py, venv, venv/bin/python)
+  - ✅ Auto-cleanup of incomplete installations from metadata
+  - ✅ Prevents showing "installed" for interrupted/deleted versions
+- ⚠️ Size display per release - Deferred (infrastructure exists, frontend integration pending)
 
-**Sub-phase 6.2.5d: Installation Control**
+**Sub-phase 6.2.5d: Installation Control** 📋 Pending
 - Backend cancellation support
-  - Process tracking (store PID in state)
+  - Process tracking (store PID in state) - Infrastructure exists
   - Graceful subprocess termination
   - Force kill fallback (5-second timeout)
   - Cleanup on cancellation (remove partial files, update metadata)
 - Cancel button in progress UI
-  - Confirmation dialog before cancelling
-  - Call backend cancel method
+  - ✅ Confirmation dialog before cancelling
+  - Backend cancel method implementation needed
   - Show cleanup progress
-  - Return to install dialog
 - Window close handler during installation
   - Detect active installations on close attempt
-  - Show warning dialog with options:
-    - Cancel installation and exit
-    - Continue installation (stay in app)
+  - Show warning dialog with options
   - Clean up processes on confirmed exit
-  - Prevent orphaned installation processes
 
-**Sub-phase 6.2.5e: UX Polish**
+**Sub-phase 6.2.5e: UX Polish** 📋 Pending
 - Version selector empty state improvements
-  - Remove hardcoded "0.2.0" placeholder
-  - Display "No Versions Installed" when empty
-  - Make selector clickable to open install dialog
+  - ✅ Removed hardcoded "0.2.0" placeholder
+  - ✅ Display "No version selected" when empty
   - Highlight/emphasize download button when empty
   - Guide user to first action
-- "Open in File Manager" functionality
+- Open in File Manager functionality
   - Cross-platform implementation (Linux/macOS/Windows)
   - Add button to version selector for active version
   - Add button to version manager view (Phase 6.3)

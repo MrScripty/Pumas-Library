@@ -54,23 +54,26 @@ export function VersionSelector() {
 
   return (
     <div className="relative w-full">
-      {/* Version Selector Button */}
-      <button
-        onClick={() => {
-          console.log('Version selector clicked, hasInstalledVersions:', hasInstalledVersions, 'isOpen:', isOpen);
-          if (hasInstalledVersions) {
-            setIsOpen(!isOpen);
-            console.log('Set isOpen to:', !isOpen);
-          }
-        }}
-        disabled={!hasInstalledVersions || isLoading || isSwitching}
-        className={`w-full h-10 bg-[#2a2a2a] hover:bg-[#333333] border border-[#444] rounded flex items-center justify-between px-3 transition-colors ${
+      {/* Version Selector Container - Changed from button to div to allow nested buttons */}
+      <div
+        className={`w-full h-10 bg-[#2a2a2a] border border-[#444] rounded flex items-center justify-between px-3 transition-colors ${
           !hasInstalledVersions || isLoading || isSwitching
-            ? 'opacity-50 cursor-not-allowed'
-            : 'cursor-pointer'
+            ? 'opacity-50'
+            : ''
         }`}
       >
-        <div className="flex items-center gap-2">
+        {/* Left side - clickable area for version selector */}
+        <button
+          onClick={() => {
+            console.log('Version selector clicked, hasInstalledVersions:', hasInstalledVersions, 'isOpen:', isOpen);
+            if (hasInstalledVersions) {
+              setIsOpen(!isOpen);
+              console.log('Set isOpen to:', !isOpen);
+            }
+          }}
+          disabled={!hasInstalledVersions || isLoading || isSwitching}
+          className="flex items-center gap-2 flex-1 hover:opacity-80 transition-opacity disabled:cursor-not-allowed"
+        >
           {isSwitching ? (
             <Loader2 size={14} className="text-gray-400 animate-spin" />
           ) : (
@@ -79,8 +82,9 @@ export function VersionSelector() {
           <span className="text-sm text-white font-medium">
             {isSwitching ? 'Switching...' : displayVersion}
           </span>
-        </div>
+        </button>
 
+        {/* Right side - action buttons */}
         <div className="flex items-center gap-2">
           {/* Download Button */}
           <motion.button
@@ -124,7 +128,7 @@ export function VersionSelector() {
             </motion.div>
           )}
         </div>
-      </button>
+      </div>
 
       {/* Dropdown Menu */}
       <AnimatePresence>

@@ -1,12 +1,5 @@
 {
-  "installed": {
-    "v0.2.0": {
-      "path": "comfyui-versions/v0.2.0",
-      "installedDate": "2025-12-19T18:00:00Z",
-      "pythonVersion": "3.11.5",
-      "releaseTag": "v0.2.0"
-    }
-  },
-  "lastSelectedVersion": "v0.2.0",
+  "installed": {},
+  "lastSelectedVersion": "v0.5.1",
   "defaultVersion": null
 }

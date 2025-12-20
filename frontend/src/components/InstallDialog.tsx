@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Download, Check, AlertCircle, Loader2, Calendar, Tag } from 'lucide-react';
+import { X, Download, Check, AlertCircle, Loader2, Calendar, Tag, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, HardDrive } from 'lucide-react';
 import { VersionRelease } from '../hooks/useVersions';
 
 interface InstallDialogProps {
@@ -13,6 +13,46 @@ interface InstallDialogProps {
   onRefreshAll: (forceRefresh: boolean) => Promise<void>;
 }
 
+interface InstallationProgress {
+  tag: string;
+  started_at: string;
+  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage_progress: number;
+  overall_progress: number;
+  current_item: string | null;
+  download_speed: number | null;
+  eta_seconds: number | null;
+  total_size: number | null;
+  downloaded_bytes: number;
+  dependency_count: number | null;
+  completed_dependencies: number;
+  completed_items: Array<{
+    name: string;
+    type: string;
+    size: number | null;
+    completed_at: string;
+  }>;
+  error: string | null;
+  completed_at?: string;
+  success?: boolean;
+}
+
+const STAGE_LABELS = {
+  download: 'Downloading',
+  extract: 'Extracting',
+  venv: 'Creating Environment',
+  dependencies: 'Installing Dependencies',
+  setup: 'Final Setup'
+};
+
+const STAGE_ICONS = {
+  download: Download,
+  extract: FolderArchive,
+  venv: Settings,
+  dependencies: Package,
+  setup: CheckCircle2
+};
+
 export function InstallDialog({
   isOpen,
   onClose,
@@ -22,12 +62,16 @@ export function InstallDialog({
   onInstallVersion,
   onRefreshAll
 }: InstallDialogProps) {
+  console.log('InstallDialog render - isOpen:', isOpen, 'availableVersions:', availableVersions.length);
+
   const [showPreReleases, setShowPreReleases] = useState(true);
   const [showInstalled, setShowInstalled] = useState(true);
   const [installingVersion, setInstallingVersion] = useState<string | null>(null);
-  const [installProgress, setInstallProgress] = useState<string | null>(null);
+  const [progress, setProgress] = useState<InstallationProgress | null>(null);
   const [errorVersion, setErrorVersion] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
+  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
 
   // Filter versions based on user preferences
   const filteredVersions = availableVersions.filter((release) => {
@@ -44,33 +88,79 @@ export function InstallDialog({
     return true;
   });
 
+  // Poll for progress updates when installing
+  useEffect(() => {
+    if (!installingVersion) {
+      if (pollInterval) {
+        clearInterval(pollInterval);
+        setPollInterval(null);
+      }
+      setProgress(null);
+      return;
+    }
+
+    const fetchProgress = async () => {
+      try {
+        const result = await (window as any).pywebview.api.get_installation_progress();
+        setProgress(result);
+
+        // Stop polling if installation is complete
+        if (result?.completed_at) {
+          setTimeout(() => {
+            if (pollInterval) {
+              clearInterval(pollInterval);
+              setPollInterval(null);
+            }
+            // Reset after showing completion
+            setTimeout(() => {
+              setInstallingVersion(null);
+              setProgress(null);
+              setShowDetails(false);
+            }, 3000);
+          }, 1000);
+        }
+      } catch (error) {
+        console.error('Failed to fetch installation progress:', error);
+      }
+    };
+
+    // Initial fetch
+    fetchProgress();
+
+    // Poll every second
+    const interval = setInterval(fetchProgress, 1000);
+    setPollInterval(interval);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [installingVersion]);
+
   const handleInstall = async (tag: string) => {
     setInstallingVersion(tag);
-    setInstallProgress('Preparing installation...');
     setErrorVersion(null);
     setErrorMessage(null);
+    setShowDetails(false);
 
     try {
-      // Note: The backend doesn't support progress callbacks via PyWebView
-      // In a real implementation, we'd poll get_version_status() for progress
-      setInstallProgress('Downloading and installing...');
-
       await onInstallVersion(tag);
-
-      setInstallProgress('Installation complete!');
-
-      // Reset after 2 seconds
-      setTimeout(() => {
-        setInstallingVersion(null);
-        setInstallProgress(null);
-      }, 2000);
-
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setErrorVersion(tag);
       setErrorMessage(message);
-      setInstallProgress(null);
       setInstallingVersion(null);
+      setProgress(null);
+    }
+  };
+
+  const handleCancelInstallation = async () => {
+    // TODO: Implement cancellation in Phase 6.2.5d
+    if (window.confirm('Are you sure you want to cancel the installation? This will stop the process and remove any partially installed files.')) {
+      console.log('Cancel installation requested');
+      // For now, just reset state
+      setInstallingVersion(null);
+      setProgress(null);
+      setShowDetails(false);
     }
   };
 
@@ -83,6 +173,30 @@ export function InstallDialog({
       month: 'short',
       day: 'numeric'
     });
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  };
+
+  const formatSpeed = (bytesPerSec: number): string => {
+    return `${formatBytes(bytesPerSec)}/s`;
+  };
+
+  const formatETA = (seconds: number): string => {
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  };
+
+  const formatElapsedTime = (startedAt: string): string => {
+    const start = new Date(startedAt);
+    const now = new Date();
+    const elapsed = Math.floor((now.getTime() - start.getTime()) / 1000);
+    return formatETA(elapsed);
   };
 
   // Close on escape key
@@ -98,6 +212,8 @@ export function InstallDialog({
       return () => window.removeEventListener('keydown', handleEscape);
     }
   }, [isOpen, onClose]);
+
+  const CurrentStageIcon = progress ? STAGE_ICONS[progress.stage] : Loader2;
 
   return (
     <AnimatePresence>
@@ -127,7 +243,7 @@ export function InstallDialog({
               {/* Header */}
               <div className="flex items-center justify-between p-4 border-b border-[#444]">
                 <h2 className="text-xl font-semibold text-white">
-                  Install ComfyUI Version
+                  {installingVersion ? `Installing ${installingVersion}` : 'Install ComfyUI Version'}
                 </h2>
                 <button
                   onClick={onClose}
@@ -137,52 +253,223 @@ export function InstallDialog({
                 </button>
               </div>
 
-              {/* Filters */}
-              <div className="flex items-center gap-4 p-4 border-b border-[#444]">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showPreReleases}
-                    onChange={(e) => setShowPreReleases(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
-                  />
-                  <span className="text-sm text-gray-300">Show pre-releases</span>
-                </label>
+              {/* Filters (hidden during installation) */}
+              {!installingVersion && (
+                <div className="flex items-center gap-4 p-4 border-b border-[#444]">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showPreReleases}
+                      onChange={(e) => setShowPreReleases(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
+                    />
+                    <span className="text-sm text-gray-300">Show pre-releases</span>
+                  </label>
 
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={showInstalled}
-                    onChange={(e) => setShowInstalled(e.target.checked)}
-                    className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
-                  />
-                  <span className="text-sm text-gray-300">Show installed</span>
-                </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={showInstalled}
+                      onChange={(e) => setShowInstalled(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
+                    />
+                    <span className="text-sm text-gray-300">Show installed</span>
+                  </label>
 
-                <div className="flex-1" />
+                  <div className="flex-1" />
 
-                <span className="text-sm text-gray-500">
-                  {filteredVersions.length} version{filteredVersions.length !== 1 ? 's' : ''}
-                </span>
-              </div>
+                  <span className="text-sm text-gray-500">
+                    {filteredVersions.length} version{filteredVersions.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+              )}
 
-              {/* Version List */}
+              {/* Version List or Installation Progress */}
               <div className="flex-1 overflow-y-auto p-4">
-                {isLoading ? (
+                {installingVersion && progress ? (
+                  /* Installation Progress View */
+                  <div className="space-y-4">
+                    {/* Overall Progress */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-300">Overall Progress</span>
+                        <span className="text-sm font-semibold text-white">{progress.overall_progress}%</span>
+                      </div>
+                      <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden">
+                        <motion.div
+                          className="h-full bg-[#55ff55] rounded-full"
+                          initial={{ width: 0 }}
+                          animate={{ width: `${progress.overall_progress}%` }}
+                          transition={{ duration: 0.3 }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Current Stage */}
+                    <div className="bg-[#333] rounded-lg p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 bg-[#55ff55]/10 rounded-lg">
+                          <CurrentStageIcon size={24} className="text-[#55ff55]" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center justify-between mb-1">
+                            <h3 className="text-white font-medium">
+                              {STAGE_LABELS[progress.stage]}
+                            </h3>
+                            <span className="text-sm text-gray-400">
+                              {progress.stage_progress}%
+                            </span>
+                          </div>
+                          {progress.current_item && (
+                            <p className="text-sm text-gray-400 truncate">
+                              {progress.current_item}
+                            </p>
+                          )}
+                          <div className="w-full h-1.5 bg-[#222] rounded-full overflow-hidden mt-2">
+                            <motion.div
+                              className="h-full bg-[#55ff55]/50 rounded-full"
+                              initial={{ width: 0 }}
+                              animate={{ width: `${progress.stage_progress}%` }}
+                              transition={{ duration: 0.3 }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Stage-specific Stats */}
+                    {progress.stage === 'download' && (
+                      <div className="grid grid-cols-2 gap-3">
+                        {progress.download_speed !== null && (
+                          <div className="bg-[#333] rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Download size={14} className="text-gray-400" />
+                              <span className="text-xs text-gray-400">Speed</span>
+                            </div>
+                            <span className="text-base font-semibold text-white">
+                              {formatSpeed(progress.download_speed)}
+                            </span>
+                          </div>
+                        )}
+                        {progress.eta_seconds !== null && (
+                          <div className="bg-[#333] rounded-lg p-3">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Clock size={14} className="text-gray-400" />
+                              <span className="text-xs text-gray-400">ETA</span>
+                            </div>
+                            <span className="text-base font-semibold text-white">
+                              {formatETA(progress.eta_seconds)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {progress.stage === 'dependencies' && progress.dependency_count !== null && (
+                      <div className="bg-[#333] rounded-lg p-3">
+                        <div className="flex items-center gap-2 mb-1">
+                          <Package size={14} className="text-gray-400" />
+                          <span className="text-xs text-gray-400">Packages</span>
+                        </div>
+                        <span className="text-base font-semibold text-white">
+                          {progress.completed_dependencies} / {progress.dependency_count}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Elapsed Time */}
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <Clock size={14} />
+                      <span>Elapsed: {formatElapsedTime(progress.started_at)}</span>
+                    </div>
+
+                    {/* Expandable Details */}
+                    {progress.completed_items.length > 0 && (
+                      <div className="bg-[#333] rounded-lg overflow-hidden">
+                        <button
+                          onClick={() => setShowDetails(!showDetails)}
+                          className="w-full flex items-center justify-between p-3 hover:bg-[#3a3a3a] transition-colors"
+                        >
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 size={14} className="text-[#55ff55]" />
+                            <span className="text-sm font-medium text-white">
+                              Completed Items ({progress.completed_items.length})
+                            </span>
+                          </div>
+                          {showDetails ? (
+                            <ChevronUp size={14} className="text-gray-400" />
+                          ) : (
+                            <ChevronDown size={14} className="text-gray-400" />
+                          )}
+                        </button>
+                        <AnimatePresence>
+                          {showDetails && (
+                            <motion.div
+                              initial={{ height: 0 }}
+                              animate={{ height: 'auto' }}
+                              exit={{ height: 0 }}
+                              className="overflow-hidden"
+                            >
+                              <div className="max-h-40 overflow-y-auto p-3 pt-0 space-y-1">
+                                {progress.completed_items.map((item, index) => (
+                                  <div
+                                    key={index}
+                                    className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-[#2a2a2a]"
+                                  >
+                                    <span className="text-gray-300 truncate flex-1">
+                                      {item.name}
+                                    </span>
+                                    {item.size !== null && (
+                                      <span className="text-gray-500 text-xs ml-2">
+                                        {formatBytes(item.size)}
+                                      </span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    )}
+
+                    {/* Error Message */}
+                    {progress.error && (
+                      <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <p className="text-red-400 text-sm">{progress.error}</p>
+                      </div>
+                    )}
+
+                    {/* Success Message */}
+                    {progress.completed_at && progress.success && (
+                      <div className="bg-[#55ff55]/10 border border-[#55ff55]/30 rounded-lg p-3 flex items-center gap-3">
+                        <CheckCircle2 size={20} className="text-[#55ff55]" />
+                        <div>
+                          <p className="text-[#55ff55] font-medium text-sm">Installation Complete!</p>
+                          <p className="text-xs text-gray-400 mt-1">
+                            {installingVersion} has been successfully installed
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : isLoading ? (
+                  /* Loading State */
                   <div className="flex items-center justify-center py-12">
                     <Loader2 size={32} className="text-gray-400 animate-spin" />
                   </div>
                 ) : filteredVersions.length === 0 ? (
+                  /* Empty State */
                   <div className="flex flex-col items-center justify-center py-12 text-gray-500">
                     <AlertCircle size={48} className="mb-3" />
                     <p>No versions available</p>
                     <p className="text-sm mt-1">Try adjusting the filters above</p>
                   </div>
                 ) : (
+                  /* Version List */
                   <div className="space-y-3">
                     {filteredVersions.map((release) => {
                       const installed = isInstalled(release.tag_name);
-                      const installing = installingVersion === release.tag_name;
                       const hasError = errorVersion === release.tag_name;
 
                       return (
@@ -243,29 +530,17 @@ export function InstallDialog({
                                   <span>{errorMessage}</span>
                                 </div>
                               )}
-
-                              {/* Progress message */}
-                              {installing && installProgress && (
-                                <div className="mt-2 flex items-center gap-2 text-sm text-[#55ff55]">
-                                  <Loader2 size={16} className="animate-spin" />
-                                  <span>{installProgress}</span>
-                                </div>
-                              )}
                             </div>
 
                             {/* Install Button */}
                             <motion.button
                               onClick={() => handleInstall(release.tag_name)}
-                              disabled={installed || installing || installingVersion !== null}
-                              whileHover={!installed && !installing ? { scale: 1.05 } : {}}
-                              whileTap={!installed && !installing ? { scale: 0.95 } : {}}
+                              disabled={installed}
+                              whileHover={!installed ? { scale: 1.05 } : {}}
+                              whileTap={!installed ? { scale: 0.95 } : {}}
                               className={`flex items-center gap-2 px-4 py-2 rounded font-medium text-sm transition-colors flex-shrink-0 ${
                                 installed
                                   ? 'bg-[#55ff55]/20 text-[#55ff55] cursor-not-allowed'
-                                  : installing
-                                  ? 'bg-gray-700 text-gray-400 cursor-wait'
-                                  : installingVersion !== null
-                                  ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                                   : 'bg-[#55ff55] text-black hover:bg-[#66ff66]'
                               }`}
                             >
@@ -273,11 +548,6 @@ export function InstallDialog({
                                 <>
                                   <Check size={16} />
                                   Installed
-                                </>
-                              ) : installing ? (
-                                <>
-                                  <Loader2 size={16} className="animate-spin" />
-                                  Installing
                                 </>
                               ) : (
                                 <>
@@ -296,15 +566,31 @@ export function InstallDialog({
 
               {/* Footer */}
               <div className="flex items-center justify-between p-4 border-t border-[#444]">
-                <p className="text-sm text-gray-500">
-                  {installedVersions.length} version{installedVersions.length !== 1 ? 's' : ''} installed
-                </p>
-                <button
-                  onClick={onClose}
-                  className="px-4 py-2 bg-[#444] hover:bg-[#555] text-white rounded font-medium transition-colors"
-                >
-                  Close
-                </button>
+                {installingVersion && progress && !progress.completed_at ? (
+                  <>
+                    <p className="text-sm text-gray-500">
+                      Installation in progress...
+                    </p>
+                    <button
+                      onClick={handleCancelInstallation}
+                      className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded font-medium transition-colors"
+                    >
+                      Cancel Installation
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-500">
+                      {installedVersions.length} version{installedVersions.length !== 1 ? 's' : ''} installed
+                    </p>
+                    <button
+                      onClick={onClose}
+                      className="px-4 py-2 bg-[#444] hover:bg-[#555] text-white rounded font-medium transition-colors"
+                    >
+                      Close
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>

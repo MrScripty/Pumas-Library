@@ -64,8 +64,12 @@ class ComfyUISetupAPI:
             from backend.github_integration import GitHubReleasesFetcher
             from backend.resource_manager import ResourceManager
             from backend.version_manager import VersionManager
+            from backend.release_data_fetcher import ReleaseDataFetcher
+            from backend.package_size_resolver import PackageSizeResolver
+            from backend.release_size_calculator import ReleaseSizeCalculator
 
             launcher_data_dir = self.script_dir / "launcher-data"
+            cache_dir = launcher_data_dir / "cache"
 
             self.metadata_manager = MetadataManager(launcher_data_dir)
             self.github_fetcher = GitHubReleasesFetcher(self.metadata_manager)
@@ -75,6 +79,15 @@ class ComfyUISetupAPI:
                 self.metadata_manager,
                 self.github_fetcher,
                 self.resource_manager
+            )
+
+            # Initialize size calculation components (Phase 6.2.5a)
+            self.release_data_fetcher = ReleaseDataFetcher(cache_dir)
+            self.package_size_resolver = PackageSizeResolver(cache_dir)
+            self.release_size_calculator = ReleaseSizeCalculator(
+                cache_dir,
+                self.release_data_fetcher,
+                self.package_size_resolver
             )
         except Exception as e:
             print(f"Warning: Version management initialization failed: {e}")
@@ -924,3 +937,64 @@ Categories=Graphics;ArtificialIntelligence;
                 "categoryCounts": {}
             }
         return self.resource_manager.scan_shared_storage()
+
+    def get_release_size_info(self, tag: str, archive_size: int) -> Optional[Dict[str, Any]]:
+        """
+        Get size information for a release (Phase 6.2.5a/c)
+
+        Args:
+            tag: Release tag
+            archive_size: Size of the archive in bytes
+
+        Returns:
+            Dict with size breakdown or None if not available
+        """
+        if not hasattr(self, 'release_size_calculator'):
+            return None
+
+        try:
+            # Calculate release size (uses cache if available)
+            result = self.release_size_calculator.calculate_release_size(tag, archive_size)
+            return result
+        except Exception as e:
+            print(f"Error calculating release size: {e}")
+            return None
+
+    def get_release_size_breakdown(self, tag: str) -> Optional[Dict[str, Any]]:
+        """
+        Get size breakdown for display (Phase 6.2.5c)
+
+        Args:
+            tag: Release tag
+
+        Returns:
+            Dict with formatted size breakdown or None if not available
+        """
+        if not hasattr(self, 'release_size_calculator'):
+            return None
+
+        try:
+            return self.release_size_calculator.get_size_breakdown(tag)
+        except Exception as e:
+            print(f"Error getting size breakdown: {e}")
+            return None
+
+    def get_release_dependencies(self, tag: str, top_n: Optional[int] = None) -> List[Dict[str, Any]]:
+        """
+        Get dependencies for a release sorted by size (Phase 6.2.5c)
+
+        Args:
+            tag: Release tag
+            top_n: Optional limit to top N packages
+
+        Returns:
+            List of dependency dicts sorted by size (largest first)
+        """
+        if not hasattr(self, 'release_size_calculator'):
+            return []
+
+        try:
+            return self.release_size_calculator.get_sorted_dependencies(tag, top_n)
+        except Exception as e:
+            print(f"Error getting dependencies: {e}")
+            return []

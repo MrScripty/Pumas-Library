@@ -104,6 +104,14 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e), "versions": []}
 
+    def get_installation_progress(self):
+        """Get current installation progress (Phase 6.2.5b)"""
+        try:
+            progress = self.api.get_installation_progress()
+            return progress  # Can be None if no installation in progress
+        except Exception as e:
+            return None
+
     def install_version(self, tag):
         """Install a ComfyUI version"""
         try:
@@ -227,6 +235,32 @@ class JavaScriptAPI:
             return {"success": True, "result": result}
         except Exception as e:
             return {"success": False, "error": str(e), "result": {}}
+
+    # ==================== Size Calculation Methods (Phase 6.2.5a/c) ====================
+
+    def get_release_size_info(self, tag, archive_size):
+        """Get size information for a release"""
+        try:
+            info = self.api.get_release_size_info(tag, archive_size)
+            return {"success": True, "info": info}
+        except Exception as e:
+            return {"success": False, "error": str(e), "info": None}
+
+    def get_release_size_breakdown(self, tag):
+        """Get size breakdown for display"""
+        try:
+            breakdown = self.api.get_release_size_breakdown(tag)
+            return {"success": True, "breakdown": breakdown}
+        except Exception as e:
+            return {"success": False, "error": str(e), "breakdown": None}
+
+    def get_release_dependencies(self, tag, top_n=None):
+        """Get dependencies for a release sorted by size"""
+        try:
+            dependencies = self.api.get_release_dependencies(tag, top_n)
+            return {"success": True, "dependencies": dependencies}
+        except Exception as e:
+            return {"success": False, "error": str(e), "dependencies": []}
 
 
 def get_entrypoint():

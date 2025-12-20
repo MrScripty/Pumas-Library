@@ -86,13 +86,61 @@ class VersionManager:
 
     def get_installed_versions(self) -> List[str]:
         """
-        Get list of installed version tags
+        Get list of installed version tags (validated against actual directories)
 
         Returns:
-            List of version tags
+            List of version tags that are both in metadata and have valid directories
         """
         versions_metadata = self.metadata_manager.load_versions()
-        return list(versions_metadata.get('installed', {}).keys())
+        metadata_versions = set(versions_metadata.get('installed', {}).keys())
+
+        # Verify each version actually exists on disk
+        validated_versions = []
+        needs_cleanup = False
+
+        for tag in metadata_versions:
+            version_path = self.versions_dir / tag
+            if self._is_version_complete(version_path):
+                validated_versions.append(tag)
+            else:
+                # Version is in metadata but incomplete/missing on disk
+                print(f"Warning: Version {tag} is incomplete or missing, removing from metadata")
+                needs_cleanup = True
+
+        # Clean up metadata if we found incomplete versions
+        if needs_cleanup:
+            for tag in metadata_versions:
+                if tag not in validated_versions:
+                    del versions_metadata['installed'][tag]
+            self.metadata_manager.save_versions(versions_metadata)
+
+        return validated_versions
+
+    def _is_version_complete(self, version_path: Path) -> bool:
+        """
+        Check if a version installation is complete
+
+        Args:
+            version_path: Path to version directory
+
+        Returns:
+            True if version appears complete
+        """
+        if not version_path.exists():
+            return False
+
+        # Check for essential files/directories
+        required_paths = [
+            version_path / "main.py",  # Core ComfyUI file
+            version_path / "venv",     # Virtual environment
+            version_path / "venv" / "bin" / "python",  # Python in venv
+        ]
+
+        for path in required_paths:
+            if not path.exists():
+                return False
+
+        return True
 
     def get_version_info(self, tag: str) -> Optional[VersionInfo]:
         """

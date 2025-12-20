@@ -12,7 +12,7 @@ import urllib.request
 import json
 import tomllib
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 
 class ComfyUISetupAPI:

@@ -1,0 +1,9 @@
+{
+  "version": "v0.2.0",
+  "customNodes": {},
+  "launchArgs": [
+    "--listen",
+    "0.0.0.0"
+  ],
+  "pythonPath": "comfyui-versions/v0.2.0/venv/bin/python"
+}

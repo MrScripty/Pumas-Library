@@ -697,6 +697,17 @@ Categories=Graphics;ArtificialIntelligence;
             return []
         return self.version_manager.get_installed_versions()
 
+    def get_installation_progress(self) -> Optional[Dict[str, Any]]:
+        """
+        Get current installation progress (Phase 6.2.5b)
+
+        Returns:
+            Progress state dict or None if no installation in progress
+        """
+        if not self.version_manager:
+            return None
+        return self.version_manager.get_installation_progress()
+
     def install_version(self, tag: str, progress_callback=None) -> bool:
         """
         Install a ComfyUI version

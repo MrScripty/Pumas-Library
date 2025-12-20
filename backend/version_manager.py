@@ -22,6 +22,10 @@ from backend.utils import (
     ensure_directory, run_command, check_command_exists,
     parse_requirements_file
 )
+from backend.installation_progress_tracker import (
+    InstallationProgressTracker,
+    InstallationStage
+)
 
 
 class VersionManager:
@@ -54,6 +58,19 @@ class VersionManager:
 
         # Ensure versions directory exists
         ensure_directory(self.versions_dir)
+
+        # Initialize progress tracker (Phase 6.2.5b)
+        cache_dir = metadata_manager.launcher_data_dir / "cache"
+        self.progress_tracker = InstallationProgressTracker(cache_dir)
+
+    def get_installation_progress(self) -> Optional[Dict]:
+        """
+        Get current installation progress (Phase 6.2.5b)
+
+        Returns:
+            Progress state dict or None if no installation in progress
+        """
+        return self.progress_tracker.get_current_state()
 
     def get_available_releases(self, force_refresh: bool = False) -> List[GitHubRelease]:
         """
@@ -152,7 +169,7 @@ class VersionManager:
         progress_callback: Optional[Callable[[str, int, int], None]] = None
     ) -> bool:
         """
-        Install a ComfyUI version
+        Install a ComfyUI version (Enhanced with Phase 6.2.5b progress tracking)
 
         Args:
             tag: Version tag to install
@@ -180,13 +197,19 @@ class VersionManager:
             return False
 
         try:
+            # Initialize progress tracking
+            self.progress_tracker.start_installation(tag)
+
             # Step 1: Download release
+            self.progress_tracker.update_stage(InstallationStage.DOWNLOAD, 0, f"Downloading {tag}")
             if progress_callback:
                 progress_callback("Downloading release...", 1, 5)
 
             download_url = release.get('zipball_url') or release.get('tarball_url')
             if not download_url:
-                print("No download URL found in release")
+                error_msg = "No download URL found in release"
+                print(error_msg)
+                self.progress_tracker.set_error(error_msg)
                 return False
 
             # Determine archive type
@@ -199,14 +222,24 @@ class VersionManager:
             archive_ext = '.zip' if is_zip else '.tar.gz'
             archive_path = download_dir / f"{tag}{archive_ext}"
 
+            # TODO: Enhance DownloadManager to provide progress callbacks
+            # For now, just update progress at start and end
             downloader = DownloadManager()
             success = downloader.download_with_retry(download_url, archive_path)
 
             if not success:
-                print("Download failed")
+                error_msg = "Download failed"
+                print(error_msg)
+                self.progress_tracker.set_error(error_msg)
                 return False
 
+            # Get archive size
+            archive_size = archive_path.stat().st_size
+            self.progress_tracker.update_download_progress(archive_size, archive_size)
+            self.progress_tracker.add_completed_item(archive_path.name, 'archive', archive_size)
+
             # Step 2: Extract archive
+            self.progress_tracker.update_stage(InstallationStage.EXTRACT, 0, "Extracting archive")
             if progress_callback:
                 progress_callback("Extracting archive...", 2, 5)
 
@@ -220,6 +253,8 @@ class VersionManager:
             else:
                 with tarfile.open(archive_path, 'r:gz') as tar_ref:
                     tar_ref.extractall(temp_extract_dir)
+
+            self.progress_tracker.update_stage(InstallationStage.EXTRACT, 100, "Extraction complete")
 
             # GitHub archives extract to a subdirectory, find it
             extracted_contents = list(temp_extract_dir.iterdir())
@@ -238,27 +273,35 @@ class VersionManager:
                 shutil.rmtree(temp_extract_dir)
 
             # Step 3: Create venv with UV
+            self.progress_tracker.update_stage(InstallationStage.VENV, 0, "Creating virtual environment")
             if progress_callback:
                 progress_callback("Creating virtual environment...", 3, 5)
 
             if not self._create_venv(version_path):
-                print("Failed to create virtual environment")
+                error_msg = "Failed to create virtual environment"
+                print(error_msg)
+                self.progress_tracker.set_error(error_msg)
                 shutil.rmtree(version_path)
                 return False
 
-            # Step 4: Install dependencies
+            self.progress_tracker.update_stage(InstallationStage.VENV, 100, "Virtual environment created")
+
+            # Step 4: Install dependencies with progress tracking
+            self.progress_tracker.update_stage(InstallationStage.DEPENDENCIES, 0, "Installing dependencies")
             if progress_callback:
                 progress_callback("Installing dependencies...", 4, 5)
 
-            if not self.install_dependencies(tag):
+            if not self._install_dependencies_with_progress(tag):
                 print("Warning: Dependency installation had errors")
                 # Continue anyway, user can retry later
 
             # Step 5: Setup symlinks
+            self.progress_tracker.update_stage(InstallationStage.SETUP, 0, "Setting up symlinks")
             if progress_callback:
                 progress_callback("Setting up symlinks...", 5, 5)
 
             self.resource_manager.setup_version_symlinks(tag)
+            self.progress_tracker.update_stage(InstallationStage.SETUP, 100, "Setup complete")
 
             # Update metadata
             version_info: VersionInfo = {
@@ -275,15 +318,27 @@ class VersionManager:
             versions_metadata['installed'][tag] = version_info
             self.metadata_manager.save_versions(versions_metadata)
 
+            # Mark installation as complete
+            self.progress_tracker.complete_installation(True)
+
             print(f"✓ Successfully installed {tag}")
             return True
 
         except Exception as e:
-            print(f"Error installing version {tag}: {e}")
+            error_msg = f"Error installing version {tag}: {e}"
+            print(error_msg)
+            self.progress_tracker.set_error(error_msg)
+            self.progress_tracker.complete_installation(False)
+
             # Clean up on failure
             if version_path.exists():
                 shutil.rmtree(version_path)
             return False
+        finally:
+            # Clear progress state after a short delay (allow UI to read final state)
+            import time
+            time.sleep(2)
+            self.progress_tracker.clear_state()
 
     def _create_venv(self, version_path: Path) -> bool:
         """
@@ -472,6 +527,79 @@ class VersionManager:
         )
 
         if success:
+            print("✓ Dependencies installed successfully")
+            if stdout:
+                print(stdout)
+            return True
+        else:
+            print(f"Error installing dependencies: {stderr}")
+            return False
+
+    def _install_dependencies_with_progress(self, tag: str) -> bool:
+        """
+        Install dependencies with detailed progress tracking (Phase 6.2.5b)
+
+        Args:
+            tag: Version tag
+
+        Returns:
+            True if successful
+        """
+        version_path = self.versions_dir / tag
+
+        if not version_path.exists():
+            print(f"Version {tag} not found")
+            return False
+
+        requirements_file = version_path / "requirements.txt"
+
+        if not requirements_file.exists():
+            print(f"No requirements.txt found for {tag}")
+            return True  # No requirements is not an error
+
+        venv_python = version_path / "venv" / "bin" / "python"
+
+        if not venv_python.exists():
+            print(f"Virtual environment not found for {tag}")
+            return False
+
+        # Parse requirements to get package list
+        requirements = parse_requirements_file(requirements_file)
+        package_count = len(requirements)
+
+        print(f"Installing {package_count} dependencies for {tag}...")
+
+        # Update progress tracker with dependency count
+        current_state = self.progress_tracker.get_current_state()
+        if current_state:
+            current_state['dependency_count'] = package_count
+            self.progress_tracker.update_dependency_progress(
+                "Preparing...",
+                0,
+                package_count
+            )
+
+        # Use UV to install requirements
+        # Note: UV doesn't provide per-package callbacks, so we track overall progress
+        success, stdout, stderr = run_command(
+            [
+                'uv', 'pip', 'install',
+                '-r', str(requirements_file),
+                '--python', str(venv_python)
+            ],
+            timeout=600  # 10 minute timeout for large installs
+        )
+
+        if success:
+            # Mark all dependencies as completed
+            for i, (package, version_spec) in enumerate(requirements.items(), 1):
+                self.progress_tracker.update_dependency_progress(
+                    f"{package}{version_spec}",
+                    i,
+                    package_count
+                )
+                self.progress_tracker.add_completed_item(package, 'package')
+
             print("✓ Dependencies installed successfully")
             if stdout:
                 print(stdout)

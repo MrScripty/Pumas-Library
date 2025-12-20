@@ -23,6 +23,7 @@ declare global {
         get_available_versions: (force_refresh?: boolean) => Promise<{ success: boolean; versions: any[]; error?: string }>;
         get_installed_versions: () => Promise<{ success: boolean; versions: string[]; error?: string }>;
         validate_installations: () => Promise<{ success: boolean; result: { had_invalid: boolean; removed: string[]; valid: string[] }; error?: string }>;
+        get_installation_progress: () => Promise<any>;
         install_version: (tag: string) => Promise<{ success: boolean; error?: string }>;
         cancel_installation: () => Promise<{ success: boolean; error?: string }>;
         remove_version: (tag: string) => Promise<{ success: boolean; error?: string }>;
@@ -33,6 +34,10 @@ declare global {
         get_version_status: () => Promise<{ success: boolean; status: any; error?: string }>;
         get_version_info: (tag: string) => Promise<{ success: boolean; info: any; error?: string }>;
         launch_version: (tag: string, extra_args?: string[]) => Promise<{ success: boolean; error?: string }>;
+
+        // Size Calculation API (Phase 6.2.5c)
+        calculate_release_size: (tag: string, force_refresh?: boolean) => Promise<any>;
+        calculate_all_release_sizes: () => Promise<any>;
 
         // Resource Management API (Phase 5)
         get_models: () => Promise<{ success: boolean; models: any; error?: string }>;
@@ -153,9 +158,10 @@ export default function App() {
 
   // Initial load effect - runs once on mount
   useEffect(() => {
-    // Wait for PyWebView API to be ready
+    // Wait for PyWebView API to be ready with actual methods
     const waitForPyWebView = () => {
-      if (window.pywebview && window.pywebview.api) {
+      if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_status === 'function') {
+        console.log('PyWebView API ready with methods, initializing...');
         fetchStatus(true).catch(err => {
           console.error("Initial fetchStatus failed:", err);
           setStatusMessage("Failed to connect to backend");
@@ -165,6 +171,7 @@ export default function App() {
           setVersion("Error");
         });
       } else {
+        console.log('Waiting for PyWebView API methods...');
         setTimeout(waitForPyWebView, 100);
       }
     };

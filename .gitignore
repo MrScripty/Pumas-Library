@@ -40,3 +40,6 @@ Thumbs.db
 
 # ComfyUI runtime files
 comfyui.pid
+
+# ComfyUI version installations
+comfyui-versions/

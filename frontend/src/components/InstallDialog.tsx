@@ -53,6 +53,21 @@ const STAGE_ICONS = {
   setup: CheckCircle2
 };
 
+// Helper function to format bytes to human-readable size
+function formatSize(bytes: number | null | undefined): string {
+  if (!bytes || bytes === 0) return '';
+
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  } else if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  } else if (bytes < 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  } else {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+}
+
 export function InstallDialog({
   isOpen,
   onClose,
@@ -170,6 +185,45 @@ export function InstallDialog({
       console.error('Error cancelling installation:', error);
     }
   };
+
+  // Calculate sizes for releases in the background when dialog opens (Phase 6.2.5c)
+  useEffect(() => {
+    if (!isOpen || availableVersions.length === 0) {
+      return;
+    }
+
+    // Check if we have any releases without size data
+    const releasesNeedingSize = availableVersions.filter(
+      release => release.total_size === null || release.total_size === undefined
+    );
+
+    if (releasesNeedingSize.length === 0) {
+      return; // All releases already have size data
+    }
+
+    // Calculate sizes in the background for releases that need it
+    const calculateSizes = async () => {
+      console.log(`Calculating sizes for ${releasesNeedingSize.length} releases in background...`);
+
+      for (const release of releasesNeedingSize) {
+        try {
+          // Calculate size for this release (non-blocking)
+          await (window as any).pywebview.api.calculate_release_size(release.tag_name, false);
+        } catch (error) {
+          console.error(`Failed to calculate size for ${release.tag_name}:`, error);
+        }
+      }
+
+      // Refresh the available versions to get updated size data
+      console.log('Size calculation complete, refreshing versions...');
+      await onRefreshAll(false);
+    };
+
+    // Start calculation in background (non-blocking)
+    calculateSizes().catch(error => {
+      console.error('Error during background size calculation:', error);
+    });
+  }, [isOpen, availableVersions, onRefreshAll]);
 
   const isInstalled = (tag: string) => installedVersions.includes(tag);
 
@@ -539,30 +593,40 @@ export function InstallDialog({
                               )}
                             </div>
 
-                            {/* Install Button */}
-                            <motion.button
-                              onClick={() => handleInstall(release.tag_name)}
-                              disabled={installed}
-                              whileHover={!installed ? { scale: 1.05 } : {}}
-                              whileTap={!installed ? { scale: 0.95 } : {}}
-                              className={`flex items-center gap-2 px-4 py-2 rounded font-medium text-sm transition-colors flex-shrink-0 ${
-                                installed
-                                  ? 'bg-[#55ff55]/20 text-[#55ff55] cursor-not-allowed'
-                                  : 'bg-[#55ff55] text-black hover:bg-[#66ff66]'
-                              }`}
-                            >
-                              {installed ? (
-                                <>
-                                  <Check size={16} />
-                                  Installed
-                                </>
-                              ) : (
-                                <>
-                                  <Download size={16} />
-                                  Install
-                                </>
+                            {/* Install Button and Size Display */}
+                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                              <motion.button
+                                onClick={() => handleInstall(release.tag_name)}
+                                disabled={installed}
+                                whileHover={!installed ? { scale: 1.05 } : {}}
+                                whileTap={!installed ? { scale: 0.95 } : {}}
+                                className={`flex items-center gap-2 px-4 py-2 rounded font-medium text-sm transition-colors ${
+                                  installed
+                                    ? 'bg-[#55ff55]/20 text-[#55ff55] cursor-not-allowed'
+                                    : 'bg-[#55ff55] text-black hover:bg-[#66ff66]'
+                                }`}
+                              >
+                                {installed ? (
+                                  <>
+                                    <Check size={16} />
+                                    Installed
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download size={16} />
+                                    Install
+                                  </>
+                                )}
+                              </motion.button>
+
+                              {/* Download size display */}
+                              {release.total_size && (
+                                <div className="flex items-center gap-1 text-xs text-gray-400">
+                                  <HardDrive size={12} />
+                                  <span>{formatSize(release.total_size)}</span>
+                                </div>
                               )}
-                            </motion.button>
+                            </div>
                           </div>
                         </motion.div>
                       );

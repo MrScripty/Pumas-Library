@@ -6,6 +6,9 @@ export interface VersionRelease {
   published_at: string;
   prerelease: boolean;
   body?: string;
+  total_size?: number | null;
+  archive_size?: number | null;
+  dependencies_size?: number | null;
 }
 
 export interface VersionStatus {
@@ -243,10 +246,12 @@ export function useVersions() {
       // Validate installations first to detect and clean up any incomplete installations
       console.log('Validating installations...');
       try {
-        const validationResult = await window.pywebview.api.validate_installations();
-        if (validationResult.success && validationResult.result.had_invalid) {
-          console.log('Found and cleaned up invalid installations:', validationResult.result.removed);
-          console.log('Valid installations:', validationResult.result.valid);
+        if (window.pywebview.api.validate_installations) {
+          const validationResult = await window.pywebview.api.validate_installations();
+          if (validationResult.success && validationResult.result.had_invalid) {
+            console.log('Found and cleaned up invalid installations:', validationResult.result.removed);
+            console.log('Valid installations:', validationResult.result.valid);
+          }
         }
       } catch (e) {
         console.error('Failed to validate installations:', e);
@@ -256,18 +261,18 @@ export function useVersions() {
       refreshAll(false);
     };
 
-    // Check if pywebview is already available
-    if (window.pywebview?.api) {
-      console.log('PyWebView API already available, loading data immediately');
-      loadData();
-    } else {
-      // Wait for pywebviewready event
-      console.log('Waiting for pywebviewready event...');
-      window.addEventListener('pywebviewready', () => {
-        console.log('pywebviewready event fired!');
+    // Poll for PyWebView API to be ready with actual methods (same approach as App.tsx)
+    const waitForPyWebView = () => {
+      if (window.pywebview?.api && typeof window.pywebview.api.get_available_versions === 'function') {
+        console.log('PyWebView API ready with methods, loading version data...');
         loadData();
-      });
-    }
+      } else {
+        console.log('Waiting for PyWebView API methods...');
+        setTimeout(waitForPyWebView, 100);
+      }
+    };
+
+    waitForPyWebView();
   }, [refreshAll]);
 
   return {

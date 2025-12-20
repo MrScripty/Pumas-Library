@@ -687,17 +687,42 @@ Categories=Graphics;ArtificialIntelligence;
 
     def get_available_versions(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
-        Get list of available ComfyUI versions from GitHub
+        Get list of available ComfyUI versions from GitHub with size information
 
         Args:
             force_refresh: Force refresh from GitHub API (bypass cache)
 
         Returns:
-            List of release dictionaries
+            List of release dictionaries with size data
         """
         if not self.version_manager:
             return []
-        return self.version_manager.get_available_releases(force_refresh)
+
+        releases = self.version_manager.get_available_releases(force_refresh)
+
+        # Enrich releases with size information (Phase 6.2.5c)
+        enriched_releases = []
+        for release in releases:
+            tag = release.get('tag_name', '')
+
+            # Get cached size data if available
+            size_data = self.release_size_calculator.get_cached_size(tag)
+
+            # Add size information to release
+            release_with_size = dict(release)
+            if size_data:
+                release_with_size['total_size'] = size_data['total_size']
+                release_with_size['archive_size'] = size_data['archive_size']
+                release_with_size['dependencies_size'] = size_data['dependencies_size']
+            else:
+                # Size not yet calculated
+                release_with_size['total_size'] = None
+                release_with_size['archive_size'] = None
+                release_with_size['dependencies_size'] = None
+
+            enriched_releases.append(release_with_size)
+
+        return enriched_releases
 
     def get_installed_versions(self) -> List[str]:
         """
@@ -877,6 +902,66 @@ Categories=Graphics;ArtificialIntelligence;
             return False
         success, process = self.version_manager.launch_version(tag, extra_args)
         return success
+
+    def calculate_release_size(self, tag: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+        """
+        Calculate total download size for a release (Phase 6.2.5c)
+
+        Args:
+            tag: Release tag to calculate size for
+            force_refresh: Force recalculation even if cached
+
+        Returns:
+            Dict with size breakdown or None if calculation fails
+        """
+        try:
+            # Get release from GitHub
+            release = self.version_manager.github_fetcher.get_release_by_tag(tag)
+            if not release:
+                print(f"Release {tag} not found")
+                return None
+
+            # Get archive size from zipball_url
+            # The GitHub API doesn't directly provide the size, so we estimate
+            # based on typical ComfyUI release sizes (~125 MB)
+            archive_size = 125 * 1024 * 1024  # 125 MB estimate
+
+            # Calculate total size including dependencies
+            result = self.release_size_calculator.calculate_release_size(
+                tag=tag,
+                archive_size=archive_size,
+                force_refresh=force_refresh
+            )
+
+            return result
+        except Exception as e:
+            print(f"Error calculating release size for {tag}: {e}")
+            return None
+
+    def calculate_all_release_sizes(self, progress_callback=None) -> Dict[str, Dict[str, Any]]:
+        """
+        Calculate sizes for all available releases (Phase 6.2.5c)
+
+        Args:
+            progress_callback: Optional callback(current, total, tag)
+
+        Returns:
+            Dict mapping tag to size data
+        """
+        releases = self.version_manager.get_available_releases()
+        results = {}
+        total = len(releases)
+
+        for i, release in enumerate(releases):
+            tag = release.get('tag_name', '')
+            if progress_callback:
+                progress_callback(i + 1, total, tag)
+
+            result = self.calculate_release_size(tag)
+            if result:
+                results[tag] = result
+
+        return results
 
     # ==================== Resource Management API (Phase 5) ====================
 

@@ -138,6 +138,10 @@ class GitHubRelease(TypedDict, total=False):
     zipball_url: str
     prerelease: bool
     assets: List[Dict]  # GitHub asset objects
+    # Phase 6.2.5c: Size information
+    total_size: Optional[int]  # Total download size in bytes
+    archive_size: Optional[int]  # ComfyUI archive size in bytes
+    dependencies_size: Optional[int]  # Dependencies size in bytes
 
 
 class GitHubReleasesCache(TypedDict):

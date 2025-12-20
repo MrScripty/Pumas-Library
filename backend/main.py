@@ -146,6 +146,24 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def calculate_release_size(self, tag, force_refresh=False):
+        """Calculate total download size for a release (Phase 6.2.5c)"""
+        try:
+            result = self.api.calculate_release_size(tag, force_refresh)
+            return result if result else None
+        except Exception as e:
+            print(f"Error calculating release size: {e}")
+            return None
+
+    def calculate_all_release_sizes(self):
+        """Calculate sizes for all available releases (Phase 6.2.5c)"""
+        try:
+            results = self.api.calculate_all_release_sizes()
+            return results
+        except Exception as e:
+            print(f"Error calculating all release sizes: {e}")
+            return {}
+
     def remove_version(self, tag):
         """Remove an installed ComfyUI version"""
         try:

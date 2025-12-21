@@ -275,6 +275,16 @@ export function useVersions() {
     }
   }, [fetchInstalledVersions, fetchActiveVersion, fetchAvailableVersions, fetchVersionStatus]);
 
+  // Refresh available versions only (non-blocking UI)
+  const refreshAvailableVersions = useCallback(async (forceRefresh: boolean = false) => {
+    setError(null);
+    try {
+      await fetchAvailableVersions(forceRefresh);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, [fetchAvailableVersions]);
+
   // Initial load - wait for PyWebView to be ready
   useEffect(() => {
     const loadData = async () => {
@@ -332,6 +342,7 @@ export function useVersions() {
     removeVersion,
     getVersionInfo,
     refreshAll,
+    refreshAvailableVersions,
     openPath,
     openActiveInstall,
   };

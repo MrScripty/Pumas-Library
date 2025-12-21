@@ -13,6 +13,7 @@ export function VersionSelector() {
     switchVersion,
     installVersion,
     refreshAll,
+    refreshAvailableVersions,
     openActiveInstall,
   } = useVersions();
 
@@ -47,7 +48,7 @@ export function VersionSelector() {
     e.stopPropagation();
     setIsRefreshing(true);
     try {
-      await refreshAll(true); // Force refresh from GitHub
+      await refreshAvailableVersions(true); // Force refresh from GitHub (non-blocking)
     } finally {
       setIsRefreshing(false);
     }

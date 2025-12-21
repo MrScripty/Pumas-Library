@@ -2,57 +2,105 @@
   "packages": {
     "comfyui-frontend-package==1.34.9|linux_x86_64|3.12": {
       "size": 18960612,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:42.278182+00:00",
+      "checked_at": "2025-12-21T02:05:29.837400+00:00",
       "wheel_filename": "comfyui_frontend_package-1.34.9-py3-none-any.whl",
       "resolved_version": "1.34.9"
     },
     "comfyui-workflow-templates==0.7.59|linux_x86_64|3.12": {
       "size": 20275,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.43",
+        "comfyui-workflow-templates-media-api==0.3.22",
+        "comfyui-workflow-templates-media-video==0.3.19",
+        "comfyui-workflow-templates-media-image==0.3.36",
+        "comfyui-workflow-templates-media-other==0.3.47"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:42.636495+00:00",
+      "checked_at": "2025-12-21T02:05:29.904275+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.7.59-py3-none-any.whl",
       "resolved_version": "0.7.59"
     },
     "comfyui-embedded-docs==0.3.1|linux_x86_64|3.12": {
       "size": 7983937,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:42.787678+00:00",
+      "checked_at": "2025-12-21T02:12:04.126488+00:00",
       "wheel_filename": "comfyui_embedded_docs-0.3.1-py3-none-any.whl",
       "resolved_version": "0.3.1"
     },
     "torch|linux_x86_64|3.12": {
       "size": 899821446,
+      "dependencies": [
+        "filelock",
+        "typing-extensions>=4.10.0",
+        "setuptools",
+        "sympy>=1.13.3",
+        "networkx>=2.5.1",
+        "jinja2",
+        "fsspec>=0.8.5",
+        "nvidia-cuda-nvrtc-cu12==12.8.93",
+        "nvidia-cuda-runtime-cu12==12.8.90",
+        "nvidia-cuda-cupti-cu12==12.8.90",
+        "nvidia-cudnn-cu12==9.10.2.21",
+        "nvidia-cublas-cu12==12.8.4.1",
+        "nvidia-cufft-cu12==11.3.3.83",
+        "nvidia-curand-cu12==10.3.9.90",
+        "nvidia-cusolver-cu12==11.7.3.90",
+        "nvidia-cusparse-cu12==12.5.8.93",
+        "nvidia-cusparselt-cu12==0.7.1",
+        "nvidia-nccl-cu12==2.27.5",
+        "nvidia-nvshmem-cu12==3.3.20",
+        "nvidia-nvtx-cu12==12.8.90",
+        "nvidia-nvjitlink-cu12==12.8.93",
+        "nvidia-cufile-cu12==1.13.1.3",
+        "triton==3.5.1"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:43.065225+00:00",
+      "checked_at": "2025-12-21T02:15:36.293722+00:00",
       "wheel_filename": "torch-2.9.1-cp311-cp311-manylinux_2_28_x86_64.whl",
       "resolved_version": "2.9.1"
     },
     "torchsde|linux_x86_64|3.12": {
       "size": 61232,
+      "dependencies": [
+        "numpy>=1.19",
+        "scipy>=1.5",
+        "torch>=1.6.0",
+        "trampoline>=0.1.2"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:43.248073+00:00",
+      "checked_at": "2025-12-21T02:15:38.330067+00:00",
       "wheel_filename": "torchsde-0.2.6-py3-none-any.whl",
       "resolved_version": "0.2.6"
     },
     "torchvision|linux_x86_64|3.12": {
       "size": 8177422,
+      "dependencies": [
+        "numpy",
+        "torch==2.9.1",
+        "pillow!=8.3.*,>=5.3.0"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:43.603065+00:00",
+      "checked_at": "2025-12-21T02:15:39.037291+00:00",
       "wheel_filename": "torchvision-0.24.1-cp314-cp314t-manylinux_2_28_x86_64.whl",
       "resolved_version": "0.24.1"
     },
     "torchaudio|linux_x86_64|3.12": {
       "size": 2062170,
+      "dependencies": [
+        "torch==2.9.1"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:43.927529+00:00",
+      "checked_at": "2025-12-21T02:15:39.442108+00:00",
       "wheel_filename": "torchaudio-2.9.1-cp314-cp314t-manylinux_2_28_x86_64.whl",
       "resolved_version": "2.9.1"
     },
@@ -66,33 +114,50 @@
     },
     "einops|linux_x86_64|3.12": {
       "size": 64359,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:44.655002+00:00",
+      "checked_at": "2025-12-21T02:15:39.512917+00:00",
       "wheel_filename": "einops-0.8.1-py3-none-any.whl",
       "resolved_version": "0.8.1"
     },
     "transformers>=4.50.3|linux_x86_64|3.12": {
       "size": 11993463,
+      "dependencies": [
+        "filelock",
+        "huggingface-hub<1.0,>=0.34.0",
+        "numpy>=1.17",
+        "packaging>=20.0",
+        "pyyaml>=5.1",
+        "regex!=2019.12.17",
+        "requests",
+        "tokenizers<=0.23.0,>=0.22.0",
+        "safetensors>=0.4.3",
+        "tqdm>=4.27"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:44.953999+00:00",
+      "checked_at": "2025-12-21T02:09:17.522107+00:00",
       "wheel_filename": "transformers-4.57.3-py3-none-any.whl",
       "resolved_version": "4.57.3"
     },
     "tokenizers>=0.13.3|linux_x86_64|3.12": {
       "size": 3710730,
+      "dependencies": [
+        "huggingface-hub<2.0,>=0.16.4"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:46.280043+00:00",
+      "checked_at": "2025-12-21T02:04:25.499434+00:00",
       "wheel_filename": "tokenizers-0.22.1-cp39-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl",
       "resolved_version": "0.22.1"
     },
     "sentencepiece|linux_x86_64|3.12": {
       "size": 1387926,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:46.925716+00:00",
+      "checked_at": "2025-12-21T02:15:50.327001+00:00",
       "wheel_filename": "sentencepiece-0.2.1-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
       "resolved_version": "0.2.1"
     },
@@ -106,17 +171,31 @@
     },
     "aiohttp>=3.11.8|linux_x86_64|3.12": {
       "size": 1935703,
+      "dependencies": [
+        "aiohappyeyeballs>=2.5.0",
+        "aiosignal>=1.4.0",
+        "attrs>=17.3.0",
+        "frozenlist>=1.1.1",
+        "multidict<7.0,>=4.5",
+        "propcache>=0.2.0",
+        "yarl<2.0,>=1.17.0"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:50.748727+00:00",
+      "checked_at": "2025-12-21T02:15:56.320218+00:00",
       "wheel_filename": "aiohttp-3.13.2-cp314-cp314t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
       "resolved_version": "3.13.2"
     },
     "yarl>=1.18.0|linux_x86_64|3.12": {
       "size": 397671,
+      "dependencies": [
+        "idna>=2.0",
+        "multidict>=4.0",
+        "propcache>=0.2.1"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:51.565606+00:00",
+      "checked_at": "2025-12-21T02:03:54.786824+00:00",
       "wheel_filename": "yarl-1.22.0-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
       "resolved_version": "1.22.0"
     },
@@ -130,9 +209,10 @@
     },
     "Pillow|linux_x86_64|3.12": {
       "size": 8071001,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:52.445163+00:00",
+      "checked_at": "2025-12-21T02:03:59.784111+00:00",
       "wheel_filename": "pillow-12.0.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
       "resolved_version": "12.0.0"
     },
@@ -154,17 +234,23 @@
     },
     "psutil|linux_x86_64|3.12": {
       "size": 291182,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:53.446143+00:00",
+      "checked_at": "2025-12-21T02:15:22.267139+00:00",
       "wheel_filename": "psutil-7.1.3-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
       "resolved_version": "7.1.3"
     },
     "alembic|linux_x86_64|3.12": {
       "size": 248554,
+      "dependencies": [
+        "SQLAlchemy>=1.4.0",
+        "Mako",
+        "typing-extensions>=4.12"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:53.652683+00:00",
+      "checked_at": "2025-12-21T02:15:22.374290+00:00",
       "wheel_filename": "alembic-1.17.2-py3-none-any.whl",
       "resolved_version": "1.17.2"
     },
@@ -178,241 +264,335 @@
     },
     "av>=14.2.0|linux_x86_64|3.12": {
       "size": 41352596,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:54.922577+00:00",
+      "checked_at": "2025-12-21T02:15:27.595904+00:00",
       "wheel_filename": "av-16.0.1-cp313-cp313t-manylinux_2_28_x86_64.whl",
       "resolved_version": "16.0.1"
     },
     "kornia>=0.7.1|linux_x86_64|3.12": {
       "size": 1095012,
+      "dependencies": [
+        "kornia_rs>=0.1.9",
+        "packaging",
+        "torch>=2.0.0"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:55.096834+00:00",
+      "checked_at": "2025-12-21T02:15:27.687122+00:00",
       "wheel_filename": "kornia-0.8.2-py2.py3-none-any.whl",
       "resolved_version": "0.8.2"
     },
     "spandrel|linux_x86_64|3.12": {
       "size": 305217,
+      "dependencies": [
+        "torch",
+        "torchvision",
+        "safetensors",
+        "numpy",
+        "einops",
+        "typing_extensions"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:55.268533+00:00",
+      "checked_at": "2025-12-21T02:15:28.032903+00:00",
       "wheel_filename": "spandrel-0.4.1-py3-none-any.whl",
       "resolved_version": "0.4.1"
     },
     "pydantic~=2.0|linux_x86_64|3.12": {
       "size": 463580,
+      "dependencies": [
+        "annotated-types>=0.6.0",
+        "pydantic-core==2.41.5",
+        "typing-extensions>=4.14.1",
+        "typing-inspection>=0.4.2"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:55.658443+00:00",
+      "checked_at": "2025-12-21T02:15:29.362792+00:00",
       "wheel_filename": "pydantic-2.12.5-py3-none-any.whl",
       "resolved_version": "2.12.5"
     },
     "pydantic-settings~=2.0|linux_x86_64|3.12": {
       "size": 51880,
+      "dependencies": [
+        "pydantic>=2.7.0",
+        "python-dotenv>=0.21.0",
+        "typing-inspection>=0.4.0"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:55.826300+00:00",
+      "checked_at": "2025-12-21T02:15:29.666183+00:00",
       "wheel_filename": "pydantic_settings-2.12.0-py3-none-any.whl",
       "resolved_version": "2.12.0"
     },
     "comfyui-frontend-package==1.33.13|linux_x86_64|3.12": {
       "size": 18882016,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:56.564894+00:00",
+      "checked_at": "2025-12-21T02:06:12.180980+00:00",
       "wheel_filename": "comfyui_frontend_package-1.33.13-py3-none-any.whl",
       "resolved_version": "1.33.13"
     },
     "comfyui-workflow-templates==0.7.54|linux_x86_64|3.12": {
       "size": 20271,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.27",
+        "comfyui-workflow-templates-media-api==0.3.20",
+        "comfyui-workflow-templates-media-video==0.3.15",
+        "comfyui-workflow-templates-media-image==0.3.27",
+        "comfyui-workflow-templates-media-other==0.3.40"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:56.869554+00:00",
+      "checked_at": "2025-12-21T02:06:12.250153+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.7.54-py3-none-any.whl",
       "resolved_version": "0.7.54"
     },
     "comfyui-frontend-package==1.32.10|linux_x86_64|3.12": {
       "size": 17669877,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:57.345363+00:00",
+      "checked_at": "2025-12-21T02:06:54.636903+00:00",
       "wheel_filename": "comfyui_frontend_package-1.32.10-py3-none-any.whl",
       "resolved_version": "1.32.10"
     },
     "comfyui-workflow-templates==0.7.25|linux_x86_64|3.12": {
       "size": 20270,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.12",
+        "comfyui-workflow-templates-media-api==0.3.14",
+        "comfyui-workflow-templates-media-video==0.3.12",
+        "comfyui-workflow-templates-media-image==0.3.17",
+        "comfyui-workflow-templates-media-other==0.3.15"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:57.591165+00:00",
+      "checked_at": "2025-12-21T02:06:54.706202+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.7.25-py3-none-any.whl",
       "resolved_version": "0.7.25"
     },
     "comfyui-frontend-package==1.30.6|linux_x86_64|3.12": {
       "size": 9119747,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:58.057308+00:00",
+      "checked_at": "2025-12-21T02:09:13.580846+00:00",
       "wheel_filename": "comfyui_frontend_package-1.30.6-py3-none-any.whl",
       "resolved_version": "1.30.6"
     },
     "comfyui-workflow-templates==0.7.20|linux_x86_64|3.12": {
       "size": 20080,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.10",
+        "comfyui-workflow-templates-media-api==0.3.14",
+        "comfyui-workflow-templates-media-video==0.3.12",
+        "comfyui-workflow-templates-media-image==0.3.15",
+        "comfyui-workflow-templates-media-other==0.3.9"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:58.301545+00:00",
+      "checked_at": "2025-12-21T02:08:31.944685+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.7.20-py3-none-any.whl",
       "resolved_version": "0.7.20"
     },
     "comfyui-workflow-templates==0.7.9|linux_x86_64|3.12": {
       "size": 20065,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.4",
+        "comfyui-workflow-templates-media-api==0.3.11",
+        "comfyui-workflow-templates-media-video==0.3.5",
+        "comfyui-workflow-templates-media-image==0.3.4",
+        "comfyui-workflow-templates-media-other==0.3.6"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:58.957411+00:00",
+      "checked_at": "2025-12-21T02:09:13.650243+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.7.9-py3-none-any.whl",
       "resolved_version": "0.7.9"
     },
     "comfyui-frontend-package==1.28.9|linux_x86_64|3.12": {
       "size": 11125956,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:59.536903+00:00",
+      "checked_at": "2025-12-21T02:09:55.821171+00:00",
       "wheel_filename": "comfyui_frontend_package-1.28.9-py3-none-any.whl",
       "resolved_version": "1.28.9"
     },
     "comfyui-workflow-templates==0.6.0|linux_x86_64|3.12": {
       "size": 20064,
+      "dependencies": [
+        "comfyui-workflow-templates-core==0.3.3",
+        "comfyui-workflow-templates-media-api==0.3.8",
+        "comfyui-workflow-templates-media-video==0.3.1",
+        "comfyui-workflow-templates-media-image==0.3.3",
+        "comfyui-workflow-templates-media-other==0.3.3"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:15:59.847955+00:00",
+      "checked_at": "2025-12-21T02:09:55.888963+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.6.0-py3-none-any.whl",
       "resolved_version": "0.6.0"
     },
     "transformers>=4.37.2|linux_x86_64|3.12": {
       "size": 11993463,
+      "dependencies": [
+        "filelock",
+        "huggingface-hub<1.0,>=0.34.0",
+        "numpy>=1.17",
+        "packaging>=20.0",
+        "pyyaml>=5.1",
+        "regex!=2019.12.17",
+        "requests",
+        "tokenizers<=0.23.0,>=0.22.0",
+        "safetensors>=0.4.3",
+        "tqdm>=4.27"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:00.059739+00:00",
+      "checked_at": "2025-12-21T02:15:39.734678+00:00",
       "wheel_filename": "transformers-4.57.3-py3-none-any.whl",
       "resolved_version": "4.57.3"
     },
     "comfyui-frontend-package==1.28.8|linux_x86_64|3.12": {
       "size": 11125808,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:00.415116+00:00",
+      "checked_at": "2025-12-21T02:12:46.092505+00:00",
       "wheel_filename": "comfyui_frontend_package-1.28.8-py3-none-any.whl",
       "resolved_version": "1.28.8"
     },
     "comfyui-workflow-templates==0.2.11|linux_x86_64|3.12": {
       "size": 88198345,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:00.847571+00:00",
+      "checked_at": "2025-12-21T02:12:04.039425+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.2.11-py3-none-any.whl",
       "resolved_version": "0.2.11"
     },
     "comfyui-workflow-templates==0.2.4|linux_x86_64|3.12": {
       "size": 88102311,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:01.938159+00:00",
+      "checked_at": "2025-12-21T02:12:46.173141+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.2.4-py3-none-any.whl",
       "resolved_version": "0.2.4"
     },
     "comfyui-embedded-docs==0.3.0|linux_x86_64|3.12": {
       "size": 6338849,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:02.096782+00:00",
+      "checked_at": "2025-12-21T02:14:10.846522+00:00",
       "wheel_filename": "comfyui_embedded_docs-0.3.0-py3-none-any.whl",
       "resolved_version": "0.3.0"
     },
     "comfyui-frontend-package==1.28.7|linux_x86_64|3.12": {
       "size": 11125373,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:02.540998+00:00",
+      "checked_at": "2025-12-21T02:13:28.134458+00:00",
       "wheel_filename": "comfyui_frontend_package-1.28.7-py3-none-any.whl",
       "resolved_version": "1.28.7"
     },
     "comfyui-workflow-templates==0.2.1|linux_x86_64|3.12": {
       "size": 86352117,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:02.849088+00:00",
+      "checked_at": "2025-12-21T02:13:28.214478+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.2.1-py3-none-any.whl",
       "resolved_version": "0.2.1"
     },
     "comfyui-frontend-package==1.27.10|linux_x86_64|3.12": {
       "size": 11278568,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:03.275406+00:00",
+      "checked_at": "2025-12-21T02:14:53.520431+00:00",
       "wheel_filename": "comfyui_frontend_package-1.27.10-py3-none-any.whl",
       "resolved_version": "1.27.10"
     },
     "comfyui-workflow-templates==0.1.95|linux_x86_64|3.12": {
       "size": 84453488,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:03.587526+00:00",
+      "checked_at": "2025-12-21T02:14:10.784573+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.1.95-py3-none-any.whl",
       "resolved_version": "0.1.95"
     },
     "comfyui-workflow-templates==0.1.94|linux_x86_64|3.12": {
       "size": 84449958,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:04.178927+00:00",
+      "checked_at": "2025-12-21T02:14:53.603582+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.1.94-py3-none-any.whl",
       "resolved_version": "0.1.94"
     },
     "comfyui-embedded-docs==0.2.6|linux_x86_64|3.12": {
       "size": 3474591,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:04.450843+00:00",
+      "checked_at": "2025-12-21T02:15:36.162125+00:00",
       "wheel_filename": "comfyui_embedded_docs-0.2.6-py3-none-any.whl",
       "resolved_version": "0.2.6"
     },
     "comfyui-frontend-package==1.27.7|linux_x86_64|3.12": {
       "size": 11277353,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:04.998070+00:00",
+      "checked_at": "2025-12-21T02:15:36.023828+00:00",
       "wheel_filename": "comfyui_frontend_package-1.27.7-py3-none-any.whl",
       "resolved_version": "1.27.7"
     },
     "comfyui-workflow-templates==0.1.93|linux_x86_64|3.12": {
       "size": 83481454,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:05.325690+00:00",
+      "checked_at": "2025-12-21T02:15:36.098165+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.1.93-py3-none-any.whl",
       "resolved_version": "0.1.93"
     },
     "comfyui-frontend-package==1.26.13|linux_x86_64|3.12": {
       "size": 9800616,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:05.883633+00:00",
+      "checked_at": "2025-12-21T02:04:15.931794+00:00",
       "wheel_filename": "comfyui_frontend_package-1.26.13-py3-none-any.whl",
       "resolved_version": "1.26.13"
     },
     "comfyui-workflow-templates==0.1.91|linux_x86_64|3.12": {
       "size": 81091015,
+      "dependencies": [],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:06.190620+00:00",
+      "checked_at": "2025-12-21T02:04:16.019564+00:00",
       "wheel_filename": "comfyui_workflow_templates-0.1.91-py3-none-any.whl",
       "resolved_version": "0.1.91"
     },
     "soundfile|linux_x86_64|3.12": {
       "size": 1313646,
+      "dependencies": [
+        "cffi>=1.0",
+        "numpy"
+      ],
       "platform": "linux_x86_64",
       "python_version": "3.12",
-      "checked_at": "2025-12-20T22:16:06.380484+00:00",
+      "checked_at": "2025-12-21T02:04:06.557660+00:00",
       "wheel_filename": "soundfile-0.13.1-py2.py3-none-manylinux_2_28_x86_64.whl",
       "resolved_version": "0.13.1"
     },
@@ -535,7 +715,885 @@
       "checked_at": "2025-12-20T22:16:14.281577+00:00",
       "wheel_filename": "comfyui_embedded_docs-0.2.4-py3-none-any.whl",
       "resolved_version": "0.2.4"
+    },
+    "comfyui-workflow-templates-core==0.3.43|linux_x86_64|3.12": {
+      "size": 28517,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:05:29.968111+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.43-py3-none-any.whl",
+      "resolved_version": "0.3.43"
+    },
+    "comfyui-workflow-templates-media-api==0.3.22|linux_x86_64|3.12": {
+      "size": 46319207,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:05:30.036624+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_api-0.3.22-py3-none-any.whl",
+      "resolved_version": "0.3.22"
+    },
+    "comfyui-workflow-templates-media-video==0.3.19|linux_x86_64|3.12": {
+      "size": 37847954,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:05:30.103565+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_video-0.3.19-py3-none-any.whl",
+      "resolved_version": "0.3.19"
+    },
+    "comfyui-workflow-templates-media-image==0.3.36|linux_x86_64|3.12": {
+      "size": 9672942,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:05:30.171022+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.36-py3-none-any.whl",
+      "resolved_version": "0.3.36"
+    },
+    "comfyui-workflow-templates-media-other==0.3.47|linux_x86_64|3.12": {
+      "size": 11306196,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:05:30.232768+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.47-py3-none-any.whl",
+      "resolved_version": "0.3.47"
+    },
+    "filelock|linux_x86_64|3.12": {
+      "size": 16666,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.384735+00:00",
+      "wheel_filename": "filelock-3.20.1-py3-none-any.whl",
+      "resolved_version": "3.20.1"
+    },
+    "typing-extensions>=4.10.0|linux_x86_64|3.12": {
+      "size": 44614,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.477197+00:00",
+      "wheel_filename": "typing_extensions-4.15.0-py3-none-any.whl",
+      "resolved_version": "4.15.0"
+    },
+    "setuptools|linux_x86_64|3.12": {
+      "size": 1201486,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.664295+00:00",
+      "wheel_filename": "setuptools-80.9.0-py3-none-any.whl",
+      "resolved_version": "80.9.0"
+    },
+    "sympy>=1.13.3|linux_x86_64|3.12": {
+      "size": 6299353,
+      "dependencies": [
+        "mpmath<1.4,>=1.1.0"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.750874+00:00",
+      "wheel_filename": "sympy-1.14.0-py3-none-any.whl",
+      "resolved_version": "1.14.0"
+    },
+    "networkx>=2.5.1|linux_x86_64|3.12": {
+      "size": 2068504,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.934307+00:00",
+      "wheel_filename": "networkx-3.6.1-py3-none-any.whl",
+      "resolved_version": "3.6.1"
+    },
+    "jinja2|linux_x86_64|3.12": {
+      "size": 134899,
+      "dependencies": [
+        "MarkupSafe>=2.0"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.015924+00:00",
+      "wheel_filename": "jinja2-3.1.6-py3-none-any.whl",
+      "resolved_version": "3.1.6"
+    },
+    "MarkupSafe>=2.0|linux_x86_64|3.12": {
+      "size": 25670,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.156564+00:00",
+      "wheel_filename": "markupsafe-3.0.3-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl",
+      "resolved_version": "3.0.3"
+    },
+    "fsspec>=0.8.5|linux_x86_64|3.12": {
+      "size": 201422,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.261854+00:00",
+      "wheel_filename": "fsspec-2025.12.0-py3-none-any.whl",
+      "resolved_version": "2025.12.0"
+    },
+    "nvidia-cuda-nvrtc-cu12==12.8.93|linux_x86_64|3.12": {
+      "size": 88040029,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.316915+00:00",
+      "wheel_filename": "nvidia_cuda_nvrtc_cu12-12.8.93-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "resolved_version": "12.8.93"
+    },
+    "nvidia-cuda-runtime-cu12==12.8.90|linux_x86_64|3.12": {
+      "size": 965265,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.379392+00:00",
+      "wheel_filename": "nvidia_cuda_runtime_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "resolved_version": "12.8.90"
+    },
+    "nvidia-cuda-cupti-cu12==12.8.90|linux_x86_64|3.12": {
+      "size": 10248621,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.441858+00:00",
+      "wheel_filename": "nvidia_cuda_cupti_cu12-12.8.90-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "12.8.90"
+    },
+    "nvidia-cudnn-cu12==9.10.2.21|linux_x86_64|3.12": {
+      "size": 706758467,
+      "dependencies": [
+        "nvidia-cublas-cu12"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.503648+00:00",
+      "wheel_filename": "nvidia_cudnn_cu12-9.10.2.21-py3-none-manylinux_2_27_x86_64.whl",
+      "resolved_version": "9.10.2.21"
+    },
+    "nvidia-cublas-cu12|linux_x86_64|3.12": {
+      "size": 581242350,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.574683+00:00",
+      "wheel_filename": "nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_x86_64.whl",
+      "resolved_version": "12.9.1.4"
+    },
+    "nvidia-cufft-cu12==11.3.3.83|linux_x86_64|3.12": {
+      "size": 193118695,
+      "dependencies": [
+        "nvidia-nvjitlink-cu12"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.633496+00:00",
+      "wheel_filename": "nvidia_cufft_cu12-11.3.3.83-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "11.3.3.83"
+    },
+    "nvidia-nvjitlink-cu12|linux_x86_64|3.12": {
+      "size": 39748338,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.712560+00:00",
+      "wheel_filename": "nvidia_nvjitlink_cu12-12.9.86-py3-none-manylinux2010_x86_64.manylinux_2_12_x86_64.whl",
+      "resolved_version": "12.9.86"
+    },
+    "nvidia-curand-cu12==10.3.9.90|linux_x86_64|3.12": {
+      "size": 63625754,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.770282+00:00",
+      "wheel_filename": "nvidia_curand_cu12-10.3.9.90-py3-none-manylinux_2_27_aarch64.whl",
+      "resolved_version": "10.3.9.90"
+    },
+    "nvidia-cusolver-cu12==11.7.3.90|linux_x86_64|3.12": {
+      "size": 267506905,
+      "dependencies": [
+        "nvidia-cublas-cu12",
+        "nvidia-nvjitlink-cu12",
+        "nvidia-cusparse-cu12"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.834695+00:00",
+      "wheel_filename": "nvidia_cusolver_cu12-11.7.3.90-py3-none-manylinux_2_27_x86_64.whl",
+      "resolved_version": "11.7.3.90"
+    },
+    "nvidia-cusparse-cu12|linux_x86_64|3.12": {
+      "size": 366465088,
+      "dependencies": [
+        "nvidia-nvjitlink-cu12"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.910342+00:00",
+      "wheel_filename": "nvidia_cusparse_cu12-12.5.10.65-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "12.5.10.65"
+    },
+    "nvidia-cusparselt-cu12==0.7.1|linux_x86_64|3.12": {
+      "size": 287193691,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:37.973534+00:00",
+      "wheel_filename": "nvidia_cusparselt_cu12-0.7.1-py3-none-manylinux2014_x86_64.whl",
+      "resolved_version": "0.7.1"
+    },
+    "nvidia-nccl-cu12==2.27.5|linux_x86_64|3.12": {
+      "size": 322400625,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.033223+00:00",
+      "wheel_filename": "nvidia_nccl_cu12-2.27.5-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "resolved_version": "2.27.5"
+    },
+    "nvidia-nvshmem-cu12==3.3.20|linux_x86_64|3.12": {
+      "size": 124657145,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.095950+00:00",
+      "wheel_filename": "nvidia_nvshmem_cu12-3.3.20-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "3.3.20"
+    },
+    "nvidia-nvtx-cu12==12.8.90|linux_x86_64|3.12": {
+      "size": 91161,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.157979+00:00",
+      "wheel_filename": "nvidia_nvtx_cu12-12.8.90-py3-none-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "resolved_version": "12.8.90"
+    },
+    "nvidia-cufile-cu12==1.13.1.3|linux_x86_64|3.12": {
+      "size": 1197834,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.211468+00:00",
+      "wheel_filename": "nvidia_cufile_cu12-1.13.1.3-py3-none-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "1.13.1.3"
+    },
+    "triton==3.5.1|linux_x86_64|3.12": {
+      "size": 170582192,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.277050+00:00",
+      "wheel_filename": "triton-3.5.1-cp314-cp314t-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "resolved_version": "3.5.1"
+    },
+    "numpy>=1.19|linux_x86_64|3.12": {
+      "size": 16646871,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.637096+00:00",
+      "wheel_filename": "numpy-2.4.0-cp311-cp311-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "resolved_version": "2.4.0"
+    },
+    "scipy>=1.5|linux_x86_64|3.12": {
+      "size": 35899798,
+      "dependencies": [
+        "numpy<2.6,>=1.25.2"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.847116+00:00",
+      "wheel_filename": "scipy-1.16.3-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "1.16.3"
+    },
+    "trampoline>=0.1.2|linux_x86_64|3.12": {
+      "size": 5173,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:38.910171+00:00",
+      "wheel_filename": "trampoline-0.1.2-py3-none-any.whl",
+      "resolved_version": "0.1.2"
+    },
+    "packaging>=20.0|linux_x86_64|3.12": {
+      "size": 66469,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:04:20.003177+00:00",
+      "wheel_filename": "packaging-25.0-py3-none-any.whl",
+      "resolved_version": "25.0"
+    },
+    "pyyaml>=5.1|linux_x86_64|3.12": {
+      "size": 882114,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:40.480658+00:00",
+      "wheel_filename": "pyyaml-6.0.3-cp311-cp311-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "6.0.3"
+    },
+    "regex!=2019.12.17|linux_x86_64|3.12": {
+      "size": 914980,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:46.660849+00:00",
+      "wheel_filename": "regex-2025.11.3-cp314-cp314t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "2025.11.3"
+    },
+    "requests|linux_x86_64|3.12": {
+      "size": 64738,
+      "dependencies": [
+        "charset_normalizer<4,>=2",
+        "idna<4,>=2.5",
+        "urllib3<3,>=1.21.1",
+        "certifi>=2017.4.17"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:40.609736+00:00",
+      "wheel_filename": "requests-2.32.5-py3-none-any.whl",
+      "resolved_version": "2.32.5"
+    },
+    "certifi>=2017.4.17|linux_x86_64|3.12": {
+      "size": 159438,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:41.883283+00:00",
+      "wheel_filename": "certifi-2025.11.12-py3-none-any.whl",
+      "resolved_version": "2025.11.12"
+    },
+    "safetensors>=0.4.3|linux_x86_64|3.12": {
+      "size": 623890,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:49.803232+00:00",
+      "wheel_filename": "safetensors-0.7.0-pp310-pypy310_pp73-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl",
+      "resolved_version": "0.7.0"
+    },
+    "tqdm>=4.27|linux_x86_64|3.12": {
+      "size": 78540,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:04:23.706177+00:00",
+      "wheel_filename": "tqdm-4.67.1-py3-none-any.whl",
+      "resolved_version": "4.67.1"
+    },
+    "aiohappyeyeballs>=2.5.0|linux_x86_64|3.12": {
+      "size": 15265,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:56.406464+00:00",
+      "wheel_filename": "aiohappyeyeballs-2.6.1-py3-none-any.whl",
+      "resolved_version": "2.6.1"
+    },
+    "aiosignal>=1.4.0|linux_x86_64|3.12": {
+      "size": 7490,
+      "dependencies": [
+        "frozenlist>=1.1.0",
+        "typing-extensions>=4.2"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:56.469312+00:00",
+      "wheel_filename": "aiosignal-1.4.0-py3-none-any.whl",
+      "resolved_version": "1.4.0"
+    },
+    "frozenlist>=1.1.0|linux_x86_64|3.12": {
+      "size": 300638,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:57.203534+00:00",
+      "wheel_filename": "frozenlist-1.8.0-cp313-cp313t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "1.8.0"
+    },
+    "attrs>=17.3.0|linux_x86_64|3.12": {
+      "size": 67615,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:57.289466+00:00",
+      "wheel_filename": "attrs-25.4.0-py3-none-any.whl",
+      "resolved_version": "25.4.0"
+    },
+    "propcache>=0.2.0|linux_x86_64|3.12": {
+      "size": 280420,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:18.268378+00:00",
+      "wheel_filename": "propcache-0.4.1-cp313-cp313t-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "0.4.1"
+    },
+    "idna>=2.0|linux_x86_64|3.12": {
+      "size": 71008,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:03:54.860629+00:00",
+      "wheel_filename": "idna-3.11-py3-none-any.whl",
+      "resolved_version": "3.11"
+    },
+    "multidict>=4.0|linux_x86_64|3.12": {
+      "size": 269346,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:03:57.648275+00:00",
+      "wheel_filename": "multidict-6.7.0-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "6.7.0"
+    },
+    "SQLAlchemy>=1.4.0|linux_x86_64|3.12": {
+      "size": 3522029,
+      "dependencies": [
+        "greenlet>=1",
+        "typing-extensions>=4.6.0"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:25.587042+00:00",
+      "wheel_filename": "sqlalchemy-2.0.45-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl",
+      "resolved_version": "2.0.45"
+    },
+    "greenlet>=1|linux_x86_64|3.12": {
+      "size": 671388,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:27.049593+00:00",
+      "wheel_filename": "greenlet-3.3.0-cp314-cp314-manylinux_2_24_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "3.3.0"
+    },
+    "Mako|linux_x86_64|3.12": {
+      "size": 78509,
+      "dependencies": [
+        "MarkupSafe>=0.9.2"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:27.130919+00:00",
+      "wheel_filename": "mako-1.3.10-py3-none-any.whl",
+      "resolved_version": "1.3.10"
+    },
+    "kornia_rs>=0.1.9|linux_x86_64|3.12": {
+      "size": 3045315,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:27.959437+00:00",
+      "wheel_filename": "kornia_rs-0.1.10-cp39-cp39-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "resolved_version": "0.1.10"
+    },
+    "typing_extensions|linux_x86_64|3.12": {
+      "size": 44614,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:28.113550+00:00",
+      "wheel_filename": "typing_extensions-4.15.0-py3-none-any.whl",
+      "resolved_version": "4.15.0"
+    },
+    "annotated-types>=0.6.0|linux_x86_64|3.12": {
+      "size": 13643,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:29.432230+00:00",
+      "wheel_filename": "annotated_types-0.7.0-py3-none-any.whl",
+      "resolved_version": "0.7.0"
+    },
+    "pydantic-core==2.41.5|linux_x86_64|3.12": {
+      "size": 2362571,
+      "dependencies": [
+        "typing-extensions>=4.14.1"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:29.520729+00:00",
+      "wheel_filename": "pydantic_core-2.41.5-cp39-cp39-manylinux_2_17_s390x.manylinux2014_s390x.whl",
+      "resolved_version": "2.41.5"
+    },
+    "typing-inspection>=0.4.2|linux_x86_64|3.12": {
+      "size": 14611,
+      "dependencies": [
+        "typing-extensions>=4.12.0"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:29.579365+00:00",
+      "wheel_filename": "typing_inspection-0.4.2-py3-none-any.whl",
+      "resolved_version": "0.4.2"
+    },
+    "python-dotenv>=0.21.0|linux_x86_64|3.12": {
+      "size": 21230,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:29.755213+00:00",
+      "wheel_filename": "python_dotenv-1.2.1-py3-none-any.whl",
+      "resolved_version": "1.2.1"
+    },
+    "comfyui-workflow-templates-core==0.3.27|linux_x86_64|3.12": {
+      "size": 27533,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:12.320250+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.27-py3-none-any.whl",
+      "resolved_version": "0.3.27"
+    },
+    "comfyui-workflow-templates-media-api==0.3.20|linux_x86_64|3.12": {
+      "size": 44687845,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:12.381558+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_api-0.3.20-py3-none-any.whl",
+      "resolved_version": "0.3.20"
+    },
+    "comfyui-workflow-templates-media-video==0.3.15|linux_x86_64|3.12": {
+      "size": 35699414,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:12.443316+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_video-0.3.15-py3-none-any.whl",
+      "resolved_version": "0.3.15"
+    },
+    "comfyui-workflow-templates-media-image==0.3.27|linux_x86_64|3.12": {
+      "size": 9760499,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:12.511334+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.27-py3-none-any.whl",
+      "resolved_version": "0.3.27"
+    },
+    "comfyui-workflow-templates-media-other==0.3.40|linux_x86_64|3.12": {
+      "size": 11328198,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:12.580562+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.40-py3-none-any.whl",
+      "resolved_version": "0.3.40"
+    },
+    "comfyui-workflow-templates-core==0.3.12|linux_x86_64|3.12": {
+      "size": 27527,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:54.766241+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.12-py3-none-any.whl",
+      "resolved_version": "0.3.12"
+    },
+    "comfyui-workflow-templates-media-api==0.3.14|linux_x86_64|3.12": {
+      "size": 43160690,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:08:32.063931+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_api-0.3.14-py3-none-any.whl",
+      "resolved_version": "0.3.14"
+    },
+    "comfyui-workflow-templates-media-video==0.3.12|linux_x86_64|3.12": {
+      "size": 31673976,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:08:32.124791+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_video-0.3.12-py3-none-any.whl",
+      "resolved_version": "0.3.12"
+    },
+    "comfyui-workflow-templates-media-image==0.3.17|linux_x86_64|3.12": {
+      "size": 5939614,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:54.981297+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.17-py3-none-any.whl",
+      "resolved_version": "0.3.17"
+    },
+    "comfyui-workflow-templates-media-other==0.3.15|linux_x86_64|3.12": {
+      "size": 11799775,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:06:55.049111+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.15-py3-none-any.whl",
+      "resolved_version": "0.3.15"
+    },
+    "comfyui-workflow-templates-core==0.3.10|linux_x86_64|3.12": {
+      "size": 27427,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:08:32.006930+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.10-py3-none-any.whl",
+      "resolved_version": "0.3.10"
+    },
+    "comfyui-workflow-templates-media-image==0.3.15|linux_x86_64|3.12": {
+      "size": 5939611,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:08:32.183525+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.15-py3-none-any.whl",
+      "resolved_version": "0.3.15"
+    },
+    "comfyui-workflow-templates-media-other==0.3.9|linux_x86_64|3.12": {
+      "size": 11756329,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:08:32.248735+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.9-py3-none-any.whl",
+      "resolved_version": "0.3.9"
+    },
+    "comfyui-workflow-templates-core==0.3.4|linux_x86_64|3.12": {
+      "size": 26730,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:13.709408+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.4-py3-none-any.whl",
+      "resolved_version": "0.3.4"
+    },
+    "comfyui-workflow-templates-media-api==0.3.11|linux_x86_64|3.12": {
+      "size": 40710534,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:13.767746+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_api-0.3.11-py3-none-any.whl",
+      "resolved_version": "0.3.11"
+    },
+    "comfyui-workflow-templates-media-video==0.3.5|linux_x86_64|3.12": {
+      "size": 31720645,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:13.818763+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_video-0.3.5-py3-none-any.whl",
+      "resolved_version": "0.3.5"
+    },
+    "comfyui-workflow-templates-media-image==0.3.4|linux_x86_64|3.12": {
+      "size": 5891670,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:13.881122+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.4-py3-none-any.whl",
+      "resolved_version": "0.3.4"
+    },
+    "comfyui-workflow-templates-media-other==0.3.6|linux_x86_64|3.12": {
+      "size": 11751200,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:13.938077+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.6-py3-none-any.whl",
+      "resolved_version": "0.3.6"
+    },
+    "comfyui-workflow-templates-core==0.3.3|linux_x86_64|3.12": {
+      "size": 26471,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:55.953312+00:00",
+      "wheel_filename": "comfyui_workflow_templates_core-0.3.3-py3-none-any.whl",
+      "resolved_version": "0.3.3"
+    },
+    "comfyui-workflow-templates-media-api==0.3.8|linux_x86_64|3.12": {
+      "size": 40689024,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:56.016890+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_api-0.3.8-py3-none-any.whl",
+      "resolved_version": "0.3.8"
+    },
+    "comfyui-workflow-templates-media-video==0.3.1|linux_x86_64|3.12": {
+      "size": 29894130,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:56.076667+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_video-0.3.1-py3-none-any.whl",
+      "resolved_version": "0.3.1"
+    },
+    "comfyui-workflow-templates-media-image==0.3.3|linux_x86_64|3.12": {
+      "size": 5891671,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:56.139490+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_image-0.3.3-py3-none-any.whl",
+      "resolved_version": "0.3.3"
+    },
+    "comfyui-workflow-templates-media-other==0.3.3|linux_x86_64|3.12": {
+      "size": 11747569,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:09:56.211954+00:00",
+      "wheel_filename": "comfyui_workflow_templates_media_other-0.3.3-py3-none-any.whl",
+      "resolved_version": "0.3.3"
+    },
+    "cffi>=1.0|linux_x86_64|3.12": {
+      "size": 221593,
+      "dependencies": [
+        "pycparser"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:04:07.690813+00:00",
+      "wheel_filename": "cffi-2.0.0-cp314-cp314t-manylinux2014_aarch64.manylinux_2_17_aarch64.whl",
+      "resolved_version": "2.0.0"
+    },
+    "pycparser|linux_x86_64|3.12": {
+      "size": 118140,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:04:07.828025+00:00",
+      "wheel_filename": "pycparser-2.23-py3-none-any.whl",
+      "resolved_version": "2.23"
+    },
+    "mpmath<1.4,>=1.1.0|linux_x86_64|3.12": {
+      "size": 536198,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:36.835083+00:00",
+      "wheel_filename": "mpmath-1.3.0-py3-none-any.whl",
+      "resolved_version": "1.3.0"
+    },
+    "pillow!=8.3.*,>=5.3.0|linux_x86_64|3.12": {
+      "size": 8071001,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:39.303658+00:00",
+      "wheel_filename": "pillow-12.0.0-cp314-cp314t-manylinux2014_x86_64.manylinux_2_17_x86_64.whl",
+      "resolved_version": "12.0.0"
+    },
+    "huggingface-hub<1.0,>=0.34.0|linux_x86_64|3.12": {
+      "size": 566094,
+      "dependencies": [
+        "filelock",
+        "fsspec>=2023.5.0",
+        "packaging>=20.9",
+        "pyyaml>=5.1",
+        "requests",
+        "tqdm>=4.42.1",
+        "typing-extensions>=3.7.4.3",
+        "hf-xet<2.0.0,>=1.1.3"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:40.081334+00:00",
+      "wheel_filename": "huggingface_hub-0.36.0-py3-none-any.whl",
+      "resolved_version": "0.36.0"
+    },
+    "packaging>=20.9|linux_x86_64|3.12": {
+      "size": 66469,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:40.167419+00:00",
+      "wheel_filename": "packaging-25.0-py3-none-any.whl",
+      "resolved_version": "25.0"
+    },
+    "charset_normalizer<4,>=2|linux_x86_64|3.12": {
+      "size": 162340,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:41.603612+00:00",
+      "wheel_filename": "charset_normalizer-3.4.4-cp39-cp39-manylinux2014_ppc64le.manylinux_2_17_ppc64le.manylinux_2_28_ppc64le.whl",
+      "resolved_version": "3.4.4"
+    },
+    "idna<4,>=2.5|linux_x86_64|3.12": {
+      "size": 71008,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:41.684971+00:00",
+      "wheel_filename": "idna-3.11-py3-none-any.whl",
+      "resolved_version": "3.11"
+    },
+    "urllib3<3,>=1.21.1|linux_x86_64|3.12": {
+      "size": 131182,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:41.790256+00:00",
+      "wheel_filename": "urllib3-2.6.2-py3-none-any.whl",
+      "resolved_version": "2.6.2"
+    },
+    "tqdm>=4.42.1|linux_x86_64|3.12": {
+      "size": 78540,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:42.082391+00:00",
+      "wheel_filename": "tqdm-4.67.1-py3-none-any.whl",
+      "resolved_version": "4.67.1"
+    },
+    "hf-xet<2.0.0,>=1.1.3|linux_x86_64|3.12": {
+      "size": 19458393,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:42.481787+00:00",
+      "wheel_filename": "hf_xet-1.2.1-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl",
+      "resolved_version": "1.2.1"
+    },
+    "tokenizers<=0.23.0,>=0.22.0|linux_x86_64|3.12": {
+      "size": 3710730,
+      "dependencies": [
+        "huggingface-hub<2.0,>=0.16.4"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:48.457806+00:00",
+      "wheel_filename": "tokenizers-0.22.1-cp39-abi3-manylinux_2_17_ppc64le.manylinux2014_ppc64le.whl",
+      "resolved_version": "0.22.1"
+    },
+    "multidict<7.0,>=4.5|linux_x86_64|3.12": {
+      "size": 269346,
+      "dependencies": [],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:17.635682+00:00",
+      "wheel_filename": "multidict-6.7.0-cp312-cp312-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "6.7.0"
+    },
+    "yarl<2.0,>=1.17.0|linux_x86_64|3.12": {
+      "size": 397671,
+      "dependencies": [
+        "idna>=2.0",
+        "multidict>=4.0",
+        "propcache>=0.2.1"
+      ],
+      "platform": "linux_x86_64",
+      "python_version": "3.12",
+      "checked_at": "2025-12-21T02:15:21.409987+00:00",
+      "wheel_filename": "yarl-1.22.0-cp313-cp313-manylinux2014_s390x.manylinux_2_17_s390x.manylinux_2_28_s390x.whl",
+      "resolved_version": "1.22.0"
     }
   },
-  "last_updated": "2025-12-20T22:16:14.281626+00:00"
+  "last_updated": "2025-12-21T02:15:57.289544+00:00"
 }

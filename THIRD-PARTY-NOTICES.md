@@ -22,6 +22,11 @@ The ComfyUI icon (`comfyui-icon.webp`) is property of the ComfyUI project:
 - **Source**: https://github.com/dvarrazzo/py-setproctitle
 - **Copyright**: Copyright (c) Daniele Varrazzo
 
+### packaging
+- **License**: Apache-2.0 or BSD-2-Clause
+- **Source**: https://github.com/pypa/packaging
+- **Copyright**: Copyright (c) Donald Stufft and individual contributors
+
 ## JavaScript/TypeScript Dependencies
 
 ### React

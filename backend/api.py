@@ -712,6 +712,17 @@ Categories=Graphics;ArtificialIntelligence;
 
         releases = self.version_manager.get_available_releases(force_refresh)
 
+        # When the user forces a refresh, also refresh the cached download sizes
+        if force_refresh:
+            for release in releases:
+                tag = release.get('tag_name', '')
+                if not tag:
+                    continue
+                try:
+                    self.calculate_release_size(tag, force_refresh=True)
+                except Exception as e:
+                    print(f"Error refreshing size for {tag}: {e}")
+
         # Enrich releases with size information (Phase 6.2.5c)
         enriched_releases = []
         for release in releases:

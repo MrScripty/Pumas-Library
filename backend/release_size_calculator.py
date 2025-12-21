@@ -9,8 +9,9 @@ import os
 import sys
 import subprocess
 import shutil
+import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Set
 from datetime import datetime, timezone
 
 
@@ -89,11 +90,13 @@ class ReleaseSizeCalculator:
             Dict with size breakdown or None if requirements not available
         """
         # Get requirements data
-        requirements_data = self.release_data_fetcher.get_cached_requirements(tag)
+        requirements_data = None
+        if not force_refresh:
+            requirements_data = self.release_data_fetcher.get_cached_requirements(tag)
 
         if not requirements_data:
-            # Try to fetch if not cached
-            requirements_data = self.release_data_fetcher.fetch_requirements_for_release(tag)
+            # Try to fetch if not cached or when forcing refresh
+            requirements_data = self.release_data_fetcher.fetch_requirements_for_release(tag, force_refresh)
 
         if not requirements_data:
             return None
@@ -113,49 +116,28 @@ class ReleaseSizeCalculator:
             requirements_data['requirements_txt']
         )
 
-        # Try to estimate dependency download size with pip's resolver (captures transitives)
+        # Fast total estimate using pip/uv resolver (captures transitives)
+        print(f"Estimating total dependency download size for {tag} via resolver report...")
         pip_estimate = self._estimate_dependencies_size_via_pip(
             requirements_data['requirements_txt'],
             tag
         )
 
-        # Get sizes for direct dependencies (used for breakdown display)
-        print(f"Calculating sizes for {len(requirements)} dependencies of {tag} (direct only)...")
-
+        deps_size = pip_estimate if pip_estimate is not None else 0
+        deps_source = 'pip_report' if pip_estimate is not None else 'unknown'
+        if pip_estimate is None:
+            cached = self._cache.get(cache_key)
+            if cached and cached.get('requirements_hash') == requirements_hash:
+                cached_deps = cached.get('dependencies_size')
+                if cached_deps:
+                    deps_size = cached_deps
+                    deps_source = 'cache_fallback'
         dependency_sizes = []
-        total_dependencies_size = 0
         unknown_count = 0
 
-        for package, version_spec in requirements.items():
-            package_spec = f"{package}{version_spec}" if version_spec else package
-
-            size = self.package_size_resolver.get_package_size(package_spec)
-
-            if size is not None:
-                dependency_sizes.append({
-                    'package': package,
-                    'version_spec': version_spec,
-                    'size': size
-                })
-                total_dependencies_size += size
-            else:
-                unknown_count += 1
-                dependency_sizes.append({
-                    'package': package,
-                    'version_spec': version_spec,
-                    'size': None
-                })
-
-        # Sort by size (largest first), None values at end
-        dependency_sizes.sort(
-            key=lambda x: x['size'] if x['size'] is not None else -1,
-            reverse=True
-        )
-
-        # Prefer pip dry-run estimate (captures transitive deps)
-        deps_size = pip_estimate if pip_estimate is not None else total_dependencies_size
-
         # Calculate total size
+        if deps_size == 0 and pip_estimate is None:
+            print(f"Warning: No dependency size estimate available for {tag}")
         total_size = archive_size + deps_size
 
         # Build result
@@ -171,7 +153,7 @@ class ReleaseSizeCalculator:
             'calculated_at': self._get_iso_timestamp(),
             'platform': self.package_size_resolver.platform,
             'python_version': self.package_size_resolver.python_version,
-            'dependencies_size_source': 'pip_dry_run' if pip_estimate is not None else 'direct_only'
+            'dependencies_size_source': deps_source
         }
 
         # Cache the result
@@ -245,43 +227,24 @@ class ReleaseSizeCalculator:
                 "--dry-run",
                 "--report",
                 str(report_file),
+                "--no-cache-dir",
+                "--disable-pip-version-check",
+                "--no-input",
                 "-r",
                 str(req_file),
             ]
 
-            result = subprocess.run(
+            return self._estimate_dependencies_size_via_report(
+                tag,
+                "pip",
                 cmd,
-                capture_output=True,
-                text=True,
-                timeout=600,
-                env=self._build_uv_env()
+                temp_root,
+                report_file
             )
-
-            if result.returncode != 0:
-                print(f"pip dry-run failed for {tag}: {result.stderr}")
-                return None
-
-            if not report_file.exists():
-                print(f"pip dry-run did not produce report for {tag}")
-                return None
-
-            with open(report_file, 'r') as f:
-                report = json.load(f)
-
-            # Sum download sizes from the report (includes transitives)
-            total_size = 0
-            install_items = report.get('install', [])
-            for item in install_items:
-                download_info = item.get('download_info') or {}
-                size = download_info.get('size')
-                if size:
-                    total_size += size
-
-            return total_size if total_size > 0 else None
 
         except Exception as e:
             print(f"Error estimating dependency size via pip for {tag}: {e}")
-            return None
+            return self._estimate_dependencies_size_via_uv(requirements_txt, tag)
         finally:
             # Clean up temp dir to avoid disk bloat
             try:
@@ -289,6 +252,141 @@ class ReleaseSizeCalculator:
                     shutil.rmtree(temp_root)
             except Exception:
                 pass
+
+    def _estimate_dependencies_size_via_uv(
+        self,
+        requirements_txt: str,
+        tag: str
+    ) -> Optional[int]:
+        """
+        Use uv pip --dry-run --report to estimate total download size including transitives.
+        """
+        temp_root = self.cache_dir / "uv-size-estimates" / tag
+        report_file = temp_root / "report.json"
+        try:
+            if temp_root.exists():
+                shutil.rmtree(temp_root)
+            temp_root.mkdir(parents=True, exist_ok=True)
+
+            req_file = temp_root / "requirements.txt"
+            req_file.write_text(requirements_txt)
+
+            cmd = [
+                "uv",
+                "pip",
+                "install",
+                "--dry-run",
+                "--report",
+                str(report_file),
+                "-r",
+                str(req_file),
+            ]
+
+            return self._estimate_dependencies_size_via_report(
+                tag,
+                "uv",
+                cmd,
+                temp_root,
+                report_file
+            )
+
+        except FileNotFoundError:
+            return None
+        except Exception as e:
+            print(f"Error estimating dependency size via uv for {tag}: {e}")
+            return None
+        finally:
+            try:
+                if temp_root.exists():
+                    shutil.rmtree(temp_root)
+            except Exception:
+                pass
+
+    def _estimate_dependencies_size_via_report(
+        self,
+        tag: str,
+        tool_name: str,
+        cmd: List[str],
+        temp_root: Path,
+        report_file: Path
+    ) -> Optional[int]:
+        """
+        Shared helper to run a resolver command that produces a pip-compatible report.
+        """
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            env=self._build_uv_env()
+        )
+
+        if result.returncode != 0:
+            print(f"{tool_name} dry-run failed for {tag}: {result.stderr}")
+            return None
+
+        if not report_file.exists():
+            print(f"{tool_name} dry-run did not produce report for {tag}")
+            return None
+
+        try:
+            with open(report_file, 'r') as f:
+                report = json.load(f)
+        except Exception as e:
+            print(f"{tool_name} report parse failed for {tag}: {e}")
+            return None
+
+        total_size = 0
+        install_items = report.get('install', [])
+        seen: Set[str] = set()
+
+        for item in install_items:
+            # Avoid double counting the same file/name/version
+            name = item.get('metadata', {}).get('name') or item.get('name')
+            version = item.get('metadata', {}).get('version') or item.get('version')
+            download_info = item.get('download_info') or {}
+            url = download_info.get('url')
+            size = download_info.get('size')
+
+            key = f"{name or ''}:{version or ''}:{url or ''}"
+            if key in seen:
+                continue
+            seen.add(key)
+
+            if size:
+                total_size += size
+                continue
+
+            # Try HEAD on the URL if present
+            if url:
+                head_size = self._head_content_length(url)
+                if head_size:
+                    total_size += head_size
+                    continue
+
+            # Fallback: query size by resolved name/version via package_size_resolver
+            if name and version:
+                pkg_size = self.package_size_resolver.get_package_size(f"{name}=={version}")
+                if pkg_size:
+                    total_size += pkg_size
+                    continue
+
+        return total_size if total_size > 0 else None
+
+    def _head_content_length(self, url: str) -> Optional[int]:
+        """
+        Perform a HEAD request to get Content-Length for a URL.
+        """
+        try:
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                length = resp.headers.get('Content-Length')
+                if length:
+                    return int(length)
+        except Exception as e:
+            print(f"Warning: HEAD failed for {url}: {e}")
+        return None
 
     def _build_uv_env(self) -> Optional[Dict[str, str]]:
         """

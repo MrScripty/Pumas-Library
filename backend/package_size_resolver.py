@@ -10,8 +10,11 @@ import sys
 import urllib.request
 import subprocess
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, List, Set
 from datetime import datetime, timezone
+from packaging.requirements import Requirement
+from packaging.markers import default_environment
+from packaging.version import Version, InvalidVersion
 
 
 class PackageSizeResolver:
@@ -111,12 +114,14 @@ class PackageSizeResolver:
         Returns:
             Cache key
         """
-        return f"{package_spec}|{self.platform}|{self.python_version}"
+        normalized_spec = self._normalize_package_spec(package_spec)
+        return f"{normalized_spec}|{self.platform}|{self.python_version}"
 
     def query_pypi_package_size(
         self,
         package_name: str,
-        version: Optional[str] = None
+        version: Optional[str] = None,
+        specifier: Optional[str] = None
     ) -> Optional[Dict[str, any]]:
         """
         Query PyPI JSON API for package size
@@ -145,20 +150,53 @@ class PackageSizeResolver:
             if version:
                 release_files = data.get('urls', [])
             else:
-                # Get latest version
-                version = data.get('info', {}).get('version')
                 releases = data.get('releases', {})
-                release_files = releases.get(version, [])
+
+                if specifier:
+                    # Select the latest version that satisfies the specifier
+                    requirement = Requirement(f"{package_name}{specifier}")
+                    spec_set = requirement.specifier
+                    matching_versions = []
+                    for version_str in releases.keys():
+                        try:
+                            parsed_version = Version(version_str)
+                        except InvalidVersion:
+                            continue
+                        if parsed_version in spec_set:
+                            matching_versions.append(parsed_version)
+
+                    if matching_versions:
+                        selected_version = str(max(matching_versions))
+                        version = selected_version
+                        release_files = releases.get(version, [])
+                    else:
+                        # Fall back to the latest if no matching versions found
+                        version = data.get('info', {}).get('version')
+                        release_files = releases.get(version, [])
+                else:
+                    # Get latest version
+                    version = data.get('info', {}).get('version')
+                    release_files = releases.get(version, [])
 
             if not release_files:
                 return None
+
+            # Ensure we use correct metadata for a non-latest version
+            requires_dist = data.get('info', {}).get('requires_dist') or []
+            if version and version != data.get('info', {}).get('version'):
+                version_data = self._fetch_pypi_version_data(package_name, version)
+                if version_data:
+                    requires_dist = version_data.get('info', {}).get('requires_dist') or []
+                    release_files = version_data.get('urls', release_files)
 
             # Find best matching wheel for our platform
             best_match = self._find_best_wheel(release_files, package_name)
 
             if best_match:
+                dependencies = self._parse_requires_dist(requires_dist)
                 return {
                     'size': best_match['size'],
+                    'dependencies': dependencies,
                     'platform': self.platform,
                     'python_version': self.python_version,
                     'checked_at': self._get_iso_timestamp(),
@@ -217,44 +255,134 @@ class PackageSizeResolver:
         # Fallback to any wheel
         return max(wheels, key=lambda w: w['size'])
 
+    def _fetch_pypi_version_data(self, package_name: str, version: str) -> Optional[Dict[str, any]]:
+        """
+        Fetch PyPI JSON metadata for a specific version.
+        """
+        try:
+            url = f"https://pypi.org/pypi/{package_name}/{version}/json"
+            req = urllib.request.Request(url)
+            req.add_header('User-Agent', 'ComfyUI-Launcher')
+            with urllib.request.urlopen(req, timeout=10) as response:
+                return json.load(response)
+        except Exception as e:
+            print(f"Warning: Failed to fetch PyPI metadata for {package_name} {version}: {e}")
+            return None
+
+    def get_package_metadata(
+        self,
+        package_spec: str,
+        force_refresh: bool = False
+    ) -> Optional[Dict[str, any]]:
+        """
+        Get cached or fresh package metadata including size and dependencies.
+
+        Args:
+            package_spec: Package specification (e.g., 'torch==2.1.0')
+            force_refresh: Force re-query PyPI
+
+        Returns:
+            Metadata dict or None if not found
+        """
+        cache_key = self._get_cache_key(package_spec)
+
+        # Check cache
+        if not force_refresh and cache_key in self._cache:
+            cached = self._cache[cache_key]
+            if cached and 'dependencies' in cached:
+                return cached
+            # Refresh stale cache entries that are missing dependency data
+            force_refresh = True
+
+        # Parse package spec
+        package_name, version = self._parse_package_spec(package_spec)
+        specifier = None
+        try:
+            requirement = Requirement(package_spec)
+            specifier = str(requirement.specifier) if requirement.specifier else None
+        except Exception:
+            pass
+
+        # Query PyPI
+        result = self.query_pypi_package_size(package_name, version, specifier)
+
+        if result:
+            self._cache[cache_key] = result
+            self._save_cache()
+            return result
+
+        # Fallback to UV dry-run if PyPI query fails
+        fallback_size = self._fallback_uv_dry_run(package_spec)
+        if fallback_size is not None:
+            fallback_entry = {
+                'size': fallback_size,
+                'dependencies': [],
+                'platform': self.platform,
+                'python_version': self.python_version,
+                'checked_at': self._get_iso_timestamp(),
+                'wheel_filename': None,
+                'resolved_version': None
+            }
+            self._cache[cache_key] = fallback_entry
+            self._save_cache()
+            return fallback_entry
+
+        return None
+
     def get_package_size(
         self,
         package_spec: str,
         force_refresh: bool = False
     ) -> Optional[int]:
         """
-        Get size of a package in bytes
+        Get size of a package in bytes (no dependency expansion).
+        """
+        metadata = self.get_package_metadata(package_spec, force_refresh)
+        if metadata:
+            return metadata.get('size')
+        return None
+
+    def get_package_total_size(
+        self,
+        package_spec: str,
+        seen: Optional[Set[str]] = None,
+        force_refresh: bool = False
+    ) -> Optional[int]:
+        """
+        Get total download size for a package including its transitive dependencies.
 
         Args:
-            package_spec: Package specification (e.g., 'torch==2.1.0' or 'torch>=2.0.0')
-            force_refresh: Force re-query PyPI
+            package_spec: Package specification
+            seen: Set used to avoid double-counting packages
+            force_refresh: Force re-query PyPI metadata
 
         Returns:
-            Size in bytes or None if not found
+            Total size in bytes or None if unresolved
         """
-        cache_key = self._get_cache_key(package_spec)
+        if seen is None:
+            seen = set()
 
-        # Check cache
-        if not force_refresh and cache_key in self._cache:
-            return self._cache[cache_key].get('size')
+        key = self._normalize_package_key(package_spec)
+        if key in seen:
+            return 0
 
-        # Parse package spec
-        package_name, version = self._parse_package_spec(package_spec)
+        metadata = self.get_package_metadata(package_spec, force_refresh)
+        if not metadata or metadata.get('size') is None:
+            return None
 
-        # Query PyPI
-        result = self.query_pypi_package_size(package_name, version)
+        seen.add(key)
+        total = metadata['size']
 
-        if result:
-            self._cache[cache_key] = result
-            self._save_cache()
-            return result['size']
+        for dep_spec in metadata.get('dependencies', []):
+            dep_size = self.get_package_total_size(dep_spec, seen, force_refresh)
+            if dep_size is not None:
+                total += dep_size
 
-        # Fallback to UV dry-run if PyPI query fails
-        return self._fallback_uv_dry_run(package_spec)
+        return total
 
     def _parse_package_spec(self, package_spec: str) -> Tuple[str, Optional[str]]:
         """
-        Parse package specification into name and version
+        Parse package specification into name and version.
 
         Args:
             package_spec: Package spec (e.g., 'torch==2.1.0')
@@ -262,22 +390,84 @@ class PackageSizeResolver:
         Returns:
             Tuple of (package_name, version)
         """
-        # Handle various operators
-        for op in ['==', '>=', '<=', '~=', '>', '<', '!=']:
-            if op in package_spec:
-                parts = package_spec.split(op, 1)
-                package_name = parts[0].strip()
+        try:
+            requirement = Requirement(package_spec)
+            package_name = requirement.name
+            version = None
+            specifiers = list(requirement.specifier)
+            if len(specifiers) == 1 and specifiers[0].operator == '==' and '*' not in specifiers[0].version:
+                version = specifiers[0].version
+            return (package_name, version)
+        except Exception:
+            # Handle various operators in raw specs as a fallback
+            for op in ['==', '>=', '<=', '~=', '>', '<', '!=']:
+                if op in package_spec:
+                    parts = package_spec.split(op, 1)
+                    package_name = parts[0].strip()
 
-                # For exact version (==), use it; otherwise None for latest
-                if op == '==':
-                    version = parts[1].strip()
-                else:
-                    version = None
+                    # For exact version (==), use it; otherwise None for latest
+                    if op == '==':
+                        version = parts[1].strip()
+                    else:
+                        version = None
 
-                return (package_name, version)
+                    return (package_name, version)
 
-        # No version specified
-        return (package_spec.strip(), None)
+            # No version specified
+            return (package_spec.strip(), None)
+
+    def _normalize_package_spec(self, package_spec: str) -> str:
+        """
+        Normalize a package spec for consistent caching.
+        """
+        try:
+            requirement = Requirement(package_spec)
+            extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
+            spec = str(requirement.specifier) if requirement.specifier else ""
+            return f"{requirement.name}{extras}{spec}"
+        except Exception:
+            return package_spec.strip()
+
+    def _normalize_package_key(self, package_spec: str) -> str:
+        """
+        Normalize a package spec for de-duplication in dependency graphs.
+
+        Args:
+            package_spec: Package specification string
+
+        Returns:
+            Lowercase package name for use as a key
+        """
+        name, _version = self._parse_package_spec(package_spec)
+        return name.lower()
+
+    def _parse_requires_dist(self, requires_dist: List[str]) -> List[str]:
+        """
+        Parse requires_dist entries from PyPI metadata into package specs.
+        Environment markers are evaluated against the current platform and skipped when not matched.
+
+        Args:
+            requires_dist: Raw requires_dist list from PyPI JSON
+
+        Returns:
+            List of package specs (e.g., ['torch==2.3.1', 'numpy>=1.25.0'])
+        """
+        dependencies: List[str] = []
+        env = default_environment()
+
+        for entry in requires_dist:
+            try:
+                req = Requirement(entry)
+                if req.marker and not req.marker.evaluate(env):
+                    continue
+
+                spec = str(req.specifier) if req.specifier else ''
+                dependencies.append(f"{req.name}{spec}")
+            except Exception as e:
+                print(f"Warning: Failed to parse requires_dist entry '{entry}': {e}")
+                continue
+
+        return dependencies
 
     def _fallback_uv_dry_run(self, package_spec: str) -> Optional[int]:
         """

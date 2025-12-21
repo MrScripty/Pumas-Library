@@ -1,31 +1,34 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, RefreshCw, Check, Loader2, Download, FolderOpen, CheckCircle2 } from 'lucide-react';
-import { useVersions } from '../hooks/useVersions';
-import { InstallDialog } from './InstallDialog';
+import { Check, Loader2, Download, FolderOpen, CheckCircle2 } from 'lucide-react';
+import { SpringyToggle } from './SpringyToggle';
 
-export function VersionSelector() {
-  const {
-    installedVersions,
-    activeVersion,
-    availableVersions,
-    isLoading,
-    switchVersion,
-    installVersion,
-    refreshAll,
-    refreshAvailableVersions,
-    openActiveInstall,
-  } = useVersions();
+interface VersionSelectorProps {
+  installedVersions: string[];
+  activeVersion: string | null;
+  isLoading: boolean;
+  switchVersion: (tag: string) => Promise<boolean>;
+  openActiveInstall: () => Promise<boolean>;
+  onOpenVersionManager: () => void;
+}
 
+export function VersionSelector({
+  installedVersions,
+  activeVersion,
+  isLoading,
+  switchVersion,
+  openActiveInstall,
+  onOpenVersionManager,
+}: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [isInstallDialogOpen, setIsInstallDialogOpen] = useState(false);
   const [isOpeningPath, setIsOpeningPath] = useState(false);
   const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
   const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
+  const [shortcutState, setShortcutState] = useState<Record<string, { menu: boolean; desktop: boolean }>>({});
 
-  console.log('VersionSelector mounted - installedVersions:', installedVersions.length, 'availableVersions:', availableVersions.length);
+  console.log('VersionSelector mounted - installedVersions:', installedVersions.length);
 
   const handleVersionSwitch = async (tag: string) => {
     if (tag === activeVersion) {
@@ -41,16 +44,6 @@ export function VersionSelector() {
       console.error('Failed to switch version:', e);
     } finally {
       setIsSwitching(false);
-    }
-  };
-
-  const handleRefresh = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setIsRefreshing(true);
-    try {
-      await refreshAvailableVersions(true); // Force refresh from GitHub (non-blocking)
-    } finally {
-      setIsRefreshing(false);
     }
   };
 
@@ -145,8 +138,8 @@ export function VersionSelector() {
             onClick={(e) => {
               console.log('Download button clicked!');
               e.stopPropagation();
-              setIsInstallDialogOpen(true);
-              console.log('Install dialog state set to true');
+              onOpenVersionManager();
+              console.log('Switching to version manager view');
             }}
             disabled={isLoading}
             className={`p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50 ${
@@ -159,30 +152,7 @@ export function VersionSelector() {
             <Download size={14} className="text-gray-400" />
           </motion.button>
 
-          {/* Refresh Button */}
-          <motion.button
-            onClick={handleRefresh}
-            disabled={isRefreshing || isLoading}
-            className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
-            whileHover={{ scale: 1.1 }}
-            whileTap={{ scale: 0.9 }}
-            title="Refresh from GitHub"
-          >
-            <RefreshCw
-              size={14}
-              className={`text-gray-400 ${isRefreshing ? 'animate-spin' : ''}`}
-            />
-          </motion.button>
-
-          {/* Dropdown Arrow */}
-          {hasInstalledVersions && (
-            <motion.div
-              animate={{ rotate: isOpen ? 180 : 0 }}
-              transition={{ duration: 0.2 }}
-            >
-              <ChevronDown size={16} className="text-gray-400" />
-            </motion.div>
-          )}
+          {/* Refresh Button moved to manager; dropdown arrow removed for cleaner look */}
         </div>
       </div>
 
@@ -199,20 +169,61 @@ export function VersionSelector() {
             <div className="max-h-64 overflow-y-auto">
               {installedVersions.map((version) => {
                 const isActive = version === activeVersion;
+                const toggles = shortcutState[version] || { menu: false, desktop: false };
+                const showHover = hoveredVersion === version;
                 return (
-                  <button
+                  <div
                     key={version}
                     onClick={() => handleVersionSwitch(version)}
-                    disabled={isSwitching}
-                    className={`w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
+                    onMouseEnter={() => setHoveredVersion(version)}
+                    onMouseLeave={() => setHoveredVersion((prev) => (prev === version ? null : prev))}
+                    className={`relative w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
                       isActive
                         ? 'bg-[#333333] text-[#55ff55]'
                         : 'text-gray-300 hover:bg-[#333333] hover:text-white'
                     } ${isSwitching ? 'opacity-50 cursor-not-allowed' : ''}`}
                   >
-                    <span className="font-medium">{version}</span>
-                    {isActive && <Check size={14} className="text-[#55ff55]" />}
-                  </button>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-medium truncate">{version}</span>
+                      {isActive && (
+                        <span className="px-1.5 py-[2px] text-[10px] rounded-full bg-[#2a2a2a] border border-[#55ff55]/60 text-[#55ff55]">
+                          Default
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 pr-12">
+                      <div
+                        className={`absolute right-8 top-1/2 -translate-y-1/2 transition-opacity duration-150 ${showHover ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => {
+                            const next = !toggles.menu;
+                            setShortcutState((prev) => ({
+                              ...prev,
+                              [version]: { ...toggles, menu: next },
+                            }));
+                            console.log('Toggled shortcut for', version, 'to', next);
+                          }}
+                          disabled={isSwitching}
+                          className={`relative w-8 h-4 rounded-full border transition-colors align-middle ${
+                            toggles.menu ? 'bg-[#55ff55]/30 border-[#55ff55]/70' : 'bg-[#2f2f2f] border-[#555]'
+                          } ${isSwitching ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        >
+                          <span
+                            className={`absolute top-[2px] left-[2px] w-3 h-3 rounded-full bg-white transition-transform ${
+                              toggles.menu ? 'translate-x-4 bg-[#55ff55]' : 'translate-x-0'
+                            }`}
+                          />
+                        </button>
+                      </div>
+                      {isActive && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2">
+                          <Check size={14} className="text-[#55ff55]" />
+                        </span>
+                      )}
+                    </div>
+                  </div>
                 );
               })}
             </div>
@@ -225,17 +236,6 @@ export function VersionSelector() {
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* Install Dialog */}
-      <InstallDialog
-        isOpen={isInstallDialogOpen}
-        onClose={() => setIsInstallDialogOpen(false)}
-        availableVersions={availableVersions}
-        installedVersions={installedVersions}
-        isLoading={isLoading}
-        onInstallVersion={installVersion}
-        onRefreshAll={refreshAll}
-      />
 
       {/* Empty state hint */}
       {!hasInstalledVersions && (

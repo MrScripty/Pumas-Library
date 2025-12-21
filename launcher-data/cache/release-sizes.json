@@ -8,10 +8,10 @@
     "unknown_size_count": 0,
     "dependencies": [],
     "requirements_hash": "sha256:ac88ff0031f9ae405b74e2258dc04a5a6ff815df49342c697c26e50f11dee845",
-    "calculated_at": "2025-12-21T08:18:01.724812+00:00",
+    "calculated_at": "2025-12-21T09:23:56.775569+00:00",
     "platform": "linux_x86_64",
     "python_version": "3.12",
-    "dependencies_size_source": "cache_fallback"
+    "dependencies_size_source": "pip_report"
   },
   "v0.5.0": {
     "tag": "v0.5.0",
@@ -22,7 +22,7 @@
     "unknown_size_count": 0,
     "dependencies": [],
     "requirements_hash": "sha256:ac88ff0031f9ae405b74e2258dc04a5a6ff815df49342c697c26e50f11dee845",
-    "calculated_at": "2025-12-21T02:24:38.457807+00:00",
+    "calculated_at": "2025-12-21T09:25:14.129813+00:00",
     "platform": "linux_x86_64",
     "python_version": "3.12",
     "dependencies_size_source": "pip_report"
@@ -36,7 +36,7 @@
     "unknown_size_count": 0,
     "dependencies": [],
     "requirements_hash": "sha256:726c21a70307ccc91718eec1561dafb7428382b7cc3a4466d42cf6c3823ab92e",
-    "calculated_at": "2025-12-21T02:24:50.090718+00:00",
+    "calculated_at": "2025-12-21T09:27:11.598069+00:00",
     "platform": "linux_x86_64",
     "python_version": "3.12",
     "dependencies_size_source": "pip_report"

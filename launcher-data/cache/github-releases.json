@@ -1,5 +1,5 @@
 {
-  "lastFetched": "2025-12-21T08:17:46.507926Z",
+  "lastFetched": "2025-12-21T11:24:55.665540Z",
   "ttl": 3600,
   "releases": [
     {
@@ -71,7 +71,7 @@
           "state": "uploaded",
           "size": 1256692428,
           "digest": "sha256:73d22e55982de4d11990f21511ee047514c6887e3f9594d5c5fbb105b01bcaa1",
-          "download_count": 3548,
+          "download_count": 3766,
           "created_at": "2025-12-18T02:36:34Z",
           "updated_at": "2025-12-18T02:37:25Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.1/ComfyUI_windows_portable_amd.7z"
@@ -107,7 +107,7 @@
           "state": "uploaded",
           "size": 1750199720,
           "digest": "sha256:0ac42e8dd1cf528e2d726a3a5403ecc1791f555c7e137a03698ecf01842cfe32",
-          "download_count": 19959,
+          "download_count": 20869,
           "created_at": "2025-12-18T02:29:56Z",
           "updated_at": "2025-12-18T02:31:00Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.1/ComfyUI_windows_portable_nvidia.7z"
@@ -143,7 +143,7 @@
           "state": "uploaded",
           "size": 1730725962,
           "digest": "sha256:8662864e115b635973b63572accbd86b7e539071c2162cf5364196d96757136d",
-          "download_count": 2150,
+          "download_count": 2232,
           "created_at": "2025-12-18T02:49:15Z",
           "updated_at": "2025-12-18T02:50:12Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.1/ComfyUI_windows_portable_nvidia_cu126.7z"
@@ -179,7 +179,7 @@
           "state": "uploaded",
           "size": 1988660553,
           "digest": "sha256:f2fcb6128a9c9c6e0a798efc45dd1fa6286633e34fd05eaff1b8c943b9a44d24",
-          "download_count": 5378,
+          "download_count": 5585,
           "created_at": "2025-12-18T02:50:06Z",
           "updated_at": "2025-12-18T02:51:23Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.1/ComfyUI_windows_portable_nvidia_cu128.7z"
@@ -190,8 +190,8 @@
       "body": "## What's Changed\r\n* [API Nodes] GPT-Image-1.5 by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11368\r\n* fix regression in V3 nodes processing by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11375\r\n* SA-Solver: return the result of the last predictor step correctly by @chaObserv in https://github.com/comfyanonymous/ComfyUI/pull/11380\r\n* Better handle torch being imported by prestartup nodes. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11383\r\n\r\n\r\n**Full Changelog**: https://github.com/comfyanonymous/ComfyUI/compare/v0.5.0...v0.5.1",
       "reactions": {
         "url": "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/271285179/reactions",
-        "total_count": 24,
-        "+1": 11,
+        "total_count": 25,
+        "+1": 12,
         "-1": 0,
         "laugh": 1,
         "hooray": 5,
@@ -307,7 +307,7 @@
           "state": "uploaded",
           "size": 1750172356,
           "digest": "sha256:67b3f3e4df6f3930ccac1de073c699ed021b315bdf78344cc9191e962089b481",
-          "download_count": 2620,
+          "download_count": 2622,
           "created_at": "2025-12-17T09:06:58Z",
           "updated_at": "2025-12-17T09:08:03Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.0/ComfyUI_windows_portable_nvidia.7z"
@@ -343,7 +343,7 @@
           "state": "uploaded",
           "size": 1730696503,
           "digest": "sha256:a4f00a256ac990b1be9971c367fe00a063b246b2ea583684fd1203d1c6bd3763",
-          "download_count": 274,
+          "download_count": 276,
           "created_at": "2025-12-17T09:26:41Z",
           "updated_at": "2025-12-17T09:27:49Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.0/ComfyUI_windows_portable_nvidia_cu126.7z"
@@ -379,7 +379,7 @@
           "state": "uploaded",
           "size": 1988672488,
           "digest": "sha256:4ad0909f030e4ebb7d410b225b893fe88634095b2141d40c9f6a2691116fb515",
-          "download_count": 624,
+          "download_count": 625,
           "created_at": "2025-12-17T09:28:06Z",
           "updated_at": "2025-12-17T09:29:21Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.5.0/ComfyUI_windows_portable_nvidia_cu128.7z"
@@ -390,8 +390,8 @@
       "body": "## What's Changed\r\n* Bump frontend to 1.34.8 by @benceruleanlu in https://github.com/comfyanonymous/ComfyUI/pull/11220\r\n* fix: correctly process the Node V1 dict results on V3 node by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11237\r\n* Tweak Z Image memory estimation. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11254\r\n* Fix: filter hidden files from /internal/files endpoint by @Myestery in https://github.com/comfyanonymous/ComfyUI/pull/11191\r\n* Lower VAE loading requirements：Create a new branch for GPU memory calculations in qwen-image vae by @jiangchengchengark in https://github.com/comfyanonymous/ComfyUI/pull/11199\r\n* feat(api-nodes): enable Kling Omni Image node by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11229\r\n* Adjust memory usage factor for sd3. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11257\r\n* Fix regular chroma radiance by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11276\r\n* This only works on radiance. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11277\r\n* Better chroma radiance vram estimation. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11278\r\n* Make portable updater work with repos in unmerged state. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11281\r\n* WanMove support by @kijai in https://github.com/comfyanonymous/ComfyUI/pull/11247\r\n* Respect the dtype the op was initialized in for non quant mixed op. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11282\r\n* feat(api-nodes): Kling TextToVideoWithAudio and ImageToVideoWithAudio nodes by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11267\r\n* Fix bias dtype issue in mixed ops. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11293\r\n* Basic implementation of z image fun control union 2.0 by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11304\r\n* Fix pytorch warnings. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11314\r\n* seeds_2: add phi_2 variant and sampler node by @chaObserv in https://github.com/comfyanonymous/ComfyUI/pull/11309\r\n* Update warning for old pytorch version. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11319\r\n* bump manager to the 4.0.3b5 by @ltdrdata in https://github.com/comfyanonymous/ComfyUI/pull/11324\r\n* Update workflow templates to v0.7.59 by @comfyui-wiki in https://github.com/comfyanonymous/ComfyUI/pull/11337\r\n* Disable guards on transformer_options when torch.compile by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11317\r\n* [API Nodes] drop very old Kling models by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11307\r\n* drop Pika API nodes by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11306\r\n* feat(preview): add per-queue live preview method override by @ltdrdata in https://github.com/comfyanonymous/ComfyUI/pull/11261\r\n* comfy_api: remove usage of \"Type\",\"List\" and \"Dict\" types by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11238\r\n* Add context windows callback for custom cond handling by @drozbay in https://github.com/comfyanonymous/ComfyUI/pull/11208\r\n* Support the new qwen edit 2511 reference method. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11340\r\n* [add] tripo3.0 by @seed93 in https://github.com/comfyanonymous/ComfyUI/pull/10663\r\n* Add code to detect if a z image fun controlnet is broken or not. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11341\r\n* [BlockInfo] Lumina by @Haoming02 in https://github.com/comfyanonymous/ComfyUI/pull/11227\r\n* [BlockInfo] Wan by @Haoming02 in https://github.com/comfyanonymous/ComfyUI/pull/10845\r\n* Only enable fp16 on ZImage on newer pytorch. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11344\r\n* Patch frontend to 1.34.9 (from 1.34.8) by @christian-byrne in https://github.com/comfyanonymous/ComfyUI/pull/11342\r\n* Inpainting for z image fun control. Use the ZImageFunControlnet node. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11346\r\n* Add a way to set the default ref method in the qwen image code. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11349\r\n* Update workflows for new release process by @benceruleanlu in https://github.com/comfyanonymous/ComfyUI/pull/11064\r\n* [API Nodes] add Wan2.6 model to video nodes by @bigcat88 in https://github.com/comfyanonymous/ComfyUI/pull/11357\r\n* Check state dict key to auto enable the index_timestep_zero ref method. by @comfyanonymous in https://github.com/comfyanonymous/ComfyUI/pull/11362\r\n* Add exp_heun_2_x0 sampler series by @chaObserv in https://github.com/comfyanonymous/ComfyUI/pull/11360\r\n\r\n## New Contributors\r\n* @jiangchengchengark made their first contribution in https://github.com/comfyanonymous/ComfyUI/pull/11199\r\n* @drozbay made their first contribution in https://github.com/comfyanonymous/ComfyUI/pull/11208\r\n* @seed93 made their first contribution in https://github.com/comfyanonymous/ComfyUI/pull/10663\r\n\r\n**Full Changelog**: https://github.com/comfyanonymous/ComfyUI/compare/v0.4.0...v0.5.0",
       "reactions": {
         "url": "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/271010044/reactions",
-        "total_count": 22,
-        "+1": 8,
+        "total_count": 23,
+        "+1": 9,
         "-1": 0,
         "laugh": 2,
         "hooray": 9,
@@ -507,7 +507,7 @@
           "state": "uploaded",
           "size": 1746491233,
           "digest": "sha256:fac64ec81e91e84687ebaab51c2fd03eabbb24b1b16a09d6ae44155cd32267ed",
-          "download_count": 51148,
+          "download_count": 51149,
           "created_at": "2025-12-09T23:45:29Z",
           "updated_at": "2025-12-09T23:46:29Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.4.0/ComfyUI_windows_portable_nvidia.7z"
@@ -579,7 +579,7 @@
           "state": "uploaded",
           "size": 1984929934,
           "digest": "sha256:7990eaf1d5be3b0f316538384285a24d776648a7049396ad48f5fdda024690d2",
-          "download_count": 13269,
+          "download_count": 13272,
           "created_at": "2025-12-10T00:05:31Z",
           "updated_at": "2025-12-10T00:06:47Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.4.0/ComfyUI_windows_portable_nvidia_cu128.7z"
@@ -671,7 +671,7 @@
           "state": "uploaded",
           "size": 1242579026,
           "digest": "sha256:fc72f6b4c09314cc072bd89fb20006018d80985e371563e209051bd1c448d0b8",
-          "download_count": 11041,
+          "download_count": 11047,
           "created_at": "2025-12-02T01:49:54Z",
           "updated_at": "2025-12-02T01:50:40Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.76/ComfyUI_windows_portable_amd.7z"
@@ -707,7 +707,7 @@
           "state": "uploaded",
           "size": 1736031977,
           "digest": "sha256:3bb5a3ca6772cff3dc1dd7137826db560d686aa7915ec57d3faf2b77f50241cb",
-          "download_count": 59251,
+          "download_count": 59275,
           "created_at": "2025-12-02T01:43:28Z",
           "updated_at": "2025-12-02T01:44:41Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.76/ComfyUI_windows_portable_nvidia.7z"
@@ -2107,7 +2107,7 @@
           "state": "uploaded",
           "size": 1723483567,
           "digest": "sha256:cb8a5cff9a1c3bb5dc37e5f1d146e04c385bfc60aa83216312a134cbcf7861ff",
-          "download_count": 68656,
+          "download_count": 68657,
           "created_at": "2025-11-05T01:06:41Z",
           "updated_at": "2025-11-05T01:07:47Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.68/ComfyUI_windows_portable_nvidia.7z"
@@ -2599,7 +2599,7 @@
           "state": "uploaded",
           "size": 2096151644,
           "digest": "sha256:6d17839039e3e70ec7edb757bcf330811fc645ad5c27f958233bf4d46592061e",
-          "download_count": 41698,
+          "download_count": 41699,
           "created_at": "2025-10-14T04:24:09Z",
           "updated_at": "2025-10-14T04:25:28Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.65/ComfyUI_windows_portable_nvidia.7z"
@@ -3659,7 +3659,7 @@
           "state": "uploaded",
           "size": 2084830956,
           "digest": "sha256:a6bd3e2e934e2369984e293bf88db2a0cfb54bbacbe025a0d60dadc468484300",
-          "download_count": 50634,
+          "download_count": 50655,
           "created_at": "2025-09-04T07:13:57Z",
           "updated_at": "2025-09-04T07:14:57Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.57/ComfyUI_windows_portable_nvidia.7z"
@@ -4303,7 +4303,7 @@
           "state": "uploaded",
           "size": 2076227488,
           "digest": "sha256:54b6333fbf2de15ea3dfd238450e69c1ed9c41ac82c89235b29931163c8dd5ac",
-          "download_count": 51758,
+          "download_count": 51759,
           "created_at": "2025-08-13T14:44:23Z",
           "updated_at": "2025-08-13T14:45:15Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.50/ComfyUI_windows_portable_nvidia.7z"
@@ -4395,7 +4395,7 @@
           "state": "uploaded",
           "size": 2127097891,
           "digest": "sha256:fc18ef8dc2cb24a29ff3d61f48cf3fde28a68b5a4da151bc313a2ce6cf0ca717",
-          "download_count": 97011,
+          "download_count": 97029,
           "created_at": "2025-08-05T12:00:16Z",
           "updated_at": "2025-08-05T12:01:22Z",
           "browser_download_url": "https://github.com/comfyanonymous/ComfyUI/releases/download/v0.3.49/ComfyUI_windows_portable_nvidia.7z"

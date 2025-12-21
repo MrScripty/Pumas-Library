@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, X, Terminal, ArrowDownToLine, Monitor, Menu, RefreshCw, Loader2 } from 'lucide-react';
+import { X, Terminal, ArrowDownToLine, Monitor, Menu, Loader2, ArrowLeft, RefreshCw, Play, Square } from 'lucide-react';
 import { SpringyToggle } from './components/SpringyToggle';
 import { VersionSelector } from './components/VersionSelector';
+import { InstallDialog } from './components/InstallDialog';
+import { useVersions } from './hooks/useVersions';
 
 // TypeScript definitions for PyWebView API
 declare global {
@@ -73,6 +75,24 @@ export default function App() {
 
   // ComfyUI running state
   const [comfyUIRunning, setComfyUIRunning] = useState(false);
+  const [showVersionManager, setShowVersionManager] = useState(false);
+  const [isRefreshingVersions, setIsRefreshingVersions] = useState(false);
+  const [isLaunchHover, setIsLaunchHover] = useState(false);
+  const [launcherVersion, setLauncherVersion] = useState<string | null>(null);
+  const [spinnerFrame, setSpinnerFrame] = useState(0);
+
+  // Version data (shared between selector and manager view)
+  const {
+    installedVersions,
+    activeVersion,
+    availableVersions,
+    isLoading: isVersionLoading,
+    switchVersion,
+    installVersion,
+    removeVersion,
+    refreshAll,
+    openActiveInstall,
+  } = useVersions();
 
   // --- API Helpers ---
   const fetchStatus = async (isInitialLoad = false) => {
@@ -123,6 +143,10 @@ export default function App() {
       } else {
         setIsLoading(false);
       }
+
+      // Capture launcher version as short string (fallback to existing version state)
+      const shortVersion = data?.launcher_version || data?.version || null;
+      setLauncherVersion(shortVersion);
     } catch (e) {
       console.error("API Error:", e);
       const errorMsg = e instanceof Error ? e.message : String(e);
@@ -196,6 +220,23 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [comfyUIRunning]); // Re-run when comfyUIRunning changes
+
+  // Spinner frame updater for running state
+  useEffect(() => {
+    if (comfyUIRunning) {
+      setSpinnerFrame(0);
+    }
+
+    if (!comfyUIRunning || isLaunchHover) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      setSpinnerFrame((prev) => (prev + 1) % spinnerFrames.length);
+    }, 180);
+
+    return () => clearInterval(interval);
+  }, [comfyUIRunning, isLaunchHover]);
 
   // --- Handlers ---
 
@@ -278,170 +319,245 @@ export default function App() {
   };
 
   const isSetupComplete = depsInstalled === true && isPatched && menuShortcut && desktopShortcut;
-  const displayStatus = statusMessage === "Setup complete – everything is ready" ? "" : statusMessage;
+  const defaultReadyText = statusMessage?.trim().toLowerCase() === 'system ready. configure options below';
+  const displayStatus = statusMessage === "Setup complete – everything is ready" || defaultReadyText ? "" : statusMessage;
+  const activeVersionLabel = activeVersion || 'No version';
+  const canLaunch = depsInstalled === true && installedVersions.length > 0;
+  const launchSubText = canLaunch ? activeVersionLabel : 'No version installed';
+  const idleIconGlow = !comfyUIRunning && canLaunch ? { filter: 'drop-shadow(0 0 6px #55ff55)' } : undefined;
+  const spinnerFrames = ['/', '-', '\\', '|'];
 
   return (
-    <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-hidden flex flex-col relative font-sans selection:bg-gray-700">
+    <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-auto flex flex-col relative font-sans selection:bg-gray-700">
 
       {/* Title Bar */}
-      <div className="h-[72px] bg-[#252525] flex items-center justify-between px-6 select-none border-b border-[#333]">
-        <div className="flex flex-col justify-center h-full">
-          <h1 className="text-white text-lg font-bold mt-2">ComfyUI Setup</h1>
-          <span className="text-[#aaaaaa] text-xs mb-2 flex items-center gap-2">
-            Version: {version}
-            {isLoading && <Loader2 size={12} className="animate-spin" />}
-            {hasUpdate && latestVersion && (
-              <motion.span
-                initial={{ opacity: 0, scale: 0.8 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="text-[#55ff55] text-xs font-semibold"
-              >
-                (New: {latestVersion})
-              </motion.span>
-            )}
-            {!hasUpdate && latestVersion && (
-              <span className="text-[#666666] text-xs">
-                (Latest: {latestVersion})
-              </span>
-            )}
-          </span>
+      <div className="sticky top-0 z-20 h-14 bg-[#252525] flex items-center justify-between px-6 select-none border-b border-[#333] shadow-sm">
+        <div className="flex items-center gap-4 h-full">
+          <div className="flex flex-col justify-center h-full">
+            <h1 className="text-white text-base font-semibold leading-tight">ComfyUI Setup</h1>
+            <span className="text-[#aaaaaa] text-[11px] flex items-center gap-2">
+              Launcher: {launcherVersion || 'dev'}
+              {isLoading && <Loader2 size={12} className="animate-spin" />}
+            </span>
+          </div>
         </div>
-        <div
-          onClick={closeWindow}
-          className="cursor-pointer group p-2 rounded hover:bg-[#333] transition-colors"
-        >
-          <X className="text-[#cccccc] group-hover:text-[#ff4444] transition-colors" size={24} />
+        <div className="flex items-center gap-3">
+          <motion.button
+            onMouseEnter={() => setIsLaunchHover(true)}
+            onMouseLeave={() => setIsLaunchHover(false)}
+            onClick={handleLaunchComfyUI}
+            disabled={!canLaunch}
+            className={`flex items-center justify-center gap-3 w-[128px] h-[48px] rounded border text-xs font-semibold transition-colors ${
+              !canLaunch
+                ? 'bg-[#333]/50 border-[#444] text-[#666] cursor-not-allowed'
+                : comfyUIRunning
+                  ? 'bg-[#55ff55]/10 hover:bg-[#55ff55]/20 border-[#55ff55] text-[#dfffd3]'
+                  : 'bg-[#2c2c2c] hover:bg-[#333] border-[#555] text-[#e6e6e6]'
+            }`}
+            whileHover={{ scale: canLaunch ? 1.04 : 1 }}
+            whileTap={{ scale: canLaunch ? 0.98 : 1 }}
+          >
+            <div className="w-5 flex items-center justify-center">
+              {comfyUIRunning ? (
+                isLaunchHover ? (
+                  <Square
+                    size={18}
+                    className="flex-shrink-0 text-[#ff6666]"
+                    fill="currentColor"
+                    stroke="currentColor"
+                    strokeWidth={1}
+                  />
+                ) : (
+                  <span className="flex-shrink-0 w-4 text-center font-mono text-[15px]">
+                    {spinnerFrames[spinnerFrame]}
+                  </span>
+                )
+              ) : (
+                <Play size={20} className="flex-shrink-0 text-[#55ff55]" style={idleIconGlow} />
+              )}
+            </div>
+            <div className="flex flex-col items-start leading-tight w-[80px]">
+              <span className="text-[13px] leading-tight font-semibold">
+                {comfyUIRunning ? (isLaunchHover ? 'Stop' : 'Running') : 'Launch'}
+              </span>
+              <span className="text-[10px] mt-0.5 truncate w-full">
+                {launchSubText}
+              </span>
+            </div>
+          </motion.button>
+          <div className="h-14 w-14 flex items-center justify-center">
+            <div
+              onClick={closeWindow}
+              className="cursor-pointer group p-2 rounded hover:bg-[#333] transition-colors"
+            >
+              <X className="text-[#cccccc] group-hover:text-[#ff4444] transition-colors" size={22} />
+            </div>
+          </div>
         </div>
       </div>
 
-        {/* Main Content */}
-        <div className="flex-1 p-6 flex flex-col items-center">
-
+      {/* Main Content */}
+      <div className="flex-1 p-6 flex flex-col items-center">
         {isCheckingDeps || depsInstalled === null ? (
           <div className="w-full flex items-center justify-center gap-2 text-gray-400">
             <Loader2 className="animate-spin" size={18} />
             <span className="text-sm">Checking Dependencies...</span>
           </div>
-        ) : (
-          <>
-        {/* VERSION SELECTOR */}
-        <div className="w-full mb-4">
-          <VersionSelector />
-        </div>
-
-        {/* DEPENDENCY SECTION */}
-        <div className="w-full mb-6 min-h-[50px] flex items-center justify-center">
-          <AnimatePresence mode="wait">
-            {depsInstalled === false ? (
-              /* MISSING STATE: Big Wide Button */
-              <motion.button
-                key="install-btn"
-                layout
-                initial={{ opacity: 0, scale: 0.9 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
-                onClick={handleInstallDeps}
-                disabled={isInstalling || comfyUIRunning}
-                className="w-full h-12 bg-[#333333] hover:bg-[#444444] text-[#aaaaaa] hover:text-white font-bold text-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98] rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
+        ) : showVersionManager ? (
+          <div className="w-full flex-1 flex flex-col gap-4">
+            <div className="w-full flex items-center justify-between">
+              <button
+                onClick={() => setShowVersionManager(false)}
+                className="flex items-center gap-2 px-3 py-2 rounded border border-[#333] bg-[#2a2a2a] hover:bg-[#333] text-white text-sm transition-colors"
               >
-                {isInstalling ? (
-                  <>
-                    <Loader2 className="animate-spin" size={18} />
-                    <span>Installing (Check Terminal)...</span>
-                  </>
-                ) : comfyUIRunning ? (
-                  <>
-                    <ArrowDownToLine size={18} />
-                    <span>Stop ComfyUI to Install</span>
-                  </>
-                ) : (
-                  <>
-                    <ArrowDownToLine size={18} />
-                    <span>Install Missing Dependencies</span>
-                  </>
-                )}
-              </motion.button>
-            ) : null}
-          </AnimatePresence>
-        </div>
-
-          {/* CONTROL PANEL */}
-          <motion.div 
-            className="w-full flex flex-col items-center gap-6"
-            animate={{ 
-              opacity: depsInstalled ? 1 : 0.3,
-              filter: depsInstalled ? "blur(0px)" : "blur(1px)",
-              pointerEvents: depsInstalled ? "auto" : "none"
-            }}
-            transition={{ duration: 0.4 }}
-          >
-            
-          {/* Status Footer Text */}
-            {displayStatus && (
-              <div className="h-6 text-center w-full px-2">
-                 <span
-                   className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
-                     comfyUIRunning ? 'text-[#55ff55]' : (isSetupComplete ? 'text-[#55ff55]' : 'text-[#666666]')
-                   }`}
-                 >
-                   {displayStatus}
-                 </span>
+                <ArrowLeft size={14} />
+                <span>Back to setup</span>
+              </button>
+              <div className="flex items-center gap-3 text-xs text-gray-400">
+                <span>{installedVersions.length} installed</span>
+                <motion.button
+                  onClick={async () => {
+                    if (isRefreshingVersions) return;
+                    setIsRefreshingVersions(true);
+                    try {
+                      await refreshAll(true);
+                    } finally {
+                      setIsRefreshingVersions(false);
+                    }
+                  }}
+                  disabled={isRefreshingVersions || isVersionLoading}
+                  className="p-2 rounded hover:bg-[#333] transition-colors disabled:opacity-50"
+                  whileHover={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 1.05 }}
+                  whileTap={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 0.96 }}
+                  title="Refresh versions"
+                >
+                  <RefreshCw size={14} className={isRefreshingVersions ? 'animate-spin text-gray-500' : 'text-gray-300'} />
+                </motion.button>
               </div>
-            )}
-
-          {/* Toggles */}
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center gap-3">
-              {isLoading ? (
-                <Loader2 size={14} className="text-gray-400 animate-spin" />
-              ) : (
-                <Menu size={16} className="text-[#555]" />
-              )}
-              <SpringyToggle
-                isOn={menuShortcut}
-                onToggle={toggleMenu}
-                disabled={isLoading}
-                labelOff="No Shortcut"
-                labelOn="Menu Shortcut"
-              />
             </div>
-
-            <div className="flex items-center gap-3">
-              {isLoading ? (
-                <Loader2 size={14} className="text-gray-400 animate-spin" />
-              ) : (
-                <Monitor size={16} className="text-[#555]" />
-              )}
-              <SpringyToggle
-                isOn={desktopShortcut}
-                onToggle={toggleDesktop}
-                disabled={isLoading}
-                labelOff="No Shortcut"
-                labelOn="Desktop Shortcut"
+            <div className="w-full flex-1 min-h-0">
+              <InstallDialog
+                isOpen={showVersionManager}
+                onClose={() => setShowVersionManager(false)}
+                availableVersions={availableVersions}
+                installedVersions={installedVersions}
+                isLoading={isVersionLoading}
+                onInstallVersion={installVersion}
+                onRemoveVersion={removeVersion}
+                onRefreshAll={refreshAll}
+                displayMode="page"
               />
             </div>
           </div>
+        ) : (
+          <>
+            {/* VERSION SELECTOR */}
+            <div className="w-full mb-4">
+              <VersionSelector
+                installedVersions={installedVersions}
+                activeVersion={activeVersion}
+                isLoading={isVersionLoading}
+                switchVersion={switchVersion}
+                openActiveInstall={openActiveInstall}
+                onOpenVersionManager={() => setShowVersionManager(true)}
+              />
+            </div>
 
-          {/* Launch/Stop ComfyUI Button */}
-          <motion.button
-            onClick={handleLaunchComfyUI}
-            disabled={depsInstalled !== true}
-            className={`w-full mt-4 h-12 border font-bold text-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98] rounded-sm ${
-              depsInstalled !== true
-                ? 'bg-[#333]/50 border-[#444] text-[#666] cursor-not-allowed'
-                : comfyUIRunning
-                  ? 'bg-[#ff4444]/10 hover:bg-[#ff4444]/20 border-[#ff4444] text-[#ff4444] hover:text-white'
-                  : 'bg-[#55ff55]/10 hover:bg-[#55ff55]/20 border-[#55ff55] text-[#55ff55] hover:text-white'
-            }`}
-            whileHover={{ scale: depsInstalled === true ? 1.02 : 1 }}
-            whileTap={{ scale: depsInstalled === true ? 0.98 : 1 }}
-          >
-            <Terminal size={18} />
-            <span>{comfyUIRunning ? 'Stop ComfyUI' : 'Launch ComfyUI'}</span>
-          </motion.button>
+            {/* DEPENDENCY SECTION */}
+            <div className="w-full mb-6 min-h-[50px] flex items-center justify-center">
+              <AnimatePresence mode="wait">
+                {depsInstalled === false ? (
+                  /* MISSING STATE: Big Wide Button */
+                  <motion.button
+                    key="install-btn"
+                    layout
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+                    onClick={handleInstallDeps}
+                    disabled={isInstalling || comfyUIRunning}
+                    className="w-full h-12 bg-[#333333] hover:bg-[#444444] text-[#aaaaaa] hover:text-white font-bold text-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98] rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isInstalling ? (
+                      <>
+                        <Loader2 className="animate-spin" size={18} />
+                        <span>Installing (Check Terminal)...</span>
+                      </>
+                    ) : comfyUIRunning ? (
+                      <>
+                        <ArrowDownToLine size={18} />
+                        <span>Stop ComfyUI to Install</span>
+                      </>
+                    ) : (
+                      <>
+                        <ArrowDownToLine size={18} />
+                        <span>Install Missing Dependencies</span>
+                      </>
+                    )}
+                  </motion.button>
+                ) : null}
+              </AnimatePresence>
+            </div>
 
-        </motion.div>
-        </>        
+            {/* CONTROL PANEL */}
+            <motion.div
+              className="w-full flex flex-col items-center gap-6"
+              animate={{
+                opacity: depsInstalled ? 1 : 0.3,
+                filter: depsInstalled ? "blur(0px)" : "blur(1px)",
+                pointerEvents: depsInstalled ? "auto" : "none"
+              }}
+              transition={{ duration: 0.4 }}
+            >
+
+            {/* Status Footer Text */}
+              {displayStatus && (
+                <div className="h-6 text-center w-full px-2">
+                  <span
+                    className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
+                      comfyUIRunning ? 'text-[#55ff55]' : (isSetupComplete ? 'text-[#55ff55]' : 'text-[#666666]')
+                    }`}
+                  >
+                    {displayStatus}
+                  </span>
+                </div>
+              )}
+
+            {/* Toggles */}
+            <div className="flex flex-col gap-4">
+              <div className="flex items-center gap-3">
+                {isLoading ? (
+                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                ) : (
+                  <Menu size={16} className="text-[#555]" />
+                )}
+                <SpringyToggle
+                  isOn={menuShortcut}
+                  onToggle={toggleMenu}
+                  disabled={isLoading}
+                  labelOff="No Shortcut"
+                  labelOn="Menu Shortcut"
+                />
+              </div>
+
+              <div className="flex items-center gap-3">
+                {isLoading ? (
+                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                ) : (
+                  <Monitor size={16} className="text-[#555]" />
+                )}
+                <SpringyToggle
+                  isOn={desktopShortcut}
+                  onToggle={toggleDesktop}
+                  disabled={isLoading}
+                  labelOff="No Shortcut"
+                  labelOn="Desktop Shortcut"
+                />
+              </div>
+            </div>
+
+          </motion.div>
+          </>
         )}
       </div>
     </div>

@@ -134,14 +134,17 @@ class InstallationProgressTracker:
                 progress = int((downloaded_bytes / total_bytes) * 100)
                 self._current_state['stage_progress'] = progress
 
-            if speed_bytes_per_sec:
+            if speed_bytes_per_sec is not None:
                 self._current_state['download_speed'] = speed_bytes_per_sec
 
                 # Calculate ETA
-                if total_bytes and downloaded_bytes < total_bytes:
+                if total_bytes and downloaded_bytes < total_bytes and speed_bytes_per_sec > 0:
                     remaining_bytes = total_bytes - downloaded_bytes
                     eta_seconds = remaining_bytes / speed_bytes_per_sec
                     self._current_state['eta_seconds'] = int(eta_seconds)
+                elif total_bytes and speed_bytes_per_sec == 0:
+                    # No progress yet, clear ETA
+                    self._current_state['eta_seconds'] = None
 
             # Calculate overall progress
             self._current_state['overall_progress'] = self._calculate_overall_progress()

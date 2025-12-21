@@ -87,7 +87,8 @@ class ComfyUISetupAPI:
             self.release_size_calculator = ReleaseSizeCalculator(
                 cache_dir,
                 self.release_data_fetcher,
-                self.package_size_resolver
+                self.package_size_resolver,
+                self.resource_manager.shared_dir / "uv"
             )
         except Exception as e:
             print(f"Warning: Version management initialization failed: {e}")
@@ -662,6 +663,17 @@ Categories=Graphics;ArtificialIntelligence;
     def launch_comfyui(self) -> bool:
         """Launch ComfyUI using run.sh script"""
         try:
+            # Prefer launching the active managed version if available
+            if self.version_manager:
+                active_tag = self.version_manager.get_active_version()
+                if active_tag:
+                    success, _process = self.version_manager.launch_version(active_tag)
+                    if success:
+                        print(f"Launched active managed version: {active_tag}")
+                        return True
+                    else:
+                        print(f"Failed to launch managed version {active_tag}, falling back to legacy run.sh")
+
             if not self.run_sh.exists():
                 print(f"Error: run.sh not found at {self.run_sh}")
                 return False
@@ -887,6 +899,73 @@ Categories=Graphics;ArtificialIntelligence;
             return {}
         return self.version_manager.get_version_info(tag)
 
+    def open_path(self, path: str) -> Dict[str, Any]:
+        """
+        Open a filesystem path in the user's file manager (cross-platform).
+
+        Args:
+            path: Path to open (absolute or relative to launcher root)
+
+        Returns:
+            Dict with success status and optional error message
+        """
+        if not path or not str(path).strip():
+            return {"success": False, "error": "Path is required"}
+
+        try:
+            target_path = Path(path).expanduser()
+            if not target_path.is_absolute():
+                # Allow relative paths from launcher root for convenience
+                target_path = (self.script_dir / target_path).resolve()
+            else:
+                target_path = target_path.resolve()
+        except Exception as e:
+            return {"success": False, "error": f"Invalid path: {e}"}
+
+        if not target_path.exists():
+            return {"success": False, "error": f"Path does not exist: {target_path}"}
+
+        # Select platform-appropriate opener
+        if sys.platform.startswith('darwin'):
+            cmd = ['open', str(target_path)]
+        elif os.name == 'nt':
+            cmd = ['explorer', str(target_path)]
+        else:
+            cmd = ['xdg-open', str(target_path)]
+
+        try:
+            # Ensure opener exists before running
+            if shutil.which(cmd[0]) is None:
+                return {"success": False, "error": f"File manager command not found: {cmd[0]}"}
+
+            result = subprocess.run(
+                cmd,
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if result.returncode != 0:
+                return {"success": False, "error": f"File manager returned code {result.returncode}"}
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def open_active_install(self) -> Dict[str, Any]:
+        """
+        Open the active ComfyUI installation directory in the file manager.
+
+        Returns:
+            Dict with success status and optional error message
+        """
+        if not self.version_manager:
+            return {"success": False, "error": "Version manager not initialized"}
+
+        active_path = self.version_manager.get_active_version_path()
+        if not active_path:
+            return {"success": False, "error": "No active version or installation incomplete"}
+
+        return self.open_path(str(active_path))
+
     def launch_version(self, tag: str, extra_args: List[str] = None) -> bool:
         """
         Launch a specific ComfyUI version
@@ -922,9 +1001,15 @@ Categories=Graphics;ArtificialIntelligence;
                 return None
 
             # Get archive size from zipball_url
-            # The GitHub API doesn't directly provide the size, so we estimate
-            # based on typical ComfyUI release sizes (~125 MB)
-            archive_size = 125 * 1024 * 1024  # 125 MB estimate
+            download_url = release.get('zipball_url') or release.get('tarball_url')
+            archive_size = None
+
+            if download_url:
+                archive_size = self._get_content_length(download_url)
+
+            # Fallback estimate if HEAD fails
+            if not archive_size:
+                archive_size = 125 * 1024 * 1024  # 125 MB estimate
 
             # Calculate total size including dependencies
             result = self.release_size_calculator.calculate_release_size(
@@ -962,6 +1047,21 @@ Categories=Graphics;ArtificialIntelligence;
                 results[tag] = result
 
         return results
+
+    def _get_content_length(self, url: str) -> Optional[int]:
+        """
+        Perform a HEAD request to retrieve Content-Length for a URL.
+        """
+        try:
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                length = resp.headers.get('Content-Length')
+                if length:
+                    return int(length)
+        except Exception as e:
+            print(f"Warning: Failed to fetch Content-Length for {url}: {e}")
+        return None
 
     # ==================== Resource Management API (Phase 5) ====================
 

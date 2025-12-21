@@ -144,9 +144,10 @@
       }
     ],
     "requirements_hash": "sha256:ac88ff0031f9ae405b74e2258dc04a5a6ff815df49342c697c26e50f11dee845",
-    "calculated_at": "2025-12-20T22:15:55.827275+00:00",
+    "calculated_at": "2025-12-21T01:26:26.912759+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.5.0": {
     "tag": "v0.5.0",
@@ -293,9 +294,10 @@
       }
     ],
     "requirements_hash": "sha256:ac88ff0031f9ae405b74e2258dc04a5a6ff815df49342c697c26e50f11dee845",
-    "calculated_at": "2025-12-20T22:15:56.025500+00:00",
+    "calculated_at": "2025-12-21T01:26:33.201740+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.4.0": {
     "tag": "v0.4.0",
@@ -442,9 +444,10 @@
       }
     ],
     "requirements_hash": "sha256:726c21a70307ccc91718eec1561dafb7428382b7cc3a4466d42cf6c3823ab92e",
-    "calculated_at": "2025-12-20T22:15:56.870809+00:00",
+    "calculated_at": "2025-12-21T01:26:39.609817+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.76": {
     "tag": "v0.3.76",
@@ -591,9 +594,10 @@
       }
     ],
     "requirements_hash": "sha256:cefb74dc24181613a0b6f3e7a2b11bc1bdf41312afba7e0aa76c9e3a68f757f3",
-    "calculated_at": "2025-12-20T22:15:57.592547+00:00",
+    "calculated_at": "2025-12-21T01:26:46.806900+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.75": {
     "tag": "v0.3.75",
@@ -740,9 +744,10 @@
       }
     ],
     "requirements_hash": "sha256:dcba4039be9dfcc5e47949cc8f725a9c1031af1364c5fc69477eb9850cd41092",
-    "calculated_at": "2025-12-20T22:15:58.302318+00:00",
+    "calculated_at": "2025-12-21T01:26:53.817715+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.73": {
     "tag": "v0.3.73",
@@ -889,9 +894,10 @@
       }
     ],
     "requirements_hash": "sha256:dcba4039be9dfcc5e47949cc8f725a9c1031af1364c5fc69477eb9850cd41092",
-    "calculated_at": "2025-12-20T22:15:58.510714+00:00",
+    "calculated_at": "2025-12-21T01:27:00.021480+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.72": {
     "tag": "v0.3.72",
@@ -1038,9 +1044,10 @@
       }
     ],
     "requirements_hash": "sha256:433c25dfcfcd9685d6694256bc594f55e1c4c26c0fdf6f534e82adc8ee163a8f",
-    "calculated_at": "2025-12-20T22:15:58.958842+00:00",
+    "calculated_at": "2025-12-21T01:27:07.133342+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.71": {
     "tag": "v0.3.71",
@@ -1187,9 +1194,10 @@
       }
     ],
     "requirements_hash": "sha256:3ac6fd97400e6a13b0b4b1496993b1e13af51a059aa6cd06bb2211b44a9c37d3",
-    "calculated_at": "2025-12-20T22:16:00.060826+00:00",
+    "calculated_at": "2025-12-21T01:27:14.136719+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.70": {
     "tag": "v0.3.70",
@@ -1336,9 +1344,10 @@
       }
     ],
     "requirements_hash": "sha256:d88b749abf6bc455292a756a05267436e1b0032b2ad491ecf2c02ec1cb425301",
-    "calculated_at": "2025-12-20T22:16:00.849337+00:00",
+    "calculated_at": "2025-12-21T01:27:20.424481+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.69": {
     "tag": "v0.3.69",
@@ -1485,9 +1494,10 @@
       }
     ],
     "requirements_hash": "sha256:d88b749abf6bc455292a756a05267436e1b0032b2ad491ecf2c02ec1cb425301",
-    "calculated_at": "2025-12-20T22:16:01.094348+00:00",
+    "calculated_at": "2025-12-21T01:27:26.736372+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.68": {
     "tag": "v0.3.68",
@@ -1634,9 +1644,10 @@
       }
     ],
     "requirements_hash": "sha256:d88b749abf6bc455292a756a05267436e1b0032b2ad491ecf2c02ec1cb425301",
-    "calculated_at": "2025-12-20T22:16:01.334665+00:00",
+    "calculated_at": "2025-12-21T01:27:32.741163+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.67": {
     "tag": "v0.3.67",
@@ -1783,9 +1794,10 @@
       }
     ],
     "requirements_hash": "sha256:2776a91397d09c329b3e2b75c23564491fc78725c4d846c2f7a11266139782b4",
-    "calculated_at": "2025-12-20T22:16:02.101412+00:00",
+    "calculated_at": "2025-12-21T01:27:39.182169+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.66": {
     "tag": "v0.3.66",
@@ -1932,9 +1944,10 @@
       }
     ],
     "requirements_hash": "sha256:43e8e8c0d2b00deebf16fecdbad704b74dc04b2765fa3fd2e5a0a73346bf871a",
-    "calculated_at": "2025-12-20T22:16:02.852118+00:00",
+    "calculated_at": "2025-12-21T01:27:45.613804+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.65": {
     "tag": "v0.3.65",
@@ -2081,9 +2094,10 @@
       }
     ],
     "requirements_hash": "sha256:c0fa052e91ffdad638585c6804d086379268c03b8fbb195c7087319cbeed9758",
-    "calculated_at": "2025-12-20T22:16:03.589213+00:00",
+    "calculated_at": "2025-12-21T01:27:52.120015+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.64": {
     "tag": "v0.3.64",
@@ -2230,9 +2244,10 @@
       }
     ],
     "requirements_hash": "sha256:35d6c9a7055c770f73902b6556af4e34c949c66831680026b6ec65804dc5a02d",
-    "calculated_at": "2025-12-20T22:16:04.453051+00:00",
+    "calculated_at": "2025-12-21T01:28:02.063862+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.63": {
     "tag": "v0.3.63",
@@ -2379,9 +2394,10 @@
       }
     ],
     "requirements_hash": "sha256:7bfa95b36c4c6d5e97c179f5b8cf110fe2542b769b18e3a3b7c76591f6c3fdb8",
-    "calculated_at": "2025-12-20T22:16:05.328415+00:00",
+    "calculated_at": "2025-12-21T01:28:07.883129+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.62": {
     "tag": "v0.3.62",
@@ -2533,9 +2549,10 @@
       }
     ],
     "requirements_hash": "sha256:ae90e1c969ad2350b71f96d1181761ea1b6fa39d8118bbbe75fb8371c47c4ad3",
-    "calculated_at": "2025-12-20T22:16:06.382289+00:00",
+    "calculated_at": "2025-12-21T01:28:14.131630+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.61": {
     "tag": "v0.3.61",
@@ -2687,9 +2704,10 @@
       }
     ],
     "requirements_hash": "sha256:ae90e1c969ad2350b71f96d1181761ea1b6fa39d8118bbbe75fb8371c47c4ad3",
-    "calculated_at": "2025-12-20T22:16:06.700427+00:00",
+    "calculated_at": "2025-12-21T01:28:20.273962+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.60": {
     "tag": "v0.3.60",
@@ -2841,9 +2859,10 @@
       }
     ],
     "requirements_hash": "sha256:952cdf7b854aabe900570e56815c00be9ce2982e6c68b32c3c187f9e475bbfae",
-    "calculated_at": "2025-12-20T22:16:07.357414+00:00",
+    "calculated_at": "2025-12-21T01:28:26.624976+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.59": {
     "tag": "v0.3.59",
@@ -2995,9 +3014,10 @@
       }
     ],
     "requirements_hash": "sha256:3a000a336e6826c893374766d9afe9c2e98533fe4c6bb820c01ee63f4c92085a",
-    "calculated_at": "2025-12-20T22:16:08.097438+00:00",
+    "calculated_at": "2025-12-21T01:28:33.168187+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.58": {
     "tag": "v0.3.58",
@@ -3149,9 +3169,10 @@
       }
     ],
     "requirements_hash": "sha256:ae9ca90e0844e31261025dc50c5fe00eb9e2d3531409f1e5a155786defb68828",
-    "calculated_at": "2025-12-20T22:16:08.725434+00:00",
+    "calculated_at": "2025-12-21T01:28:39.627504+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.57": {
     "tag": "v0.3.57",
@@ -3303,9 +3324,10 @@
       }
     ],
     "requirements_hash": "sha256:74a930ff5e10dd96452444feefca49c4dc49889fd02a72d047dcc8b5407df587",
-    "calculated_at": "2025-12-20T22:16:09.503993+00:00",
+    "calculated_at": "2025-12-21T01:28:45.665359+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.56": {
     "tag": "v0.3.56",
@@ -3457,9 +3479,10 @@
       }
     ],
     "requirements_hash": "sha256:d011afc0a1baf35bc483c7363b002001870e3ad0a160766e858ebb51c157cf00",
-    "calculated_at": "2025-12-20T22:16:10.041198+00:00",
+    "calculated_at": "2025-12-21T01:28:53.250891+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.55": {
     "tag": "v0.3.55",
@@ -3611,9 +3634,10 @@
       }
     ],
     "requirements_hash": "sha256:d011afc0a1baf35bc483c7363b002001870e3ad0a160766e858ebb51c157cf00",
-    "calculated_at": "2025-12-20T22:16:10.222794+00:00",
+    "calculated_at": "2025-12-21T01:28:59.123245+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.54": {
     "tag": "v0.3.54",
@@ -3765,9 +3789,10 @@
       }
     ],
     "requirements_hash": "sha256:9b09506e28c0a9ce0c945cda0b07ac5a79ad387d21b8f42bee428f8384ae5fe7",
-    "calculated_at": "2025-12-20T22:16:10.762946+00:00",
+    "calculated_at": "2025-12-21T01:29:05.032276+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.53": {
     "tag": "v0.3.53",
@@ -3919,9 +3944,10 @@
       }
     ],
     "requirements_hash": "sha256:9b09506e28c0a9ce0c945cda0b07ac5a79ad387d21b8f42bee428f8384ae5fe7",
-    "calculated_at": "2025-12-20T22:16:11.106088+00:00",
+    "calculated_at": "2025-12-21T01:29:11.057278+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.52": {
     "tag": "v0.3.52",
@@ -4073,9 +4099,10 @@
       }
     ],
     "requirements_hash": "sha256:d0cf2317b5902cdb1ffc8371c1295ae3e6b3860d4af7a131533780af23a61bba",
-    "calculated_at": "2025-12-20T22:16:11.864524+00:00",
+    "calculated_at": "2025-12-21T01:29:17.500220+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.51": {
     "tag": "v0.3.51",
@@ -4227,9 +4254,10 @@
       }
     ],
     "requirements_hash": "sha256:f08ffed02886bf1c23141e42df0a6c70d09098336f8bb2a3e472223c88bf6c9b",
-    "calculated_at": "2025-12-20T22:16:12.622668+00:00",
+    "calculated_at": "2025-12-21T01:29:23.946598+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.50": {
     "tag": "v0.3.50",
@@ -4381,9 +4409,10 @@
       }
     ],
     "requirements_hash": "sha256:573fefe7d341a9482665667c6f3d050ff590092a92cd5a3282afe60deac06e32",
-    "calculated_at": "2025-12-20T22:16:13.438625+00:00",
+    "calculated_at": "2025-12-21T01:29:30.254919+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   },
   "v0.3.49": {
     "tag": "v0.3.49",
@@ -4535,8 +4564,9 @@
       }
     ],
     "requirements_hash": "sha256:dc6371def6fbe18ac82dda462fc8d057e9e3ef7bbeb042810745c750ba3f003f",
-    "calculated_at": "2025-12-20T22:16:14.284297+00:00",
+    "calculated_at": "2025-12-21T01:29:36.447517+00:00",
     "platform": "linux_x86_64",
-    "python_version": "3.12"
+    "python_version": "3.12",
+    "dependencies_size_source": "direct_only"
   }
 }

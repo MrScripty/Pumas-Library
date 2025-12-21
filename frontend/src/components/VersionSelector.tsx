@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ChevronDown, RefreshCw, Check, Loader2, Download } from 'lucide-react';
+import { ChevronDown, RefreshCw, Check, Loader2, Download, FolderOpen, CheckCircle2 } from 'lucide-react';
 import { useVersions } from '../hooks/useVersions';
 import { InstallDialog } from './InstallDialog';
 
@@ -13,12 +13,16 @@ export function VersionSelector() {
     switchVersion,
     installVersion,
     refreshAll,
+    openActiveInstall,
   } = useVersions();
 
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isInstallDialogOpen, setIsInstallDialogOpen] = useState(false);
+  const [isOpeningPath, setIsOpeningPath] = useState(false);
+  const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
+  const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   console.log('VersionSelector mounted - installedVersions:', installedVersions.length, 'availableVersions:', availableVersions.length);
 
@@ -49,8 +53,39 @@ export function VersionSelector() {
     }
   };
 
+  const handleOpenActiveInstall = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!activeVersion) {
+      return;
+    }
+
+    setIsOpeningPath(true);
+    setShowOpenedIndicator(false);
+    try {
+      await openActiveInstall();
+      setShowOpenedIndicator(true);
+      if (openedIndicatorTimeout.current) {
+        clearTimeout(openedIndicatorTimeout.current);
+      }
+      openedIndicatorTimeout.current = setTimeout(() => setShowOpenedIndicator(false), 2000);
+    } catch (err) {
+      console.error('Failed to open active installation path:', err);
+    } finally {
+      setIsOpeningPath(false);
+    }
+  };
+
   const displayVersion = activeVersion || 'No version selected';
   const hasInstalledVersions = installedVersions.length > 0;
+  const emphasizeInstall = !hasInstalledVersions && !isLoading;
+
+  useEffect(() => {
+    return () => {
+      if (openedIndicatorTimeout.current) {
+        clearTimeout(openedIndicatorTimeout.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="relative w-full">
@@ -86,6 +121,24 @@ export function VersionSelector() {
 
         {/* Right side - action buttons */}
         <div className="flex items-center gap-2">
+          {/* Open in File Manager */}
+          <motion.button
+            onClick={handleOpenActiveInstall}
+            disabled={!activeVersion || isOpeningPath || isLoading}
+            className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+            whileHover={{ scale: activeVersion ? 1.1 : 1 }}
+            whileTap={{ scale: activeVersion ? 0.9 : 1 }}
+            title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
+          >
+            {showOpenedIndicator ? (
+              <CheckCircle2 size={14} className="text-[#55ff55]" />
+            ) : isOpeningPath ? (
+              <Loader2 size={14} className="text-gray-400 animate-spin" />
+            ) : (
+              <FolderOpen size={14} className="text-gray-400" />
+            )}
+          </motion.button>
+
           {/* Download Button */}
           <motion.button
             onClick={(e) => {
@@ -95,7 +148,9 @@ export function VersionSelector() {
               console.log('Install dialog state set to true');
             }}
             disabled={isLoading}
-            className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+            className={`p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50 ${
+              emphasizeInstall ? 'animate-pulse ring-1 ring-[#55ff55]/60' : ''
+            }`}
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.9 }}
             title="Install new version"
@@ -180,6 +235,13 @@ export function VersionSelector() {
         onInstallVersion={installVersion}
         onRefreshAll={refreshAll}
       />
+
+      {/* Empty state hint */}
+      {!hasInstalledVersions && (
+        <div className="mt-2 text-xs text-gray-400">
+          No versions installed yet. Click the download arrow to install your first version.
+        </div>
+      )}
     </div>
   );
 }

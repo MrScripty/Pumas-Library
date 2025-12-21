@@ -10,6 +10,7 @@ import shutil
 import tarfile
 import zipfile
 import subprocess
+import time
 from pathlib import Path
 from typing import Optional, List, Callable, Dict, Tuple
 from backend.models import (
@@ -20,7 +21,7 @@ from backend.metadata_manager import MetadataManager
 from backend.github_integration import GitHubReleasesFetcher, DownloadManager
 from backend.resource_manager import ResourceManager
 from backend.utils import (
-    ensure_directory, run_command, check_command_exists,
+    ensure_directory, run_command, check_command_exists, get_directory_size,
     parse_requirements_file
 )
 from backend.installation_progress_tracker import (
@@ -59,6 +60,10 @@ class VersionManager:
 
         # Ensure versions directory exists
         ensure_directory(self.versions_dir)
+        # Shared UV cache directory (persists across installs)
+        self.uv_cache_dir = self.resource_manager.shared_dir / "uv"
+        if ensure_directory(self.uv_cache_dir):
+            print(f"Using UV cache directory at {self.uv_cache_dir}")
 
         # Initialize progress tracker (Phase 6.2.5b)
         cache_dir = metadata_manager.launcher_data_dir / "cache"
@@ -115,7 +120,6 @@ class VersionManager:
                             # Send SIGTERM first for graceful shutdown
                             os.killpg(os.getpgid(pid), 15)
                             # Wait a moment
-                            import time
                             time.sleep(0.5)
                             # Check if still alive - need to check if process object is still valid
                             try:
@@ -306,6 +310,25 @@ class VersionManager:
         versions_metadata = self.metadata_manager.load_versions()
         return versions_metadata.get('installed', {}).get(tag)
 
+    def get_version_path(self, tag: str) -> Optional[Path]:
+        """
+        Get filesystem path for an installed version.
+
+        Args:
+            tag: Version tag
+
+        Returns:
+            Path to version directory or None if missing/incomplete
+        """
+        version_path = self.versions_dir / tag
+        if not version_path.exists():
+            return None
+
+        if not self._is_version_complete(version_path):
+            return None
+
+        return version_path
+
     def get_active_version(self) -> Optional[str]:
         """
         Get currently active version tag
@@ -322,6 +345,19 @@ class VersionManager:
         # Fallback to metadata
         versions_metadata = self.metadata_manager.load_versions()
         return versions_metadata.get('lastSelectedVersion')
+
+    def get_active_version_path(self) -> Optional[Path]:
+        """
+        Get filesystem path for the active version.
+
+        Returns:
+            Path or None if no active version or incomplete installation
+        """
+        active_tag = self.get_active_version()
+        if not active_tag:
+            return None
+
+        return self.get_version_path(active_tag)
 
     def set_active_version(self, tag: str) -> bool:
         """
@@ -429,13 +465,33 @@ class VersionManager:
             archive_ext = '.zip' if is_zip else '.tar.gz'
             archive_path = download_dir / f"{tag}{archive_ext}"
 
-            # TODO: Enhance DownloadManager to provide progress callbacks
-            # For now, just update progress at start and end
+            # Track download progress and speed for UI feedback
             downloader = DownloadManager()
             self._current_downloader = downloader  # Track for cancellation
 
+            download_start_time = time.time()
+
+            def on_download_progress(downloaded: int, total: int, speed: Optional[float] = None):
+                # Prefer instantaneous speed from downloader; fall back to average if missing
+                effective_speed = speed
+                if effective_speed is None and downloaded > 0:
+                    elapsed = time.time() - download_start_time
+                    if elapsed > 0:
+                        effective_speed = downloaded / elapsed
+
+                total_bytes = total if total and total > 0 else None
+                self.progress_tracker.update_download_progress(
+                    downloaded,
+                    total_bytes,
+                    effective_speed
+                )
+
             try:
-                success = downloader.download_with_retry(download_url, archive_path)
+                success = downloader.download_with_retry(
+                    download_url,
+                    archive_path,
+                    progress_callback=on_download_progress
+                )
 
                 if not success:
                     error_msg = "Download failed"
@@ -519,9 +575,11 @@ class VersionManager:
             if progress_callback:
                 progress_callback("Installing dependencies...", 4, 5)
 
-            if not self._install_dependencies_with_progress(tag):
+            deps_success = self._install_dependencies_with_progress(tag)
+            if not deps_success:
                 print("Warning: Dependency installation had errors")
-                # Continue anyway, user can retry later
+                self.progress_tracker.set_error("Dependency installation failed")
+                # Continue to finish setup, but installation will be marked as failed
 
             # Step 5: Setup symlinks
             self.progress_tracker.update_stage(InstallationStage.SETUP, 0, "Setting up symlinks")
@@ -547,10 +605,13 @@ class VersionManager:
             self.metadata_manager.save_versions(versions_metadata)
 
             # Mark installation as complete
-            self.progress_tracker.complete_installation(True)
+            self.progress_tracker.complete_installation(deps_success)
 
-            print(f"✓ Successfully installed {tag}")
-            return True
+            if deps_success:
+                print(f"✓ Successfully installed {tag}")
+            else:
+                print(f"Installation completed with dependency errors for {tag}")
+            return deps_success
 
         except InterruptedError as e:
             # Installation was cancelled by user
@@ -589,9 +650,27 @@ class VersionManager:
             self._cancel_installation = False
 
             # Clear progress state after a short delay (allow UI to read final state)
-            import time
             time.sleep(2)
             self.progress_tracker.clear_state()
+
+    def _build_uv_env(self) -> Dict[str, str]:
+        """
+        Build environment variables for UV commands, ensuring cache is shared
+        """
+        env = os.environ.copy()
+        if ensure_directory(self.uv_cache_dir):
+            env['UV_CACHE_DIR'] = str(self.uv_cache_dir)
+            # Also point pip to a persistent cache alongside UV's cache
+            pip_cache = self.uv_cache_dir / "pip-cache"
+            try:
+                pip_cache.mkdir(parents=True, exist_ok=True)
+                env['PIP_CACHE_DIR'] = str(pip_cache)
+            except Exception:
+                pass
+        else:
+            print(f"Warning: Unable to create UV cache directory at {self.uv_cache_dir}")
+        env['UV_LINK_MODE'] = env.get('UV_LINK_MODE', 'copy')
+        return env
 
     def _create_venv(self, version_path: Path) -> bool:
         """
@@ -619,9 +698,11 @@ class VersionManager:
         venv_path = version_path / "venv"
 
         print(f"Creating virtual environment with UV...")
+        uv_env = self._build_uv_env()
         success, stdout, stderr = run_command(
             ['uv', 'venv', str(venv_path)],
-            timeout=120
+            timeout=120,
+            env=uv_env
         )
 
         if not success:
@@ -769,6 +850,7 @@ class VersionManager:
         if progress_callback:
             progress_callback("Installing Python packages...")
 
+        uv_env = self._build_uv_env()
         # Use UV to install requirements
         success, stdout, stderr = run_command(
             [
@@ -776,7 +858,8 @@ class VersionManager:
                 '-r', str(requirements_file),
                 '--python', str(venv_python)
             ],
-            timeout=600  # 10 minute timeout for large installs
+            timeout=600,  # 10 minute timeout for large installs
+            env=uv_env
         )
 
         if success:
@@ -784,9 +867,31 @@ class VersionManager:
             if stdout:
                 print(stdout)
             return True
-        else:
-            print(f"Error installing dependencies: {stderr}")
-            return False
+
+        print(f"Error installing dependencies with uv: {stderr}")
+        print("Attempting pip fallback...")
+
+        success, stdout, stderr = run_command(
+            [
+                str(venv_python),
+                "-m",
+                "pip",
+                "install",
+                "-r",
+                str(requirements_file),
+            ],
+            timeout=900,
+            env=uv_env
+        )
+
+        if success:
+            print("✓ Dependencies installed successfully via pip fallback")
+            if stdout:
+                print(stdout)
+            return True
+
+        print(f"Dependency installation failed via uv and pip: {stderr}")
+        return False
 
     def _install_dependencies_with_progress(self, tag: str) -> bool:
         """
@@ -830,11 +935,17 @@ class VersionManager:
                 "Preparing...",
                 0,
                 package_count
-            )
+        )
 
         # Use UV to install requirements
         # Use Popen to allow immediate cancellation
         print("Starting dependency installation...")
+        uv_env = self._build_uv_env()
+        cache_start_size = get_directory_size(self.uv_cache_dir) if self.uv_cache_dir.exists() else 0
+        last_cache_size = cache_start_size
+        last_sample_time = time.time()
+        uv_stdout = ""
+        uv_stderr = ""
         self._current_process = subprocess.Popen(
             [
                 'uv', 'pip', 'install',
@@ -845,22 +956,40 @@ class VersionManager:
             stderr=subprocess.PIPE,
             text=True,
             # Create new process group so we can kill the entire tree
-            preexec_fn=os.setsid if hasattr(os, 'setsid') else None
+            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
+            env=uv_env
         )
 
         try:
             # Wait for process to complete, checking cancellation flag
             # The cancel_installation() method will kill the process immediately
-            import time
             while self._current_process.poll() is None:
                 time.sleep(0.1)  # Check every 100ms
+
+                # Update approximate download speed based on UV cache growth
+                now = time.time()
+                if now - last_sample_time >= 0.75:
+                    current_cache_size = get_directory_size(self.uv_cache_dir) if self.uv_cache_dir.exists() else 0
+                    bytes_since_last = current_cache_size - last_cache_size
+                    elapsed = now - last_sample_time
+                    speed = bytes_since_last / elapsed if elapsed > 0 else None
+
+                    total_downloaded = max(current_cache_size - cache_start_size, 0)
+                    self.progress_tracker.update_download_progress(
+                        total_downloaded,
+                        None,
+                        speed
+                    )
+
+                    last_cache_size = current_cache_size
+                    last_sample_time = now
 
                 # Check if process was killed by cancel_installation()
                 if self._cancel_installation:
                     raise InterruptedError("Installation cancelled during dependency installation")
 
             # Process completed, get output
-            stdout, stderr = self._current_process.communicate()
+            uv_stdout, uv_stderr = self._current_process.communicate()
             success = self._current_process.returncode == 0
 
         except InterruptedError:
@@ -891,11 +1020,44 @@ class VersionManager:
                 self.progress_tracker.add_completed_item(package, 'package')
 
             print("✓ Dependencies installed successfully")
-            if stdout:
-                print(stdout)
+            if uv_stdout:
+                print(uv_stdout)
             return True
         else:
-            print(f"Error installing dependencies: {stderr}")
+            print(f"Error installing dependencies with uv: {uv_stderr}")
+            self.progress_tracker.set_error("Dependency installation failed with uv, attempting pip fallback")
+
+            # Fallback: use venv's pip directly (still reuses cache via env)
+            print("Attempting fallback install with pip...")
+            success, stdout, stderr = run_command(
+                [
+                    str(venv_python),
+                    "-m",
+                    "pip",
+                    "install",
+                    "-r",
+                    str(requirements_file),
+                ],
+                timeout=900,
+                env=uv_env
+            )
+
+            if success:
+                for i, (package, version_spec) in enumerate(requirements.items(), 1):
+                    self.progress_tracker.update_dependency_progress(
+                        f"{package}{version_spec}",
+                        i,
+                        package_count
+                    )
+                    self.progress_tracker.add_completed_item(package, 'package')
+                print("✓ Dependencies installed successfully via pip fallback")
+                if stdout:
+                    print(stdout)
+                return True
+
+            error_msg = f"Dependency installation failed via uv and pip. uv stderr: {uv_stderr[:500]} pip stderr: {stderr[:500]}"
+            print(error_msg)
+            self.progress_tracker.set_error(error_msg)
             return False
 
     def remove_version(self, tag: str) -> bool:
@@ -967,9 +1129,16 @@ class VersionManager:
         # Check dependencies
         dep_status = self.check_dependencies(tag)
         if dep_status['missing']:
-            print(f"Warning: {len(dep_status['missing'])} missing dependencies")
-            print("Install dependencies with install_dependencies() first")
-            # Continue anyway - user may want to run with missing deps
+            print(f"Missing dependencies detected for {tag}: {len(dep_status['missing'])}")
+            print("Attempting to install missing dependencies before launch...")
+            if not self.install_dependencies(tag):
+                print("Failed to install dependencies, aborting launch.")
+                return (False, None)
+            # Re-check after install
+            dep_status = self.check_dependencies(tag)
+            if dep_status['missing']:
+                print(f"Dependencies still missing after install: {dep_status['missing']}")
+                return (False, None)
 
         # Validate symlinks
         repair_report = self.resource_manager.validate_and_repair_symlinks(tag)

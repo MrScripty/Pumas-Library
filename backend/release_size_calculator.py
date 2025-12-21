@@ -5,6 +5,10 @@ Calculates total size per release (archive + dependencies)
 """
 
 import json
+import os
+import sys
+import subprocess
+import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timezone
@@ -17,7 +21,8 @@ class ReleaseSizeCalculator:
         self,
         cache_dir: Path,
         release_data_fetcher,
-        package_size_resolver
+        package_size_resolver,
+        uv_cache_dir: Optional[Path] = None
     ):
         """
         Initialize ReleaseSizeCalculator
@@ -35,13 +40,21 @@ class ReleaseSizeCalculator:
         self.package_size_resolver = package_size_resolver
 
         self._cache: Dict = self._load_cache()
+        # Optional shared UV cache to reuse metadata downloads if present
+        self.uv_cache_dir = Path(uv_cache_dir) if uv_cache_dir else None
 
     def _load_cache(self) -> Dict:
         """Load release sizes cache from disk"""
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, 'r') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    # Drop old cache entries that don't include source info
+                    cleaned = {}
+                    for tag, entry in data.items():
+                        if isinstance(entry, dict) and entry.get('dependencies_size_source'):
+                            cleaned[tag] = entry
+                    return cleaned
             except Exception as e:
                 print(f"Warning: Failed to load release sizes cache: {e}")
         return {}
@@ -100,8 +113,14 @@ class ReleaseSizeCalculator:
             requirements_data['requirements_txt']
         )
 
-        # Get sizes for all dependencies
-        print(f"Calculating sizes for {len(requirements)} dependencies of {tag}...")
+        # Try to estimate dependency download size with pip's resolver (captures transitives)
+        pip_estimate = self._estimate_dependencies_size_via_pip(
+            requirements_data['requirements_txt'],
+            tag
+        )
+
+        # Get sizes for direct dependencies (used for breakdown display)
+        print(f"Calculating sizes for {len(requirements)} dependencies of {tag} (direct only)...")
 
         dependency_sizes = []
         total_dependencies_size = 0
@@ -133,22 +152,26 @@ class ReleaseSizeCalculator:
             reverse=True
         )
 
+        # Prefer pip dry-run estimate (captures transitive deps)
+        deps_size = pip_estimate if pip_estimate is not None else total_dependencies_size
+
         # Calculate total size
-        total_size = archive_size + total_dependencies_size
+        total_size = archive_size + deps_size
 
         # Build result
         result = {
             'tag': tag,
             'total_size': total_size,
             'archive_size': archive_size,
-            'dependencies_size': total_dependencies_size,
+            'dependencies_size': deps_size,
             'dependency_count': len(requirements),
             'unknown_size_count': unknown_count,
             'dependencies': dependency_sizes,
             'requirements_hash': requirements_hash,
             'calculated_at': self._get_iso_timestamp(),
             'platform': self.package_size_resolver.platform,
-            'python_version': self.package_size_resolver.python_version
+            'python_version': self.package_size_resolver.python_version,
+            'dependencies_size_source': 'pip_dry_run' if pip_estimate is not None else 'direct_only'
         }
 
         # Cache the result
@@ -195,6 +218,94 @@ class ReleaseSizeCalculator:
             return dependencies[:top_n]
 
         return dependencies
+
+    def _estimate_dependencies_size_via_pip(
+        self,
+        requirements_txt: str,
+        tag: str
+    ) -> Optional[int]:
+        """
+        Use pip --dry-run --report to estimate total download size including transitives.
+        """
+        temp_root = self.cache_dir / "pip-size-estimates" / tag
+        report_file = temp_root / "report.json"
+        try:
+            if temp_root.exists():
+                shutil.rmtree(temp_root)
+            temp_root.mkdir(parents=True, exist_ok=True)
+
+            req_file = temp_root / "requirements.txt"
+            req_file.write_text(requirements_txt)
+
+            cmd = [
+                sys.executable,
+                "-m",
+                "pip",
+                "install",
+                "--dry-run",
+                "--report",
+                str(report_file),
+                "-r",
+                str(req_file),
+            ]
+
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env=self._build_uv_env()
+            )
+
+            if result.returncode != 0:
+                print(f"pip dry-run failed for {tag}: {result.stderr}")
+                return None
+
+            if not report_file.exists():
+                print(f"pip dry-run did not produce report for {tag}")
+                return None
+
+            with open(report_file, 'r') as f:
+                report = json.load(f)
+
+            # Sum download sizes from the report (includes transitives)
+            total_size = 0
+            install_items = report.get('install', [])
+            for item in install_items:
+                download_info = item.get('download_info') or {}
+                size = download_info.get('size')
+                if size:
+                    total_size += size
+
+            return total_size if total_size > 0 else None
+
+        except Exception as e:
+            print(f"Error estimating dependency size via pip for {tag}: {e}")
+            return None
+        finally:
+            # Clean up temp dir to avoid disk bloat
+            try:
+                if temp_root.exists():
+                    shutil.rmtree(temp_root)
+            except Exception:
+                pass
+
+    def _build_uv_env(self) -> Optional[Dict[str, str]]:
+        """
+        Build env for pip to reuse UV cache if provided.
+        """
+        if not self.uv_cache_dir:
+            return None
+
+        try:
+            self.uv_cache_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"Warning: Could not ensure UV cache directory {self.uv_cache_dir}: {e}")
+            return None
+
+        env = os.environ.copy()
+        env['UV_CACHE_DIR'] = str(self.uv_cache_dir)
+        return env
 
     def get_size_breakdown(self, tag: str) -> Optional[Dict[str, any]]:
         """

@@ -7,7 +7,7 @@ Path resolution, validation, and helper functions
 import hashlib
 import subprocess
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict
 
 
 def get_launcher_root() -> Path:
@@ -196,7 +196,8 @@ def relative_path(from_path: Path, to_path: Path) -> str:
 def run_command(
     cmd: List[str],
     cwd: Optional[Path] = None,
-    timeout: Optional[int] = None
+    timeout: Optional[int] = None,
+    env: Optional[Dict[str, str]] = None
 ) -> tuple[bool, str, str]:
     """
     Run a shell command and capture output
@@ -205,6 +206,7 @@ def run_command(
         cmd: Command and arguments as list
         cwd: Working directory
         timeout: Timeout in seconds
+        env: Optional environment variables to use
 
     Returns:
         Tuple of (success, stdout, stderr)
@@ -215,7 +217,8 @@ def run_command(
             cwd=str(cwd) if cwd else None,
             capture_output=True,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=env
         )
         return (result.returncode == 0, result.stdout, result.stderr)
     except subprocess.TimeoutExpired:

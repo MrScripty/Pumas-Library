@@ -196,6 +196,7 @@ class DownloadManager:
     def __init__(self):
         """Initialize download manager"""
         self.last_progress_time = 0
+        self.last_progress_bytes = 0
         self.progress_update_interval = 0.5  # Update progress every 500ms
         self._cancel_requested = False  # Cancellation flag
 
@@ -208,7 +209,7 @@ class DownloadManager:
         self,
         url: str,
         destination: Path,
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None
     ) -> bool:
         """
         Download a file with progress tracking
@@ -216,13 +217,15 @@ class DownloadManager:
         Args:
             url: URL to download from
             destination: Path to save file
-            progress_callback: Optional callback function(bytes_downloaded, total_bytes)
+            progress_callback: Optional callback function(bytes_downloaded, total_bytes, speed_bytes_per_sec)
 
         Returns:
             True if successful, False otherwise
         """
         # Reset cancellation flag at start of download
         self._cancel_requested = False
+        self.last_progress_time = time.time()
+        self.last_progress_bytes = 0
 
         try:
             # Create parent directory if needed
@@ -236,6 +239,10 @@ class DownloadManager:
             with urllib.request.urlopen(req, timeout=30) as response:
                 total_size = int(response.headers.get('Content-Length', 0))
                 downloaded = 0
+
+                # Initial progress update so listeners know total size
+                if progress_callback:
+                    progress_callback(downloaded, total_size, None)
 
                 with open(destination, 'wb') as f:
                     while True:
@@ -254,13 +261,28 @@ class DownloadManager:
                         # Call progress callback if provided
                         if progress_callback:
                             current_time = time.time()
-                            if current_time - self.last_progress_time >= self.progress_update_interval:
-                                progress_callback(downloaded, total_size)
+                            should_update = current_time - self.last_progress_time >= self.progress_update_interval
+                            if should_update or downloaded == total_size:
+                                speed = None
+                                elapsed = current_time - self.last_progress_time
+                                if elapsed > 0:
+                                    bytes_since_last = downloaded - self.last_progress_bytes
+                                    speed = bytes_since_last / elapsed
+
+                                progress_callback(downloaded, total_size, speed)
                                 self.last_progress_time = current_time
+                                self.last_progress_bytes = downloaded
 
                 # Final progress update
-                if progress_callback and total_size > 0:
-                    progress_callback(downloaded, total_size)
+                if progress_callback:
+                    current_time = time.time()
+                    elapsed = current_time - self.last_progress_time
+                    speed = None
+                    if elapsed > 0:
+                        bytes_since_last = downloaded - self.last_progress_bytes
+                        speed = bytes_since_last / elapsed
+
+                    progress_callback(downloaded, total_size, speed)
 
                 return True
 
@@ -282,7 +304,7 @@ class DownloadManager:
         url: str,
         destination: Path,
         max_retries: int = 3,
-        progress_callback: Optional[Callable[[int, int], None]] = None
+        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None
     ) -> bool:
         """
         Download with automatic retries on failure

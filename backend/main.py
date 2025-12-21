@@ -232,6 +232,20 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e), "info": {}}
 
+    def open_path(self, path):
+        """Open an arbitrary path in the system file manager"""
+        try:
+            return self.api.open_path(path)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def open_active_install(self):
+        """Open the active ComfyUI installation directory"""
+        try:
+            return self.api.open_active_install()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def launch_version(self, tag, extra_args=None):
         """Launch a specific ComfyUI version"""
         try:

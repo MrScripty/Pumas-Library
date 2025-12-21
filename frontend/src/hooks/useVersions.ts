@@ -194,6 +194,48 @@ export function useVersions() {
     }
   }, [fetchInstalledVersions, fetchActiveVersion, fetchVersionStatus]);
 
+  // Open arbitrary path in the system file manager
+  const openPath = useCallback(async (path: string) => {
+    if (!window.pywebview?.api?.open_path) {
+      throw new Error('API not available');
+    }
+
+    try {
+      const result = await window.pywebview.api.open_path(path);
+      if (!result.success) {
+        const message = result.error || 'Failed to open path';
+        setError(message);
+        throw new Error(message);
+      }
+      return true;
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setError(errorMsg);
+      throw e;
+    }
+  }, []);
+
+  // Open the active installation directory
+  const openActiveInstall = useCallback(async () => {
+    if (!window.pywebview?.api?.open_active_install) {
+      throw new Error('API not available');
+    }
+
+    try {
+      const result = await window.pywebview.api.open_active_install();
+      if (!result.success) {
+        const message = result.error || 'Failed to open active installation';
+        setError(message);
+        throw new Error(message);
+      }
+      return true;
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      setError(errorMsg);
+      throw e;
+    }
+  }, []);
+
   // Get version info
   const getVersionInfo = useCallback(async (tag: string): Promise<VersionInfo | null> => {
     if (!window.pywebview?.api?.get_version_info) {
@@ -290,5 +332,7 @@ export function useVersions() {
     removeVersion,
     getVersionInfo,
     refreshAll,
+    openPath,
+    openActiveInstall,
   };
 }

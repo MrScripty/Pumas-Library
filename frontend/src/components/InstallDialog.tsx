@@ -463,7 +463,7 @@ export function InstallDialog({
                     </div>
 
                     {/* Stage-specific Stats */}
-                    {progress.stage === 'download' && (
+                    {(progress.download_speed !== null || progress.eta_seconds !== null) && (
                       <div className="grid grid-cols-2 gap-3">
                         {progress.download_speed !== null && (
                           <div className="bg-[#333] rounded-lg p-3">

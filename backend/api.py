@@ -11,6 +11,7 @@ import shutil
 import urllib.request
 import json
 import tomllib
+import webbrowser
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
@@ -799,6 +800,8 @@ Categories=Graphics;ArtificialIntelligence;
 
             # Add size information to release
             release_with_size = dict(release)
+            if not release_with_size.get('html_url') and tag:
+                release_with_size['html_url'] = f"https://github.com/comfyanonymous/ComfyUI/releases/tag/{tag}"
             if size_data:
                 release_with_size['total_size'] = size_data['total_size']
                 release_with_size['archive_size'] = size_data['archive_size']
@@ -1033,6 +1036,37 @@ Categories=Graphics;ArtificialIntelligence;
             )
             if result.returncode != 0:
                 return {"success": False, "error": f"File manager returned code {result.returncode}"}
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def open_url(self, url: str) -> Dict[str, Any]:
+        """
+        Open a URL in the default system browser.
+
+        Args:
+            url: URL to open (must start with http:// or https://)
+
+        Returns:
+            Dict with success status and optional error message
+        """
+        if not url or not str(url).strip():
+            return {"success": False, "error": "URL is required"}
+
+        if not (url.startswith("http://") or url.startswith("https://")):
+            return {"success": False, "error": "Only http/https URLs are allowed"}
+
+        try:
+            opened = webbrowser.open(url, new=2)
+            if not opened:
+                # Fallback to xdg-open/xdg-utils on Linux
+                opener = shutil.which("xdg-open")
+                if opener:
+                    result = subprocess.run([opener, url], capture_output=True)
+                    if result.returncode != 0:
+                        return {"success": False, "error": f"xdg-open returned {result.returncode}"}
+                    return {"success": True}
+                return {"success": False, "error": "Unable to open browser"}
             return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}

@@ -6,6 +6,7 @@ export interface VersionRelease {
   published_at: string;
   prerelease: boolean;
   body?: string;
+  html_url?: string;
   total_size?: number | null;
   archive_size?: number | null;
   dependencies_size?: number | null;

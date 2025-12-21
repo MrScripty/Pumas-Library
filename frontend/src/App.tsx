@@ -38,6 +38,9 @@ declare global {
         calculate_release_size: (tag: string, force_refresh?: boolean) => Promise<any>;
         calculate_all_release_sizes: () => Promise<any>;
 
+        // Utility
+        open_url: (url: string) => Promise<{ success: boolean; error?: string }>;
+
         // Resource Management API (Phase 5)
         get_models: () => Promise<{ success: boolean; models: any; error?: string }>;
         get_custom_nodes: (version_tag: string) => Promise<{ success: boolean; nodes: string[]; error?: string }>;
@@ -275,6 +278,7 @@ export default function App() {
   };
 
   const isSetupComplete = depsInstalled === true && isPatched && menuShortcut && desktopShortcut;
+  const displayStatus = statusMessage === "Setup complete – everything is ready" ? "" : statusMessage;
 
   return (
     <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-hidden flex flex-col relative font-sans selection:bg-gray-700">
@@ -313,6 +317,13 @@ export default function App() {
         {/* Main Content */}
         <div className="flex-1 p-6 flex flex-col items-center">
 
+        {isCheckingDeps || depsInstalled === null ? (
+          <div className="w-full flex items-center justify-center gap-2 text-gray-400">
+            <Loader2 className="animate-spin" size={18} />
+            <span className="text-sm">Checking Dependencies...</span>
+          </div>
+        ) : (
+          <>
         {/* VERSION SELECTOR */}
         <div className="w-full mb-4">
           <VersionSelector />
@@ -321,19 +332,7 @@ export default function App() {
         {/* DEPENDENCY SECTION */}
         <div className="w-full mb-6 min-h-[50px] flex items-center justify-center">
           <AnimatePresence mode="wait">
-            {isCheckingDeps || depsInstalled === null ? (
-              /* CHECKING STATE */
-              <motion.div
-                key="checking"
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="flex items-center gap-2 text-gray-400"
-              >
-                <Loader2 className="animate-spin" size={18} />
-                <span className="text-sm">Checking Dependencies...</span>
-              </motion.div>
-            ) : depsInstalled === false ? (
+            {depsInstalled === false ? (
               /* MISSING STATE: Big Wide Button */
               <motion.button
                 key="install-btn"
@@ -362,25 +361,7 @@ export default function App() {
                   </>
                 )}
               </motion.button>
-            ) : (
-              /* INSTALLED STATE: Small Check Badge */
-              <motion.div
-                key="installed-badge"
-                layout
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                className="w-full flex items-center justify-center gap-3"
-              >
-                <motion.div
-                  className="flex items-center gap-2 px-4 py-2 bg-[#1e1e1e] border border-[#333] rounded text-[#55ff55] text-sm font-semibold select-none"
-                >
-                  <div className="w-5 h-5 rounded-full bg-[#55ff55]/10 flex items-center justify-center border border-[#55ff55]">
-                    <Check size={12} strokeWidth={4} />
-                  </div>
-                  <span>Dependencies Ready</span>
-                </motion.div>
-              </motion.div>
-            )}
+            ) : null}
           </AnimatePresence>
         </div>
 
@@ -394,17 +375,19 @@ export default function App() {
             }}
             transition={{ duration: 0.4 }}
           >
-
-            {/* Status Footer Text */}
-            <div className="h-6 text-center w-full px-2">
-               <span
-                 className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
-                   comfyUIRunning ? 'text-[#55ff55]' : (isSetupComplete ? 'text-[#55ff55]' : 'text-[#666666]')
-                 }`}
-               >
-                 {statusMessage}
-               </span>
-            </div>
+            
+          {/* Status Footer Text */}
+            {displayStatus && (
+              <div className="h-6 text-center w-full px-2">
+                 <span
+                   className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
+                     comfyUIRunning ? 'text-[#55ff55]' : (isSetupComplete ? 'text-[#55ff55]' : 'text-[#666666]')
+                   }`}
+                 >
+                   {displayStatus}
+                 </span>
+              </div>
+            )}
 
           {/* Toggles */}
           <div className="flex flex-col gap-4">
@@ -458,6 +441,8 @@ export default function App() {
           </motion.button>
 
         </motion.div>
+        </>        
+        )}
       </div>
     </div>
   );

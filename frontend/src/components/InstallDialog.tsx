@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Download, Check, AlertCircle, Loader2, Calendar, Tag, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, HardDrive } from 'lucide-react';
+import { X, Download, Check, AlertCircle, Loader2, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, ExternalLink, File, Settings as Gear } from 'lucide-react';
 import { VersionRelease } from '../hooks/useVersions';
 
 interface InstallDialogProps {
@@ -67,6 +67,14 @@ function formatSize(bytes: number | null | undefined): string {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
   }
 }
+
+const formatGB = (bytes: number | null | undefined): string => {
+  if (!bytes || bytes <= 0) return '0.00 GB';
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+};
+
+const getReleaseUrl = (release: VersionRelease) =>
+  release.html_url || `https://github.com/comfyanonymous/ComfyUI/releases/tag/${release.tag_name}`;
 
 export function InstallDialog({
   isOpen,
@@ -308,6 +316,22 @@ export function InstallDialog({
     return formatETA(elapsed);
   };
 
+  const openReleaseLink = async (url: string) => {
+    try {
+      if ((window as any).pywebview?.api?.open_url) {
+        const result = await (window as any).pywebview.api.open_url(url);
+        if (!result?.success) {
+          window.open(url, '_blank');
+        }
+      } else {
+        window.open(url, '_blank');
+      }
+    } catch (err) {
+      console.error('Failed to open release link:', err);
+      window.open(url, '_blank');
+    }
+  };
+
   // Close on escape key
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -362,39 +386,8 @@ export function InstallDialog({
                 </button>
               </div>
 
-              {/* Filters (hidden during installation) */}
-              {!installingVersion && (
-                <div className="flex items-center gap-4 p-4 border-b border-[#444]">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showPreReleases}
-                      onChange={(e) => setShowPreReleases(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
-                    />
-                    <span className="text-sm text-gray-300">Show pre-releases</span>
-                  </label>
-
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={showInstalled}
-                      onChange={(e) => setShowInstalled(e.target.checked)}
-                      className="w-4 h-4 rounded border-gray-600 bg-[#333] text-[#55ff55] focus:ring-[#55ff55]"
-                    />
-                    <span className="text-sm text-gray-300">Show installed</span>
-                  </label>
-
-                  <div className="flex-1" />
-
-                  <span className="text-sm text-gray-500">
-                    {filteredVersions.length} version{filteredVersions.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              )}
-
               {/* Version List or Installation Progress */}
-              <div className="flex-1 overflow-y-auto p-4">
+              <div className="flex-1 overflow-y-auto p-4 pt-0">
                 <AnimatePresence>
                   {cancellationNotice && (
                     <motion.div
@@ -614,102 +607,126 @@ export function InstallDialog({
                   /* Version List */
                   <div className="space-y-3">
                     {filteredVersions.map((release) => {
+                      const displayTag = release.tag_name?.replace(/^v/i, '') || release.tag_name;
                       const installed = isInstalled(release.tag_name);
                       const hasError = errorVersion === release.tag_name;
+                      const isCurrent = installingVersion === release.tag_name;
+                      const isDownloading = isCurrent && progress && progress.stage === 'download' && !progress.completed_at;
+                      const isInstalling = isCurrent && progress && progress.stage !== 'download' && !progress.completed_at;
+                      const isComplete = installed || (isCurrent && progress?.success && !!progress?.completed_at);
+                      const totalBytes = (isCurrent ? progress?.total_size : null) ?? release.total_size ?? null;
+                      const downloadedBytes = isCurrent ? progress?.downloaded_bytes ?? 0 : 0;
+                      const releaseUrl = getReleaseUrl(release);
+
+                      const downloadLabel =
+                        isDownloading && totalBytes
+                          ? `${formatGB(downloadedBytes)} / ${formatGB(totalBytes)}`
+                          : totalBytes
+                          ? formatGB(totalBytes)
+                          : '...';
 
                       return (
                         <motion.div
                           key={release.tag_name}
                           initial={{ opacity: 0, y: 10 }}
                           animate={{ opacity: 1, y: 0 }}
-                          className={`bg-[#333] border rounded-lg p-4 transition-colors ${
+                          className={`bg-[#333] border rounded-lg p-3 transition-colors ${
                             installed
-                              ? 'border-[#55ff55]/30'
+                              ? 'border-[#55ff55]/40'
                               : hasError
                               ? 'border-red-500/50'
                               : 'border-[#444] hover:border-[#555]'
                           }`}
                         >
-                          <div className="flex items-start justify-between gap-4">
+                          <div className="flex items-center justify-between gap-3">
                             {/* Version Info */}
                             <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <Tag size={16} className="text-gray-400 flex-shrink-0" />
-                                <h3 className="text-white font-medium truncate">
-                                  {release.tag_name}
-                                </h3>
-                                {release.prerelease && (
-                                  <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-xs rounded-full">
-                                    Pre-release
-                                  </span>
-                                )}
-                                {installed && (
-                                  <span className="px-2 py-0.5 bg-[#55ff55]/20 text-[#55ff55] text-xs rounded-full flex items-center gap-1">
-                                    <Check size={12} />
-                                    Installed
-                                  </span>
-                                )}
+                              <div className="flex items-center gap-2">
+                                <div className="flex flex-col min-w-0">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <h3 className="text-white font-medium truncate">
+                                      {displayTag}
+                                    </h3>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        openReleaseLink(releaseUrl);
+                                      }}
+                                      className="p-1 rounded hover:bg-[#444] transition-colors flex-shrink-0"
+                                      title="Open release notes"
+                                    >
+                                      <ExternalLink size={14} className="text-gray-300" />
+                                    </button>
+                                    {release.prerelease && (
+                                      <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[11px] rounded-full">
+                                        Pre
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                                    <span>{formatDate(release.published_at)}</span>
+                                  </div>
+                                </div>
                               </div>
-
-                              <div className="flex items-center gap-2 text-sm text-gray-400 mb-2">
-                                <Calendar size={14} />
-                                <span>{formatDate(release.published_at)}</span>
-                              </div>
-
-                              {release.name && release.name !== release.tag_name && (
-                                <p className="text-sm text-gray-300 mb-2">
-                                  {release.name}
-                                </p>
-                              )}
-
-                              {release.body && (
-                                <p className="text-sm text-gray-400 line-clamp-2">
-                                  {release.body}
-                                </p>
-                              )}
 
                               {/* Error message */}
                               {hasError && errorMessage && (
-                                <div className="mt-2 flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded p-2">
+                                <div className="mt-1 flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded p-2">
                                   <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
                                   <span>{errorMessage}</span>
                                 </div>
                               )}
                             </div>
 
-                            {/* Install Button and Size Display */}
-                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
+                            {/* Compact Install Button */}
+                            <div className="flex items-center gap-2 flex-shrink-0">
                               <motion.button
                                 onClick={() => handleInstall(release.tag_name)}
-                                disabled={installed}
-                                whileHover={!installed ? { scale: 1.05 } : {}}
-                                whileTap={!installed ? { scale: 0.95 } : {}}
-                                className={`flex items-center gap-2 px-4 py-2 rounded font-medium text-sm transition-colors ${
-                                  installed
-                                    ? 'bg-[#55ff55]/20 text-[#55ff55] cursor-not-allowed'
-                                    : 'bg-[#55ff55] text-black hover:bg-[#66ff66]'
-                                }`}
+                                disabled={installed || isCurrent}
+                                whileHover={!installed && !isCurrent ? { scale: 1.05 } : {}}
+                                whileTap={!installed && !isCurrent ? { scale: 0.96 } : {}}
+                                className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border ${
+                                  isComplete
+                                    ? 'bg-[#55ff55]/20 border-[#55ff55]/60 text-[#0f2b0f]'
+                                    : isDownloading
+                                    ? 'bg-[#122812] border-[#55ff55]/70 text-[#55ff55]'
+                                    : isInstalling
+                                    ? 'bg-[#1f1f1f] border-[#888]/40 text-gray-200'
+                                    : installed
+                                    ? 'bg-[#55ff55]/20 border-[#55ff55]/60 text-[#0f2b0f]'
+                                    : 'bg-[#2f2f2f] border-[#555] text-white hover:border-[#66ff66] hover:text-[#66ff66]'
+                                } ${installed || isCurrent ? 'cursor-not-allowed opacity-80' : ''}`}
                               >
-                                {installed ? (
+                                {isComplete ? (
                                   <>
-                                    <Check size={16} />
-                                    Installed
+                                    <Check size={16} className="text-[#0f2b0f]" />
+                                    <span className="text-xs font-semibold text-[#0f2b0f]">Installed</span>
+                                  </>
+                                ) : isDownloading ? (
+                                  <>
+                                    <Download
+                                      size={16}
+                                      className="text-[#55ff55] animate-pulse"
+                                    />
+                                    <span className="text-xs font-semibold">{downloadLabel}</span>
+                                  </>
+                                ) : isInstalling ? (
+                                  <>
+                                    <File size={16} className="text-[#55ff55] animate-pulse" />
+                                    <span className="text-xs text-gray-300">
+                                      Installing…
+                                    </span>
                                   </>
                                 ) : (
                                   <>
                                     <Download size={16} />
-                                    Install
+                                    <span className="text-xs">
+                                      {totalBytes ? formatGB(totalBytes) : 'Size TBD'}
+                                    </span>
                                   </>
                                 )}
                               </motion.button>
-
-                              {/* Download size display */}
-                              {release.total_size && (
-                                <div className="flex items-center gap-1 text-xs text-gray-400">
-                                  <HardDrive size={12} />
-                                  <span>{formatSize(release.total_size)}</span>
-                                </div>
-                              )}
+                              <Gear size={16} className="text-gray-400" />
                             </div>
                           </div>
                         </motion.div>
@@ -719,34 +736,7 @@ export function InstallDialog({
                 )}
               </div>
 
-              {/* Footer */}
-              <div className="flex items-center justify-between p-4 border-t border-[#444]">
-                {installingVersion && progress && !progress.completed_at ? (
-                  <>
-                    <p className="text-sm text-gray-500">
-                      Installation in progress...
-                    </p>
-                    <button
-                      onClick={handleCancelInstallation}
-                      className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 rounded font-medium transition-colors"
-                    >
-                      Cancel Installation
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <p className="text-sm text-gray-500">
-                      {installedVersions.length} version{installedVersions.length !== 1 ? 's' : ''} installed
-                    </p>
-                    <button
-                      onClick={onClose}
-                      className="px-4 py-2 bg-[#444] hover:bg-[#555] text-white rounded font-medium transition-colors"
-                    >
-                      Close
-                    </button>
-                  </>
-                )}
-              </div>
+              {/* Footer removed (close via titlebar X) */}
             </div>
           </motion.div>
         </>

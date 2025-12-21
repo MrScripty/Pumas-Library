@@ -8,10 +8,10 @@
     "unknown_size_count": 0,
     "dependencies": [],
     "requirements_hash": "sha256:ac88ff0031f9ae405b74e2258dc04a5a6ff815df49342c697c26e50f11dee845",
-    "calculated_at": "2025-12-21T02:24:27.028548+00:00",
+    "calculated_at": "2025-12-21T08:18:01.724812+00:00",
     "platform": "linux_x86_64",
     "python_version": "3.12",
-    "dependencies_size_source": "pip_report"
+    "dependencies_size_source": "cache_fallback"
   },
   "v0.5.0": {
     "tag": "v0.5.0",

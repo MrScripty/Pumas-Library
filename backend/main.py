@@ -246,6 +246,13 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    def open_url(self, url):
+        """Open a URL in the system browser"""
+        try:
+            return self.api.open_url(url)
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     def launch_version(self, tag, extra_args=None):
         """Launch a specific ComfyUI version"""
         try:

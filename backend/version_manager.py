@@ -349,9 +349,9 @@ class VersionManager:
         Get currently active version tag
 
         Priority order:
-        1. defaultVersion (if set and installed)
-        2. lastSelectedVersion (if installed)
-        3. newest installed version
+        1. lastSelectedVersion (user's explicit choice - takes precedence)
+        2. defaultVersion (if set and installed, only when no user choice)
+        3. newest installed version (fallback)
         4. None (nothing installed)
 
         Returns:
@@ -364,19 +364,17 @@ class VersionManager:
         if not installed_versions:
             return None
 
-        # Priority 1: Use default version if set and installed
-        default_version = versions_metadata.get('defaultVersion')
-        if default_version and default_version in installed_versions:
-            return default_version
-
-        # Priority 2: Use last selected version if installed
+        # Priority 1: Use last selected version if installed (user's explicit choice)
         last_selected = versions_metadata.get('lastSelectedVersion')
         if last_selected and last_selected in installed_versions:
             return last_selected
 
-        # Priority 3: Use newest installed version
-        # Versions are typically in format v1.2.3 or similar
-        # Sort in reverse to get newest first
+        # Priority 2: Use default version if set and installed (only when no user choice)
+        default_version = versions_metadata.get('defaultVersion')
+        if default_version and default_version in installed_versions:
+            return default_version
+
+        # Priority 3: Use newest installed version (fallback)
         sorted_versions = sorted(installed_versions, reverse=True)
         return sorted_versions[0] if sorted_versions else None
 

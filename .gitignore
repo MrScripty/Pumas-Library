@@ -41,6 +41,7 @@ Thumbs.db
 # ComfyUI runtime files
 comfyui.pid
 launcher-data/*
+.active-version
 
 # ComfyUI version installations
 comfyui-versions/

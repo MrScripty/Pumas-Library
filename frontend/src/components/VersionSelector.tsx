@@ -256,7 +256,7 @@ export function VersionSelector({
                 )}
               </span>
               <span className="text-sm text-white font-medium">
-                {isSwitching ? 'Switching...' : displayVersion}
+                {displayVersion}
               </span>
             </button>
 

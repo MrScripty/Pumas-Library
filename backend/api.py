@@ -13,8 +13,12 @@ import urllib.request
 import json
 import tomllib
 import webbrowser
+import threading
 from pathlib import Path
 from typing import Dict, List, Any, Optional
+
+from backend.file_opener import open_in_file_manager
+from backend.models import GitHubRelease
 
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
 try:
@@ -108,12 +112,69 @@ class ComfyUISetupAPI:
                 self.package_size_resolver,
                 self.resource_manager.shared_dir / "uv"
             )
+
+            self._prefetch_releases_if_needed()
         except Exception as e:
             print(f"Warning: Version management initialization failed: {e}")
             self.metadata_manager = None
             self.github_fetcher = None
             self.resource_manager = None
             self.version_manager = None
+            self.release_size_calculator = None
+
+    def _prefetch_releases_if_needed(self):
+        """Fetch releases in background on startup when cache is empty."""
+        try:
+            if not self.github_fetcher or not self.metadata_manager:
+                return
+
+            cache = self.metadata_manager.load_github_cache()
+            if cache and cache.get("releases"):
+                return
+
+            def _background_fetch():
+                try:
+                    self.github_fetcher.get_releases(force_refresh=False)
+                except Exception as exc:
+                    print(f"Background release fetch failed: {exc}")
+
+            threading.Thread(target=_background_fetch, daemon=True).start()
+        except Exception as e:
+            print(f"Prefetch init error: {e}")
+
+    def _refresh_release_sizes_async(
+        self,
+        releases: List[GitHubRelease],
+        installed_tags: set[str],
+        force_refresh: bool = False
+    ):
+        """
+        Calculate release sizes in the background, prioritizing non-installed releases.
+        """
+        if not self.release_size_calculator:
+            return
+
+        # Build priority queue: non-installed first
+        def sort_key(release: GitHubRelease):
+            tag = release.get('tag_name', '')
+            return 0 if tag not in installed_tags else 1
+
+        pending = sorted(releases, key=sort_key)
+
+        def _worker():
+            for release in pending:
+                tag = release.get('tag_name', '')
+                if not tag:
+                    continue
+                # Skip if already cached and not forcing
+                if not force_refresh and self.release_size_calculator.get_cached_size(tag):
+                    continue
+                try:
+                    self.calculate_release_size(tag, force_refresh=force_refresh)
+                except Exception as exc:
+                    print(f"Size refresh failed for {tag}: {exc}")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _find_comfyui_root(self, start_path: Path) -> Path:
         """
@@ -1146,6 +1207,35 @@ Categories=Graphics;ArtificialIntelligence;
             "release_info": release_info
         }
 
+    def get_disk_space(self) -> Dict[str, Any]:
+        """
+        Get disk space information for the launcher directory
+
+        Returns:
+            Dictionary with total, used, free space in bytes and usage percentage
+        """
+        try:
+            import shutil
+            stat = shutil.disk_usage(self.script_dir)
+            usage_percent = (stat.used / stat.total) * 100 if stat.total > 0 else 0
+
+            return {
+                "success": True,
+                "total": stat.total,
+                "used": stat.used,
+                "free": stat.free,
+                "percent": round(usage_percent, 1)
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": str(e),
+                "total": 0,
+                "used": 0,
+                "free": 0,
+                "percent": 0
+            }
+
     # ==================== Action Handlers ====================
 
     def toggle_patch(self) -> bool:
@@ -1433,18 +1523,16 @@ Categories=Graphics;ArtificialIntelligence;
             except Exception as e:
                 print(f"Error loading cached releases after fetch failure: {e}")
 
-        # When the user forces a refresh, also refresh the cached download sizes
-        if force_refresh:
-            for release in releases:
-                tag = release.get('tag_name', '')
-                if not tag:
-                    continue
-                try:
-                    self.calculate_release_size(tag, force_refresh=True)
-                except Exception as e:
-                    print(f"Error refreshing size for {tag}: {e}")
+        # Enrich releases with size information (Phase 6.2.5c) + installing flag
+        installing_tag = None
+        active_progress = None
+        try:
+            active_progress = self.version_manager.get_installation_progress()
+            if active_progress and not active_progress.get('completed_at'):
+                installing_tag = active_progress.get('tag')
+        except Exception as e:
+            print(f"Error checking installation progress for releases: {e}")
 
-        # Enrich releases with size information (Phase 6.2.5c)
         enriched_releases = []
         for release in releases:
             tag = release.get('tag_name', '')
@@ -1466,7 +1554,17 @@ Categories=Graphics;ArtificialIntelligence;
                 release_with_size['archive_size'] = None
                 release_with_size['dependencies_size'] = None
 
+            # Flag releases currently installing
+            release_with_size['installing'] = bool(installing_tag and tag == installing_tag)
+
             enriched_releases.append(release_with_size)
+
+        # Kick off background size refresh prioritizing non-installed releases
+        try:
+            installed_tags = set(self.get_installed_versions())
+            self._refresh_release_sizes_async(enriched_releases, installed_tags, force_refresh)
+        except Exception as e:
+            print(f"Error scheduling size refresh: {e}")
 
         return enriched_releases
 
@@ -1589,6 +1687,25 @@ Categories=Graphics;ArtificialIntelligence;
             return ""
         return self.version_manager.get_active_version() or ""
 
+    def get_default_version(self) -> str:
+        """
+        Get configured default ComfyUI version
+
+        Returns:
+            Default version tag or empty string if none
+        """
+        if not self.version_manager:
+            return ""
+        return self.version_manager.get_default_version() or ""
+
+    def set_default_version(self, tag: Optional[str]) -> bool:
+        """
+        Set the default ComfyUI version (or clear when tag is None)
+        """
+        if not self.version_manager:
+            return False
+        return self.version_manager.set_default_version(tag)
+
     def check_version_dependencies(self, tag: str) -> Dict[str, Any]:
         """
         Check dependency installation status for a version
@@ -1657,46 +1774,7 @@ Categories=Graphics;ArtificialIntelligence;
         Returns:
             Dict with success status and optional error message
         """
-        if not path or not str(path).strip():
-            return {"success": False, "error": "Path is required"}
-
-        try:
-            target_path = Path(path).expanduser()
-            if not target_path.is_absolute():
-                # Allow relative paths from launcher root for convenience
-                target_path = (self.script_dir / target_path).resolve()
-            else:
-                target_path = target_path.resolve()
-        except Exception as e:
-            return {"success": False, "error": f"Invalid path: {e}"}
-
-        if not target_path.exists():
-            return {"success": False, "error": f"Path does not exist: {target_path}"}
-
-        # Select platform-appropriate opener
-        if sys.platform.startswith('darwin'):
-            cmd = ['open', str(target_path)]
-        elif os.name == 'nt':
-            cmd = ['explorer', str(target_path)]
-        else:
-            cmd = ['xdg-open', str(target_path)]
-
-        try:
-            # Ensure opener exists before running
-            if shutil.which(cmd[0]) is None:
-                return {"success": False, "error": f"File manager command not found: {cmd[0]}"}
-
-            result = subprocess.run(
-                cmd,
-                check=False,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            if result.returncode != 0:
-                return {"success": False, "error": f"File manager returned code {result.returncode}"}
-            return {"success": True}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return open_in_file_manager(path, base_dir=self.script_dir)
 
     def open_url(self, url: str) -> Dict[str, Any]:
         """

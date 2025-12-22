@@ -25,6 +25,10 @@ class JavaScriptAPI:
         """Get complete system status - called from JavaScript"""
         return self.api.get_status()
 
+    def get_disk_space(self):
+        """Get disk space information - called from JavaScript"""
+        return self.api.get_disk_space()
+
     # ==================== Action Methods ====================
 
     def install_deps(self):
@@ -239,6 +243,22 @@ class JavaScriptAPI:
             return {"success": True, "version": version}
         except Exception as e:
             return {"success": False, "error": str(e), "version": ""}
+
+    def get_default_version(self):
+        """Get configured default ComfyUI version"""
+        try:
+            version = self.api.get_default_version()
+            return {"success": True, "version": version}
+        except Exception as e:
+            return {"success": False, "error": str(e), "version": ""}
+
+    def set_default_version(self, tag=None):
+        """Set the default ComfyUI version (pass None to clear)"""
+        try:
+            success = self.api.set_default_version(tag)
+            return {"success": success}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     def check_version_dependencies(self, tag):
         """Check dependency installation status for a version"""

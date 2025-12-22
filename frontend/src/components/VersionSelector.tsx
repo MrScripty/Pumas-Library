@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Loader2, Download, FolderOpen, CheckCircle2 } from 'lucide-react';
+import { Check, Loader2, Download, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
 
 interface VersionSelectorProps {
   installedVersions: string[];
@@ -10,6 +10,11 @@ interface VersionSelectorProps {
   openActiveInstall: () => Promise<boolean>;
   onOpenVersionManager: () => void;
   activeShortcutState?: { menu: boolean; desktop: boolean };
+  installingVersion?: string | null;
+  installNetworkStatus?: 'idle' | 'downloading' | 'stalled' | 'failed';
+  defaultVersion?: string | null;
+  onMakeDefault?: (tag: string | null) => Promise<boolean>;
+  diskSpacePercent?: number;
 }
 
 export function VersionSelector({
@@ -20,6 +25,11 @@ export function VersionSelector({
   openActiveInstall,
   onOpenVersionManager,
   activeShortcutState,
+  installingVersion,
+  installNetworkStatus = 'idle',
+  defaultVersion,
+  onMakeDefault,
+  diskSpacePercent = 0,
 }: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -27,7 +37,11 @@ export function VersionSelector({
   const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
   const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
+  const [hoveredAnchor, setHoveredAnchor] = useState<string | null>(null);
+  const [hoveredSelectorAnchor, setHoveredSelectorAnchor] = useState(false);
   const [shortcutState, setShortcutState] = useState<Record<string, { menu: boolean; desktop: boolean }>>({});
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const hoverDefaultWasActive = useRef<boolean>(false);
 
   const refreshShortcutStates = useCallback(async () => {
     if (!window.pywebview?.api?.get_all_shortcut_states) {
@@ -91,9 +105,29 @@ export function VersionSelector({
     }
   };
 
+  const combinedVersions = React.useMemo(() => {
+    const unique = new Set(installedVersions);
+    const merged = [...installedVersions];
+    if (installingVersion && !unique.has(installingVersion)) {
+      merged.push(installingVersion);
+    }
+    // Sort by version number - most recent first (reverse sort)
+    return merged.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
+  }, [installedVersions, installingVersion]);
+
   const displayVersion = activeVersion || 'No version selected';
   const hasInstalledVersions = installedVersions.length > 0;
+  const hasVersionsToShow = combinedVersions.length > 0;
   const emphasizeInstall = !hasInstalledVersions && !isLoading;
+
+  // Determine folder icon color based on disk space
+  const getFolderIconColor = () => {
+    if (diskSpacePercent >= 95) return 'text-red-500';
+    if (diskSpacePercent >= 85) return 'text-orange-500';
+    return 'text-gray-400';
+  };
+
+  const folderIconColor = getFolderIconColor();
 
   useEffect(() => {
     return () => {
@@ -125,84 +159,175 @@ export function VersionSelector({
     }
   }, [activeVersion, activeShortcutState?.menu, activeShortcutState?.desktop]);
 
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
+      if (!isOpen) return;
+      const target = event.target as Node | null;
+      if (containerRef.current && target && !containerRef.current.contains(target)) {
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleOutsideClick);
+    document.addEventListener('touchstart', handleOutsideClick);
+    return () => {
+      document.removeEventListener('mousedown', handleOutsideClick);
+      document.removeEventListener('touchstart', handleOutsideClick);
+    };
+  }, [isOpen]);
+
   return (
-    <div className="relative w-full">
+    <div className="relative w-full" ref={containerRef}>
       {/* Version Selector Container - Changed from button to div to allow nested buttons */}
       <div
-        className={`w-full h-10 bg-[#2a2a2a] border border-[#444] rounded flex items-center justify-between px-3 transition-colors ${
-          !hasInstalledVersions || isLoading || isSwitching
-            ? 'opacity-50'
-            : ''
+        className={`w-full h-10 bg-[#2a2a2a] border border-[#444] rounded flex items-center justify-center transition-colors ${
+          !hasVersionsToShow || isLoading || isSwitching ? 'opacity-50' : ''
         }`}
       >
-        {/* Left side - clickable area for version selector */}
-        <button
-          onClick={() => {
-            console.log('Version selector clicked, hasInstalledVersions:', hasInstalledVersions, 'isOpen:', isOpen);
-            if (hasInstalledVersions) {
-              setIsOpen(!isOpen);
-              console.log('Set isOpen to:', !isOpen);
-            }
-          }}
-          disabled={!hasInstalledVersions || isLoading || isSwitching}
-          className="flex items-center gap-2 flex-1 hover:opacity-80 transition-opacity disabled:cursor-not-allowed"
-        >
-          {isSwitching ? (
-            <Loader2 size={14} className="text-gray-400 animate-spin" />
-          ) : (
-            <div className="w-2 h-2 rounded-full bg-[#55ff55]" />
-          )}
-          <span className="text-sm text-white font-medium">
-            {isSwitching ? 'Switching...' : displayVersion}
-          </span>
-        </button>
-
-        {/* Right side - action buttons */}
-        <div className="flex items-center gap-2">
-          {/* Open in File Manager */}
-          <motion.button
-            onClick={handleOpenActiveInstall}
-            disabled={!activeVersion || isOpeningPath || isLoading}
-            className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
-            whileHover={{ scale: activeVersion ? 1.1 : 1 }}
-            whileTap={{ scale: activeVersion ? 0.9 : 1 }}
-            title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
-          >
-            {showOpenedIndicator ? (
-              <CheckCircle2 size={14} className="text-[#55ff55]" />
-            ) : isOpeningPath ? (
-              <Loader2 size={14} className="text-gray-400 animate-spin" />
-            ) : (
-              <FolderOpen size={14} className="text-gray-400" />
-            )}
-          </motion.button>
-
-          {/* Download Button */}
+        {/* No versions installed - show centered download button */}
+        {!hasInstalledVersions && !installingVersion ? (
           <motion.button
             onClick={(e) => {
-              console.log('Download button clicked!');
               e.stopPropagation();
               onOpenVersionManager();
-              console.log('Switching to version manager view');
             }}
             disabled={isLoading}
-            className={`p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50 ${
-              emphasizeInstall ? 'animate-pulse ring-1 ring-[#55ff55]/60' : ''
-            }`}
-            whileHover={{ scale: 1.1 }}
+            className="p-2 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+            whileHover={{ scale: 1.2 }}
             whileTap={{ scale: 0.9 }}
-            title="Install new version"
+            title="Install your first version"
           >
-            <Download size={14} className="text-gray-400" />
+            <Download
+              size={20}
+              className="text-[#55ff55] animate-pulse"
+              style={{ filter: 'drop-shadow(0 0 8px #55ff55)' }}
+            />
           </motion.button>
+        ) : (
+          <>
+            {/* Left side - clickable area for version selector */}
+            <button
+              onClick={() => {
+                console.log('Version selector clicked, hasVersionsToShow:', hasVersionsToShow, 'isOpen:', isOpen);
+                if (hasVersionsToShow) {
+                  setIsOpen(!isOpen);
+                  console.log('Set isOpen to:', !isOpen);
+                }
+              }}
+              disabled={!hasVersionsToShow || isLoading || isSwitching}
+              className="flex items-center gap-2 flex-1 hover:opacity-80 transition-opacity disabled:cursor-not-allowed px-3"
+            >
+              <span className="inline-flex items-center justify-center w-4">
+                {isSwitching ? (
+                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (!onMakeDefault || !activeVersion) return;
+                      const isDefault = defaultVersion === activeVersion;
+                      const target = isDefault ? null : activeVersion;
+                      onMakeDefault(target).catch((err) => console.error('Failed to toggle default', err));
+                    }}
+                    onMouseEnter={() => setHoveredSelectorAnchor(true)}
+                    onMouseLeave={() => setHoveredSelectorAnchor(false)}
+                    className="flex items-center justify-center w-4 h-4"
+                    title={
+                      defaultVersion === activeVersion
+                        ? 'Click to unset as default'
+                        : 'Click to set as default'
+                    }
+                    disabled={!onMakeDefault || isLoading}
+                  >
+                    {defaultVersion === activeVersion ? (
+                      hoveredSelectorAnchor ? (
+                        <CircleX size={14} className="text-gray-500" />
+                      ) : (
+                        <Anchor
+                          size={14}
+                          className="text-[#55ff55]"
+                        />
+                      )
+                    ) : (
+                      <div className="w-2 h-2 rounded-full bg-[#55ff55]" />
+                    )}
+                  </button>
+                )}
+              </span>
+              <span className="text-sm text-white font-medium">
+                {isSwitching ? 'Switching...' : displayVersion}
+              </span>
+            </button>
 
-          {/* Refresh Button moved to manager; dropdown arrow removed for cleaner look */}
-        </div>
+            {/* Right side - action buttons */}
+            <div className="flex items-center gap-2 px-3">
+              {/* Open in File Manager */}
+              <motion.button
+                onClick={handleOpenActiveInstall}
+                disabled={!activeVersion || isOpeningPath || isLoading}
+                className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+                whileHover={{ scale: activeVersion ? 1.1 : 1 }}
+                whileTap={{ scale: activeVersion ? 0.9 : 1 }}
+                title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
+              >
+                {showOpenedIndicator ? (
+                  <CheckCircle2 size={14} className="text-[#55ff55]" />
+                ) : isOpeningPath ? (
+                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                ) : (
+                  <FolderOpen size={14} className={folderIconColor} />
+                )}
+              </motion.button>
+
+              {/* Download Button */}
+              <motion.button
+                onClick={(e) => {
+                  console.log('Download button clicked!');
+                  e.stopPropagation();
+                  onOpenVersionManager();
+                  console.log('Switching to version manager view');
+                }}
+                disabled={isLoading}
+                className={`p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50 ${
+                  emphasizeInstall ? 'animate-pulse ring-1 ring-[#55ff55]/60' : ''
+                }`}
+                whileHover={{ scale: 1.1 }}
+                whileTap={{ scale: 0.9 }}
+                title="Install new version"
+              >
+                <Download
+                  size={14}
+                  className={`text-gray-400 ${
+                    installNetworkStatus === 'downloading'
+                      ? 'animate-pulse text-[#7dff7d]'
+                      : installNetworkStatus === 'stalled'
+                        ? 'animate-pulse text-[#ffc266]'
+                        : installNetworkStatus === 'failed'
+                          ? 'animate-pulse text-[#ff6b6b]'
+                          : ''
+                  }`}
+                  style={
+                    installNetworkStatus === 'downloading'
+                      ? { filter: 'drop-shadow(0 0 6px #7dff7d)' }
+                      : installNetworkStatus === 'stalled'
+                        ? { filter: 'drop-shadow(0 0 6px #ffc266)' }
+                        : installNetworkStatus === 'failed'
+                          ? { filter: 'drop-shadow(0 0 6px #ff6b6b)' }
+                          : undefined
+                  }
+                />
+              </motion.button>
+
+              {/* Refresh Button moved to manager; dropdown arrow removed for cleaner look */}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Dropdown Menu */}
       <AnimatePresence>
-        {isOpen && hasInstalledVersions && (
+        {isOpen && hasVersionsToShow && (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -211,39 +336,98 @@ export function VersionSelector({
             className="absolute top-full left-0 right-0 mt-1 bg-[#2a2a2a] border border-[#444] rounded shadow-lg overflow-hidden z-50"
           >
             <div className="max-h-64 overflow-y-auto">
-              {installedVersions.map((version) => {
+              {combinedVersions.map((version) => {
                 const isActive = version === activeVersion;
                 const toggles = shortcutState[version] || { menu: false, desktop: false };
                 const isEnabled = toggles.menu && toggles.desktop;
                 const isPartial = toggles.menu !== toggles.desktop;
                 const showHover = hoveredVersion === version;
+                const isInstalling = installingVersion === version && !installedVersions.includes(version);
+                const isDefault = defaultVersion === version;
+                const showAnchorHover = hoveredAnchor === version && !!onMakeDefault;
                 return (
                   <div
                     key={version}
-                    onClick={() => handleVersionSwitch(version)}
-                    onMouseEnter={() => setHoveredVersion(version)}
-                    onMouseLeave={() => setHoveredVersion((prev) => (prev === version ? null : prev))}
-                    className={`relative w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
-                      isActive
-                        ? 'bg-[#333333] text-[#55ff55]'
-                        : 'text-gray-300 hover:bg-[#333333] hover:text-white'
-                    } ${isSwitching ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  >
+                    onClick={() => {
+                      if (isInstalling) return;
+                      handleVersionSwitch(version);
+                    }}
+                    onMouseEnter={() => {
+                      setHoveredVersion(version);
+                    }}
+                    onMouseLeave={() => {
+                      setHoveredVersion((prev) => (prev === version ? null : prev));
+                      if (hoveredAnchor === version) {
+                        setHoveredAnchor(null);
+                        hoverDefaultWasActive.current = false;
+                      }
+                    }}
+                className={`relative w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
+                  isActive
+                    ? 'bg-[#333333] text-[#55ff55]'
+                    : isInstalling
+                      ? 'text-gray-500 bg-[#2a2a2a]'
+                      : 'text-gray-300 hover:bg-[#333333] hover:text-white'
+                } ${isSwitching || isInstalling ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
                     <div className="flex items-center gap-2 min-w-0">
+                      {/* Anchor on the left of version */}
+                      <div className="w-4 flex items-center justify-center flex-shrink-0">
+                        {onMakeDefault ? (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (!onMakeDefault) return;
+                              if (isDefault) {
+                                onMakeDefault(null).catch((err) => console.error('Failed to clear default', err));
+                              } else {
+                                onMakeDefault(version).catch((err) => console.error('Failed to set default', err));
+                              }
+                            }}
+                            onMouseEnter={() => {
+                              hoverDefaultWasActive.current = isDefault;
+                              setHoveredAnchor(version);
+                            }}
+                            onMouseLeave={() => {
+                              setHoveredAnchor((prev) => (prev === version ? null : prev));
+                            }}
+                            className="flex items-center justify-center"
+                            title={
+                              isDefault
+                                ? 'Click to unset as default'
+                                : 'Click to set as default'
+                            }
+                            disabled={isSwitching || isLoading}
+                          >
+                            {isDefault && showAnchorHover && hoverDefaultWasActive.current ? (
+                              <CircleX size={14} className="text-gray-500" />
+                            ) : isDefault ? (
+                              <Anchor
+                                size={14}
+                                className="text-[#55ff55]"
+                              />
+                            ) : showHover ? (
+                              <Anchor size={14} className="text-gray-500" />
+                            ) : (
+                              <Anchor size={14} className="text-transparent" />
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-4" />
+                        )}
+                      </div>
                       <span className="font-medium truncate">{version}</span>
-                      {isActive && (
-                        <span className="px-1.5 py-[2px] text-[10px] rounded-full bg-[#2a2a2a] border border-[#55ff55]/60 text-[#55ff55]">
-                          Default
+                      {isInstalling && (
+                        <span className="px-1.5 py-[2px] text-[10px] rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-200">
+                          Installing
                         </span>
                       )}
                     </div>
                     <div className="flex items-center gap-2 pr-12">
-                      <div
-                        className={`absolute right-8 top-1/2 -translate-y-1/2 transition-opacity duration-150 ${showHover ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}
-                        onClick={(e) => e.stopPropagation()}
-                      >
+                      {!isInstalling && (showHover || isEnabled) && (
                         <button
-                          onClick={async () => {
+                          onClick={async (e) => {
+                            e.stopPropagation();
                             if (!window.pywebview?.api?.set_version_shortcuts) {
                               console.warn('Shortcut API not available');
                               return;
@@ -278,22 +462,17 @@ export function VersionSelector({
                             }
                           }}
                           disabled={isSwitching || isLoading}
-                          className={`relative w-8 h-4 rounded-full border transition-colors align-middle ${
-                            isEnabled
-                              ? 'bg-[#55ff55]/30 border-[#55ff55]/70'
-                              : isPartial
-                                ? 'bg-[#4a3c2a] border-amber-400/80'
-                                : 'bg-[#2f2f2f] border-[#555]'
-                          } ${isSwitching || isLoading ? 'opacity-50 cursor-not-allowed' : ''}`}
-                          title={isEnabled ? 'Remove menu + desktop shortcuts for this version' : 'Create menu + desktop shortcuts for this version'}
+                          className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center justify-center transition-colors"
+                          title={isEnabled ? 'Shortcuts enabled (click to disable)' : 'Shortcuts disabled (click to enable)'}
                         >
-                          <span
-                            className={`absolute top-[2px] left-[2px] w-3 h-3 rounded-full bg-white transition-transform ${
-                              isEnabled ? 'translate-x-4 bg-[#55ff55]' : 'translate-x-0'
-                            }`}
+                          <Link2
+                            size={14}
+                            className={isEnabled ? 'text-[#0080ff]' : 'text-gray-500'}
+                            style={{ opacity: 1 }}
+                            aria-hidden
                           />
                         </button>
-                      </div>
+                      )}
                       {isActive && (
                         <span className="absolute right-2 top-1/2 -translate-y-1/2">
                           <Check size={14} className="text-[#55ff55]" />
@@ -314,12 +493,6 @@ export function VersionSelector({
         )}
       </AnimatePresence>
 
-      {/* Empty state hint */}
-      {!hasInstalledVersions && (
-        <div className="mt-2 text-xs text-gray-400">
-          No versions installed yet. Click the download arrow to install your first version.
-        </div>
-      )}
     </div>
   );
 }

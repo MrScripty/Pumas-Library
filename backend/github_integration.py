@@ -9,7 +9,8 @@ import time
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Optional, List, Callable
+from typing import Optional, List, Callable, Dict
+from packaging.version import Version, InvalidVersion
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
 from backend.metadata_manager import MetadataManager
 
@@ -19,6 +20,8 @@ class GitHubReleasesFetcher:
 
     GITHUB_API_BASE = "https://api.github.com"
     COMFYUI_REPO = "comfyanonymous/ComfyUI"
+    PER_PAGE = 100
+    MAX_PAGES = 10  # Safety cap for pagination
     DEFAULT_TTL = 3600  # 1 hour cache TTL
 
     def __init__(self, metadata_manager: MetadataManager, ttl: int = DEFAULT_TTL):
@@ -32,6 +35,20 @@ class GitHubReleasesFetcher:
         self.metadata_manager = metadata_manager
         self.ttl = ttl
 
+    def _fetch_page(self, page: int) -> List[GitHubRelease]:
+        """
+        Fetch a single page of releases from GitHub API.
+        """
+        url = f"{self.GITHUB_API_BASE}/repos/{self.COMFYUI_REPO}/releases?per_page={self.PER_PAGE}&page={page}"
+
+        # Create request with User-Agent header (required by GitHub API)
+        req = urllib.request.Request(url)
+        req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+        req.add_header('Accept', 'application/vnd.github.v3+json')
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode('utf-8'))
+
     def _fetch_from_github(self) -> List[GitHubRelease]:
         """
         Fetch releases from GitHub API
@@ -42,17 +59,16 @@ class GitHubReleasesFetcher:
         Raises:
             urllib.error.URLError: If network request fails
         """
-        url = f"{self.GITHUB_API_BASE}/repos/{self.COMFYUI_REPO}/releases"
-
-        # Create request with User-Agent header (required by GitHub API)
-        req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
-        req.add_header('Accept', 'application/vnd.github.v3+json')
-
+        releases: List[GitHubRelease] = []
         try:
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode('utf-8'))
-                return data
+            for page in range(1, self.MAX_PAGES + 1):
+                page_data = self._fetch_page(page)
+                if not page_data:
+                    break
+                releases.extend(page_data)
+                if len(page_data) < self.PER_PAGE:
+                    break
+            return releases
         except urllib.error.HTTPError as e:
             if e.code == 403:
                 print("GitHub API rate limit exceeded. Using cached data if available.")
@@ -188,6 +204,70 @@ class GitHubReleasesFetcher:
                 'prerelease': release.get('prerelease', False)
             })
         return formatted
+
+    def collapse_latest_patch_per_minor(
+        self,
+        releases: List[GitHubRelease],
+        include_prerelease: bool = True
+    ) -> List[GitHubRelease]:
+        """
+        Reduce releases to the latest patch per minor (major.minor).
+        """
+        best_by_minor: Dict[str, GitHubRelease] = {}
+
+        for release in releases:
+            if release.get('prerelease', False) and not include_prerelease:
+                continue
+
+            tag = release.get('tag_name') or ""
+            if not tag:
+                continue
+
+            # Strip leading 'v' or 'V' for parsing
+            normalized = tag.lstrip('vV')
+
+            try:
+                parsed = Version(normalized)
+            except InvalidVersion:
+                # Skip unparseable tags to avoid breaking the list
+                continue
+
+            minor_key = f"{parsed.major}.{parsed.minor}"
+            current_best = best_by_minor.get(minor_key)
+
+            if not current_best:
+                best_by_minor[minor_key] = release
+                continue
+
+            current_tag = (current_best.get('tag_name') or "").lstrip('vV')
+            try:
+                current_version = Version(current_tag)
+            except InvalidVersion:
+                best_by_minor[minor_key] = release
+                continue
+
+            if parsed > current_version:
+                best_by_minor[minor_key] = release
+
+        # Preserve original order based on appearance in the source list
+        collapsed: List[GitHubRelease] = []
+        seen = set()
+        for release in releases:
+            tag = release.get('tag_name')
+            if not tag:
+                continue
+            normalized = tag.lstrip('vV')
+            try:
+                parsed = Version(normalized)
+            except InvalidVersion:
+                continue
+            minor_key = f"{parsed.major}.{parsed.minor}"
+            best = best_by_minor.get(minor_key)
+            if best and best.get('tag_name') == tag and minor_key not in seen:
+                collapsed.append(release)
+                seen.add(minor_key)
+
+        return collapsed
 
 
 class DownloadManager:

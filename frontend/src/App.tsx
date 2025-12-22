@@ -12,6 +12,7 @@ declare global {
       api: {
         // Original API methods
         get_status: () => Promise<any>;
+        get_disk_space: () => Promise<{ success: boolean; total: number; used: number; free: number; percent: number; error?: string }>;
         install_deps: () => Promise<{ success: boolean }>;
         toggle_menu: (tag?: string) => Promise<{ success: boolean }>;
         toggle_desktop: (tag?: string) => Promise<{ success: boolean }>;
@@ -39,6 +40,8 @@ declare global {
         get_version_status: () => Promise<{ success: boolean; status: any; error?: string }>;
         get_version_info: (tag: string) => Promise<{ success: boolean; info: any; error?: string }>;
         launch_version: (tag: string, extra_args?: string[]) => Promise<{ success: boolean; error?: string }>;
+        get_default_version: () => Promise<{ success: boolean; version: string; error?: string }>;
+        set_default_version: (tag?: string | null) => Promise<{ success: boolean; error?: string }>;
 
         // Size Calculation API (Phase 6.2.5c)
         calculate_release_size: (tag: string, force_refresh?: boolean) => Promise<any>;
@@ -87,6 +90,9 @@ export default function App() {
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   const isPolling = useRef(false);
 
+  // Disk space tracking
+  const [diskSpacePercent, setDiskSpacePercent] = useState(0);
+
   // Version data (shared between selector and manager view)
   const {
     installedVersions,
@@ -98,9 +104,28 @@ export default function App() {
     removeVersion,
     refreshAll,
     openActiveInstall,
+    installingTag,
+    installationProgress,
+    fetchInstallationProgress,
+    installNetworkStatus,
+    defaultVersion,
+    setDefaultVersion,
   } = useVersions();
 
   // --- API Helpers ---
+  const fetchDiskSpace = async () => {
+    try {
+      if (window.pywebview?.api?.get_disk_space) {
+        const diskData = await window.pywebview.api.get_disk_space();
+        if (diskData.success) {
+          setDiskSpacePercent(diskData.percent || 0);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch disk space:", e);
+    }
+  };
+
   const fetchStatus = async (isInitialLoad = false) => {
     const startTime = Date.now();
 
@@ -139,6 +164,9 @@ export default function App() {
         setHasUpdate(Boolean(data.release_info.has_update));
         setLatestVersion(data.release_info.latest_version);
       }
+
+      // Fetch disk space
+      await fetchDiskSpace();
 
       // Ensure loading indicator shows for at least 800ms for better UX on initial load
       if (isInitialLoad) {
@@ -441,6 +469,9 @@ export default function App() {
                 onInstallVersion={installVersion}
                 onRemoveVersion={removeVersion}
                 onRefreshAll={refreshAll}
+                installingTag={installingTag}
+                installationProgress={installationProgress}
+                onRefreshProgress={fetchInstallationProgress}
                 displayMode="page"
               />
             </div>
@@ -456,7 +487,12 @@ export default function App() {
                 switchVersion={switchVersion}
                 openActiveInstall={openActiveInstall}
                 onOpenVersionManager={() => setShowVersionManager(true)}
+                installNetworkStatus={installNetworkStatus}
+                defaultVersion={defaultVersion}
+                onMakeDefault={setDefaultVersion}
+                installingVersion={installingTag}
                 activeShortcutState={{ menu: menuShortcut, desktop: desktopShortcut }}
+                diskSpacePercent={diskSpacePercent}
               />
             </div>
 

@@ -163,17 +163,30 @@ class VersionManager:
             return True
         return False
 
-    def get_available_releases(self, force_refresh: bool = False) -> List[GitHubRelease]:
+    def get_available_releases(
+        self,
+        force_refresh: bool = False,
+        collapse: bool = True,
+        include_prerelease: bool = True
+    ) -> List[GitHubRelease]:
         """
         Get available ComfyUI releases from GitHub
 
         Args:
             force_refresh: Force refresh from GitHub
+            collapse: Collapse to latest patch per minor
+            include_prerelease: Include prereleases in collapsed set
 
         Returns:
             List of GitHubRelease objects
         """
-        return self.github_fetcher.get_releases(force_refresh)
+        releases = self.github_fetcher.get_releases(force_refresh)
+        if collapse:
+            releases = self.github_fetcher.collapse_latest_patch_per_minor(
+                releases,
+                include_prerelease=include_prerelease
+            )
+        return releases
 
     def get_installed_versions(self) -> List[str]:
         """
@@ -335,18 +348,37 @@ class VersionManager:
         """
         Get currently active version tag
 
+        Priority order:
+        1. defaultVersion (if set and installed)
+        2. lastSelectedVersion (if installed)
+        3. newest installed version
+        4. None (nothing installed)
+
         Returns:
             Active version tag or None
         """
-        if self.active_version_file.exists():
-            try:
-                return self.active_version_file.read_text().strip()
-            except Exception as e:
-                print(f"Error reading active version file: {e}")
-
-        # Fallback to metadata
         versions_metadata = self.metadata_manager.load_versions()
-        return versions_metadata.get('lastSelectedVersion')
+        installed_versions = self.get_installed_versions()
+
+        # If no versions installed, return None
+        if not installed_versions:
+            return None
+
+        # Priority 1: Use default version if set and installed
+        default_version = versions_metadata.get('defaultVersion')
+        if default_version and default_version in installed_versions:
+            return default_version
+
+        # Priority 2: Use last selected version if installed
+        last_selected = versions_metadata.get('lastSelectedVersion')
+        if last_selected and last_selected in installed_versions:
+            return last_selected
+
+        # Priority 3: Use newest installed version
+        # Versions are typically in format v1.2.3 or similar
+        # Sort in reverse to get newest first
+        sorted_versions = sorted(installed_versions, reverse=True)
+        return sorted_versions[0] if sorted_versions else None
 
     def get_active_version_path(self) -> Optional[Path]:
         """
@@ -398,6 +430,29 @@ class VersionManager:
         self.metadata_manager.save_versions(versions_metadata)
 
         print(f"✓ Activated version: {tag}")
+        return True
+
+    def get_default_version(self) -> Optional[str]:
+        """
+        Get the default version set in metadata.
+        """
+        versions_metadata = self.metadata_manager.load_versions()
+        return versions_metadata.get('defaultVersion')
+
+    def set_default_version(self, tag: Optional[str]) -> bool:
+        """
+        Set a version as default (or clear if tag is None).
+        """
+        versions_metadata = self.metadata_manager.load_versions()
+        installed = versions_metadata.get('installed', {})
+
+        if tag is not None and tag not in installed:
+            print(f"Cannot set default to {tag}: not installed")
+            return False
+
+        versions_metadata['defaultVersion'] = tag
+        self.metadata_manager.save_versions(versions_metadata)
+        print(f"✓ Default version set to: {tag}")
         return True
 
     def install_version(
@@ -1342,6 +1397,9 @@ wait $SERVER_PID
             if tag in versions_metadata.get('installed', {}):
                 del versions_metadata['installed'][tag]
 
+            if versions_metadata.get('defaultVersion') == tag:
+                versions_metadata['defaultVersion'] = None
+
             self.metadata_manager.save_versions(versions_metadata)
 
             print(f"✓ Removed version {tag}")
@@ -1487,6 +1545,7 @@ wait $SERVER_PID
         status = {
             'installedCount': len(installed),
             'activeVersion': active,
+            'defaultVersion': self.get_default_version(),
             'versions': {}
         }
 

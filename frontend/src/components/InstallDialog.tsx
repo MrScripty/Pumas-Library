@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Download, Check, AlertCircle, Loader2, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, ExternalLink, File, Settings as Gear } from 'lucide-react';
-import { VersionRelease } from '../hooks/useVersions';
+import { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 
 interface InstallDialogProps {
   isOpen: boolean;
@@ -13,30 +13,9 @@ interface InstallDialogProps {
   onRefreshAll: (forceRefresh?: boolean) => Promise<void>;
   onRemoveVersion: (tag: string) => Promise<boolean>;
   displayMode?: 'modal' | 'page';
-}
-
-interface InstallationProgress {
-  tag: string;
-  started_at: string;
-  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
-  stage_progress: number;
-  overall_progress: number;
-  current_item: string | null;
-  download_speed: number | null;
-  eta_seconds: number | null;
-  total_size: number | null;
-  downloaded_bytes: number;
-  dependency_count: number | null;
-  completed_dependencies: number;
-  completed_items: Array<{
-    name: string;
-    type: string;
-    size: number | null;
-    completed_at: string;
-  }>;
-  error: string | null;
-  completed_at?: string;
-  success?: boolean;
+  installingTag?: string | null;
+  installationProgress?: InstallationProgress | null;
+  onRefreshProgress?: () => Promise<void>;
 }
 
 const STAGE_LABELS = {
@@ -87,15 +66,18 @@ export function InstallDialog({
   onInstallVersion,
   onRefreshAll,
   onRemoveVersion,
-  displayMode = 'modal'
+  displayMode = 'modal',
+  installingTag,
+  installationProgress,
+  onRefreshProgress,
 }: InstallDialogProps) {
   console.log('InstallDialog render - isOpen:', isOpen, 'availableVersions:', availableVersions.length);
 
   const isPageMode = displayMode === 'page';
   const [showPreReleases, setShowPreReleases] = useState(true);
   const [showInstalled, setShowInstalled] = useState(true);
-  const [installingVersion, setInstallingVersion] = useState<string | null>(null);
-  const [progress, setProgress] = useState<InstallationProgress | null>(null);
+  const [installingVersion, setInstallingVersion] = useState<string | null>(installingTag || null);
+  const [progress, setProgress] = useState<InstallationProgress | null>(installationProgress || null);
   const [errorVersion, setErrorVersion] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showDetails, setShowDetails] = useState(false);
@@ -104,6 +86,24 @@ export function InstallDialog({
   const [noticeTimeout, setNoticeTimeout] = useState<NodeJS.Timeout | null>(null);
   const cancellationRef = useRef(false);
   const [hoveredTag, setHoveredTag] = useState<string | null>(null);
+
+  // Sync local state with external installation progress/tag
+  useEffect(() => {
+    if (installationProgress) {
+      setProgress(installationProgress);
+      if (installationProgress.tag) {
+        setInstallingVersion(installationProgress.tag);
+      }
+    }
+  }, [installationProgress]);
+
+  useEffect(() => {
+    if (installingTag) {
+      setInstallingVersion(installingTag);
+    } else if (!installationProgress || installationProgress.completed_at) {
+      setInstallingVersion(null);
+    }
+  }, [installingTag, installationProgress]);
 
   // Filter versions based on user preferences
   const filteredVersions = availableVersions.filter((release) => {
@@ -122,6 +122,11 @@ export function InstallDialog({
 
   // Poll for progress updates when installing
   useEffect(() => {
+    // When external polling is provided, rely on that source and skip local polling
+    if (onRefreshProgress) {
+      return;
+    }
+
     if (!installingVersion) {
       if (pollInterval) {
         clearInterval(pollInterval);
@@ -185,6 +190,28 @@ export function InstallDialog({
     };
   }, [noticeTimeout]);
 
+  // Handle completion when progress is driven externally (hook polling)
+  useEffect(() => {
+    if (!onRefreshProgress) {
+      return;
+    }
+
+    if (!progress || !progress.completed_at) {
+      return;
+    }
+
+    const wasCancelled = progress?.error?.toLowerCase().includes('cancel');
+    const resetDelay = wasCancelled ? 1500 : 3000;
+
+    const timer = setTimeout(() => {
+      setInstallingVersion(null);
+      setProgress(null);
+      setShowDetails(false);
+    }, resetDelay);
+
+    return () => clearTimeout(timer);
+  }, [progress, onRefreshProgress]);
+
   const showCancellationNotice = () => {
     if (noticeTimeout) {
       clearTimeout(noticeTimeout);
@@ -209,6 +236,9 @@ export function InstallDialog({
 
     try {
       await onInstallVersion(tag);
+      if (onRefreshProgress) {
+        await onRefreshProgress();
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
 
@@ -644,6 +674,12 @@ export function InstallDialog({
                             <h3 className="text-white font-medium truncate">
                               {displayTag}
                             </h3>
+                            {isCurrent && !isComplete && (
+                              <span className="px-2 py-0.5 bg-amber-500/20 text-amber-300 text-[11px] rounded-full flex items-center gap-1">
+                                <Loader2 size={12} className="animate-spin" />
+                                Installing
+                              </span>
+                            )}
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();

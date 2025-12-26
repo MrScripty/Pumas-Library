@@ -37,11 +37,14 @@ Thumbs.db
 *.tmp
 *.bak
 *.backup
+temp/
 
 # ComfyUI runtime files
 comfyui.pid
-launcher-data/*
+launcher-data/
 .active-version
+shared-resources/
+comfyui.db
 
 # ComfyUI version installations
 comfyui-versions/

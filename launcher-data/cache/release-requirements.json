@@ -196,5 +196,11 @@
     "requirements_hash": "sha256:ee97a0a81f88b675c7c08e37da673e80973ea8809b1d52cae51aa2a13d8013bd",
     "fetched_at": "2025-12-23T00:23:06.786562+00:00",
     "source_url": "https://raw.githubusercontent.com/comfyanonymous/ComfyUI/v0.0.8/requirements.txt"
+  },
+  "v0.6.0": {
+    "requirements_txt": "comfyui-frontend-package==1.34.9\ncomfyui-workflow-templates==0.7.63\ncomfyui-embedded-docs==0.3.1\ntorch\ntorchsde\ntorchvision\ntorchaudio\nnumpy>=1.25.0\neinops\ntransformers>=4.50.3\ntokenizers>=0.13.3\nsentencepiece\nsafetensors>=0.4.2\naiohttp>=3.11.8\nyarl>=1.18.0\npyyaml\nPillow\nscipy\ntqdm\npsutil\nalembic\nSQLAlchemy\nav>=14.2.0\n\n#non essential dependencies:\nkornia>=0.7.1\nspandrel\npydantic~=2.0\npydantic-settings~=2.0\n",
+    "requirements_hash": "sha256:9827bf79fd3763381495c70f26d519801693c743a75829150223a5582d4f6a3f",
+    "fetched_at": "2025-12-26T05:10:28.121930+00:00",
+    "source_url": "https://raw.githubusercontent.com/comfyanonymous/ComfyUI/v0.6.0/requirements.txt"
   }
 }

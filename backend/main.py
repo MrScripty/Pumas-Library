@@ -8,6 +8,7 @@ import sys
 import webview
 from pathlib import Path
 from backend.api import ComfyUISetupAPI
+from backend.config import UI
 
 
 class JavaScriptAPI:
@@ -452,8 +453,8 @@ def main():
         title="ComfyUI Setup",
         url=entry,
         js_api=js_api,
-        width=400,
-        height=520,
+        width=UI.WINDOW_WIDTH,
+        height=UI.WINDOW_HEIGHT,
         resizable=False,
         frameless=True,
         easy_drag=True,

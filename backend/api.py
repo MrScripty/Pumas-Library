@@ -19,6 +19,7 @@ from typing import Dict, List, Any, Optional
 
 from backend.file_opener import open_in_file_manager
 from backend.models import GitHubRelease
+from backend.config import INSTALLATION
 
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
 try:
@@ -602,71 +603,115 @@ class ComfyUISetupAPI:
         except Exception:
             pass
 
-    def _generate_version_icon(self, tag: str) -> Optional[Path]:
-        """Create a PNG icon with the version number overlaid"""
+    def _validate_icon_prerequisites(self) -> bool:
+        """Validate that icon generation prerequisites are met."""
         if not self.icon_webp.exists():
             print("Base icon not found; cannot generate version-specific icon")
-            return None
+            return False
 
         if not (Image and ImageDraw and ImageFont):
             print("Pillow not available; skipping version label overlay")
-            return None
+            return False
 
+        return True
+
+    def _create_icon_canvas(self):
+        """Create a square canvas with the base icon centered."""
+        base = Image.open(self.icon_webp).convert("RGBA")
+        size = max(base.size)
+
+        canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+        offset = ((size - base.width) // 2, (size - base.height) // 2)
+        canvas.paste(base, offset)
+
+        return canvas
+
+    def _load_icon_font(self, canvas_size: int):
+        """Load the font for icon text overlay."""
+        font_size = max(28, canvas_size // 5 + 2)
+        try:
+            return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
+        except Exception:
+            return ImageFont.load_default()
+
+    def _prepare_version_label(self, tag: str) -> str:
+        """Prepare version label text from tag."""
+        label = tag.lstrip('v')
+        if len(label) > 12:
+            label = label[:12]
+        return label
+
+    def _draw_version_banner(self, canvas, label: str, font):
+        """Draw the version banner with text on the canvas."""
+        size = canvas.size[0]
+        draw = ImageDraw.Draw(canvas)
+
+        # Calculate text dimensions
+        if hasattr(draw, "textbbox"):
+            bbox = draw.textbbox((0, 0), label, font=font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+        else:
+            text_w, text_h = draw.textsize(label, font=font)
+
+        # Calculate banner dimensions
+        padding = max(6, size // 30)
+        banner_height = max(text_h + padding * 2, int(size * 0.28))
+        banner_y = (size - banner_height) // 2
+        background = (
+            padding,
+            banner_y,
+            size - padding,
+            banner_y + banner_height,
+        )
+
+        # Draw background banner
+        try:
+            draw.rounded_rectangle(background, radius=padding, fill=(0, 0, 0, 190))
+        except Exception:
+            draw.rectangle(background, fill=(0, 0, 0, 190))
+
+        # Draw text
+        draw.text(
+            ((size - text_w) / 2, banner_y + (banner_height - text_h) / 2),
+            label,
+            font=font,
+            fill=(255, 255, 255, 230),
+        )
+
+    def _save_generated_icon(self, tag: str, canvas) -> Optional[Path]:
+        """Save the generated icon to disk."""
         slug = self._slugify_tag(tag)
         dest_path = self.generated_icons_dir / f"comfyui-{slug}.png"
+        canvas.save(dest_path, format="PNG")
+        return dest_path
+
+    def _generate_version_icon(self, tag: str) -> Optional[Path]:
+        """
+        Create a PNG icon with the version number overlaid.
+
+        Process:
+        1. Validates prerequisites (base icon exists, Pillow available)
+        2. Creates square canvas with base icon
+        3. Loads font for version label
+        4. Draws semi-transparent banner with version text
+        5. Saves generated icon to disk
+
+        Args:
+            tag: Version tag to display on icon
+
+        Returns:
+            Path to generated icon, or None if generation failed
+        """
+        if not self._validate_icon_prerequisites():
+            return None
 
         try:
-            base = Image.open(self.icon_webp).convert("RGBA")
-            size = max(base.size)
-
-            # Ensure we have a square canvas for consistent text placement
-            canvas = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-            offset = ((size - base.width) // 2, (size - base.height) // 2)
-            canvas.paste(base, offset)
-
-            draw = ImageDraw.Draw(canvas)
-            label = tag.lstrip('v')
-            if len(label) > 12:
-                label = label[:12]
-
-            try:
-                # Larger overlay text for legibility (+2px bump)
-                font_size = max(28, size // 5 + 2)
-                font = ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
-            except Exception:
-                font = ImageFont.load_default()
-
-            if hasattr(draw, "textbbox"):
-                bbox = draw.textbbox((0, 0), label, font=font)
-                text_w = bbox[2] - bbox[0]
-                text_h = bbox[3] - bbox[1]
-            else:
-                text_w, text_h = draw.textsize(label, font=font)
-
-            padding = max(6, size // 30)
-            banner_height = max(text_h + padding * 2, int(size * 0.28))
-            banner_y = (size - banner_height) // 2
-            background = (
-                padding,
-                banner_y,
-                size - padding,
-                banner_y + banner_height,
-            )
-
-            try:
-                draw.rounded_rectangle(background, radius=padding, fill=(0, 0, 0, 190))
-            except Exception:
-                draw.rectangle(background, fill=(0, 0, 0, 190))
-
-            draw.text(
-                ((size - text_w) / 2, banner_y + (banner_height - text_h) / 2),
-                label,
-                font=font,
-                fill=(255, 255, 255, 230),
-            )
-
-            canvas.save(dest_path, format="PNG")
-            return dest_path
+            canvas = self._create_icon_canvas()
+            font = self._load_icon_font(canvas.size[0])
+            label = self._prepare_version_label(tag)
+            self._draw_version_banner(canvas, label, font)
+            return self._save_generated_icon(tag, canvas)
         except Exception as e:
             print(f"Error generating icon for {tag}: {e}")
             return None
@@ -753,6 +798,7 @@ class ComfyUISetupAPI:
         script_path = self.shortcut_scripts_dir / f"launch-{slug}.sh"
         profile_dir = self.launcher_data_dir / "profiles" / slug
         profile_dir.mkdir(parents=True, exist_ok=True)
+        server_start_delay = INSTALLATION.SERVER_START_DELAY_SEC
 
         content = f"""#!/bin/bash
 set -euo pipefail
@@ -764,7 +810,7 @@ PID_FILE="$VERSION_DIR/comfyui.pid"
 URL="http://127.0.0.1:8188"
 WINDOW_CLASS="ComfyUI-{slug}"
 PROFILE_DIR="{profile_dir}"
-SERVER_START_DELAY=8
+SERVER_START_DELAY={server_start_delay}
 SERVER_PID=""
 
 log() {{
@@ -1291,10 +1337,28 @@ Categories=Graphics;ArtificialIntelligence;
 
     def _detect_comfyui_processes(self) -> List[Dict[str, Any]]:
         """
-        Detect running ComfyUI processes using PID files and process table scan.
+        Detect running ComfyUI processes using multiple detection methods.
+
+        Detection strategy:
+        1. Check PID files in version directories (most reliable)
+        2. Scan process table for Python processes running main.py
+        3. Verify processes are actually alive and ComfyUI instances
+
+        Each process is deduplicated by PID to avoid duplicates across
+        detection methods.
 
         Returns:
-            List of process info dictionaries (pid, source, tag, etc.)
+            List of dictionaries containing process information:
+                - pid (int): Process ID
+                - source (str): Detection method ('pid_file' or 'process_scan')
+                - tag (str): Version tag if identified
+                - cmdline (str): Command line arguments
+                - exe (str): Executable path
+
+        Side Effects:
+            - Reads PID files from version directories
+            - Scans system process table if psutil is available
+            - May log warnings for stale PID files
         """
         processes: List[Dict[str, Any]] = []
         seen_pids: set[int] = set()

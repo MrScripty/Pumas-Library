@@ -39,6 +39,8 @@ from backend.installation_progress_tracker import (
     InstallationProgressTracker,
     InstallationStage
 )
+from backend.config import INSTALLATION
+from backend.process_io_tracker import ProcessIOTracker
 
 
 class VersionManager:
@@ -272,7 +274,7 @@ class VersionManager:
 
         url = f"https://pypi.org/pypi/{package}/json"
         try:
-            with urllib.request.urlopen(url, timeout=15) as resp:
+            with urllib.request.urlopen(url, timeout=INSTALLATION.URL_FETCH_TIMEOUT_SEC) as resp:
                 data = json.load(resp)
         except Exception as exc:
             print(f"Warning: failed to fetch PyPI data for {package}: {exc}")
@@ -458,7 +460,7 @@ class VersionManager:
 
                         # Wait for process to die
                         try:
-                            self._current_process.wait(timeout=2)
+                            self._current_process.wait(timeout=INSTALLATION.SUBPROCESS_STOP_TIMEOUT_SEC)
                         except Exception:
                             pass  # Process might already be gone
                         print("✓ All processes terminated")
@@ -469,7 +471,7 @@ class VersionManager:
                         # Fallback: try killing just the main process
                         try:
                             self._current_process.kill()
-                            self._current_process.wait(timeout=1)
+                            self._current_process.wait(timeout=INSTALLATION.SUBPROCESS_KILL_TIMEOUT_SEC)
                             print("✓ Main process killed")
                         except Exception:
                             pass
@@ -772,7 +774,7 @@ class VersionManager:
                 return False, msg
 
             try:
-                with urllib.request.urlopen(url, timeout=3) as resp:
+                with urllib.request.urlopen(url, timeout=INSTALLATION.URL_QUICK_CHECK_TIMEOUT_SEC) as resp:
                     if resp.status == 200:
                         return True, None
             except Exception as exc:
@@ -1190,7 +1192,7 @@ class VersionManager:
             # Try to install UV
             success, stdout, stderr = run_command(
                 ['pip', 'install', 'uv'],
-                timeout=60
+                timeout=INSTALLATION.SUBPROCESS_LONG_TIMEOUT_SEC
             )
             if not success:
                 print("Failed to install UV. Please install it manually:")
@@ -1203,7 +1205,7 @@ class VersionManager:
         uv_env = self._build_uv_env()
         success, stdout, stderr = run_command(
             ['uv', 'venv', str(venv_path)],
-            timeout=120,
+            timeout=INSTALLATION.VENV_CREATION_TIMEOUT_SEC,
             env=uv_env
         )
 
@@ -1231,7 +1233,7 @@ class VersionManager:
 
         success, stdout, stderr = run_command(
             [str(venv_python), '--version'],
-            timeout=5
+            timeout=INSTALLATION.SUBPROCESS_QUICK_TIMEOUT_SEC
         )
 
         if success:
@@ -1349,7 +1351,7 @@ class VersionManager:
         # Prefer uv pip list JSON (works even if pip isn't in the venv)
         success, stdout, stderr = run_command(
             ['uv', 'pip', 'list', '--format=json', '--python', str(venv_python)],
-            timeout=30,
+            timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC,
             env=uv_env
         )
 
@@ -1372,7 +1374,7 @@ class VersionManager:
         # Fallback to freeze format
         success, stdout, stderr = run_command(
             ['uv', 'pip', 'list', '--format=freeze', '--python', str(venv_python)],
-            timeout=30,
+            timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC,
             env=uv_env
         )
         if success:
@@ -1390,7 +1392,7 @@ class VersionManager:
         # Last resort: try venv's pip directly if available
         success, stdout, stderr = run_command(
             [str(venv_python), '-m', 'pip', 'list', '--format=json'],
-            timeout=30
+            timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC
         )
 
         if success:
@@ -1411,7 +1413,7 @@ class VersionManager:
 
         success, stdout, stderr = run_command(
             [str(venv_python), '-m', 'pip', 'list', '--format=freeze'],
-            timeout=30
+            timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC
         )
         if success:
             for line in stdout.splitlines():
@@ -1612,7 +1614,7 @@ wait $SERVER_PID
             install_cmd += ['-c', str(Path(safe_constraints))]
         install_cmd += global_required
 
-        success, stdout, stderr = run_command(install_cmd, timeout=600, env=uv_env)
+        success, stdout, stderr = run_command(install_cmd, timeout=INSTALLATION.UV_INSTALL_TIMEOUT_SEC, env=uv_env)
 
         if success:
             print("✓ Dependencies installed successfully")
@@ -1641,7 +1643,7 @@ wait $SERVER_PID
             pip_cmd += ["-c", str(Path(safe_constraints))]
         pip_cmd += global_required
 
-        success, stdout, stderr = run_command(pip_cmd, timeout=900, env=uv_env)
+        success, stdout, stderr = run_command(pip_cmd, timeout=INSTALLATION.PIP_FALLBACK_TIMEOUT_SEC, env=uv_env)
 
         if success:
             print("✓ Dependencies installed successfully via pip fallback")
@@ -1656,13 +1658,33 @@ wait $SERVER_PID
 
     def _install_dependencies_with_progress(self, tag: str) -> bool:
         """
-        Install dependencies with detailed progress tracking (Phase 6.2.5b)
+        Install Python dependencies with real-time progress tracking.
+
+        Uses UV package manager with pip fallback. Tracks download speed
+        via process I/O counters and cache directory growth. Supports
+        cancellation via the _cancel_installation flag.
+
+        Process:
+        1. Parses requirements.txt and constraints
+        2. Attempts installation with UV (faster)
+        3. Falls back to pip if UV fails
+        4. Monitors download progress via ProcessIOTracker
+        5. Updates progress_tracker with real-time metrics
 
         Args:
-            tag: Version tag
+            tag: Version tag being installed
 
         Returns:
-            True if successful
+            True if all dependencies installed successfully, False otherwise
+
+        Raises:
+            InterruptedError: If installation is cancelled by user via cancel_installation()
+
+        Side Effects:
+            - Updates self.progress_tracker state continuously
+            - May create constraints cache files
+            - Writes to installation log
+            - Sets self._current_process during execution
         """
         version_path = self.versions_dir / tag
 
@@ -1720,15 +1742,8 @@ wait $SERVER_PID
         print("Starting dependency installation...")
         uv_env = self._build_uv_env()
         safe_req, safe_constraints = self._create_space_safe_requirements(tag, requirements_file if requirements_file.exists() else None, constraints_path)
-        io_pid = None
-        io_baseline = None
-        io_last_bytes = None
-        io_last_time = None
 
         cache_dir = self.active_uv_cache_dir or self.uv_cache_dir
-        cache_start_size = get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
-        last_cache_size = cache_start_size
-        last_sample_time = time.time()
         uv_stdout = ""
         uv_stderr = ""
         uv_cmd = [
@@ -1750,11 +1765,13 @@ wait $SERVER_PID
             preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
             env=uv_env
         )
-        io_pid = self._current_process.pid if self._current_process else None
-        if io_pid:
-            io_baseline = self._get_process_io_bytes(io_pid, include_children=True)
-            io_last_bytes = io_baseline
-            io_last_time = time.time()
+
+        # Initialize process I/O tracker for monitoring download progress
+        io_tracker = ProcessIOTracker(
+            pid=self._current_process.pid if self._current_process else None,
+            cache_dir=cache_dir,
+            io_bytes_getter=self._get_process_io_bytes
+        )
 
         try:
             # Wait for process to complete, checking cancellation flag
@@ -1762,33 +1779,9 @@ wait $SERVER_PID
             while self._current_process.poll() is None:
                 time.sleep(0.1)  # Check every 100ms
 
-                # Update approximate download speed based on UV cache growth
-                now = time.time()
-                if now - last_sample_time >= 0.75:
-                    speed = None
-                    downloaded = None
-
-                    if io_pid:
-                        current_io = self._get_process_io_bytes(io_pid, include_children=True)
-                        if current_io is not None and io_baseline is not None and io_last_bytes is not None and io_last_time is not None:
-                            elapsed_io = now - io_last_time
-                            delta_io = current_io - io_last_bytes
-                            if elapsed_io > 0 and delta_io >= 0:
-                                speed = delta_io / elapsed_io
-                            downloaded = max(0, current_io - io_baseline)
-                            io_last_bytes = current_io
-                            io_last_time = now
-
-                    # Fallback to cache growth if IO metrics unavailable
-                    if speed is None:
-                        current_cache_size = get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
-                        bytes_since_last = current_cache_size - last_cache_size
-                        elapsed = now - last_sample_time
-                        speed = bytes_since_last / elapsed if elapsed > 0 else None
-                        downloaded = max(current_cache_size - cache_start_size, 0)
-                        last_cache_size = current_cache_size
-
-                    last_sample_time = now
+                # Update download progress metrics
+                if io_tracker.should_update(min_interval_sec=0.75):
+                    downloaded, speed = io_tracker.get_download_metrics()
 
                     if downloaded is not None:
                         self.progress_tracker.update_download_progress(
@@ -1867,45 +1860,21 @@ wait $SERVER_PID
                 preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
                 env=uv_env
             )
-            io_pid = self._current_process.pid if self._current_process else None
-            if io_pid:
-                io_baseline = self._get_process_io_bytes(io_pid, include_children=True)
-                io_last_bytes = io_baseline
-                io_last_time = time.time()
-            # Reset cache sampling baselines for the pip attempt
-            cache_start_size = get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
-            last_cache_size = cache_start_size
-            last_sample_time = time.time()
+
+            # Initialize process I/O tracker for pip fallback
+            io_tracker = ProcessIOTracker(
+                pid=self._current_process.pid if self._current_process else None,
+                cache_dir=cache_dir,
+                io_bytes_getter=self._get_process_io_bytes
+            )
 
             try:
                 while self._current_process.poll() is None:
                     time.sleep(0.1)
 
-                    now = time.time()
-                    if now - last_sample_time >= 0.75:
-                        speed = None
-                        downloaded = None
-
-                        if io_pid:
-                            current_io = self._get_process_io_bytes(io_pid, include_children=True)
-                            if current_io is not None and io_baseline is not None and io_last_bytes is not None and io_last_time is not None:
-                                elapsed_io = now - io_last_time
-                                delta_io = current_io - io_last_bytes
-                                if elapsed_io > 0 and delta_io >= 0:
-                                    speed = delta_io / elapsed_io
-                                downloaded = max(0, current_io - io_baseline)
-                                io_last_bytes = current_io
-                                io_last_time = now
-
-                        if speed is None:
-                            current_cache_size = get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
-                            bytes_since_last = current_cache_size - last_cache_size
-                            elapsed = now - last_sample_time
-                            speed = bytes_since_last / elapsed if elapsed > 0 else None
-                            downloaded = max(current_cache_size - cache_start_size, 0)
-                            last_cache_size = current_cache_size
-
-                        last_sample_time = now
+                    # Update download progress metrics
+                    if io_tracker.should_update(min_interval_sec=0.75):
+                        downloaded, speed = io_tracker.get_download_metrics()
 
                         if downloaded is not None:
                             self.progress_tracker.update_download_progress(

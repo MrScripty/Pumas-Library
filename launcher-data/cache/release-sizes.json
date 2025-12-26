@@ -460,5 +460,19 @@
     "platform": "linux_x86_64",
     "python_version": "3.12",
     "dependencies_size_source": "pip_report"
+  },
+  "v0.6.0": {
+    "tag": "v0.6.0",
+    "total_size": 4482419673,
+    "archive_size": 131072000,
+    "dependencies_size": 4351347673,
+    "dependency_count": 27,
+    "unknown_size_count": 0,
+    "dependencies": [],
+    "requirements_hash": "sha256:9827bf79fd3763381495c70f26d519801693c743a75829150223a5582d4f6a3f",
+    "calculated_at": "2025-12-26T05:11:45.558134+00:00",
+    "platform": "linux_x86_64",
+    "python_version": "3.12",
+    "dependencies_size_source": "pip_report"
   }
 }

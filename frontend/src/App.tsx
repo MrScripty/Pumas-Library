@@ -105,6 +105,7 @@ export default function App() {
   const [isUpdatingLauncher, setIsUpdatingLauncher] = useState(false);
   const [updateCheckDone, setUpdateCheckDone] = useState(false);
   const [isCheckingLauncherUpdate, setIsCheckingLauncherUpdate] = useState(false);
+  const [lastLauncherUpdateCheckAt, setLastLauncherUpdateCheckAt] = useState<number | null>(null);
 
   // Disk space tracking
   const [diskSpacePercent, setDiskSpacePercent] = useState(0);
@@ -274,11 +275,14 @@ export default function App() {
       const updateResult = await window.pywebview.api.check_launcher_updates(forceRefresh);
       if (updateResult.success) {
         setLauncherUpdateAvailable(updateResult.hasUpdate);
+        setLastLauncherUpdateCheckAt(Date.now());
       }
       setUpdateCheckDone(true);
+      return updateResult;
     } catch (err) {
       console.error('Failed to check launcher version:', err);
       setUpdateCheckDone(true);
+      return { success: false, hasUpdate: false };
     } finally {
       setIsCheckingLauncherUpdate(false);
     }
@@ -299,6 +303,23 @@ export default function App() {
     );
 
     if (!confirmed) return;
+
+    const now = Date.now();
+    const isStale = !lastLauncherUpdateCheckAt || now - lastLauncherUpdateCheckAt > 5 * 60 * 1000;
+    if (isStale) {
+      setIsCheckingLauncherUpdate(true);
+      const refreshResult = await checkLauncherVersion(true);
+      if (!refreshResult?.success) {
+        setStatusMessage('Update check failed. Please try again.');
+        setIsUpdatingLauncher(false);
+        return;
+      }
+      if (!refreshResult?.hasUpdate) {
+        setStatusMessage('Already up to date.');
+        setIsUpdatingLauncher(false);
+        return;
+      }
+    }
 
     setIsUpdatingLauncher(true);
     setStatusMessage('Updating launcher...');
@@ -473,20 +494,8 @@ export default function App() {
               <span className="text-[#aaaaaa] text-[11px] flex items-center gap-1.5">
                 {launcherVersion || 'dev'}
                 {!updateCheckDone && isLoading && <Loader2 size={12} className="animate-spin" />}
-                <motion.button
-                  onClick={() => {
-                    if (isCheckingLauncherUpdate) return;
-                    setIsCheckingLauncherUpdate(true);
-                    checkLauncherVersion(true);
-                  }}
-                  className="text-[#aaaaaa] hover:text-white transition-colors"
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.95 }}
-                  title="Check for launcher updates"
-                >
-                  <RefreshCw size={12} className={isCheckingLauncherUpdate ? 'animate-spin' : ''} />
-                </motion.button>
-                {updateCheckDone && launcherUpdateAvailable && !isUpdatingLauncher && (
+                {isCheckingLauncherUpdate && <Loader2 size={12} className="animate-spin" />}
+                {updateCheckDone && launcherUpdateAvailable && !isUpdatingLauncher ? (
                   <motion.button
                     onClick={handleLauncherUpdate}
                     className="text-[#55ff55] hover:text-[#77ff77] transition-colors"
@@ -495,6 +504,20 @@ export default function App() {
                     title="Update launcher to latest version"
                   >
                     <SquareArrowUp size={14} />
+                  </motion.button>
+                ) : (
+                  <motion.button
+                    onClick={() => {
+                      if (isCheckingLauncherUpdate) return;
+                      setIsCheckingLauncherUpdate(true);
+                      checkLauncherVersion(true);
+                    }}
+                    className="text-[#aaaaaa] hover:text-white transition-colors"
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    title="Check for launcher updates"
+                  >
+                    <RefreshCw size={12} />
                   </motion.button>
                 )}
                 {isUpdatingLauncher && <Loader2 size={12} className="animate-spin text-[#55ff55]" />}

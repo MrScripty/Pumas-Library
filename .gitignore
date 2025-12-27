@@ -39,6 +39,9 @@ Thumbs.db
 *.backup
 temp/
 
+# Generated scripts
+launcher
+
 # ComfyUI runtime files
 comfyui.pid
 launcher-data/

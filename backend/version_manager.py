@@ -1385,6 +1385,9 @@ class VersionManager:
         """
         Ensure a version-specific run.sh exists that also opens the UI.
 
+        Note: This generates the script dynamically with version-specific paths.
+        A reference template is available at: scripts/templates/comfyui_run.sh
+
         Returns:
             Path to the run script.
         """

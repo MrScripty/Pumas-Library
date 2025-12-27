@@ -437,6 +437,9 @@ def main():
     except Exception:
         pass
 
+    # Parse command-line arguments for debug mode
+    debug_mode = '--debug' in sys.argv or '--dev' in sys.argv
+
     # Create JavaScript API instance
     js_api = JavaScriptAPI()
 
@@ -454,6 +457,9 @@ def main():
         print("Make sure you have run 'npm run dev' in the frontend/ directory")
         print("=" * 60)
 
+    if debug_mode:
+        print("Developer console enabled (--debug flag)")
+
     # Create and configure the webview window
     window = webview.create_window(
         title="ComfyUI Setup",
@@ -469,8 +475,8 @@ def main():
 
     # Start the webview application
     # Use 'gtk' backend on Linux for best compatibility with Debian/Mint
-    # Force debug=True to enable developer console
-    webview.start(debug=True, gui='gtk')
+    # Enable debug console only if --debug or --dev flag is passed
+    webview.start(debug=debug_mode, gui='gtk')
 
 
 if __name__ == "__main__":

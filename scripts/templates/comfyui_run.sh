@@ -1,9 +1,15 @@
 #!/bin/bash
 
 # =============================================================================
-# ComfyUI Launcher Script (Fixed & Improved)
+# ComfyUI Launcher Script Template
 # =============================================================================
-# - Works when Run.sh is inside a subfolder of the ComfyUI root
+# TEMPLATE FILE: This file is used by version_manager.py to generate
+# version-specific ComfyUI run scripts. Do not execute directly.
+#
+# Generated scripts are placed in: comfyui-versions/{version}/run_{version}.sh
+#
+# Features:
+# - Works when script is inside a subfolder of the ComfyUI root
 # - Finds virtual environment automatically (supports common names)
 # - Stops previous instances, closes old Brave app windows
 # - Starts server and opens isolated Brave app window

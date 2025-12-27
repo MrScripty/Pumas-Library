@@ -403,6 +403,77 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e), "dependencies": []}
 
+    # ==================== Launcher Update Methods ====================
+
+    def get_launcher_version(self):
+        """Get current launcher version (git commit)"""
+        try:
+            from backend.__version__ import __version__, __branch__, is_git_repo
+            return {
+                "success": True,
+                "version": __version__,
+                "branch": __branch__,
+                "isGitRepo": is_git_repo()
+            }
+        except Exception as e:
+            return {"success": False, "error": str(e), "version": "unknown"}
+
+    def check_launcher_updates(self, force_refresh=False):
+        """Check if launcher updates are available"""
+        try:
+            # Initialize updater if not exists
+            if not hasattr(self.api, 'launcher_updater'):
+                from backend.launcher_updater import LauncherUpdater
+                self.api.launcher_updater = LauncherUpdater(self.api.metadata_manager)
+
+            result = self.api.launcher_updater.check_for_updates(force_refresh)
+            return {"success": True, **result}
+        except Exception as e:
+            return {"success": False, "error": str(e), "hasUpdate": False}
+
+    def apply_launcher_update(self):
+        """Apply launcher update (pull + rebuild)"""
+        try:
+            if not hasattr(self.api, 'launcher_updater'):
+                from backend.launcher_updater import LauncherUpdater
+                self.api.launcher_updater = LauncherUpdater(self.api.metadata_manager)
+
+            result = self.api.launcher_updater.apply_update()
+            return {"success": result.get('success', False), **result}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def restart_launcher(self):
+        """Restart the launcher application"""
+        import os
+        import subprocess
+
+        try:
+            # Get the launcher script path
+            launcher_root = Path(__file__).parent.parent
+            launcher_script = launcher_root / 'launcher'
+
+            if launcher_script.exists():
+                # Restart via launcher script
+                subprocess.Popen([str(launcher_script)], start_new_session=True)
+            else:
+                # Restart Python directly
+                python = sys.executable
+                subprocess.Popen([python, str(launcher_root / 'backend' / 'main.py')], start_new_session=True)
+
+            # Exit current process after a brief delay
+            import threading
+            def delayed_exit():
+                import time
+                time.sleep(1)
+                os._exit(0)
+
+            threading.Thread(target=delayed_exit, daemon=True).start()
+
+            return {"success": True, "message": "Restarting..."}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
 
 def get_entrypoint():
     """

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, Play, Square, AlertTriangle, FileText } from 'lucide-react';
+import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, Play, Square, AlertTriangle, FileText, SquareArrowUp } from 'lucide-react';
 import { VersionSelector } from './components/VersionSelector';
 import { InstallDialog } from './components/InstallDialog';
 import { useVersions } from './hooks/useVersions';
@@ -58,6 +58,12 @@ declare global {
         update_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         remove_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         scan_shared_storage: () => Promise<{ success: boolean; result: any; error?: string }>;
+
+        // Launcher Update API
+        get_launcher_version: () => Promise<{ success: boolean; version: string; branch: string; isGitRepo: boolean; error?: string }>;
+        check_launcher_updates: (force_refresh?: boolean) => Promise<{ success: boolean; hasUpdate: boolean; currentCommit: string; latestCommit: string; commitsBehind: number; commits: any[]; error?: string }>;
+        apply_launcher_update: () => Promise<{ success: boolean; message: string; newCommit?: string; error?: string }>;
+        restart_launcher: () => Promise<{ success: boolean; message: string; error?: string }>;
       };
     };
   }
@@ -93,6 +99,11 @@ export default function App() {
   const [launcherVersion, setLauncherVersion] = useState<string | null>(null);
   const [spinnerFrame, setSpinnerFrame] = useState(0);
   const isPolling = useRef(false);
+
+  // Launcher update state
+  const [launcherUpdateAvailable, setLauncherUpdateAvailable] = useState(false);
+  const [isUpdatingLauncher, setIsUpdatingLauncher] = useState(false);
+  const [updateCheckDone, setUpdateCheckDone] = useState(false);
 
   // Disk space tracking
   const [diskSpacePercent, setDiskSpacePercent] = useState(0);
@@ -239,6 +250,9 @@ export default function App() {
           setDepsInstalled(false);
           setVersion("Error");
         });
+
+        // Fetch launcher version and check for updates
+        checkLauncherVersion();
       } else {
         console.log('Waiting for PyWebView API methods...');
         setTimeout(waitForPyWebView, 100);
@@ -247,6 +261,70 @@ export default function App() {
 
     waitForPyWebView();
   }, []); // Empty dependency array - runs only once on mount
+
+  // Check launcher version and updates
+  const checkLauncherVersion = async () => {
+    try {
+      if (!window.pywebview?.api) return;
+
+      // Get current version
+      const versionResult = await window.pywebview.api.get_launcher_version();
+      if (versionResult.success) {
+        setLauncherVersion(versionResult.version);
+      }
+
+      // Check for updates (non-blocking)
+      const updateResult = await window.pywebview.api.check_launcher_updates(false);
+      if (updateResult.success) {
+        setLauncherUpdateAvailable(updateResult.hasUpdate);
+        setUpdateCheckDone(true);
+      }
+    } catch (err) {
+      console.error('Failed to check launcher version:', err);
+    }
+  };
+
+  // Handle launcher update
+  const handleLauncherUpdate = async () => {
+    if (!window.pywebview?.api || isUpdatingLauncher) return;
+
+    const confirmed = confirm(
+      'This will update the launcher to the latest version from GitHub.\n\n' +
+      'The app will:\n' +
+      '1. Pull latest changes from git\n' +
+      '2. Update dependencies\n' +
+      '3. Rebuild the frontend\n' +
+      '4. Restart automatically\n\n' +
+      'Continue?'
+    );
+
+    if (!confirmed) return;
+
+    setIsUpdatingLauncher(true);
+    setStatusMessage('Updating launcher...');
+
+    try {
+      const result = await window.pywebview.api.apply_launcher_update();
+
+      if (result.success) {
+        setStatusMessage('Update complete! Restarting...');
+
+        // Restart after 2 seconds
+        setTimeout(async () => {
+          await window.pywebview.api.restart_launcher();
+        }, 2000);
+      } else {
+        setStatusMessage(`Update failed: ${result.error || 'Unknown error'}`);
+        alert(`Update failed: ${result.error || 'Unknown error'}`);
+        setIsUpdatingLauncher(false);
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      setStatusMessage(`Update error: ${errorMsg}`);
+      alert(`Update error: ${errorMsg}`);
+      setIsUpdatingLauncher(false);
+    }
+  };
 
   // Polling effect - keep UI state in sync with the actual server process
   useEffect(() => {
@@ -391,10 +469,24 @@ export default function App() {
         <div className="flex items-center gap-4 h-full">
           <div className="flex flex-col justify-center h-full">
             <h1 className="text-white text-base font-semibold leading-tight">ComfyUI Setup</h1>
-            <span className="text-[#aaaaaa] text-[11px] flex items-center gap-2">
-              Launcher: {launcherVersion || 'dev'}
-              {isLoading && <Loader2 size={12} className="animate-spin" />}
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-[#aaaaaa] text-[11px] flex items-center gap-1.5">
+                {launcherVersion || 'dev'}
+                {!updateCheckDone && isLoading && <Loader2 size={12} className="animate-spin" />}
+                {updateCheckDone && launcherUpdateAvailable && !isUpdatingLauncher && (
+                  <motion.button
+                    onClick={handleLauncherUpdate}
+                    className="text-[#55ff55] hover:text-[#77ff77] transition-colors"
+                    whileHover={{ scale: 1.1 }}
+                    whileTap={{ scale: 0.95 }}
+                    title="Update launcher to latest version"
+                  >
+                    <SquareArrowUp size={14} />
+                  </motion.button>
+                )}
+                {isUpdatingLauncher && <Loader2 size={12} className="animate-spin text-[#55ff55]" />}
+              </span>
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-3">

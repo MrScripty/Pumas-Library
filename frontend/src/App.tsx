@@ -196,10 +196,6 @@ export default function App() {
       } else {
         setIsLoading(false);
       }
-
-      // Capture launcher version as short string (fallback to existing version state)
-      const shortVersion = data?.launcher_version || data?.version || null;
-      setLauncherVersion(shortVersion);
     } catch (e) {
       console.error("API Error:", e);
       const errorMsg = e instanceof Error ? e.message : String(e);

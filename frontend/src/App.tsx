@@ -104,6 +104,7 @@ export default function App() {
   const [launcherUpdateAvailable, setLauncherUpdateAvailable] = useState(false);
   const [isUpdatingLauncher, setIsUpdatingLauncher] = useState(false);
   const [updateCheckDone, setUpdateCheckDone] = useState(false);
+  const [isCheckingLauncherUpdate, setIsCheckingLauncherUpdate] = useState(false);
 
   // Disk space tracking
   const [diskSpacePercent, setDiskSpacePercent] = useState(0);
@@ -259,7 +260,7 @@ export default function App() {
   }, []); // Empty dependency array - runs only once on mount
 
   // Check launcher version and updates
-  const checkLauncherVersion = async () => {
+  const checkLauncherVersion = async (forceRefresh = false) => {
     try {
       if (!window.pywebview?.api) return;
 
@@ -270,13 +271,16 @@ export default function App() {
       }
 
       // Check for updates (non-blocking)
-      const updateResult = await window.pywebview.api.check_launcher_updates(false);
+      const updateResult = await window.pywebview.api.check_launcher_updates(forceRefresh);
       if (updateResult.success) {
         setLauncherUpdateAvailable(updateResult.hasUpdate);
-        setUpdateCheckDone(true);
       }
+      setUpdateCheckDone(true);
     } catch (err) {
       console.error('Failed to check launcher version:', err);
+      setUpdateCheckDone(true);
+    } finally {
+      setIsCheckingLauncherUpdate(false);
     }
   };
 
@@ -469,6 +473,19 @@ export default function App() {
               <span className="text-[#aaaaaa] text-[11px] flex items-center gap-1.5">
                 {launcherVersion || 'dev'}
                 {!updateCheckDone && isLoading && <Loader2 size={12} className="animate-spin" />}
+                <motion.button
+                  onClick={() => {
+                    if (isCheckingLauncherUpdate) return;
+                    setIsCheckingLauncherUpdate(true);
+                    checkLauncherVersion(true);
+                  }}
+                  className="text-[#aaaaaa] hover:text-white transition-colors"
+                  whileHover={{ scale: 1.1 }}
+                  whileTap={{ scale: 0.95 }}
+                  title="Check for launcher updates"
+                >
+                  <RefreshCw size={12} className={isCheckingLauncherUpdate ? 'animate-spin' : ''} />
+                </motion.button>
                 {updateCheckDone && launcherUpdateAvailable && !isUpdatingLauncher && (
                   <motion.button
                     onClick={handleLauncherUpdate}

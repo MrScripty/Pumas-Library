@@ -43,8 +43,8 @@ class LauncherUpdater:
             if not current_commit:
                 return {'hasUpdate': False, 'error': 'Not a git repository'}
 
-            # Get current branch
-            current_branch = self._get_current_branch()
+            # Check upstream main branch for updates
+            current_branch = "main"
 
             # Check cache first (unless force refresh)
             if not force_refresh:

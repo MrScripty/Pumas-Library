@@ -248,8 +248,8 @@ export default function App() {
           setVersion("Error");
         });
 
-        // Fetch launcher version and check for updates
-        checkLauncherVersion();
+        // Fetch launcher version and force-refresh update check on app start
+        checkLauncherVersion(true);
       } else {
         console.log('Waiting for PyWebView API methods...');
         setTimeout(waitForPyWebView, 100);

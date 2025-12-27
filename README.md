@@ -99,13 +99,6 @@ comfyui-launcher
 
 Run the launcher with different modes:
 
-```bash
-./launcher          # Run the application (normal mode)
-./launcher dev      # Run with developer console enabled (F12 debug tools)
-./launcher build    # Build the frontend (runs npm run build)
-./launcher help     # Show help message
-```
-
 | Command | Description |
 |---------|-------------|
 | `./launcher` | Launch the application in normal mode |

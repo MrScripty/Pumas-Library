@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
 from packaging.markers import default_environment
-from packaging.requirements import Requirement
+from packaging.requirements import InvalidRequirement, Requirement
 from packaging.version import InvalidVersion, Version
 
 from backend.logging_config import get_logger
@@ -48,7 +48,7 @@ class PackageSizeResolver:
                 with open(self.cache_file, "r") as f:
                     data = json.load(f)
                     return data.get("packages", {})
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                 logger.warning(f"Warning: Failed to load package sizes cache: {e}")
         return {}
 
@@ -58,7 +58,7 @@ class PackageSizeResolver:
             cache_data = {"packages": self._cache, "last_updated": self._get_iso_timestamp()}
             with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving package sizes cache: {e}", exc_info=True)
 
     def _get_iso_timestamp(self) -> str:
@@ -210,7 +210,7 @@ class PackageSizeResolver:
             else:
                 logger.error(f"HTTP error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
-        except Exception as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as e:
             logger.error(f"Error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
 
@@ -258,7 +258,7 @@ class PackageSizeResolver:
             req.add_header("User-Agent", "ComfyUI-Launcher")
             with urllib.request.urlopen(req, timeout=10) as response:
                 return json.load(response)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as e:
             logger.warning(
                 f"Warning: Failed to fetch PyPI metadata for {package_name} {version}: {e}"
             )
@@ -293,7 +293,7 @@ class PackageSizeResolver:
         try:
             requirement = Requirement(package_spec)
             specifier = str(requirement.specifier) if requirement.specifier else None
-        except Exception:
+        except InvalidRequirement:
             pass
 
         # Query PyPI
@@ -372,7 +372,7 @@ class PackageSizeResolver:
             ):
                 version = specifiers[0].version
             return (package_name, version)
-        except Exception:
+        except InvalidRequirement:
             # Handle various operators in raw specs as a fallback
             for op in ["==", ">=", "<=", "~=", ">", "<", "!="]:
                 if op in package_spec:
@@ -399,7 +399,7 @@ class PackageSizeResolver:
             extras = f"[{','.join(sorted(requirement.extras))}]" if requirement.extras else ""
             spec = str(requirement.specifier) if requirement.specifier else ""
             return f"{requirement.name}{extras}{spec}"
-        except Exception:
+        except InvalidRequirement:
             return package_spec.strip()
 
     def _normalize_package_key(self, package_spec: str) -> str:
@@ -437,7 +437,7 @@ class PackageSizeResolver:
 
                 spec = str(req.specifier) if req.specifier else ""
                 dependencies.append(f"{req.name}{spec}")
-            except Exception as e:
+            except InvalidRequirement as e:
                 logger.warning(f"Warning: Failed to parse requires_dist entry '{entry}': {e}")
                 continue
 

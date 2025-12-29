@@ -1,5 +1,31 @@
 import React from 'react';
-import { WifiOff, Wifi, RefreshCw, Clock, Database } from 'lucide-react';
+import { WifiOff, Wifi, RefreshCw, Clock, Database, Download, Package } from 'lucide-react';
+import { formatSpeed } from '../utils/formatters';
+
+interface InstallationProgress {
+  tag: string;
+  started_at: string;
+  stage: 'download' | 'extract' | 'venv' | 'dependencies' | 'setup';
+  stage_progress: number;
+  overall_progress: number;
+  current_item: string | null;
+  download_speed: number | null;
+  eta_seconds: number | null;
+  total_size: number | null;
+  downloaded_bytes: number;
+  dependency_count: number | null;
+  completed_dependencies: number;
+  completed_items: Array<{
+    name: string;
+    type: string;
+    size: number | null;
+    completed_at: string;
+  }>;
+  error: string | null;
+  completed_at?: string;
+  success?: boolean;
+  log_path?: string | null;
+}
 
 interface StatusFooterProps {
   cacheStatus: {
@@ -10,10 +36,61 @@ interface StatusFooterProps {
     last_fetched?: string;
     releases_count?: number;
   };
+  installationProgress?: InstallationProgress | null;
 }
 
-export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus }) => {
+export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, installationProgress }) => {
   const getStatusInfo = () => {
+    // INSTALLATION IN PROGRESS STATE - Priority 1
+    if (installationProgress && !installationProgress.completed_at) {
+      // During download stage with speed available
+      if (installationProgress.stage === 'download' && installationProgress.download_speed !== null) {
+        return {
+          icon: Download,
+          text: `Downloading at ${formatSpeed(installationProgress.download_speed)} · ${installationProgress.overall_progress}% complete`,
+          color: 'text-blue-400',
+          bgColor: 'bg-blue-500/10',
+          spinning: false
+        };
+      }
+
+      // During dependencies stage
+      if (installationProgress.stage === 'dependencies') {
+        const packageInfo = installationProgress.dependency_count !== null
+          ? `${installationProgress.completed_dependencies}/${installationProgress.dependency_count} packages`
+          : 'Installing packages';
+
+        const speedInfo = installationProgress.download_speed !== null
+          ? ` · ${formatSpeed(installationProgress.download_speed)}`
+          : '';
+
+        return {
+          icon: Package,
+          text: `Installing · ${packageInfo}${speedInfo}`,
+          color: 'text-blue-400',
+          bgColor: 'bg-blue-500/10',
+          spinning: false
+        };
+      }
+
+      // Other installation stages (extract, venv, setup)
+      const stageNames = {
+        extract: 'Extracting',
+        venv: 'Creating environment',
+        setup: 'Finalizing setup'
+      };
+
+      const stageName = stageNames[installationProgress.stage as keyof typeof stageNames] || 'Installing';
+
+      return {
+        icon: Download,
+        text: `${stageName} · ${installationProgress.overall_progress}% complete`,
+        color: 'text-blue-400',
+        bgColor: 'bg-blue-500/10',
+        spinning: false
+      };
+    }
+
     // FETCHING STATE
     if (cacheStatus.is_fetching) {
       return {

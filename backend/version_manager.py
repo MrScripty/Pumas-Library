@@ -1662,6 +1662,10 @@ wait $SERVER_PID
 
         print(f"Installing {package_count} dependencies for {tag}...")
 
+        # Set up weighted progress tracking
+        package_specs = [f"{pkg}{ver}" if ver else pkg for pkg, ver in package_entries]
+        self.progress_tracker.set_dependency_weights(package_specs)
+
         # Update progress tracker with dependency count
         current_state = self.progress_tracker.get_current_state()
         if current_state:
@@ -1703,8 +1707,9 @@ wait $SERVER_PID
         self._current_process = subprocess.Popen(
             pip_cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            stderr=subprocess.STDOUT,  # Merge stderr into stdout for unified parsing
             text=True,
+            bufsize=1,  # Line buffered for real-time output
             # Create new process group so we can kill the entire tree
             preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
             env=pip_env
@@ -1717,30 +1722,86 @@ wait $SERVER_PID
             io_bytes_getter=self._get_process_io_bytes
         )
 
-        try:
-            # Wait for process to complete, checking cancellation flag
-            # The cancel_installation() method will kill the process immediately
-            while self._current_process.poll() is None:
-                time.sleep(0.1)  # Check every 100ms
+        # Track completed packages
+        completed_packages = set()
+        current_package = None
 
-                # Update download progress metrics
+        try:
+            # Read output line by line in real-time
+            while self._current_process.poll() is None:
+                # Try to read a line with short timeout
+                import select
+                if self._current_process.stdout:
+                    # Check if data is available
+                    readable, _, _ = select.select([self._current_process.stdout], [], [], 0.1)
+
+                    if readable:
+                        line = self._current_process.stdout.readline()
+                        if line:
+                            pip_stdout += line
+
+                            # Parse pip output for package information
+                            line_lower = line.lower()
+
+                            # Detect package being collected/downloaded
+                            if "collecting" in line_lower:
+                                match = re.search(r"collecting\s+([a-zA-Z0-9_-]+)", line, re.IGNORECASE)
+                                if match:
+                                    current_package = match.group(1)
+                                    self.progress_tracker.update_dependency_progress(
+                                        f"Collecting {current_package}",
+                                        len(completed_packages),
+                                        package_count
+                                    )
+
+                            # Detect package being downloaded
+                            elif "downloading" in line_lower and current_package:
+                                # Extract size if present: "Downloading package-1.0-...-linux.whl (123.4 MB)"
+                                size_match = re.search(r"\(([0-9.]+\s*[KMG]?B)\)", line)
+                                if size_match:
+                                    size_str = size_match.group(1)
+                                    self.progress_tracker.update_dependency_progress(
+                                        f"Downloading {current_package} ({size_str})",
+                                        len(completed_packages),
+                                        package_count
+                                    )
+
+                            # Detect successful installation
+                            elif "successfully installed" in line_lower:
+                                # Parse all installed packages: "Successfully installed pkg1-1.0 pkg2-2.0"
+                                match = re.search(r"successfully installed\s+(.+)", line, re.IGNORECASE)
+                                if match:
+                                    packages_str = match.group(1).strip()
+                                    for pkg_ver in packages_str.split():
+                                        pkg_name = pkg_ver.split('-')[0]
+                                        if pkg_name and pkg_name.lower() not in completed_packages:
+                                            completed_packages.add(pkg_name.lower())
+                                            self.progress_tracker.complete_package(pkg_name)
+                                            self.progress_tracker.add_completed_item(pkg_name, 'package')
+
+                # Update I/O metrics periodically
                 if io_tracker.should_update(min_interval_sec=0.75):
                     downloaded, speed = io_tracker.get_download_metrics()
 
                     if downloaded is not None:
-                        self.progress_tracker.update_download_progress(
-                            downloaded,
-                            None,
-                            speed if speed is not None else 0
-                        )
+                        # Update download bytes but don't interfere with weighted progress
+                        current_state = self.progress_tracker.get_current_state()
+                        if current_state:
+                            current_state['downloaded_bytes'] = downloaded
+                            if speed is not None:
+                                current_state['download_speed'] = speed
 
                 # Check if process was killed by cancel_installation()
                 if self._cancel_installation:
                     raise InterruptedError("Installation cancelled during dependency installation")
 
-            # Process completed, get output
-            pip_stdout, pip_stderr = self._current_process.communicate()
+            # Process completed, read any remaining output
+            remaining_output, _ = self._current_process.communicate()
+            if remaining_output:
+                pip_stdout += remaining_output
+
             success = self._current_process.returncode == 0
+            pip_stderr = ""  # We merged stderr into stdout
 
         except InterruptedError:
             raise  # Re-raise to be caught by install_version
@@ -1760,18 +1821,22 @@ wait $SERVER_PID
             self._current_process = None  # Clear process reference
 
         if success:
-            # Mark all dependencies as completed
-            for i, (package, version_spec) in enumerate(package_entries, 1):
-                self.progress_tracker.update_dependency_progress(
-                    f"{package}{version_spec}",
-                    i,
-                    package_count
-                )
-                self.progress_tracker.add_completed_item(package, 'package')
+            # Ensure all packages are marked complete (in case some were missed in parsing)
+            for package, _ in package_entries:
+                if package.lower() not in completed_packages:
+                    self.progress_tracker.complete_package(package)
+                    self.progress_tracker.add_completed_item(package, 'package')
+                    completed_packages.add(package.lower())
+
+            # Ensure progress reaches 100%
+            self.progress_tracker.update_dependency_progress(
+                "Complete",
+                package_count,
+                package_count
+            )
 
             print("✓ Dependencies installed successfully")
             if pip_stdout:
-                print(pip_stdout)
                 self._log_install(pip_stdout)
             return True
 

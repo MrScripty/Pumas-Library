@@ -30,6 +30,31 @@ STAGE_WEIGHTS = {
     InstallationStage.SETUP: 0.05           # 5% - final setup/symlinks
 }
 
+# Package weights for progress calculation
+# Larger packages get higher weights to reflect actual download/install time
+PACKAGE_WEIGHTS = {
+    'torch': 15,              # ~2-3 GB depending on version/platform
+    'torchvision': 5,         # ~500 MB
+    'torchaudio': 3,          # ~300 MB
+    'tensorflow': 12,         # ~500 MB - 2 GB
+    'tensorflow-gpu': 15,     # ~2 GB
+    'opencv-python': 4,       # ~80 MB
+    'opencv-contrib-python': 6,  # ~120 MB
+    'opencv-python-headless': 4,  # ~80 MB
+    'scipy': 3,               # ~40 MB
+    'pandas': 2,              # ~15 MB
+    'matplotlib': 2,          # ~20 MB
+    'scikit-learn': 3,        # ~30 MB
+    'scikit-image': 3,        # ~35 MB
+    'transformers': 3,        # ~30 MB
+    'diffusers': 2,           # ~20 MB
+    'accelerate': 2,          # ~15 MB
+    'xformers': 4,            # ~50 MB
+    'onnxruntime': 4,         # ~50 MB
+    'onnxruntime-gpu': 5,     # ~100 MB
+    '_default': 1             # Default weight for unknown packages
+}
+
 
 class InstallationProgressTracker:
     """Thread-safe installation progress tracker"""
@@ -47,6 +72,11 @@ class InstallationProgressTracker:
         self.state_file = self.cache_dir / "installation-state.json"
         self._lock = threading.Lock()
         self._current_state: Optional[Dict] = None
+
+        # Weighted package tracking
+        self._package_weights: Dict[str, int] = {}
+        self._total_weight: int = 0
+        self._completed_weight: int = 0
 
     def start_installation(
         self,
@@ -213,6 +243,75 @@ class InstallationProgressTracker:
 
             self._current_state['completed_items'].append(completed_item)
             self._save_state()
+
+    def set_dependency_weights(self, packages: List[str]):
+        """
+        Calculate total weight from package list for weighted progress tracking
+
+        Args:
+            packages: List of package specifications (e.g., ['torch==2.1.0', 'numpy'])
+        """
+        with self._lock:
+            self._package_weights = {}
+            for pkg in packages:
+                pkg_name = self._extract_package_name(pkg)
+                weight = PACKAGE_WEIGHTS.get(pkg_name.lower(), PACKAGE_WEIGHTS['_default'])
+                self._package_weights[pkg_name.lower()] = weight
+
+            self._total_weight = sum(self._package_weights.values())
+            self._completed_weight = 0
+
+            # Store in state for visibility
+            if self._current_state:
+                self._current_state['total_weight'] = self._total_weight
+                self._current_state['completed_weight'] = 0
+                self._save_state()
+
+    def complete_package(self, package_name: str):
+        """
+        Mark a package as completed and update weighted progress
+
+        Args:
+            package_name: Name of the package that completed
+        """
+        with self._lock:
+            if not self._current_state:
+                return
+
+            pkg_name = self._extract_package_name(package_name)
+            weight = self._package_weights.get(pkg_name.lower(), PACKAGE_WEIGHTS['_default'])
+            self._completed_weight += weight
+
+            # Calculate progress based on weight
+            if self._total_weight > 0:
+                progress = int((self._completed_weight / self._total_weight) * 100)
+                self._current_state['stage_progress'] = min(progress, 100)
+                self._current_state['completed_weight'] = self._completed_weight
+                self._current_state['overall_progress'] = self._calculate_overall_progress()
+
+            self._save_state()
+
+    def _extract_package_name(self, package_spec: str) -> str:
+        """
+        Extract package name from specification
+
+        Args:
+            package_spec: Package spec (e.g., 'torch==2.1.0', 'numpy>=1.20')
+
+        Returns:
+            Package name (e.g., 'torch', 'numpy')
+        """
+        # Remove version specifiers
+        for op in ['==', '>=', '<=', '~=', '!=', '>', '<', '@']:
+            if op in package_spec:
+                package_spec = package_spec.split(op)[0]
+                break
+
+        # Remove extras like [dev]
+        if '[' in package_spec:
+            package_spec = package_spec.split('[')[0]
+
+        return package_spec.strip()
 
     def set_error(self, error_message: str):
         """

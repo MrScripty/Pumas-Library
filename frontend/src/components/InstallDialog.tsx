@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Download, Check, AlertCircle, Loader2, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, ExternalLink, Settings as Gear, ArrowLeft, FileText, XCircle, Infinity } from 'lucide-react';
+import { X, Download, Check, AlertCircle, Loader2, ChevronDown, ChevronUp, Package, FolderArchive, Settings, CheckCircle2, Clock, ExternalLink, Settings as Gear, ArrowLeft, FileText, XCircle } from 'lucide-react';
 import { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { ProgressRing } from './ProgressRing';
+import { formatBytes, formatSpeed } from '../utils/formatters';
 
 interface InstallDialogProps {
   isOpen: boolean;
@@ -395,17 +396,6 @@ export function InstallDialog({
     });
   };
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-  };
-
-  const formatSpeed = (bytesPerSec: number): string => {
-    return `${formatBytes(bytesPerSec)}/s`;
-  };
-
   const formatETA = (seconds: number): string => {
     const maxEtaSeconds = 48 * 3600 + 59 * 60;
     const clampedSeconds = Math.min(seconds, maxEtaSeconds);
@@ -562,30 +552,15 @@ export function InstallDialog({
             </div>
 
             {/* Stage-specific Stats */}
-            {(progress.download_speed !== null || progress.eta_seconds !== null) && (
-              <div className="grid grid-cols-2 gap-3">
-                {progress.download_speed !== null && (
-                  <div className="bg-[#333] rounded-lg p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Download size={14} className="text-gray-400" />
-                      <span className="text-xs text-gray-400">Speed</span>
-                    </div>
-                    <span className="text-base font-semibold text-white">
-                      {formatSpeed(progress.download_speed)}
-                    </span>
-                  </div>
-                )}
-                {progress.eta_seconds !== null && (
-                  <div className="bg-[#333] rounded-lg p-3">
-                    <div className="flex items-center gap-2 mb-1">
-                      <Clock size={14} className="text-gray-400" />
-                      <span className="text-xs text-gray-400">ETA</span>
-                    </div>
-                    <span className="text-base font-semibold text-white">
-                      {formatETA(progress.eta_seconds)}
-                    </span>
-                  </div>
-                )}
+            {progress.download_speed !== null && (
+              <div className="bg-[#333] rounded-lg p-3">
+                <div className="flex items-center gap-2 mb-1">
+                  <Download size={14} className="text-gray-400" />
+                  <span className="text-xs text-gray-400">Speed</span>
+                </div>
+                <span className="text-base font-semibold text-white">
+                  {formatSpeed(progress.download_speed)}
+                </span>
               </div>
             )}
 
@@ -748,15 +723,13 @@ export function InstallDialog({
               const speedLabel = currentProgress?.download_speed !== null && currentProgress?.download_speed !== undefined
                 ? formatSpeed(currentProgress.download_speed)
                 : 'Waiting...';
-              const etaLabel = currentProgress?.eta_seconds !== null && currentProgress?.eta_seconds !== undefined
-                ? formatETA(currentProgress.eta_seconds)
-                : '...';
+              const packageLabel = currentProgress?.dependency_count !== null && currentProgress?.dependency_count !== undefined && currentProgress?.completed_dependencies !== null
+                ? `${currentProgress.completed_dependencies}/${currentProgress.dependency_count}`
+                : currentProgress?.stage === 'dependencies'
+                  ? 'Installing...'
+                  : 'Downloading...';
               const ringColor = currentProgress?.error ? '#ff6b6b' : '#55ff55';
               const isCancelHover = isCurrent && cancelHoverTag === release.tag_name;
-              const etaButtonLabel = etaLabel !== '...' ? etaLabel : 'Estimating…';
-              const etaOverflow = currentProgress?.eta_seconds !== null
-                && currentProgress?.eta_seconds !== undefined
-                && currentProgress.eta_seconds > (48 * 3600 + 59 * 60);
               const downloadIconClass =
                 installNetworkStatus === 'stalled'
                   ? 'animate-pulse text-[#ffc266]'
@@ -904,10 +877,8 @@ export function InstallDialog({
                             )}
                             {isCancelHover ? (
                               <span className="text-xs font-semibold text-[#ffcccc] truncate whitespace-nowrap flex-1 min-w-0">Cancel</span>
-                            ) : etaOverflow ? (
-                              <Infinity size={16} className="text-[#7dff7d]" />
                             ) : (
-                              <span className="text-xs font-semibold truncate whitespace-nowrap flex-1 min-w-0">{etaButtonLabel}</span>
+                              <span className="text-xs font-semibold truncate whitespace-nowrap flex-1 min-w-0">{packageLabel}</span>
                             )}
                           </>
                         ) : (

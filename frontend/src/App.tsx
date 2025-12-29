@@ -765,7 +765,10 @@ export default function App() {
       </div>
 
       {/* Status Footer */}
-      <StatusFooter cacheStatus={cacheStatus} />
+      <StatusFooter
+        cacheStatus={cacheStatus}
+        installationProgress={installationProgress}
+      />
     </div>
   );
 }

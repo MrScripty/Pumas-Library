@@ -100,7 +100,7 @@ class SharedStorageManager:
                 logger.warning("Could not parse folder_paths.py, using defaults")
                 return self._get_default_model_directories()
 
-        except Exception as e:
+        except (IOError, OSError, UnicodeDecodeError) as e:
             logger.error(f"Error parsing folder_paths.py: {e}", exc_info=True)
             return self._get_default_model_directories()
 
@@ -215,7 +215,7 @@ class SharedStorageManager:
                         shutil.move(str(model_file), str(shared_file_path))
                         files_moved += 1
                         logger.info(f"Moved: {category_name}/{model_file.name} -> shared storage")
-                    except Exception as e:
+                    except (IOError, OSError, PermissionError) as e:
                         logger.error(f"Error moving {model_file}: {e}", exc_info=True)
 
             # Remove empty category directories
@@ -257,7 +257,7 @@ class SharedStorageManager:
                         shutil.move(str(workflow_file), str(shared_workflow_path))
                         files_moved += 1
                         logger.info(f"Moved: workflow {workflow_file.name} -> shared storage")
-                    except Exception as e:
+                    except (IOError, OSError, PermissionError) as e:
                         logger.error(f"Error moving workflow {workflow_file}: {e}", exc_info=True)
 
             # Remove empty directories

@@ -7,6 +7,7 @@ Handles version detection and release checking
 import json
 import subprocess
 import tomllib
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -42,7 +43,7 @@ class VersionInfoManager:
                     version = data.get("project", {}).get("version")
                     if version:
                         return version
-            except Exception:
+            except (OSError, tomllib.TOMLDecodeError):
                 pass
 
         # Try git describe
@@ -54,7 +55,7 @@ class VersionInfoManager:
             ).strip()
             if version:
                 return version
-        except Exception:
+        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
             pass
 
         # Fallback to GitHub API
@@ -64,7 +65,7 @@ class VersionInfoManager:
             ) as resp:
                 data = json.loads(resp.read())
                 return data["tag_name"] + " (latest)"
-        except Exception:
+        except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
             pass
 
         return "Unknown"
@@ -87,7 +88,7 @@ class VersionInfoManager:
                     stderr=subprocess.DEVNULL,
                 ).strip()
                 current_version = current_tag
-            except Exception:
+            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
                 # If not on an exact tag, get the description
                 try:
                     current_version = subprocess.check_output(
@@ -100,7 +101,7 @@ class VersionInfoManager:
                         current_tag = current_version.split("-")[0]
                     else:
                         current_tag = current_version
-                except Exception:
+                except (subprocess.CalledProcessError, FileNotFoundError, OSError):
                     pass
 
             # Use cached GitHub releases (TTL handled by GitHubReleasesFetcher)
@@ -110,7 +111,7 @@ class VersionInfoManager:
                     releases = self.github_fetcher.get_releases(force_refresh=False)
                     if releases:
                         latest_tag = releases[0].get("tag_name") or None
-                except Exception as e:
+                except (OSError, RuntimeError, TypeError, ValueError) as e:
                     logger.warning(f"Using cached/stale releases after error: {e}")
 
             if current_tag and latest_tag:
@@ -126,7 +127,7 @@ class VersionInfoManager:
                     "latest_version": latest_tag,
                     "current_version": current_version,
                 }
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
             logger.error(f"Error checking for new release: {e}")
             self._release_info_cache = {
                 "has_update": False,

@@ -112,7 +112,7 @@ class ResourceManager:
                 logger.info("Could not parse folder_paths.py, using defaults")
                 return self._get_default_model_directories()
 
-        except Exception as e:
+        except (IOError, OSError, UnicodeDecodeError) as e:
             logger.error(f"Error parsing folder_paths.py: {e}", exc_info=True)
             return self._get_default_model_directories()
 
@@ -318,7 +318,7 @@ class ResourceManager:
                         shutil.move(str(model_file), str(shared_file_path))
                         files_moved += 1
                         logger.info(f"Moved: {category_name}/{model_file.name} -> shared storage")
-                    except Exception as e:
+                    except (IOError, OSError, PermissionError) as e:
                         logger.error(f"Error moving {model_file}: {e}", exc_info=True)
 
             # Remove empty category directories
@@ -358,7 +358,7 @@ class ResourceManager:
                         shutil.move(str(workflow_file), str(shared_workflow_path))
                         files_moved += 1
                         logger.info(f"Moved: workflow {workflow_file.name} -> shared storage")
-                    except Exception as e:
+                    except (IOError, OSError, PermissionError) as e:
                         logger.error(f"Error moving workflow {workflow_file}: {e}", exc_info=True)
 
             # Remove empty directories
@@ -416,7 +416,7 @@ class ResourceManager:
 
             return True
 
-        except Exception as e:
+        except (IOError, OSError, PermissionError) as e:
             logger.error(f"Error adding model: {e}", exc_info=True)
             return False
 
@@ -457,7 +457,7 @@ class ResourceManager:
             self.metadata_manager.save_models(metadata)
             logger.info(f"Updated metadata for {model_path.name}")
 
-        except Exception as e:
+        except (IOError, OSError) as e:
             logger.error(f"Error updating model metadata: {e}", exc_info=True)
 
     def remove_model(self, model_path: str) -> bool:
@@ -489,7 +489,7 @@ class ResourceManager:
 
             return True
 
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error removing model: {e}", exc_info=True)
             return False
 
@@ -564,7 +564,7 @@ class ResourceManager:
                 for d in custom_nodes_dir.iterdir()
                 if d.is_dir() and not d.name.startswith(".")
             ]
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error listing custom nodes: {e}", exc_info=True)
             return []
 
@@ -688,7 +688,7 @@ class ResourceManager:
             shutil.rmtree(node_path)
             logger.info(f"✓ Removed custom node: {node_name} from {version_tag}")
             return True
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error removing custom node: {e}", exc_info=True)
             return False
 

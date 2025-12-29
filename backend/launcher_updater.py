@@ -116,7 +116,7 @@ class LauncherUpdater:
         except requests.RequestException as e:
             logger.error(f"Network error during update check: {e}")
             return {"hasUpdate": False, "error": f"Network error: {str(e)}"}
-        except Exception as e:
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Update check failed: {e}")
             return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
 
@@ -269,7 +269,7 @@ class LauncherUpdater:
         except subprocess.TimeoutExpired as e:
             logger.error(f"Update timed out: {e}")
             return {"success": False, "error": "Update timed out"}
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
             logger.error(f"Update failed: {e}")
             return {"success": False, "error": f"Update failed: {str(e)}"}
 
@@ -284,7 +284,12 @@ class LauncherUpdater:
                 check=True,
             )
             logger.info("Rollback successful")
-        except Exception as e:
+        except (
+            subprocess.CalledProcessError,
+            FileNotFoundError,
+            OSError,
+            subprocess.SubprocessError,
+        ) as e:
             logger.error(f"Rollback failed: {e}")
 
     def _get_current_commit(self) -> Optional[str]:
@@ -299,7 +304,7 @@ class LauncherUpdater:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except Exception as e:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
             logger.error(f"Failed to get current commit: {e}")
         return None
 
@@ -315,7 +320,7 @@ class LauncherUpdater:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except Exception:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
             pass
         return "main"
 
@@ -325,7 +330,7 @@ class LauncherUpdater:
             try:
                 with open(self.cache_file, "r") as f:
                     return json.load(f)
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, ValueError) as e:
                 logger.warning(f"Failed to read cache: {e}")
         return None
 
@@ -338,7 +343,7 @@ class LauncherUpdater:
         try:
             with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.warning(f"Failed to write cache: {e}")
 
     def is_git_repo(self) -> bool:
@@ -360,6 +365,6 @@ class LauncherUpdater:
             if has_changes:
                 logger.warning("Uncommitted changes detected")
             return has_changes
-        except Exception as e:
+        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
             logger.error(f"Failed to check git status: {e}")
             return False

@@ -61,7 +61,7 @@ class CustomNodesManager:
                 for d in custom_nodes_dir.iterdir()
                 if d.is_dir() and not d.name.startswith(".")
             ]
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error listing custom nodes: {e}", exc_info=True)
             return []
 
@@ -181,7 +181,7 @@ class CustomNodesManager:
             shutil.rmtree(node_path)
             logger.info(f"✓ Removed custom node: {node_name} from {version_tag}")
             return True
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error removing custom node: {e}", exc_info=True)
             return False
 

@@ -415,7 +415,7 @@ class InstallationProgressTracker:
         try:
             with open(self.state_file, "w") as f:
                 json.dump(self._current_state, f, indent=2)
-        except Exception as e:
+        except (IOError, OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving installation state: {e}", exc_info=True)
 
     def _load_state(self) -> Optional[Dict]:
@@ -426,7 +426,7 @@ class InstallationProgressTracker:
         try:
             with open(self.state_file, "r") as f:
                 return json.load(f)
-        except Exception as e:
+        except (IOError, OSError, json.JSONDecodeError) as e:
             logger.error(f"Error loading installation state: {e}", exc_info=True)
             return None
 

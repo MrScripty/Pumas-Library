@@ -57,7 +57,7 @@ class SizeCalculator:
                     continue
                 try:
                     self.calculate_release_size(tag, force_refresh=force_refresh)
-                except Exception as exc:
+                except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
                     logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -99,7 +99,7 @@ class SizeCalculator:
             )
 
             return result
-        except Exception as e:
+        except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
             logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
             return None
 
@@ -142,7 +142,7 @@ class SizeCalculator:
                 length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, ValueError) as e:
             logger.warning(f"Warning: Failed to fetch Content-Length for {url}: {e}")
         return None
 
@@ -164,7 +164,7 @@ class SizeCalculator:
             # Calculate release size (uses cache if available)
             result = self.release_size_calculator.calculate_release_size(tag, archive_size)
             return result
-        except Exception as e:
+        except (ValueError, KeyError, TypeError) as e:
             logger.error(f"Error calculating release size: {e}", exc_info=True)
             return None
 
@@ -183,7 +183,7 @@ class SizeCalculator:
 
         try:
             return self.release_size_calculator.get_size_breakdown(tag)
-        except Exception as e:
+        except (ValueError, KeyError, TypeError) as e:
             logger.error(f"Error getting size breakdown: {e}", exc_info=True)
             return None
 
@@ -205,6 +205,6 @@ class SizeCalculator:
 
         try:
             return self.release_size_calculator.get_sorted_dependencies(tag, top_n)
-        except Exception as e:
+        except (ValueError, KeyError, TypeError) as e:
             logger.error(f"Error getting dependencies: {e}", exc_info=True)
             return []

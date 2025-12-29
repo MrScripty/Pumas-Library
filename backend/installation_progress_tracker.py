@@ -11,6 +11,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -76,6 +77,7 @@ class InstallationProgressTracker:
 
         self.state_file = self.cache_dir / "installation-state.json"
         self._lock = threading.Lock()
+        self._file_lock = threading.Lock()
         self._current_state: Optional[Dict] = None
 
         # Weighted package tracking
@@ -413,9 +415,10 @@ class InstallationProgressTracker:
             return
 
         try:
-            with open(self.state_file, "w") as f:
-                json.dump(self._current_state, f, indent=2)
-        except (IOError, OSError, TypeError, ValueError) as e:
+            atomic_write_json(
+                self.state_file, self._current_state, lock=self._file_lock, keep_backup=True
+            )
+        except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as e:
             logger.error(f"Error saving installation state: {e}", exc_info=True)
 
     def _load_state(self) -> Optional[Dict]:

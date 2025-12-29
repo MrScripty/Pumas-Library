@@ -6,6 +6,7 @@ Handles installation, switching, and launching of ComfyUI versions
 
 from __future__ import annotations
 
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -59,6 +60,7 @@ class VersionManager(
         self._constraints_cache_file = (
             self.metadata_manager.cache_dir / PATHS.CONSTRAINTS_CACHE_FILENAME
         )
+        self._constraints_cache_lock = threading.Lock()
         self._constraints_cache: Dict[str, Dict[str, str]] = self._load_constraints_cache()
         self._pypi_release_cache: Dict[str, Dict[str, datetime]] = {}
 

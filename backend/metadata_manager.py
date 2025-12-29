@@ -5,11 +5,12 @@ Handles reading/writing metadata JSON files with atomic updates and validation
 """
 
 import json
-import shutil
+import threading
 from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.exceptions import MetadataError, ResourceError
+from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
 from backend.models import (
     CustomNodesMetadata,
@@ -38,6 +39,7 @@ class MetadataManager:
         self.config_dir = self.launcher_data_dir / "config"
         self.cache_dir = self.launcher_data_dir / "cache"
         self.version_configs_dir = self.config_dir / "version-configs"
+        self._write_lock = threading.Lock()
 
         # Ensure directories exist
         self.metadata_dir.mkdir(parents=True, exist_ok=True)
@@ -103,30 +105,18 @@ class MetadataManager:
             MetadataError: If JSON serialization fails
             ResourceError: If file I/O fails
         """
-        temp_file = file_path.with_suffix(".tmp")
         try:
-            # Write to temporary file first
-            with open(temp_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-
-            # Atomic rename (overwrites existing file)
-            shutil.move(str(temp_file), str(file_path))
+            atomic_write_json(file_path, data, lock=self._write_lock, keep_backup=True)
             return True
         except (TypeError, ValueError) as e:
             # JSON serialization errors
             logger.error(f"Error serializing data for {file_path}: {e}", exc_info=True)
-            # Clean up temp file if it exists
-            if temp_file.exists():
-                temp_file.unlink(missing_ok=True)
             raise MetadataError(
                 f"Failed to serialize metadata to JSON: {e}", file_path=str(file_path)
             ) from e
         except (IOError, OSError) as e:
             # File I/O errors
             logger.error(f"Error writing {file_path}: {e}", exc_info=True)
-            # Clean up temp file if it exists
-            if temp_file.exists():
-                temp_file.unlink(missing_ok=True)
             raise ResourceError(f"Failed to write metadata file: {e}", resource_type="file") from e
 
     # ==================== Versions Metadata ====================

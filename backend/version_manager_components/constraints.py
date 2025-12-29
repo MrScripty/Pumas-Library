@@ -14,6 +14,7 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from backend.config import INSTALLATION
+from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
 from backend.models import GitHubRelease
 from backend.utils import parse_requirements_file, safe_filename
@@ -177,9 +178,9 @@ class ConstraintsMixin:
     def _save_constraints_cache(self) -> None:
         """Persist constraints cache safely."""
         try:
-            tmp = self._constraints_cache_file.with_suffix(".tmp")
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self._constraints_cache, f, indent=2)
-            tmp.replace(self._constraints_cache_file)
-        except (IOError, OSError, TypeError, ValueError) as exc:
+            lock = getattr(self, "_constraints_cache_lock", None)
+            atomic_write_json(
+                self._constraints_cache_file, self._constraints_cache, lock=lock, keep_backup=True
+            )
+        except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(f"Unable to write constraints cache: {exc}")

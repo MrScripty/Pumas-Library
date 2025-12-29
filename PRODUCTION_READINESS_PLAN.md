@@ -235,6 +235,7 @@ def atomic_write_json(path: Path, data: dict, lock: threading.Lock = None):
 **Add validation:**
 - Verify JSON is valid before replacing file
 - Keep backup of previous version
+**Status:** ✅ Completed
 
 ---
 
@@ -1067,6 +1068,17 @@ All 5 quick win tasks completed successfully:
 - Added version tag checks across version manager components (installer/state/launcher/dependencies).
 - Added unit tests for validators and updated file opener tests for path validation.
 
+**Task #8: Consolidate config** - ✅ COMPLETED (2025-12-29)
+- Added centralized app/network/path config values in `backend/config.py`.
+- Updated GitHub integration to read repo, API base, pagination, and TTL from config.
+- Centralized constraints and pip cache directory naming in version manager.
+- Wired logging rotation settings to config defaults.
+
+**Task #5: Fix file race conditions** - ✅ COMPLETED (2025-12-29)
+- Added `backend/file_utils.py` with atomic JSON writes, validation, fsync, and backups.
+- Metadata writes now use locked atomic writes in `backend/metadata_manager.py`.
+- Installation progress state writes now use locked atomic writes in `backend/installation_progress_tracker.py`.
+- Constraints cache writes now use locked atomic writes in `backend/version_manager_components/constraints.py`.
+
 **Next steps:**
-- Task #8: Consolidate config (~2 hours)
-- Task #5: Fix file race conditions (~1 day)
+- Task #9: Rate limiting for destructive actions (~2 hours)

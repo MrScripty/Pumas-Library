@@ -62,6 +62,7 @@ htmlcov/
 *.cover
 .hypothesis/
 .tox/
+.pre-commit-cache/
 
 # Security audit reports
 security-audit-*.json

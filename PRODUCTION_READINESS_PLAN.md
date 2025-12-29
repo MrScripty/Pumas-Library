@@ -1007,7 +1007,7 @@ All 5 quick win tasks completed successfully:
 
 ### ✅ Week 2: Foundation (Core Infrastructure) - IN PROGRESS
 
-**Task #2: Structured logging system** - PARTIALLY COMPLETED (2025-12-29) - Commits 56ee4ef, [current]
+**Task #2: Structured logging system** - PARTIALLY COMPLETED (2025-12-29) - Commits 56ee4ef, 56faccf, [current]
 - Created backend/logging_config.py with centralized logging infrastructure:
   - Rotating file handler (10MB max, 5 backups) for detailed logs
   - Console handler (WARNING+ only) to avoid terminal spam
@@ -1019,19 +1019,23 @@ All 5 quick win tasks completed successfully:
   - 100% code coverage on logging_config.py
   - Tests for file/console handlers, log levels, rotation, reset, migration helpers
 - Initialized logging in main.py entry point
+- Created pre-commit hook to enforce logging system usage:
+  - Automated check for print() statements in backend/ code
+  - Prevents regression once migration is complete
+  - Allows exceptions via '# noqa: print' comments
+  - Integrated with existing pre-commit framework
 - Migrated print() statements to logging:
   - ✅ metadata_manager.py (2 print → logger.error calls)
   - ✅ main.py (3 print → logger.info/error calls)
-  - ✅ github_integration.py (42 print → logger calls, 2 kept for user-facing progress)
+  - ✅ github_integration.py (42 print → logger calls, 2 kept for user-facing progress with noqa)
   - ✅ installation_progress_tracker.py (10 print → logger.info/error calls)
   - ✅ api/core.py (16 print → logger calls)
-  - ⏳ version_manager.py (~120 print statements remaining)
-  - ⏳ Other backend modules (~317 print statements remaining)
-- Status: 🚧 Infrastructure complete, gradual migration ongoing (73/456 print statements migrated - 16%)
+  - ✅ version_manager.py (120 print → logger calls: 2 debug, 51 info, 39 warning, 28 error)
+  - ⏳ Other backend modules (~263 print statements remaining in 21 files)
+- Status: 🚧 Infrastructure complete with enforcement, gradual migration ongoing (193/456 print statements migrated - 42%)
 
 **Next steps:**
-- Migrate version_manager.py to logging (largest module, ~120 statements)
-- Continue migrating remaining backend modules (~317 statements)
+- Continue migrating remaining backend modules (~263 statements in 21 files)
 - Task #4: Custom exceptions (~2 hours)
 - Task #1: Input validation (~3 hours)
 - Task #8: Consolidate config (~2 hours)

@@ -11,6 +11,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class VersionInfoManager:
     """Manages ComfyUI version information and release checking"""
@@ -107,7 +111,7 @@ class VersionInfoManager:
                     if releases:
                         latest_tag = releases[0].get("tag_name") or None
                 except Exception as e:
-                    print(f"Warning: using cached/stale releases after error: {e}")
+                    logger.warning(f"Using cached/stale releases after error: {e}")
 
             if current_tag and latest_tag:
                 has_update = current_tag != latest_tag
@@ -123,7 +127,7 @@ class VersionInfoManager:
                     "current_version": current_version,
                 }
         except Exception as e:
-            print(f"Error checking for new release: {e}")
+            logger.error(f"Error checking for new release: {e}")
             self._release_info_cache = {
                 "has_update": False,
                 "latest_version": None,

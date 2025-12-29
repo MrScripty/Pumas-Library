@@ -8,7 +8,10 @@ import shutil
 from pathlib import Path
 from typing import List, Optional
 
+from backend.logging_config import get_logger
 from backend.utils import ensure_directory, run_command
+
+logger = get_logger(__name__)
 
 
 class CustomNodesManager:
@@ -59,7 +62,7 @@ class CustomNodesManager:
                 if d.is_dir() and not d.name.startswith(".")
             ]
         except Exception as e:
-            print(f"Error listing custom nodes: {e}")
+            logger.error(f"Error listing custom nodes: {e}", exc_info=True)
             return []
 
     def install_custom_node(
@@ -91,11 +94,11 @@ class CustomNodesManager:
         node_install_path = custom_nodes_dir / node_name
 
         if node_install_path.exists():
-            print(f"Custom node already installed: {node_name}")
+            logger.info(f"Custom node already installed: {node_name}")
             return False
 
         # Clone to version's custom_nodes directory
-        print(f"Installing custom node {node_name} for {version_tag}...")
+        logger.info(f"Installing custom node {node_name} for {version_tag}...")
 
         success, stdout, stderr = run_command(
             ["git", "clone", git_url, str(node_install_path)],
@@ -103,16 +106,16 @@ class CustomNodesManager:
         )
 
         if not success:
-            print(f"Error cloning custom node: {stderr}")
+            logger.error(f"Error cloning custom node: {stderr}")
             return False
 
-        print(f"✓ Installed custom node: {node_name}")
+        logger.info(f"✓ Installed custom node: {node_name}")
 
         # Check for requirements.txt and warn user
         requirements_file = node_install_path / "requirements.txt"
         if requirements_file.exists():
-            print(f"  Note: {node_name} has requirements.txt")
-            print(f"  You may need to install dependencies for {version_tag}")
+            logger.info(f"  Note: {node_name} has requirements.txt")
+            logger.info(f"  You may need to install dependencies for {version_tag}")
 
         return True
 
@@ -130,30 +133,30 @@ class CustomNodesManager:
         node_path = self.get_version_custom_nodes_dir(version_tag) / node_name
 
         if not node_path.exists():
-            print(f"Custom node not found: {node_name}")
+            logger.warning(f"Custom node not found: {node_name}")
             return False
 
         # Check if it's a git repository
         if not (node_path / ".git").exists():
-            print(f"Not a git repository: {node_name}")
+            logger.warning(f"Not a git repository: {node_name}")
             return False
 
-        print(f"Updating custom node {node_name}...")
+        logger.info(f"Updating custom node {node_name}...")
 
         # Git pull
         success, stdout, stderr = run_command(["git", "pull"], cwd=node_path, timeout=60)
 
         if not success:
-            print(f"Error updating custom node: {stderr}")
+            logger.error(f"Error updating custom node: {stderr}")
             return False
 
-        print(f"✓ Updated custom node: {node_name}")
-        print(stdout)
+        logger.info(f"✓ Updated custom node: {node_name}")
+        logger.info(stdout)
 
         # Check if requirements changed
         requirements_file = node_path / "requirements.txt"
         if requirements_file.exists():
-            print(f"  Note: Check if requirements.txt changed")
+            logger.info(f"  Note: Check if requirements.txt changed")
 
         return True
 
@@ -171,15 +174,15 @@ class CustomNodesManager:
         node_path = self.get_version_custom_nodes_dir(version_tag) / node_name
 
         if not node_path.exists():
-            print(f"Custom node not found: {node_name}")
+            logger.warning(f"Custom node not found: {node_name}")
             return False
 
         try:
             shutil.rmtree(node_path)
-            print(f"✓ Removed custom node: {node_name} from {version_tag}")
+            logger.info(f"✓ Removed custom node: {node_name} from {version_tag}")
             return True
         except Exception as e:
-            print(f"Error removing custom node: {e}")
+            logger.error(f"Error removing custom node: {e}", exc_info=True)
             return False
 
     def cache_custom_node_repo(self, git_url: str) -> Optional[Path]:
@@ -202,18 +205,18 @@ class CustomNodesManager:
 
         if cache_path.exists():
             # Update existing cache
-            print(f"Updating cached repo: {repo_name}")
+            logger.info(f"Updating cached repo: {repo_name}")
             success, stdout, stderr = run_command(
                 ["git", "fetch", "--all"], cwd=cache_path, timeout=60
             )
 
             if not success:
-                print(f"Warning: Failed to update cache: {stderr}")
+                logger.warning(f"Warning: Failed to update cache: {stderr}")
 
             return cache_path
         else:
             # Clone as bare repo
-            print(f"Caching custom node repo: {repo_name}")
+            logger.info(f"Caching custom node repo: {repo_name}")
             ensure_directory(self.shared_custom_nodes_cache_dir)
 
             success, stdout, stderr = run_command(
@@ -221,8 +224,8 @@ class CustomNodesManager:
             )
 
             if not success:
-                print(f"Error caching repo: {stderr}")
+                logger.error(f"Error caching repo: {stderr}")
                 return None
 
-            print(f"✓ Cached repo: {repo_name}")
+            logger.info(f"✓ Cached repo: {repo_name}")
             return cache_path

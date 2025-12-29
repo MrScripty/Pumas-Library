@@ -7,6 +7,10 @@ Creates the necessary directories for the version manager
 from pathlib import Path
 from typing import List
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class DirectorySetup:
     """Handles creation and initialization of directory structure"""
@@ -65,9 +69,9 @@ class DirectorySetup:
         for directory in directories:
             try:
                 directory.mkdir(parents=True, exist_ok=True)
-                print(f"Created/verified: {directory.relative_to(self.launcher_root)}")
+                logger.info(f"Created/verified: {directory.relative_to(self.launcher_root)}")
             except OSError as e:
-                print(f"Error creating {directory}: {e}")
+                logger.error(f"Error creating {directory}: {e}", exc_info=True)
                 success = False
 
         return success
@@ -104,7 +108,7 @@ class DirectorySetup:
                 category_dir = self.shared_models_dir / category
                 category_dir.mkdir(parents=True, exist_ok=True)
             except OSError as e:
-                print(f"Error creating model category {category}: {e}")
+                logger.error(f"Error creating model category {category}: {e}", exc_info=True)
                 success = False
 
         return success
@@ -203,19 +207,19 @@ if __name__ == "__main__":
         launcher_root = Path(__file__).parent.parent
 
     setup = DirectorySetup(launcher_root)
-    print(setup.get_structure_summary())
-    print("\nInitializing directories...")
+    logger.info(setup.get_structure_summary())
+    logger.info("\nInitializing directories...")
 
     if setup.create_all_directories():
-        print("✓ Main directories created")
+        logger.info("✓ Main directories created")
     else:
-        print("✗ Error creating main directories")
+        logger.error("✗ Error creating main directories")
         sys.exit(1)
 
     if setup.initialize_model_directories():
-        print("✓ Model directories created")
+        logger.info("✓ Model directories created")
     else:
-        print("✗ Error creating model directories")
+        logger.error("✗ Error creating model directories")
         sys.exit(1)
 
-    print("\n" + setup.get_structure_summary())
+    logger.info("\n" + setup.get_structure_summary())

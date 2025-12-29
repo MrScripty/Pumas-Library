@@ -7,12 +7,15 @@ Main coordinator for shared storage, symlinks, custom nodes, and resource manage
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import RepairReport, ScanResult
 from backend.resources.custom_nodes_manager import CustomNodesManager
 from backend.resources.model_manager import ModelManager
 from backend.resources.shared_storage import SharedStorageManager
 from backend.resources.symlink_manager import SymlinkManager
+
+logger = get_logger(__name__)
 
 
 class ResourceManager:
@@ -278,42 +281,42 @@ if __name__ == "__main__":
     # Initialize resource manager
     resource_mgr = ResourceManager(launcher_root, metadata_mgr)
 
-    print("=== Resource Manager Test ===\n")
+    logger.info("=== Resource Manager Test ===\n")
 
     # Initialize shared storage
-    print("Initializing shared storage...")
+    logger.info("Initializing shared storage...")
     if resource_mgr.initialize_shared_storage():
-        print("✓ Shared storage initialized\n")
+        logger.info("✓ Shared storage initialized\n")
     else:
-        print("✗ Failed to initialize shared storage\n")
+        logger.error("✗ Failed to initialize shared storage\n")
 
     # Scan shared storage
-    print("Scanning shared storage...")
+    logger.info("Scanning shared storage...")
     scan_result = resource_mgr.scan_shared_storage()
-    print(f"✓ Scan complete:")
-    print(f"  Models: {scan_result['modelsFound']}")
-    print(f"  Workflows: {scan_result['workflowsFound']}")
-    print(f"  Total size: {scan_result['totalSize']:,} bytes\n")
+    logger.info(f"✓ Scan complete:")
+    logger.info(f"  Models: {scan_result['modelsFound']}")
+    logger.info(f"  Workflows: {scan_result['workflowsFound']}")
+    logger.info(f"  Total size: {scan_result['totalSize']:,} bytes\n")
 
     # Check if we have any installed versions
     versions = metadata_mgr.load_versions_metadata()
     if versions.get("installed"):
-        print("Testing symlink setup for installed versions:")
+        logger.info("Testing symlink setup for installed versions:")
         for version_tag in versions["installed"].keys():
-            print(f"\nVersion: {version_tag}")
+            logger.info(f"\nVersion: {version_tag}")
 
             # Setup symlinks
             if resource_mgr.setup_version_symlinks(version_tag):
-                print(f"  ✓ Symlinks created")
+                logger.info(f"  ✓ Symlinks created")
             else:
-                print(f"  ✗ Failed to create symlinks")
+                logger.error(f"  ✗ Failed to create symlinks")
 
             # Validate symlinks
             repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
-            print(
+            logger.info(
                 f"  Validation: {len(repair_report['broken'])} broken, "
                 f"{len(repair_report['repaired'])} repaired, "
                 f"{len(repair_report['removed'])} removed"
             )
     else:
-        print("No versions installed yet")
+        logger.info("No versions installed yet")

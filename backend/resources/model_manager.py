@@ -8,9 +8,12 @@ import shutil
 from pathlib import Path
 from typing import Dict
 
+from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import ModelInfo, get_iso_timestamp
 from backend.utils import calculate_file_hash, ensure_directory
+
+logger = get_logger(__name__)
 
 
 class ModelManager:
@@ -49,7 +52,7 @@ class ModelManager:
             True if successful
         """
         if not source_path.exists():
-            print(f"Error: Source file not found: {source_path}")
+            logger.error(f"Error: Source file not found: {source_path}")
             return False
 
         # Ensure category directory exists
@@ -60,13 +63,13 @@ class ModelManager:
         dest_path = category_dir / source_path.name
 
         if dest_path.exists():
-            print(f"Error: Model already exists: {dest_path.name}")
+            logger.error(f"Error: Model already exists: {dest_path.name}")
             return False
 
         try:
             # Copy file
             shutil.copy2(str(source_path), str(dest_path))
-            print(f"Added model: {category}/{source_path.name}")
+            logger.info(f"Added model: {category}/{source_path.name}")
 
             # Update metadata if requested
             if update_metadata:
@@ -75,7 +78,7 @@ class ModelManager:
             return True
 
         except Exception as e:
-            print(f"Error adding model: {e}")
+            logger.error(f"Error adding model: {e}", exc_info=True)
             return False
 
     def _update_model_metadata(self, model_path: Path, category: str):
@@ -113,10 +116,10 @@ class ModelManager:
 
             # Save metadata
             self.metadata_manager.save_models(metadata)
-            print(f"Updated metadata for {model_path.name}")
+            logger.info(f"Updated metadata for {model_path.name}")
 
         except Exception as e:
-            print(f"Error updating model metadata: {e}")
+            logger.error(f"Error updating model metadata: {e}", exc_info=True)
 
     def remove_model(self, model_path: str) -> bool:
         """
@@ -131,13 +134,13 @@ class ModelManager:
         full_path = self.shared_models_dir / model_path
 
         if not full_path.exists():
-            print(f"Error: Model not found: {model_path}")
+            logger.error(f"Error: Model not found: {model_path}")
             return False
 
         try:
             # Remove file
             full_path.unlink()
-            print(f"Removed model: {model_path}")
+            logger.info(f"Removed model: {model_path}")
 
             # Update metadata
             metadata = self.metadata_manager.load_models()
@@ -148,5 +151,5 @@ class ModelManager:
             return True
 
         except Exception as e:
-            print(f"Error removing model: {e}")
+            logger.error(f"Error removing model: {e}", exc_info=True)
             return False

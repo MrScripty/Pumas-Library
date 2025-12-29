@@ -16,6 +16,10 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import InvalidVersion, Version
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class PackageSizeResolver:
     """Resolves package sizes from PyPI with platform-specific detection"""
@@ -45,7 +49,7 @@ class PackageSizeResolver:
                     data = json.load(f)
                     return data.get("packages", {})
             except Exception as e:
-                print(f"Warning: Failed to load package sizes cache: {e}")
+                logger.warning(f"Warning: Failed to load package sizes cache: {e}")
         return {}
 
     def _save_cache(self):
@@ -55,7 +59,7 @@ class PackageSizeResolver:
             with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
         except Exception as e:
-            print(f"Error saving package sizes cache: {e}")
+            logger.error(f"Error saving package sizes cache: {e}", exc_info=True)
 
     def _get_iso_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -202,12 +206,12 @@ class PackageSizeResolver:
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                print(f"Package {package_name} not found on PyPI (404)")
+                logger.warning(f"Package {package_name} not found on PyPI (404)")
             else:
-                print(f"HTTP error querying PyPI for {package_name}: {e}")
+                logger.error(f"HTTP error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
         except Exception as e:
-            print(f"Error querying PyPI for {package_name}: {e}")
+            logger.error(f"Error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
 
     def _find_best_wheel(self, release_files: list, package_name: str) -> Optional[Dict]:
@@ -255,7 +259,9 @@ class PackageSizeResolver:
             with urllib.request.urlopen(req, timeout=10) as response:
                 return json.load(response)
         except Exception as e:
-            print(f"Warning: Failed to fetch PyPI metadata for {package_name} {version}: {e}")
+            logger.warning(
+                f"Warning: Failed to fetch PyPI metadata for {package_name} {version}: {e}"
+            )
             return None
 
     def get_package_metadata(
@@ -432,7 +438,7 @@ class PackageSizeResolver:
                 spec = str(req.specifier) if req.specifier else ""
                 dependencies.append(f"{req.name}{spec}")
             except Exception as e:
-                print(f"Warning: Failed to parse requires_dist entry '{entry}': {e}")
+                logger.warning(f"Warning: Failed to parse requires_dist entry '{entry}': {e}")
                 continue
 
         return dependencies
@@ -466,7 +472,7 @@ class PackageSizeResolver:
         """Clear all cached package sizes"""
         self._cache = {}
         self._save_cache()
-        print("✓ Package sizes cache cleared")
+        logger.info("✓ Package sizes cache cleared")
 
 
 if __name__ == "__main__":
@@ -476,26 +482,26 @@ if __name__ == "__main__":
     test_cache_dir = Path("./test-cache")
     resolver = PackageSizeResolver(test_cache_dir)
 
-    print("=== Testing PackageSizeResolver ===\n")
-    print(f"Platform: {resolver.platform}")
-    print(f"Python: {resolver.python_version}\n")
+    logger.info("=== Testing PackageSizeResolver ===\n")
+    logger.info(f"Platform: {resolver.platform}")
+    logger.info(f"Python: {resolver.python_version}\n")
 
     # Test querying a package
     test_packages = ["pillow", "numpy", "torch==2.1.0"]
 
     for pkg in test_packages:
-        print(f"Querying {pkg}...")
+        logger.info(f"Querying {pkg}...")
         size = resolver.get_package_size(pkg)
         if size:
             size_mb = size / (1024 * 1024)
-            print(f"  ✓ Size: {size_mb:.2f} MB ({size:,} bytes)")
+            logger.info(f"  ✓ Size: {size_mb:.2f} MB ({size:,} bytes)")
         else:
-            print(f"  ✗ Size not found")
-        print()
+            logger.info(f"  ✗ Size not found")
+        logger.info("")
 
     # Cleanup
     import shutil
 
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
-        print("✓ Test cache cleaned up")
+        logger.info("✓ Test cache cleaned up")

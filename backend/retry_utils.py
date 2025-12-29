@@ -10,6 +10,10 @@ import random
 import time
 from typing import Callable, Optional, TypeVar
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 T = TypeVar("T")
 
 
@@ -134,8 +138,8 @@ def retry_operation(
     """
 
     def on_retry_callback(attempt: int, delay: float, error: Exception) -> None:
-        """Print retry message"""
-        print(
+        """Log retry message"""
+        logger.info(
             f"{operation_name} failed (attempt {attempt + 1}/{max_retries}). "
             f"Retrying in {delay:.1f}s... ({type(error).__name__}: {error})"
         )
@@ -157,5 +161,5 @@ def retry_operation(
         )
         return result is not None
     except Exception:
-        print(f"{operation_name} failed after {max_retries} attempts")
+        logger.info(f"{operation_name} failed after {max_retries} attempts")
         return False

@@ -9,6 +9,10 @@ import subprocess
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def get_launcher_root() -> Path:
     """
@@ -35,7 +39,7 @@ def ensure_directory(path: Path) -> bool:
         path.mkdir(parents=True, exist_ok=True)
         return True
     except OSError as e:
-        print(f"Error creating directory {path}: {e}")
+        logger.error(f"Error creating directory {path}: {e}", exc_info=True)
         return False
 
 
@@ -58,7 +62,7 @@ def calculate_file_hash(file_path: Path, algorithm: str = "sha256") -> Optional[
                 hasher.update(chunk)
         return hasher.hexdigest()
     except (IOError, OSError) as e:
-        print(f"Error calculating hash for {file_path}: {e}")
+        logger.error(f"Error calculating hash for {file_path}: {e}", exc_info=True)
         return None
 
 
@@ -94,7 +98,7 @@ def get_directory_size(path: Path) -> int:
             if item.is_file():
                 total += item.stat().st_size
     except (OSError, PermissionError) as e:
-        print(f"Error calculating directory size for {path}: {e}")
+        logger.error(f"Error calculating directory size for {path}: {e}", exc_info=True)
     return total
 
 
@@ -150,7 +154,7 @@ def make_relative_symlink(target: Path, link: Path) -> bool:
         link.symlink_to(relative_target)
         return True
     except (OSError, ValueError) as e:
-        print(f"Error creating symlink {link} -> {target}: {e}")
+        logger.error(f"Error creating symlink {link} -> {target}: {e}", exc_info=True)
         return False
 
 
@@ -317,7 +321,7 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                         # No version specifier
                         requirements[line.strip()] = ""
     except Exception as e:
-        print(f"Error parsing requirements file {requirements_path}: {e}")
+        logger.error(f"Error parsing requirements file {requirements_path}: {e}", exc_info=True)
 
     return requirements
 
@@ -339,5 +343,5 @@ def find_files_by_extension(directory: Path, extension: str) -> List[Path]:
     try:
         return list(directory.rglob(f"*{extension}"))
     except Exception as e:
-        print(f"Error searching for {extension} files in {directory}: {e}")
+        logger.error(f"Error searching for {extension} files in {directory}: {e}", exc_info=True)
         return []

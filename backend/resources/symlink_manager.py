@@ -7,8 +7,11 @@ Handles symlink creation and validation for version installations
 from pathlib import Path
 from typing import Dict
 
+from backend.logging_config import get_logger
 from backend.models import RepairReport
 from backend.utils import is_broken_symlink, make_relative_symlink
+
+logger = get_logger(__name__)
 
 
 class SymlinkManager:
@@ -51,7 +54,7 @@ class SymlinkManager:
         version_path = self.versions_dir / version_tag
 
         if not version_path.exists():
-            print(f"Error: Version directory not found: {version_path}")
+            logger.error(f"Error: Version directory not found: {version_path}")
             return False
 
         success = True
@@ -59,18 +62,18 @@ class SymlinkManager:
         # 1. Symlink models directory
         models_link = version_path / "models"
         if not make_relative_symlink(self.shared_models_dir, models_link):
-            print(f"Failed to create models symlink for {version_tag}")
+            logger.error(f"Failed to create models symlink for {version_tag}")
             success = False
         else:
-            print(f"Created models symlink: {version_tag}/models -> shared-resources/models")
+            logger.info(f"Created models symlink: {version_tag}/models -> shared-resources/models")
 
         # 2. Symlink user directory
         user_link = version_path / "user"
         if not make_relative_symlink(self.shared_user_dir, user_link):
-            print(f"Failed to create user symlink for {version_tag}")
+            logger.error(f"Failed to create user symlink for {version_tag}")
             success = False
         else:
-            print(f"Created user symlink: {version_tag}/user -> shared-resources/user")
+            logger.info(f"Created user symlink: {version_tag}/user -> shared-resources/user")
 
         return success
 
@@ -89,7 +92,7 @@ class SymlinkManager:
         report: RepairReport = {"broken": [], "repaired": [], "removed": []}
 
         if not version_path.exists():
-            print(f"Error: Version directory not found: {version_path}")
+            logger.error(f"Error: Version directory not found: {version_path}")
             return report
 
         # Check key symlinks
@@ -108,20 +111,20 @@ class SymlinkManager:
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
                         report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        print(f"Repaired symlink: {link_name}")
+                        logger.info(f"Repaired symlink: {link_name}")
                     else:
-                        print(f"Failed to repair symlink: {link_name}")
+                        logger.error(f"Failed to repair symlink: {link_name}")
                 else:
                     # Target doesn't exist, remove broken symlink
                     link_path.unlink()
                     report["removed"].append(str(link_path.relative_to(self.launcher_root)))
-                    print(f"Removed broken symlink: {link_name}")
+                    logger.info(f"Removed broken symlink: {link_name}")
 
             elif not link_path.exists():
                 # Symlink doesn't exist, create it
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
                         report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        print(f"Created missing symlink: {link_name}")
+                        logger.info(f"Created missing symlink: {link_name}")
 
         return report

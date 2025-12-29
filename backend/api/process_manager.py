@@ -10,6 +10,10 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class ProcessManager:
     """Manages ComfyUI process lifecycle"""
@@ -39,7 +43,7 @@ class ProcessManager:
                 if version_path:
                     tag_paths[tag] = version_path
         except Exception as e:
-            print(f"Error collecting version paths: {e}")
+            logger.error(f"Error collecting version paths: {e}", exc_info=True)
 
         return tag_paths
 
@@ -100,7 +104,7 @@ class ProcessManager:
             )
             ps_output = ps.stdout.splitlines()
         except Exception as e:
-            print(f"Error scanning process table: {e}")
+            logger.error(f"Error scanning process table: {e}", exc_info=True)
             ps_output = []
 
         for line in ps_output:
@@ -191,7 +195,7 @@ class ProcessManager:
                 except (ProcessLookupError, OSError):
                     pass
                 except Exception as e:
-                    print(f"Error stopping PID {pid}: {e}")
+                    logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
 
                 pid_file = proc.get("pid_file")
                 if pid_file:
@@ -212,7 +216,7 @@ class ProcessManager:
 
             return False
         except Exception as e:
-            print(f"Error stopping ComfyUI: {e}")
+            logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
             return False
 
     def launch_comfyui(self) -> Dict[str, Any]:
@@ -225,12 +229,12 @@ class ProcessManager:
                         self.version_manager.launch_version(active_tag)
                     )
                     if success:
-                        print(f"Launched active managed version: {active_tag}")
+                        logger.info(f"Launched active managed version: {active_tag}")
                         self.last_launch_log = log_path
                         self.last_launch_error = None
                         return {"success": True, "log_path": log_path, "ready": ready}
 
-                    print(f"Failed to launch managed version {active_tag}")
+                    logger.error(f"Failed to launch managed version {active_tag}")
                     self.last_launch_log = log_path
                     self.last_launch_error = error_msg
                     return {
@@ -244,6 +248,6 @@ class ProcessManager:
             self.last_launch_log = None
             return {"success": False, "error": "No active version selected"}
         except Exception as e:
-            print(f"Error launching ComfyUI: {e}")
+            logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
             self.last_launch_error = str(e)
             return {"success": False, "error": str(e)}

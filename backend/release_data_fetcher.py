@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class ReleaseDataFetcher:
     """Fetches and caches requirements.txt data for ComfyUI releases"""
@@ -35,7 +39,7 @@ class ReleaseDataFetcher:
                 with open(self.requirements_cache_file, "r") as f:
                     return json.load(f)
             except Exception as e:
-                print(f"Warning: Failed to load requirements cache: {e}")
+                logger.warning(f"Warning: Failed to load requirements cache: {e}")
         return {}
 
     def _save_cache(self):
@@ -44,7 +48,7 @@ class ReleaseDataFetcher:
             with open(self.requirements_cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
         except Exception as e:
-            print(f"Error saving requirements cache: {e}")
+            logger.error(f"Error saving requirements cache: {e}", exc_info=True)
 
     def _compute_hash(self, content: str) -> str:
         """Compute SHA256 hash of content"""
@@ -76,7 +80,7 @@ class ReleaseDataFetcher:
         url = f"https://raw.githubusercontent.com/comfyanonymous/ComfyUI/{tag}/requirements.txt"
 
         try:
-            print(f"Fetching requirements.txt for {tag}...")
+            logger.info(f"Fetching requirements.txt for {tag}...")
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "ComfyUI-Launcher")
 
@@ -97,17 +101,17 @@ class ReleaseDataFetcher:
             self._cache[tag] = cache_entry
             self._save_cache()
 
-            print(f"✓ Cached requirements.txt for {tag}")
+            logger.info(f"✓ Cached requirements.txt for {tag}")
             return cache_entry
 
         except urllib.error.HTTPError as e:
             if e.code == 404:
-                print(f"No requirements.txt found for {tag} (404)")
+                logger.warning(f"No requirements.txt found for {tag} (404)")
             else:
-                print(f"HTTP error fetching requirements for {tag}: {e}")
+                logger.error(f"HTTP error fetching requirements for {tag}: {e}", exc_info=True)
             return None
         except Exception as e:
-            print(f"Error fetching requirements for {tag}: {e}")
+            logger.error(f"Error fetching requirements for {tag}: {e}", exc_info=True)
             return None
 
     def fetch_requirements_for_releases(
@@ -204,7 +208,7 @@ class ReleaseDataFetcher:
         """Clear all cached requirements data"""
         self._cache = {}
         self._save_cache()
-        print("✓ Requirements cache cleared")
+        logger.info("✓ Requirements cache cleared")
 
 
 if __name__ == "__main__":
@@ -215,30 +219,30 @@ if __name__ == "__main__":
     fetcher = ReleaseDataFetcher(test_cache_dir)
 
     # Test fetching a single release
-    print("=== Testing ReleaseDataFetcher ===\n")
+    logger.info("=== Testing ReleaseDataFetcher ===\n")
 
     result = fetcher.fetch_requirements_for_release("v0.2.7")
     if result:
-        print(f"\nFetched requirements for v0.2.7:")
-        print(f"Hash: {result['requirements_hash']}")
-        print(f"Fetched at: {result['fetched_at']}")
+        logger.info(f"\nFetched requirements for v0.2.7:")
+        logger.info(f"Hash: {result['requirements_hash']}")
+        logger.info(f"Fetched at: {result['fetched_at']}")
 
         packages = fetcher.parse_requirements(result["requirements_txt"])
-        print(f"\nPackages ({len(packages)}):")
+        logger.info(f"\nPackages ({len(packages)}):")
         for pkg, version in list(packages.items())[:5]:
-            print(f"  - {pkg}{version}")
+            logger.info(f"  - {pkg}{version}")
         if len(packages) > 5:
-            print(f"  ... and {len(packages) - 5} more")
+            logger.info(f"  ... and {len(packages) - 5} more")
 
     # Test cached retrieval
-    print("\n\nTesting cached retrieval...")
+    logger.info("\n\nTesting cached retrieval...")
     cached = fetcher.get_cached_requirements("v0.2.7")
     if cached:
-        print("✓ Successfully retrieved from cache")
+        logger.info("✓ Successfully retrieved from cache")
 
     # Cleanup
     import shutil
 
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
-        print("\n✓ Test cache cleaned up")
+        logger.info("\n✓ Test cache cleaned up")

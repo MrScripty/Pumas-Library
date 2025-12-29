@@ -9,8 +9,11 @@ import shutil
 from pathlib import Path
 from typing import List, Tuple
 
+from backend.logging_config import get_logger
 from backend.models import ScanResult
 from backend.utils import ensure_directory
+
+logger = get_logger(__name__)
 
 
 class SharedStorageManager:
@@ -73,7 +76,7 @@ class SharedStorageManager:
         folder_paths_file = comfyui_path / "comfy" / "folder_paths.py"
 
         if not folder_paths_file.exists():
-            print(f"Warning: folder_paths.py not found in {comfyui_path}")
+            logger.warning(f"Warning: folder_paths.py not found in {comfyui_path}")
             return self._get_default_model_directories()
 
         try:
@@ -91,14 +94,14 @@ class SharedStorageManager:
 
             if matches:
                 model_dirs = list(set(matches))
-                print(f"Discovered {len(model_dirs)} model directories from folder_paths.py")
+                logger.info(f"Discovered {len(model_dirs)} model directories from folder_paths.py")
                 return sorted(model_dirs)
             else:
-                print("Could not parse folder_paths.py, using defaults")
+                logger.warning("Could not parse folder_paths.py, using defaults")
                 return self._get_default_model_directories()
 
         except Exception as e:
-            print(f"Error parsing folder_paths.py: {e}")
+            logger.error(f"Error parsing folder_paths.py: {e}", exc_info=True)
             return self._get_default_model_directories()
 
     def _get_default_model_directories(self) -> List[str]:
@@ -147,12 +150,12 @@ class SharedStorageManager:
             if not target_dir.exists():
                 if ensure_directory(target_dir):
                     created_count += 1
-                    print(f"Created model directory: {model_dir}")
+                    logger.info(f"Created model directory: {model_dir}")
                 else:
                     success = False
 
         if created_count > 0:
-            print(f"Created {created_count} new model directories")
+            logger.info(f"Created {created_count} new model directories")
 
         return success
 
@@ -176,7 +179,7 @@ class SharedStorageManager:
         # Check for real models directory
         models_dir = version_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            print(f"Found real models directory in {version_path.name}")
+            logger.info(f"Found real models directory in {version_path.name}")
 
             # Scan for model files
             for category_dir in models_dir.iterdir():
@@ -202,16 +205,18 @@ class SharedStorageManager:
                         conflict_paths.append(str(model_file.relative_to(self.launcher_root)))
 
                         if not auto_merge:
-                            print(f"Conflict: {model_file.name} already exists in shared storage")
+                            logger.warning(
+                                f"Conflict: {model_file.name} already exists in shared storage"
+                            )
                             continue
 
                     # Move file to shared storage
                     try:
                         shutil.move(str(model_file), str(shared_file_path))
                         files_moved += 1
-                        print(f"Moved: {category_name}/{model_file.name} -> shared storage")
+                        logger.info(f"Moved: {category_name}/{model_file.name} -> shared storage")
                     except Exception as e:
-                        print(f"Error moving {model_file}: {e}")
+                        logger.error(f"Error moving {model_file}: {e}", exc_info=True)
 
             # Remove empty category directories
             for category_dir in models_dir.iterdir():
@@ -225,7 +230,7 @@ class SharedStorageManager:
         # Check for real user directory
         user_dir = version_path / "user"
         if user_dir.exists() and not user_dir.is_symlink():
-            print(f"Found real user directory in {version_path.name}")
+            logger.info(f"Found real user directory in {version_path.name}")
 
             # Migrate workflows
             workflows_dir = user_dir / "workflows"
@@ -243,15 +248,17 @@ class SharedStorageManager:
                         conflict_paths.append(str(workflow_file.relative_to(self.launcher_root)))
 
                         if not auto_merge:
-                            print(f"Conflict: workflow {workflow_file.name} already exists")
+                            logger.warning(
+                                f"Conflict: workflow {workflow_file.name} already exists"
+                            )
                             continue
 
                     try:
                         shutil.move(str(workflow_file), str(shared_workflow_path))
                         files_moved += 1
-                        print(f"Moved: workflow {workflow_file.name} -> shared storage")
+                        logger.info(f"Moved: workflow {workflow_file.name} -> shared storage")
                     except Exception as e:
-                        print(f"Error moving workflow {workflow_file}: {e}")
+                        logger.error(f"Error moving workflow {workflow_file}: {e}", exc_info=True)
 
             # Remove empty directories
             if workflows_dir.exists() and not list(workflows_dir.iterdir()):

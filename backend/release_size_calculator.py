@@ -14,6 +14,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class ReleaseSizeCalculator:
     """Calculates and caches total sizes for ComfyUI releases"""
@@ -57,7 +61,7 @@ class ReleaseSizeCalculator:
                             cleaned[tag] = entry
                     return cleaned
             except Exception as e:
-                print(f"Warning: Failed to load release sizes cache: {e}")
+                logger.warning(f"Warning: Failed to load release sizes cache: {e}")
         return {}
 
     def _save_cache(self):
@@ -66,7 +70,7 @@ class ReleaseSizeCalculator:
             with open(self.cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
         except Exception as e:
-            print(f"Error saving release sizes cache: {e}")
+            logger.error(f"Error saving release sizes cache: {e}", exc_info=True)
 
     def _get_iso_timestamp(self) -> str:
         """Get current timestamp in ISO format"""
@@ -116,7 +120,7 @@ class ReleaseSizeCalculator:
         )
 
         # Fast total estimate using pip resolver (captures transitives)
-        print(f"Estimating total dependency download size for {tag} via resolver report...")
+        logger.info(f"Estimating total dependency download size for {tag} via resolver report...")
         pip_estimate = self._estimate_dependencies_size_via_pip(
             requirements_data["requirements_txt"], tag
         )
@@ -135,7 +139,7 @@ class ReleaseSizeCalculator:
 
         # Calculate total size
         if deps_size == 0 and pip_estimate is None:
-            print(f"Warning: No dependency size estimate available for {tag}")
+            logger.warning(f"Warning: No dependency size estimate available for {tag}")
         total_size = archive_size + deps_size
 
         # Build result
@@ -158,7 +162,7 @@ class ReleaseSizeCalculator:
         self._cache[cache_key] = result
         self._save_cache()
 
-        print(f"✓ Calculated total size for {tag}: {self._format_size(total_size)}")
+        logger.info(f"✓ Calculated total size for {tag}: {self._format_size(total_size)}")
         return result
 
     def get_cached_size(self, tag: str) -> Optional[Dict[str, any]]:
@@ -230,7 +234,7 @@ class ReleaseSizeCalculator:
             )
 
         except Exception as e:
-            print(f"Error estimating dependency size via pip for {tag}: {e}")
+            logger.error(f"Error estimating dependency size via pip for {tag}: {e}", exc_info=True)
             return None
         finally:
             # Clean up temp dir to avoid disk bloat
@@ -251,18 +255,18 @@ class ReleaseSizeCalculator:
         )
 
         if result.returncode != 0:
-            print(f"{tool_name} dry-run failed for {tag}: {result.stderr}")
+            logger.error(f"{tool_name} dry-run failed for {tag}: {result.stderr}")
             return None
 
         if not report_file.exists():
-            print(f"{tool_name} dry-run did not produce report for {tag}")
+            logger.error(f"{tool_name} dry-run did not produce report for {tag}")
             return None
 
         try:
             with open(report_file, "r") as f:
                 report = json.load(f)
         except Exception as e:
-            print(f"{tool_name} report parse failed for {tag}: {e}")
+            logger.error(f"{tool_name} report parse failed for {tag}: {e}", exc_info=True)
             return None
 
         total_size = 0
@@ -314,7 +318,7 @@ class ReleaseSizeCalculator:
                 if length:
                     return int(length)
         except Exception as e:
-            print(f"Warning: HEAD failed for {url}: {e}")
+            logger.warning(f"Warning: HEAD failed for {url}: {e}")
         return None
 
     def _build_pip_env(self) -> Optional[Dict[str, str]]:
@@ -327,7 +331,9 @@ class ReleaseSizeCalculator:
         try:
             self.pip_cache_dir.mkdir(parents=True, exist_ok=True)
         except Exception as e:
-            print(f"Warning: Could not ensure pip cache directory {self.pip_cache_dir}: {e}")
+            logger.warning(
+                f"Warning: Could not ensure pip cache directory {self.pip_cache_dir}: {e}"
+            )
             return None
 
         env = os.environ.copy()
@@ -398,13 +404,13 @@ class ReleaseSizeCalculator:
         if tag in self._cache:
             del self._cache[tag]
             self._save_cache()
-            print(f"✓ Cache invalidated for {tag}")
+            logger.info(f"✓ Cache invalidated for {tag}")
 
     def clear_cache(self):
         """Clear all cached release sizes"""
         self._cache = {}
         self._save_cache()
-        print("✓ Release sizes cache cleared")
+        logger.info("✓ Release sizes cache cleared")
 
     def calculate_multiple_releases(
         self, releases: List[Tuple[str, int]], progress_callback: Optional[callable] = None
@@ -447,35 +453,35 @@ if __name__ == "__main__":
     resolver = PackageSizeResolver(test_cache_dir)
     calculator = ReleaseSizeCalculator(test_cache_dir, fetcher, resolver)
 
-    print("=== Testing ReleaseSizeCalculator ===\n")
+    logger.info("=== Testing ReleaseSizeCalculator ===\n")
 
     # Test with a release
     tag = "v0.2.7"
     archive_size = 125 * 1024 * 1024  # 125 MB estimate
 
-    print(f"Calculating size for {tag}...")
+    logger.info(f"Calculating size for {tag}...")
     result = calculator.calculate_release_size(tag, archive_size)
 
     if result:
-        print(f"\nTotal Size: {calculator._format_size(result['total_size'])}")
-        print(f"Archive: {calculator._format_size(result['archive_size'])}")
-        print(f"Dependencies: {calculator._format_size(result['dependencies_size'])}")
-        print(f"Dependency Count: {result['dependency_count']}")
+        logger.info(f"\nTotal Size: {calculator._format_size(result['total_size'])}")
+        logger.info(f"Archive: {calculator._format_size(result['archive_size'])}")
+        logger.info(f"Dependencies: {calculator._format_size(result['dependencies_size'])}")
+        logger.info(f"Dependency Count: {result['dependency_count']}")
 
-        print("\nTop 5 Dependencies:")
+        logger.info("\nTop 5 Dependencies:")
         top_deps = calculator.get_sorted_dependencies(tag, top_n=5)
         for i, dep in enumerate(top_deps, 1):
             if dep["size"]:
                 size_str = calculator._format_size(dep["size"])
-                print(f"  {i}. {dep['package']}{dep['version_spec']} - {size_str}")
+                logger.info(f"  {i}. {dep['package']}{dep['version_spec']} - {size_str}")
 
-        print("\nSize Breakdown:")
+        logger.info("\nSize Breakdown:")
         breakdown = calculator.get_size_breakdown(tag)
         if breakdown:
-            print(
+            logger.info(
                 f"  Archive: {breakdown['archive_size_formatted']} ({breakdown['archive_percentage']:.1f}%)"
             )
-            print(
+            logger.info(
                 f"  Dependencies: {breakdown['dependencies_size_formatted']} ({breakdown['dependencies_percentage']:.1f}%)"
             )
 
@@ -484,4 +490,4 @@ if __name__ == "__main__":
 
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
-        print("\n✓ Test cache cleaned up")
+        logger.info("\n✓ Test cache cleaned up")

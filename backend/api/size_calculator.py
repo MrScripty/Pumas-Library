@@ -9,7 +9,10 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.logging_config import get_logger
 from backend.models import GitHubRelease
+
+logger = get_logger(__name__)
 
 
 class SizeCalculator:
@@ -55,7 +58,7 @@ class SizeCalculator:
                 try:
                     self.calculate_release_size(tag, force_refresh=force_refresh)
                 except Exception as exc:
-                    print(f"Size refresh failed for {tag}: {exc}")
+                    logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
 
         threading.Thread(target=_worker, daemon=True).start()
 
@@ -76,7 +79,7 @@ class SizeCalculator:
             # Get release from GitHub
             release = self.github_fetcher.get_release_by_tag(tag)
             if not release:
-                print(f"Release {tag} not found")
+                logger.warning(f"Release {tag} not found")
                 return None
 
             # Get archive size from zipball_url
@@ -97,7 +100,7 @@ class SizeCalculator:
 
             return result
         except Exception as e:
-            print(f"Error calculating release size for {tag}: {e}")
+            logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
             return None
 
     def calculate_all_release_sizes(self, progress_callback=None) -> Dict[str, Dict[str, Any]]:
@@ -140,7 +143,7 @@ class SizeCalculator:
                 if length:
                     return int(length)
         except Exception as e:
-            print(f"Warning: Failed to fetch Content-Length for {url}: {e}")
+            logger.warning(f"Warning: Failed to fetch Content-Length for {url}: {e}")
         return None
 
     def get_release_size_info(self, tag: str, archive_size: int) -> Optional[Dict[str, Any]]:
@@ -162,7 +165,7 @@ class SizeCalculator:
             result = self.release_size_calculator.calculate_release_size(tag, archive_size)
             return result
         except Exception as e:
-            print(f"Error calculating release size: {e}")
+            logger.error(f"Error calculating release size: {e}", exc_info=True)
             return None
 
     def get_release_size_breakdown(self, tag: str) -> Optional[Dict[str, Any]]:
@@ -181,7 +184,7 @@ class SizeCalculator:
         try:
             return self.release_size_calculator.get_size_breakdown(tag)
         except Exception as e:
-            print(f"Error getting size breakdown: {e}")
+            logger.error(f"Error getting size breakdown: {e}", exc_info=True)
             return None
 
     def get_release_dependencies(
@@ -203,5 +206,5 @@ class SizeCalculator:
         try:
             return self.release_size_calculator.get_sorted_dependencies(tag, top_n)
         except Exception as e:
-            print(f"Error getting dependencies: {e}")
+            logger.error(f"Error getting dependencies: {e}", exc_info=True)
             return []

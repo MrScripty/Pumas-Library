@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.config import INSTALLATION
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
 try:
@@ -127,11 +130,11 @@ class ShortcutManager:
     def _validate_icon_prerequisites(self) -> bool:
         """Validate that icon generation prerequisites are met."""
         if not self.icon_webp.exists():
-            print("Base icon not found; cannot generate version-specific icon")
+            logger.warning("Base icon not found; cannot generate version-specific icon")
             return False
 
         if not (Image and ImageDraw and ImageFont):
-            print("Pillow not available; skipping version label overlay")
+            logger.warning("Pillow not available; skipping version label overlay")
             return False
 
         return True
@@ -234,7 +237,7 @@ class ShortcutManager:
             self._draw_version_banner(canvas, label, font)
             return self._save_generated_icon(tag, canvas)
         except Exception as e:
-            print(f"Error generating icon for {tag}: {e}")
+            logger.error(f"Error generating icon for {tag}: {e}", exc_info=True)
             return None
 
     def _install_version_icon(self, tag: str) -> str:
@@ -278,7 +281,7 @@ class ShortcutManager:
                     if result.returncode == 0:
                         conversion_success = True
             except Exception as e:
-                print(f"Error installing icon size {size} for {tag}: {e}")
+                logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
 
         if not conversion_success:
             try:
@@ -295,7 +298,7 @@ class ShortcutManager:
                 except Exception:
                     pass
             except Exception as e:
-                print(f"Error installing fallback icon for {tag}: {e}")
+                logger.error(f"Error installing fallback icon for {tag}: {e}", exc_info=True)
 
         # Update icon cache if available
         try:
@@ -434,7 +437,7 @@ wait $SERVER_PID
             script_path.chmod(0o755)
             return script_path
         except Exception as e:
-            print(f"Error writing launch script for {tag}: {e}")
+            logger.error(f"Error writing launch script for {tag}: {e}", exc_info=True)
             return None
 
     def get_version_shortcut_state(self, tag: str) -> Dict[str, Any]:
@@ -507,7 +510,7 @@ Categories=Graphics;ArtificialIntelligence;
                 shortcut_paths["menu"].chmod(0o755)
                 results["menu"] = True
             except Exception as e:
-                print(f"Error creating menu shortcut for {tag}: {e}")
+                logger.error(f"Error creating menu shortcut for {tag}: {e}", exc_info=True)
 
         if create_desktop:
             try:
@@ -526,7 +529,7 @@ Categories=Graphics;ArtificialIntelligence;
                 shortcut_paths["desktop"].chmod(0o755)
                 results["desktop"] = True
             except Exception as e:
-                print(f"Error creating desktop shortcut for {tag}: {e}")
+                logger.error(f"Error creating desktop shortcut for {tag}: {e}", exc_info=True)
 
         results["success"] = (not create_menu or results["menu"]) and (
             not create_desktop or results["desktop"]
@@ -676,17 +679,17 @@ Categories=Graphics;ArtificialIntelligence;
 
             return True
         except Exception as e:
-            print(f"Error installing icon: {e}")
+            logger.error(f"Error installing icon: {e}", exc_info=True)
             return False
 
     def create_menu_shortcut(self) -> bool:
         """Create application menu shortcut"""
-        print("Legacy shortcuts are disabled; use version-specific shortcuts instead.")
+        logger.info("Legacy shortcuts are disabled; use version-specific shortcuts instead.")
         return False
 
     def create_desktop_shortcut(self) -> bool:
         """Create desktop shortcut"""
-        print("Legacy shortcuts are disabled; use version-specific shortcuts instead.")
+        logger.info("Legacy shortcuts are disabled; use version-specific shortcuts instead.")
         return False
 
     def remove_menu_shortcut(self) -> bool:

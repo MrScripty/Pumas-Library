@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import ModelInfo, RepairReport, ScanResult, get_iso_timestamp
 from backend.utils import (
@@ -19,6 +20,8 @@ from backend.utils import (
     is_valid_symlink,
     make_relative_symlink,
 )
+
+logger = get_logger(__name__)
 
 
 class ResourceManager:
@@ -83,7 +86,7 @@ class ResourceManager:
         folder_paths_file = comfyui_path / "comfy" / "folder_paths.py"
 
         if not folder_paths_file.exists():
-            print(f"Warning: folder_paths.py not found in {comfyui_path}")
+            logger.warning(f"Warning: folder_paths.py not found in {comfyui_path}")
             return self._get_default_model_directories()
 
         try:
@@ -103,14 +106,14 @@ class ResourceManager:
 
             if matches:
                 model_dirs = list(set(matches))
-                print(f"Discovered {len(model_dirs)} model directories from folder_paths.py")
+                logger.info(f"Discovered {len(model_dirs)} model directories from folder_paths.py")
                 return sorted(model_dirs)
             else:
-                print("Could not parse folder_paths.py, using defaults")
+                logger.info("Could not parse folder_paths.py, using defaults")
                 return self._get_default_model_directories()
 
         except Exception as e:
-            print(f"Error parsing folder_paths.py: {e}")
+            logger.error(f"Error parsing folder_paths.py: {e}", exc_info=True)
             return self._get_default_model_directories()
 
     def _get_default_model_directories(self) -> List[str]:
@@ -159,12 +162,12 @@ class ResourceManager:
             if not target_dir.exists():
                 if ensure_directory(target_dir):
                     created_count += 1
-                    print(f"Created model directory: {model_dir}")
+                    logger.info(f"Created model directory: {model_dir}")
                 else:
                     success = False
 
         if created_count > 0:
-            print(f"Created {created_count} new model directories")
+            logger.info(f"Created {created_count} new model directories")
 
         return success
 
@@ -184,7 +187,7 @@ class ResourceManager:
         version_path = self.versions_dir / version_tag
 
         if not version_path.exists():
-            print(f"Error: Version directory not found: {version_path}")
+            logger.error(f"Error: Version directory not found: {version_path}")
             return False
 
         success = True
@@ -192,18 +195,18 @@ class ResourceManager:
         # 1. Symlink models directory
         models_link = version_path / "models"
         if not make_relative_symlink(self.shared_models_dir, models_link):
-            print(f"Failed to create models symlink for {version_tag}")
+            logger.error(f"Failed to create models symlink for {version_tag}")
             success = False
         else:
-            print(f"Created models symlink: {version_tag}/models -> shared-resources/models")
+            logger.info(f"Created models symlink: {version_tag}/models -> shared-resources/models")
 
         # 2. Symlink user directory
         user_link = version_path / "user"
         if not make_relative_symlink(self.shared_user_dir, user_link):
-            print(f"Failed to create user symlink for {version_tag}")
+            logger.error(f"Failed to create user symlink for {version_tag}")
             success = False
         else:
-            print(f"Created user symlink: {version_tag}/user -> shared-resources/user")
+            logger.info(f"Created user symlink: {version_tag}/user -> shared-resources/user")
 
         return success
 
@@ -222,7 +225,7 @@ class ResourceManager:
         report: RepairReport = {"broken": [], "repaired": [], "removed": []}
 
         if not version_path.exists():
-            print(f"Error: Version directory not found: {version_path}")
+            logger.error(f"Error: Version directory not found: {version_path}")
             return report
 
         # Check key symlinks
@@ -241,21 +244,21 @@ class ResourceManager:
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
                         report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        print(f"Repaired symlink: {link_name}")
+                        logger.info(f"Repaired symlink: {link_name}")
                     else:
-                        print(f"Failed to repair symlink: {link_name}")
+                        logger.error(f"Failed to repair symlink: {link_name}")
                 else:
                     # Target doesn't exist, remove broken symlink
                     link_path.unlink()
                     report["removed"].append(str(link_path.relative_to(self.launcher_root)))
-                    print(f"Removed broken symlink: {link_name}")
+                    logger.info(f"Removed broken symlink: {link_name}")
 
             elif not link_path.exists():
                 # Symlink doesn't exist, create it
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
                         report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        print(f"Created missing symlink: {link_name}")
+                        logger.info(f"Created missing symlink: {link_name}")
 
         return report
 
@@ -279,7 +282,7 @@ class ResourceManager:
         # Check for real models directory
         models_dir = version_path / "models"
         if models_dir.exists() and not models_dir.is_symlink():
-            print(f"Found real models directory in {version_path.name}")
+            logger.info(f"Found real models directory in {version_path.name}")
 
             # Scan for model files
             for category_dir in models_dir.iterdir():
@@ -305,16 +308,18 @@ class ResourceManager:
                         conflict_paths.append(str(model_file.relative_to(self.launcher_root)))
 
                         if not auto_merge:
-                            print(f"Conflict: {model_file.name} already exists in shared storage")
+                            logger.info(
+                                f"Conflict: {model_file.name} already exists in shared storage"
+                            )
                             continue
 
                     # Move file to shared storage
                     try:
                         shutil.move(str(model_file), str(shared_file_path))
                         files_moved += 1
-                        print(f"Moved: {category_name}/{model_file.name} -> shared storage")
+                        logger.info(f"Moved: {category_name}/{model_file.name} -> shared storage")
                     except Exception as e:
-                        print(f"Error moving {model_file}: {e}")
+                        logger.error(f"Error moving {model_file}: {e}", exc_info=True)
 
             # Remove empty category directories
             for category_dir in models_dir.iterdir():
@@ -328,7 +333,7 @@ class ResourceManager:
         # Check for real user directory
         user_dir = version_path / "user"
         if user_dir.exists() and not user_dir.is_symlink():
-            print(f"Found real user directory in {version_path.name}")
+            logger.info(f"Found real user directory in {version_path.name}")
 
             # Migrate workflows
             workflows_dir = user_dir / "workflows"
@@ -346,15 +351,15 @@ class ResourceManager:
                         conflict_paths.append(str(workflow_file.relative_to(self.launcher_root)))
 
                         if not auto_merge:
-                            print(f"Conflict: workflow {workflow_file.name} already exists")
+                            logger.info(f"Conflict: workflow {workflow_file.name} already exists")
                             continue
 
                     try:
                         shutil.move(str(workflow_file), str(shared_workflow_path))
                         files_moved += 1
-                        print(f"Moved: workflow {workflow_file.name} -> shared storage")
+                        logger.info(f"Moved: workflow {workflow_file.name} -> shared storage")
                     except Exception as e:
-                        print(f"Error moving workflow {workflow_file}: {e}")
+                        logger.error(f"Error moving workflow {workflow_file}: {e}", exc_info=True)
 
             # Remove empty directories
             if workflows_dir.exists() and not list(workflows_dir.iterdir()):
@@ -386,7 +391,7 @@ class ResourceManager:
             True if successful
         """
         if not source_path.exists():
-            print(f"Error: Source file not found: {source_path}")
+            logger.error(f"Error: Source file not found: {source_path}")
             return False
 
         # Ensure category directory exists
@@ -397,13 +402,13 @@ class ResourceManager:
         dest_path = category_dir / source_path.name
 
         if dest_path.exists():
-            print(f"Error: Model already exists: {dest_path.name}")
+            logger.error(f"Error: Model already exists: {dest_path.name}")
             return False
 
         try:
             # Copy file
             shutil.copy2(str(source_path), str(dest_path))
-            print(f"Added model: {category}/{source_path.name}")
+            logger.info(f"Added model: {category}/{source_path.name}")
 
             # Update metadata if requested
             if update_metadata:
@@ -412,7 +417,7 @@ class ResourceManager:
             return True
 
         except Exception as e:
-            print(f"Error adding model: {e}")
+            logger.error(f"Error adding model: {e}", exc_info=True)
             return False
 
     def _update_model_metadata(self, model_path: Path, category: str):
@@ -450,10 +455,10 @@ class ResourceManager:
 
             # Save metadata
             self.metadata_manager.save_models(metadata)
-            print(f"Updated metadata for {model_path.name}")
+            logger.info(f"Updated metadata for {model_path.name}")
 
         except Exception as e:
-            print(f"Error updating model metadata: {e}")
+            logger.error(f"Error updating model metadata: {e}", exc_info=True)
 
     def remove_model(self, model_path: str) -> bool:
         """
@@ -468,13 +473,13 @@ class ResourceManager:
         full_path = self.shared_models_dir / model_path
 
         if not full_path.exists():
-            print(f"Error: Model not found: {model_path}")
+            logger.error(f"Error: Model not found: {model_path}")
             return False
 
         try:
             # Remove file
             full_path.unlink()
-            print(f"Removed model: {model_path}")
+            logger.info(f"Removed model: {model_path}")
 
             # Update metadata
             metadata = self.metadata_manager.load_models()
@@ -485,7 +490,7 @@ class ResourceManager:
             return True
 
         except Exception as e:
-            print(f"Error removing model: {e}")
+            logger.error(f"Error removing model: {e}", exc_info=True)
             return False
 
     def scan_shared_storage(self) -> ScanResult:
@@ -560,7 +565,7 @@ class ResourceManager:
                 if d.is_dir() and not d.name.startswith(".")
             ]
         except Exception as e:
-            print(f"Error listing custom nodes: {e}")
+            logger.error(f"Error listing custom nodes: {e}", exc_info=True)
             return []
 
     def install_custom_node(
@@ -594,11 +599,11 @@ class ResourceManager:
         node_install_path = custom_nodes_dir / node_name
 
         if node_install_path.exists():
-            print(f"Custom node already installed: {node_name}")
+            logger.info(f"Custom node already installed: {node_name}")
             return False
 
         # Clone to version's custom_nodes directory
-        print(f"Installing custom node {node_name} for {version_tag}...")
+        logger.info(f"Installing custom node {node_name} for {version_tag}...")
 
         success, stdout, stderr = run_command(
             ["git", "clone", git_url, str(node_install_path)],
@@ -606,16 +611,16 @@ class ResourceManager:
         )
 
         if not success:
-            print(f"Error cloning custom node: {stderr}")
+            logger.error(f"Error cloning custom node: {stderr}")
             return False
 
-        print(f"✓ Installed custom node: {node_name}")
+        logger.info(f"✓ Installed custom node: {node_name}")
 
         # Check for requirements.txt and warn user
         requirements_file = node_install_path / "requirements.txt"
         if requirements_file.exists():
-            print(f"  Note: {node_name} has requirements.txt")
-            print(f"  You may need to install dependencies for {version_tag}")
+            logger.info(f"  Note: {node_name} has requirements.txt")
+            logger.info(f"  You may need to install dependencies for {version_tag}")
 
         return True
 
@@ -635,30 +640,30 @@ class ResourceManager:
         node_path = self.get_version_custom_nodes_dir(version_tag) / node_name
 
         if not node_path.exists():
-            print(f"Custom node not found: {node_name}")
+            logger.error(f"Custom node not found: {node_name}")
             return False
 
         # Check if it's a git repository
         if not (node_path / ".git").exists():
-            print(f"Not a git repository: {node_name}")
+            logger.error(f"Not a git repository: {node_name}")
             return False
 
-        print(f"Updating custom node {node_name}...")
+        logger.info(f"Updating custom node {node_name}...")
 
         # Git pull
         success, stdout, stderr = run_command(["git", "pull"], cwd=node_path, timeout=60)
 
         if not success:
-            print(f"Error updating custom node: {stderr}")
+            logger.error(f"Error updating custom node: {stderr}")
             return False
 
-        print(f"✓ Updated custom node: {node_name}")
-        print(stdout)
+        logger.info(f"✓ Updated custom node: {node_name}")
+        logger.info(stdout)
 
         # Check if requirements changed
         requirements_file = node_path / "requirements.txt"
         if requirements_file.exists():
-            print(f"  Note: Check if requirements.txt changed")
+            logger.info(f"  Note: Check if requirements.txt changed")
 
         return True
 
@@ -676,15 +681,15 @@ class ResourceManager:
         node_path = self.get_version_custom_nodes_dir(version_tag) / node_name
 
         if not node_path.exists():
-            print(f"Custom node not found: {node_name}")
+            logger.error(f"Custom node not found: {node_name}")
             return False
 
         try:
             shutil.rmtree(node_path)
-            print(f"✓ Removed custom node: {node_name} from {version_tag}")
+            logger.info(f"✓ Removed custom node: {node_name} from {version_tag}")
             return True
         except Exception as e:
-            print(f"Error removing custom node: {e}")
+            logger.error(f"Error removing custom node: {e}", exc_info=True)
             return False
 
     def cache_custom_node_repo(self, git_url: str) -> Optional[Path]:
@@ -709,18 +714,18 @@ class ResourceManager:
 
         if cache_path.exists():
             # Update existing cache
-            print(f"Updating cached repo: {repo_name}")
+            logger.info(f"Updating cached repo: {repo_name}")
             success, stdout, stderr = run_command(
                 ["git", "fetch", "--all"], cwd=cache_path, timeout=60
             )
 
             if not success:
-                print(f"Warning: Failed to update cache: {stderr}")
+                logger.warning(f"Warning: Failed to update cache: {stderr}")
 
             return cache_path
         else:
             # Clone as bare repo
-            print(f"Caching custom node repo: {repo_name}")
+            logger.info(f"Caching custom node repo: {repo_name}")
             ensure_directory(self.shared_custom_nodes_cache_dir)
 
             success, stdout, stderr = run_command(
@@ -728,10 +733,10 @@ class ResourceManager:
             )
 
             if not success:
-                print(f"Error caching repo: {stderr}")
+                logger.error(f"Error caching repo: {stderr}")
                 return None
 
-            print(f"✓ Cached repo: {repo_name}")
+            logger.info(f"✓ Cached repo: {repo_name}")
             return cache_path
 
 
@@ -748,42 +753,42 @@ if __name__ == "__main__":
     # Initialize resource manager
     resource_mgr = ResourceManager(launcher_root, metadata_mgr)
 
-    print("=== Resource Manager Test ===\n")
+    logger.info("=== Resource Manager Test ===\n")
 
     # Initialize shared storage
-    print("Initializing shared storage...")
+    logger.info("Initializing shared storage...")
     if resource_mgr.initialize_shared_storage():
-        print("✓ Shared storage initialized\n")
+        logger.info("✓ Shared storage initialized\n")
     else:
-        print("✗ Failed to initialize shared storage\n")
+        logger.info("✗ Failed to initialize shared storage\n")
 
     # Scan shared storage
-    print("Scanning shared storage...")
+    logger.info("Scanning shared storage...")
     scan_result = resource_mgr.scan_shared_storage()
-    print(f"✓ Scan complete:")
-    print(f"  Models: {scan_result['modelsFound']}")
-    print(f"  Workflows: {scan_result['workflowsFound']}")
-    print(f"  Total size: {scan_result['totalSize']:,} bytes\n")
+    logger.info(f"✓ Scan complete:")
+    logger.info(f"  Models: {scan_result['modelsFound']}")
+    logger.info(f"  Workflows: {scan_result['workflowsFound']}")
+    logger.info(f"  Total size: {scan_result['totalSize']:,} bytes\n")
 
     # Check if we have any installed versions
     versions = metadata_mgr.load_versions_metadata()
     if versions.get("installed"):
-        print("Testing symlink setup for installed versions:")
+        logger.info("Testing symlink setup for installed versions:")
         for version_tag in versions["installed"].keys():
-            print(f"\nVersion: {version_tag}")
+            logger.info(f"\nVersion: {version_tag}")
 
             # Setup symlinks
             if resource_mgr.setup_version_symlinks(version_tag):
-                print(f"  ✓ Symlinks created")
+                logger.info(f"  ✓ Symlinks created")
             else:
-                print(f"  ✗ Failed to create symlinks")
+                logger.info(f"  ✗ Failed to create symlinks")
 
             # Validate symlinks
             repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
-            print(
+            logger.info(
                 f"  Validation: {len(repair_report['broken'])} broken, "
                 f"{len(repair_report['repaired'])} repaired, "
                 f"{len(repair_report['removed'])} removed"
             )
     else:
-        print("No versions installed yet")
+        logger.info("No versions installed yet")

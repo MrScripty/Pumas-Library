@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from backend.file_opener import open_in_file_manager
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 class SystemUtils:
@@ -138,7 +141,7 @@ class SystemUtils:
             result = self.shortcut_manager.toggle_version_menu_shortcut(target)
             return bool(result.get("success", False))
 
-        print("No active version available for menu shortcut")
+        logger.warning("No active version available for menu shortcut")
         return False
 
     def toggle_desktop(self, tag: Optional[str] = None) -> bool:
@@ -151,7 +154,7 @@ class SystemUtils:
             result = self.shortcut_manager.toggle_version_desktop_shortcut(target)
             return bool(result.get("success", False))
 
-        print("No active version available for desktop shortcut")
+        logger.warning("No active version available for desktop shortcut")
         return False
 
     def open_path(self, path: str) -> Dict[str, Any]:

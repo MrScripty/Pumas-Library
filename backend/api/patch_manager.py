@@ -10,6 +10,10 @@ import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class PatchManager:
     """Manages main.py patching for ComfyUI versions"""
@@ -61,10 +65,10 @@ class PatchManager:
                     main_py = version_path / "main.py"
                     if main_py.exists():
                         return main_py, tag
-                    print(f"main.py not found for version {tag} at {main_py}")
+                    logger.warning(f"main.py not found for version {tag} at {main_py}")
                     return None, tag
             except Exception as e:
-                print(f"Error resolving main.py for version {tag}: {e}")
+                logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
                 return None, tag
 
         if self.version_manager:
@@ -76,10 +80,12 @@ class PatchManager:
                         main_py = version_path / "main.py"
                         if main_py.exists():
                             return main_py, active_tag
-                        print(f"main.py not found for active version {active_tag} at {main_py}")
+                        logger.warning(
+                            f"main.py not found for active version {active_tag} at {main_py}"
+                        )
                         return None, active_tag
             except Exception as e:
-                print(f"Error determining active version for patching: {e}")
+                logger.error(f"Error determining active version for patching: {e}", exc_info=True)
                 return None, active_tag
 
         if self.main_py.exists():
@@ -92,7 +98,7 @@ class PatchManager:
                 installed_versions = self.version_manager.list_installed_versions()
                 if installed_versions:
                     # We have versions but no main.py found - this is an error
-                    print(f"No main.py found to patch at {self.main_py}")
+                    logger.warning(f"No main.py found to patch at {self.main_py}")
             except Exception:
                 pass  # Silently handle errors checking for installed versions
 
@@ -119,7 +125,7 @@ class PatchManager:
                 re.search(r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)', content)
             )
         except Exception as e:
-            print(f"Error reading {main_py} to check patch state: {e}")
+            logger.error(f"Error reading {main_py} to check patch state: {e}", exc_info=True)
             return False
 
     def is_patched(self, tag: Optional[str] = None) -> bool:
@@ -133,7 +139,7 @@ class PatchManager:
         """Patch selected main.py to set process title"""
         main_py, active_tag = self._get_target_main_py(tag)
         if not main_py:
-            print("No active version found to patch. Select a version first.")
+            logger.warning("No active version found to patch. Select a version first.")
             return False
 
         server_title = self._build_server_title(active_tag)
@@ -144,7 +150,7 @@ class PatchManager:
         try:
             content = main_py.read_text()
         except Exception as e:
-            print(f"Error reading {main_py} for patching: {e}")
+            logger.error(f"Error reading {main_py} for patching: {e}", exc_info=True)
             return False
 
         # Already patched with the correct title - nothing to do
@@ -186,7 +192,7 @@ class PatchManager:
         """Revert selected main.py to original state"""
         main_py, active_tag = self._get_target_main_py(tag)
         if not main_py:
-            print("No active version found to unpatch. Select a version first.")
+            logger.warning("No active version found to unpatch. Select a version first.")
             return False
 
         backup = main_py.with_suffix(".py.bak")

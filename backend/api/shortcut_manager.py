@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
 try:
     from PIL import Image, ImageDraw, ImageFont
-except Exception:
+except ImportError:
     Image = None
     ImageDraw = None
     ImageFont = None
@@ -108,7 +108,7 @@ class ShortcutManager:
             try:
                 if icon_path.exists():
                     icon_path.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         scalable_dir = icon_base_dir / "scalable" / "apps"
@@ -117,14 +117,14 @@ class ShortcutManager:
                 icon_path = scalable_dir / f"{icon_name}.{ext}"
                 if icon_path.exists():
                     icon_path.unlink()
-            except Exception:
+            except OSError:
                 pass
 
         generated_icon = self.generated_icons_dir / f"{icon_name}.png"
         try:
             if generated_icon.exists():
                 generated_icon.unlink()
-        except Exception:
+        except OSError:
             pass
 
     def _validate_icon_prerequisites(self) -> bool:
@@ -155,7 +155,7 @@ class ShortcutManager:
         font_size = max(28, canvas_size // 5 + 2)
         try:
             return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
-        except Exception:
+        except OSError:
             return ImageFont.load_default()
 
     def _prepare_version_label(self, tag: str) -> str:
@@ -192,7 +192,7 @@ class ShortcutManager:
         # Draw background banner
         try:
             draw.rounded_rectangle(background, radius=padding, fill=(0, 0, 0, 190))
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             draw.rectangle(background, fill=(0, 0, 0, 190))
 
         # Draw text
@@ -236,7 +236,7 @@ class ShortcutManager:
             label = self._prepare_version_label(tag)
             self._draw_version_banner(canvas, label, font)
             return self._save_generated_icon(tag, canvas)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error generating icon for {tag}: {e}", exc_info=True)
             return None
 
@@ -280,7 +280,13 @@ class ShortcutManager:
                     )
                     if result.returncode == 0:
                         conversion_success = True
-            except Exception as e:
+            except (
+                FileNotFoundError,
+                OSError,
+                TypeError,
+                ValueError,
+                subprocess.SubprocessError,
+            ) as e:
                 logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
 
         if not conversion_success:
@@ -295,9 +301,9 @@ class ShortcutManager:
                     if png_link.exists():
                         png_link.unlink()
                     png_link.symlink_to(dest_icon)
-                except Exception:
+                except OSError:
                     pass
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Error installing fallback icon for {tag}: {e}", exc_info=True)
 
         # Update icon cache if available
@@ -307,7 +313,7 @@ class ShortcutManager:
                 capture_output=True,
                 timeout=5,
             )
-        except Exception:
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
             pass
 
         try:
@@ -324,7 +330,7 @@ class ShortcutManager:
                 capture_output=True,
                 timeout=5,
             )
-        except Exception:
+        except (FileNotFoundError, OSError, subprocess.SubprocessError):
             pass
 
         return icon_name
@@ -436,7 +442,7 @@ wait $SERVER_PID
             script_path.write_text(content)
             script_path.chmod(0o755)
             return script_path
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Error writing launch script for {tag}: {e}", exc_info=True)
             return None
 
@@ -509,7 +515,7 @@ Categories=Graphics;ArtificialIntelligence;
                 # Mark executable to be trusted by desktop environments (especially on Desktop)
                 shortcut_paths["menu"].chmod(0o755)
                 results["menu"] = True
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Error creating menu shortcut for {tag}: {e}", exc_info=True)
 
         if create_desktop:
@@ -528,7 +534,7 @@ Categories=Graphics;ArtificialIntelligence;
                 shortcut_paths["desktop"].write_text(content)
                 shortcut_paths["desktop"].chmod(0o755)
                 results["desktop"] = True
-            except Exception as e:
+            except OSError as e:
                 logger.error(f"Error creating desktop shortcut for {tag}: {e}", exc_info=True)
 
         results["success"] = (not create_menu or results["menu"]) and (
@@ -545,13 +551,13 @@ Categories=Graphics;ArtificialIntelligence;
         if remove_menu:
             try:
                 paths["menu"].unlink(missing_ok=True)
-            except Exception:
+            except OSError:
                 pass
 
         if remove_desktop:
             try:
                 paths["desktop"].unlink(missing_ok=True)
-            except Exception:
+            except OSError:
                 pass
 
         # Remove launcher script if no shortcuts remain
@@ -559,7 +565,7 @@ Categories=Graphics;ArtificialIntelligence;
         if not state_after["menu"] and not state_after["desktop"]:
             try:
                 paths["launcher"].unlink(missing_ok=True)
-            except Exception:
+            except OSError:
                 pass
             self._remove_installed_icon(paths["icon_name"])
 
@@ -629,7 +635,7 @@ Categories=Graphics;ArtificialIntelligence;
                     )
                     if result.returncode == 0:
                         conversion_success = True
-                except Exception:
+                except (FileNotFoundError, OSError, subprocess.SubprocessError):
                     pass
 
             # If conversion failed, try copying webp as fallback
@@ -646,7 +652,7 @@ Categories=Graphics;ArtificialIntelligence;
                     if png_link.exists():
                         png_link.unlink()
                     png_link.symlink_to(dest_icon)
-                except Exception:
+                except OSError:
                     pass
 
             # Update icon cache if available
@@ -656,7 +662,7 @@ Categories=Graphics;ArtificialIntelligence;
                     capture_output=True,
                     timeout=5,
                 )
-            except Exception:
+            except (FileNotFoundError, OSError, subprocess.SubprocessError):
                 pass
 
             # Also try xdg-icon-resource as alternative installation method
@@ -674,11 +680,11 @@ Categories=Graphics;ArtificialIntelligence;
                     capture_output=True,
                     timeout=5,
                 )
-            except Exception:
+            except (FileNotFoundError, OSError, subprocess.SubprocessError):
                 pass
 
             return True
-        except Exception as e:
+        except OSError as e:
             logger.error(f"Error installing icon: {e}", exc_info=True)
             return False
 

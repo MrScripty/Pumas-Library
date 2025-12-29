@@ -88,7 +88,7 @@ class ComfyUISetupAPI:
                         data = tomllib.load(f)
                         if data.get("project", {}).get("name") == "ComfyUI":
                             return current
-                except Exception:
+                except (OSError, tomllib.TOMLDecodeError):
                     pass
 
             # Move up one directory
@@ -130,7 +130,7 @@ class ComfyUISetupAPI:
             )
 
             self._prefetch_releases_if_needed()
-        except Exception as e:
+        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.warning(f"Version management initialization failed: {e}", exc_info=True)
             self.metadata_manager = None
             self.github_fetcher = None
@@ -210,7 +210,7 @@ class ComfyUISetupAPI:
                         return
                     else:
                         logger.info(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
-                except Exception as e:
+                except (KeyError, TypeError, ValueError) as e:
                     logger.warning(
                         f"Error checking cache validity: {e} - prefetching", exc_info=True
                     )
@@ -231,7 +231,7 @@ class ComfyUISetupAPI:
                         self._background_fetch_completed = True
                     else:
                         logger.warning("Background prefetch returned empty (likely offline)")
-                except Exception as exc:
+                except (OSError, RuntimeError, TypeError, ValueError) as exc:
                     logger.error(f"Background prefetch failed: {exc}", exc_info=True)
                     logger.info("App will continue using stale cache")
 
@@ -239,7 +239,7 @@ class ComfyUISetupAPI:
 
             threading.Thread(target=_background_fetch, daemon=True).start()
 
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Prefetch init error: {e}", exc_info=True)
 
     def has_background_fetch_completed(self) -> bool:
@@ -438,7 +438,7 @@ class ComfyUISetupAPI:
         try:
             releases = self.version_manager.get_available_releases(force_refresh)
             releases_source = "remote" if force_refresh else "cache/remote"
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(
                 f"Error fetching releases (force_refresh={force_refresh}): {e}", exc_info=True
             )
@@ -451,7 +451,7 @@ class ComfyUISetupAPI:
                     releases = cache.get("releases", [])
                     releases_source = "cache-fallback"
                     logger.info("Using cached releases due to fetch error/rate-limit.")
-            except Exception as e:
+            except (OSError, TypeError, ValueError) as e:
                 logger.error(
                     f"Error loading cached releases after fetch failure: {e}", exc_info=True
                 )
@@ -463,7 +463,7 @@ class ComfyUISetupAPI:
             active_progress = self.version_manager.get_installation_progress()
             if active_progress and not active_progress.get("completed_at"):
                 installing_tag = active_progress.get("tag")
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
 
         enriched_releases = []
@@ -500,7 +500,7 @@ class ComfyUISetupAPI:
             self.size_calc._refresh_release_sizes_async(
                 enriched_releases, installed_tags, force_refresh
             )
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
 
         return enriched_releases

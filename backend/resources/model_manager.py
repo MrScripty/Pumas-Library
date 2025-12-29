@@ -77,7 +77,7 @@ class ModelManager:
 
             return True
 
-        except Exception as e:
+        except (IOError, OSError, PermissionError) as e:
             logger.error(f"Error adding model: {e}", exc_info=True)
             return False
 
@@ -118,7 +118,7 @@ class ModelManager:
             self.metadata_manager.save_models(metadata)
             logger.info(f"Updated metadata for {model_path.name}")
 
-        except Exception as e:
+        except (IOError, OSError) as e:
             logger.error(f"Error updating model metadata: {e}", exc_info=True)
 
     def remove_model(self, model_path: str) -> bool:
@@ -150,6 +150,6 @@ class ModelManager:
 
             return True
 
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error removing model: {e}", exc_info=True)
             return False

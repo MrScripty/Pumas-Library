@@ -52,6 +52,12 @@ repos:
         language: system
         types: [python]
         files: \.py$
+      - id: pytest
+        name: pytest
+        entry: ./venv/bin/python -m pytest
+        language: system
+        pass_filenames: false
+        always_run: true
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

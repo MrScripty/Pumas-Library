@@ -83,7 +83,17 @@ class PatchManager:
         if self.main_py.exists():
             return self.main_py, None
 
-        print(f"No main.py found to patch at {self.main_py}")
+        # Only print error if we have installed versions but can't find main.py
+        # For fresh installs with no versions, silently return None
+        if self.version_manager:
+            try:
+                installed_versions = self.version_manager.list_installed_versions()
+                if installed_versions:
+                    # We have versions but no main.py found - this is an error
+                    print(f"No main.py found to patch at {self.main_py}")
+            except Exception:
+                pass  # Silently handle errors checking for installed versions
+
         return None, active_tag
 
     def _is_main_py_patched(self, main_py: Path, expected_title: Optional[str] = None) -> bool:

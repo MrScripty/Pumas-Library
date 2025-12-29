@@ -42,7 +42,7 @@ class ProcessManager:
                 version_path = self.version_manager.get_version_path(tag)
                 if version_path:
                     tag_paths[tag] = version_path
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error collecting version paths: {e}", exc_info=True)
 
         return tag_paths
@@ -103,7 +103,7 @@ class ProcessManager:
                 ["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=3
             )
             ps_output = ps.stdout.splitlines()
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
             logger.error(f"Error scanning process table: {e}", exc_info=True)
             ps_output = []
 
@@ -149,7 +149,7 @@ class ProcessManager:
         """Check if ComfyUI is currently running"""
         try:
             return bool(self._detect_comfyui_processes())
-        except Exception:
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
             return False
 
     def stop_comfyui(self) -> bool:
@@ -173,7 +173,7 @@ class ProcessManager:
                             os.kill(int(pid), 9)  # SIGKILL - force kill immediately
                         except (ValueError, ProcessLookupError):
                             pass
-            except Exception:
+            except (subprocess.SubprocessError, OSError, FileNotFoundError):
                 pass  # Continue even if this fails
 
             # Stop the ComfyUI server (all detected processes)
@@ -194,14 +194,14 @@ class ProcessManager:
                     killed = True
                 except (ProcessLookupError, OSError):
                     pass
-                except Exception as e:
+                except (OSError, TypeError, ValueError) as e:
                     logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
 
                 pid_file = proc.get("pid_file")
                 if pid_file:
                     try:
                         Path(pid_file).unlink(missing_ok=True)
-                    except Exception:
+                    except (OSError, TypeError):
                         pass
 
             if killed:
@@ -211,11 +211,11 @@ class ProcessManager:
             try:
                 subprocess.run(["pkill", "-9", "-f", "ComfyUI Server"], check=False)
                 return True
-            except Exception:
+            except (subprocess.SubprocessError, OSError, FileNotFoundError):
                 pass
 
             return False
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
             logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
             return False
 
@@ -247,7 +247,7 @@ class ProcessManager:
             self.last_launch_error = "No active version selected"
             self.last_launch_log = None
             return {"success": False, "error": "No active version selected"}
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
             self.last_launch_error = str(e)
             return {"success": False, "error": str(e)}

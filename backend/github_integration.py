@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 from cachetools import TTLCache
 from packaging.version import InvalidVersion, Version
 
+from backend.exceptions import MetadataError, NetworkError
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
@@ -250,14 +251,14 @@ class GitHubReleasesFetcher:
 
                 return []
 
-            except Exception as e:
-                # Other errors (rate limit, parse error, etc.)
-                logger.error(f"Error fetching from GitHub: {e}", exc_info=True)
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
+                # JSON parsing or data format errors
+                logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
 
                 # Try stale cache
                 disk_cache = self.metadata_manager.load_github_cache()
                 if disk_cache and disk_cache.get("releases"):
-                    logger.info("Using stale disk cache (fetch error)")
+                    logger.info("Using stale disk cache (parse error)")
                     return disk_cache["releases"]
 
                 logger.warning("No cache available and fetch failed - returning empty")
@@ -307,7 +308,7 @@ class GitHubReleasesFetcher:
                     now = parse_iso_timestamp(get_iso_timestamp())
                     status["age_seconds"] = int((now - last_fetched).total_seconds())
                     status["last_fetched"] = disk_cache.get("lastFetched")
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.error(f"Error getting cache age: {e}", exc_info=True)
             return status
 
@@ -327,7 +328,7 @@ class GitHubReleasesFetcher:
                 age_seconds = (now - last_fetched).total_seconds()
                 status["age_seconds"] = int(age_seconds)
                 status["is_valid"] = age_seconds < disk_cache.get("ttl", self.ttl)
-            except Exception as e:
+            except (KeyError, ValueError, TypeError) as e:
                 logger.error(f"Error validating disk cache in get_cache_status: {e}", exc_info=True)
                 # If we can't parse the timestamp, assume it's invalid but exists
                 status["is_valid"] = False
@@ -563,8 +564,16 @@ class DownloadManager:
             if destination.exists():
                 destination.unlink()
             return False
-        except Exception as e:
-            logger.error(f"Unexpected error during download: {e}", exc_info=True)
+        except InterruptedError as e:
+            # User cancelled download
+            logger.info(f"Download interrupted: {e}")
+            # Clean up partial download
+            if destination.exists():
+                destination.unlink()
+            return False
+        except (OSError, IOError) as e:
+            # File I/O errors (permissions, disk full, etc.)
+            logger.error(f"File system error during download: {e}", exc_info=True)
             # Clean up partial download
             if destination.exists():
                 destination.unlink()

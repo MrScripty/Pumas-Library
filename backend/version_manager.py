@@ -405,7 +405,7 @@ class VersionManager:
                         f.write(f"{pkg}{spec}\n")
                     else:
                         f.write(f"{pkg}\n")
-        except Exception as exc:
+        except (IOError, OSError) as exc:
             logger.warning(f"Failed to write constraints file for {tag}: {exc}")
             return None
 
@@ -465,7 +465,8 @@ class VersionManager:
                     logger.info("→ Cancelling active download...")
                     self._current_downloader.cancel()
                     logger.info("✓ Download cancelled")
-                except Exception as e:
+                except (AttributeError, RuntimeError) as e:
+                    # Downloader may not support cancellation or already finished
                     logger.error(f"✗ Error cancelling download: {e}", exc_info=True)
 
             # Immediately kill any running process and all its children
@@ -484,7 +485,7 @@ class VersionManager:
                             # Check if still alive - need to check if process object is still valid
                             try:
                                 still_alive = self._current_process.poll() is None
-                            except Exception:
+                            except (OSError, ValueError):
                                 # Process object might be invalid, assume it's dead
                                 still_alive = False
 
@@ -499,12 +500,12 @@ class VersionManager:
                             self._current_process.wait(
                                 timeout=INSTALLATION.SUBPROCESS_STOP_TIMEOUT_SEC
                             )
-                        except Exception:
-                            pass  # Process might already be gone
+                        except (subprocess.TimeoutExpired, OSError):
+                            pass  # Process might already be gone or timeout
                         logger.info("✓ All processes terminated")
                     except ProcessLookupError:
                         logger.info("✓ Process already terminated")
-                    except Exception as kill_error:
+                    except (OSError, PermissionError) as kill_error:
                         logger.error(f"✗ Error killing process group: {kill_error}", exc_info=True)
                         # Fallback: try killing just the main process
                         try:
@@ -513,9 +514,9 @@ class VersionManager:
                                 timeout=INSTALLATION.SUBPROCESS_KILL_TIMEOUT_SEC
                             )
                             logger.info("✓ Main process killed")
-                        except Exception:
+                        except (subprocess.TimeoutExpired, OSError):
                             pass
-                except Exception as e:
+                except (OSError, PermissionError) as e:
                     logger.error(f"✗ Error terminating subprocess: {e}", exc_info=True)
 
             self.progress_tracker.set_error("Installation cancelled by user")
@@ -631,7 +632,7 @@ class VersionManager:
                         try:
                             shutil.rmtree(version_dir)
                             logger.info(f"✓ Removed incomplete installation directory: {tag}")
-                        except Exception as e:
+                        except (OSError, PermissionError) as e:
                             logger.error(f"Error removing {tag}: {e}", exc_info=True)
 
         # Clean up metadata if we found incomplete versions in metadata
@@ -820,7 +821,7 @@ class VersionManager:
                 ) as resp:
                     if resp.status == 200:
                         return True, None
-            except Exception as exc:
+            except (urllib.error.URLError, OSError) as exc:
                 last_error = str(exc)
 
             if time.time() - start > timeout:
@@ -838,7 +839,7 @@ class VersionManager:
         try:
             content = log_file.read_text().splitlines()
             return content[-lines:]
-        except Exception:
+        except (IOError, OSError, UnicodeDecodeError):
             return []
 
     def _open_frontend(self, url: str, slug: str):
@@ -862,7 +863,7 @@ class VersionManager:
                 subprocess.Popen(
                     ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-        except Exception as exc:
+        except (OSError, subprocess.SubprocessError) as exc:
             logger.warning(f"Failed to open frontend: {exc}")
 
     def install_version(
@@ -1064,7 +1065,7 @@ class VersionManager:
                     try:
                         shutil.rmtree(version_path)
                         logger.info(f"✓ Removed incomplete installation directory")
-                    except Exception as cleanup_error:
+                    except (OSError, PermissionError) as cleanup_error:
                         logger.warning(f"Failed to clean up directory: {cleanup_error}")
                 self.progress_tracker.complete_installation(False)
                 return False
@@ -1119,10 +1120,17 @@ class VersionManager:
                 try:
                     shutil.rmtree(version_path)
                     logger.info(f"✓ Removed incomplete installation directory")
-                except Exception as cleanup_error:
+                except (OSError, PermissionError) as cleanup_error:
                     logger.warning(f"Failed to clean up directory: {cleanup_error}")
             return False
-        except Exception as e:
+        except (
+            InstallationError,
+            DependencyError,
+            NetworkError,
+            ResourceError,
+            tarfile.TarError,
+            zipfile.BadZipFile,
+        ) as e:
             error_msg = f"Error installing version {tag}: {e}"
             logger.error(error_msg, exc_info=True)
             self._log_install(error_msg)
@@ -1135,7 +1143,7 @@ class VersionManager:
                 try:
                     shutil.rmtree(version_path)
                     logger.info(f"✓ Removed incomplete installation directory")
-                except Exception as cleanup_error:
+                except (OSError, PermissionError) as cleanup_error:
                     logger.warning(f"Failed to clean up directory: {cleanup_error}")
             return False
         finally:
@@ -1146,7 +1154,7 @@ class VersionManager:
                 try:
                     self._install_log_handle.write(f"{'='*30} INSTALL END {tag} {'='*30}\n")
                     self._install_log_handle.close()
-                except Exception:
+                except (IOError, OSError):
                     pass
                 self._install_log_handle = None
             # Preserve progress state so UI can read failure logs; it will be overwritten by the next install
@@ -1177,7 +1185,7 @@ class VersionManager:
         safe_dir = self.metadata_manager.cache_dir / "requirements-safe"
         try:
             safe_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as exc:
+        except (OSError, PermissionError) as exc:
             logger.warning(f"Could not create safe requirements dir: {exc}")
             return requirements_file, constraints_path
 
@@ -1189,7 +1197,7 @@ class VersionManager:
             if requirements_file and requirements_file.exists():
                 safe_req = safe_dir / f"{safe_tag}-requirements.txt"
                 shutil.copyfile(requirements_file, safe_req)
-        except Exception as exc:
+        except (IOError, OSError) as exc:
             logger.warning(f"Could not copy requirements.txt to safe path: {exc}")
             safe_req = requirements_file
 
@@ -1197,7 +1205,7 @@ class VersionManager:
             if constraints_path and constraints_path.exists():
                 safe_constraints = safe_dir / f"{safe_tag}-constraints.txt"
                 shutil.copyfile(constraints_path, safe_constraints)
-        except Exception as exc:
+        except (IOError, OSError) as exc:
             logger.warning(f"Could not copy constraints to safe path: {exc}")
             safe_constraints = constraints_path
 
@@ -1320,7 +1328,7 @@ class VersionManager:
                             )
                             if pkg:
                                 optional_requirements.add(canonicalize_name(pkg))
-            except Exception as e:
+            except (IOError, OSError, KeyError, ValueError) as e:
                 logger.warning(f"Could not parse optional dependencies in {requirements_file}: {e}")
 
         # Add global required packages (e.g., setproctitle for process naming)
@@ -1404,7 +1412,7 @@ class VersionManager:
                     canonicalize_name(pkg.get("name", "")) for pkg in parsed if pkg.get("name")
                 }
                 return installed_names
-            except Exception as e:
+            except (json.JSONDecodeError, KeyError, ValueError) as e:
                 errors.append(f"pip json parse: {e}")
                 logger.error(f"Error parsing pip list JSON for {tag}: {e}", exc_info=True)
         else:
@@ -1551,7 +1559,7 @@ wait $SERVER_PID
         try:
             script_path.write_text(content)
             script_path.chmod(0o755)
-        except Exception as e:
+        except (IOError, OSError) as e:
             logger.warning(f"Could not write run.sh for {tag}: {e}")
         return script_path
 
@@ -1601,7 +1609,7 @@ wait $SERVER_PID
         constraints_path = None
         try:
             release = self.github_fetcher.get_release_by_tag(tag)
-        except Exception:
+        except (KeyError, ValueError, TypeError):
             release = None
         if requirements_file.exists():
             constraints_path = self._build_constraints_for_tag(tag, requirements_file, release)
@@ -1700,7 +1708,7 @@ wait $SERVER_PID
         constraints_path = None
         try:
             release = self.github_fetcher.get_release_by_tag(tag)
-        except Exception:
+        except (KeyError, ValueError, TypeError):
             release = None
         if requirements_file.exists():
             constraints_path = self._build_constraints_for_tag(tag, requirements_file, release)
@@ -1865,7 +1873,7 @@ wait $SERVER_PID
 
         except InterruptedError:
             raise  # Re-raise to be caught by install_version
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Error during dependency installation: {e}", exc_info=True)
             if self._current_process:
                 # Kill entire process group
@@ -1874,7 +1882,7 @@ wait $SERVER_PID
                         os.killpg(os.getpgid(self._current_process.pid), 9)
                     else:
                         self._current_process.kill()
-                except Exception:
+                except (OSError, PermissionError):
                     pass
             return False
         finally:
@@ -1945,7 +1953,7 @@ wait $SERVER_PID
             logger.info(f"✓ Removed version {tag}")
             return True
 
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             logger.error(f"Error removing version {tag}: {e}", exc_info=True)
             return False
 
@@ -2008,7 +2016,7 @@ wait $SERVER_PID
         log_handle = None
         try:
             log_handle = open(log_file, "a", encoding="utf-8")
-        except Exception as e:
+        except (IOError, OSError) as e:
             logger.warning(f"Could not open log file {log_file} for {tag}: {e}")
 
         cmd = ["bash", str(run_script)]
@@ -2053,14 +2061,14 @@ wait $SERVER_PID
                 False,
             )
 
-        except Exception as e:
+        except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
             return (False, None, str(log_file), str(e), None)
         finally:
             if log_handle:
                 try:
                     log_handle.close()
-                except Exception:
+                except (IOError, OSError):
                     pass
 
     def get_version_status(self) -> Dict[str, any]:

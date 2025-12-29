@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""
+Pre-commit hook to detect print() statements in backend code.
+
+This enforces the use of the logging system instead of print() for better
+troubleshooting and monitoring in production.
+
+Exceptions:
+- Lines with 'noqa: print' comment are allowed
+- User-facing console output functions (explicitly marked)
+- Test files that need to verify print behavior
+"""
+
+import re
+import sys
+from pathlib import Path
+
+
+def check_file(file_path: Path) -> list[tuple[int, str]]:
+    """
+    Check a file for print statements.
+
+    Args:
+        file_path: Path to the Python file to check
+
+    Returns:
+        List of (line_number, line_content) tuples for violations
+    """
+    violations = []
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            for line_num, line in enumerate(f, start=1):
+                # Skip empty lines and comments
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+
+                # Check for print() calls
+                if re.search(r"\bprint\s*\(", line):
+                    # Allow if explicitly marked with noqa comment
+                    if "noqa: print" in line or "noqa:print" in line:
+                        continue
+
+                    # Allow in main blocks that are for testing
+                    # (we check context in next iteration if needed)
+
+                    violations.append((line_num, line.rstrip()))
+
+    except Exception as e:
+        print(f"Error reading {file_path}: {e}", file=sys.stderr)
+        return []
+
+    return violations
+
+
+def main() -> int:
+    """
+    Main entry point for the pre-commit hook.
+
+    Returns:
+        0 if no violations found, 1 otherwise
+    """
+    if len(sys.argv) < 2:
+        print("Usage: check_print_statements.py <file1> [file2] ...", file=sys.stderr)
+        return 1
+
+    files_to_check = [Path(f) for f in sys.argv[1:]]
+    total_violations = 0
+
+    for file_path in files_to_check:
+        # Only check Python files in backend/
+        if not file_path.suffix == ".py":
+            continue
+        if not str(file_path).startswith("backend/"):
+            continue
+
+        violations = check_file(file_path)
+        if violations:
+            print(f"\n❌ {file_path}:", file=sys.stderr)
+            for line_num, line_content in violations:
+                print(f"  Line {line_num}: {line_content}", file=sys.stderr)
+                total_violations += 1
+
+    if total_violations > 0:
+        print(
+            f"\n{'='*70}\n"
+            f"❌ Found {total_violations} print statement(s) in backend code.\n"
+            f"\n"
+            f"Please use the logging system instead:\n"
+            f"  from backend.logging_config import get_logger\n"
+            f"  logger = get_logger(__name__)\n"
+            f"  logger.info('message')  # or .debug, .warning, .error\n"
+            f"\n"
+            f"If this is intentional user-facing output, add '# noqa: print'\n"
+            f"{'='*70}\n",
+            file=sys.stderr,
+        )
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

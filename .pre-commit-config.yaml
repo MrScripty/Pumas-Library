@@ -37,6 +37,16 @@ repos:
   #       exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
   #       files: ^backend/
 
+  # Custom hooks: Enforce logging system usage
+  - repo: local
+    hooks:
+      - id: check-print-statements
+        name: Check for print statements in backend/
+        entry: python3 .pre-commit-hooks/check_print_statements.py
+        language: system
+        types: [python]
+        files: ^backend/
+
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.5.0

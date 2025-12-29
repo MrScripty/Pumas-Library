@@ -633,13 +633,13 @@ def print_progress(downloaded: int, total: int) -> None:
     """
     if total > 0:
         percent = (downloaded / total) * 100
-        print(
+        print(  # noqa: print
             f"\rDownloading: {format_bytes(downloaded)} / {format_bytes(total)} ({percent:.1f}%)",
             end="",
             flush=True,
         )
     else:
-        print(f"\rDownloading: {format_bytes(downloaded)}", end="", flush=True)
+        print(f"\rDownloading: {format_bytes(downloaded)}", end="", flush=True)  # noqa: print
 
 
 if __name__ == "__main__":

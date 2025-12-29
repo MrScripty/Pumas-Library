@@ -6,6 +6,7 @@ Handles patching main.py with setproctitle for process naming
 
 import re
 import subprocess
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Optional, Tuple
@@ -67,7 +68,7 @@ class PatchManager:
                         return main_py, tag
                     logger.warning(f"main.py not found for version {tag} at {main_py}")
                     return None, tag
-            except Exception as e:
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
                 logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
                 return None, tag
 
@@ -84,7 +85,7 @@ class PatchManager:
                             f"main.py not found for active version {active_tag} at {main_py}"
                         )
                         return None, active_tag
-            except Exception as e:
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
                 logger.error(f"Error determining active version for patching: {e}", exc_info=True)
                 return None, active_tag
 
@@ -99,7 +100,7 @@ class PatchManager:
                 if installed_versions:
                     # We have versions but no main.py found - this is an error
                     logger.warning(f"No main.py found to patch at {self.main_py}")
-            except Exception:
+            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
                 pass  # Silently handle errors checking for installed versions
 
         return None, active_tag
@@ -124,7 +125,7 @@ class PatchManager:
             return bool(
                 re.search(r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)', content)
             )
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             logger.error(f"Error reading {main_py} to check patch state: {e}", exc_info=True)
             return False
 
@@ -149,7 +150,7 @@ class PatchManager:
         # Read existing content first to determine patch state
         try:
             content = main_py.read_text()
-        except Exception as e:
+        except (OSError, UnicodeDecodeError) as e:
             logger.error(f"Error reading {main_py} for patching: {e}", exc_info=True)
             return False
 
@@ -213,7 +214,12 @@ class PatchManager:
                     check=True,
                 )
                 return True
-            except Exception:
+            except (
+                subprocess.CalledProcessError,
+                FileNotFoundError,
+                OSError,
+                subprocess.SubprocessError,
+            ):
                 pass
 
         # Try downloading from GitHub
@@ -223,5 +229,5 @@ class PatchManager:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 main_py.write_bytes(resp.read())
             return True
-        except Exception:
+        except (urllib.error.URLError, OSError):
             return False

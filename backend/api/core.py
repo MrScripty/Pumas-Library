@@ -18,6 +18,7 @@ from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
 from backend.models import GitHubRelease
+from backend.rate_limiter import RateLimiter
 from backend.validators import validate_package_name, validate_url, validate_version_tag
 
 logger = get_logger(__name__)
@@ -69,6 +70,23 @@ class ComfyUISetupAPI:
 
         # Initialize specialized managers
         self._init_managers()
+
+        # Rate limits for destructive actions
+        self._rate_limiters = {
+            "install": RateLimiter(max_calls=3, period_seconds=60),
+            "remove": RateLimiter(max_calls=5, period_seconds=60),
+            "cancel": RateLimiter(max_calls=10, period_seconds=60),
+        }
+
+    def _is_rate_limited(self, action: str, tag: Optional[str] = None) -> bool:
+        limiter = self._rate_limiters.get(action)
+        if not limiter:
+            return False
+        if limiter.is_allowed(action):
+            return False
+        target = f" for {tag}" if tag else ""
+        logger.warning(f"Rate limit exceeded for {action}{target}")
+        return True
 
     def _find_comfyui_root(self, start_path: Path) -> Path:
         """
@@ -533,6 +551,8 @@ class ComfyUISetupAPI:
         if not validate_version_tag(tag):
             logger.warning(f"Rejected install for invalid tag: {tag!r}")
             return False
+        if self._is_rate_limited("install", tag):
+            return False
         install_ok = self.version_manager.install_version(tag, progress_callback)
         if not install_ok:
             return False
@@ -549,6 +569,8 @@ class ComfyUISetupAPI:
         """Cancel the currently running installation"""
         if not self.version_manager:
             return False
+        if self._is_rate_limited("cancel"):
+            return False
         return self.version_manager.cancel_installation()
 
     def remove_version(self, tag: str) -> bool:
@@ -557,6 +579,8 @@ class ComfyUISetupAPI:
             return False
         if not validate_version_tag(tag):
             logger.warning(f"Rejected removal for invalid tag: {tag!r}")
+            return False
+        if self._is_rate_limited("remove", tag):
             return False
         removed = self.version_manager.remove_version(tag)
         if removed:

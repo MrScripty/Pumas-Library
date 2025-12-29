@@ -356,6 +356,7 @@ def install_version(self, tag):
 - `install_version()` - Max 3 installs per minute
 - `remove_version()` - Max 5 removes per minute
 - `cancel_installation()` - Max 10 cancels per minute
+**Status:** ✅ Completed
 
 ---
 
@@ -1080,5 +1081,9 @@ All 5 quick win tasks completed successfully:
 - Installation progress state writes now use locked atomic writes in `backend/installation_progress_tracker.py`.
 - Constraints cache writes now use locked atomic writes in `backend/version_manager_components/constraints.py`.
 
+**Task #9: Rate limiting for destructive actions** - ✅ COMPLETED (2025-12-29)
+- Added `backend/rate_limiter.py` to enforce fixed-window limits per action.
+- Applied limits to installs, removals, and cancellation in `backend/api/core.py`.
+
 **Next steps:**
-- Task #9: Rate limiting for destructive actions (~2 hours)
+- Task #13: Type hints + mypy (ongoing)

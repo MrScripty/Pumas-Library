@@ -11,6 +11,11 @@ import webview
 
 from backend.api import ComfyUISetupAPI
 from backend.config import UI
+from backend.logging_config import get_logger, setup_logging
+
+# Initialize logging as early as possible
+setup_logging(log_level="INFO", console_level="WARNING")
+logger = get_logger(__name__)
 
 
 class JavaScriptAPI:
@@ -125,12 +130,12 @@ class JavaScriptAPI:
         """Close the application window and terminate the process"""
         try:
             # Cancel any ongoing installation before closing
-            print("\nCleaning up before exit...")
+            logger.info("Cleaning up before exit")
             if self.api.version_manager:
                 # Check if there's an active installation
                 progress = self.api.get_installation_progress()
                 if progress and not progress.get("completed_at"):
-                    print("Active installation detected - cancelling...")
+                    logger.info("Active installation detected - cancelling")
                     self.api.cancel_installation()
                     # Give it a moment to clean up
                     import time
@@ -141,7 +146,7 @@ class JavaScriptAPI:
             for window in webview.windows:
                 window.destroy()
         except Exception as e:
-            print(f"Error during cleanup: {e}")
+            logger.error(f"Error during cleanup: {e}", exc_info=True)
         # Exit the application
         sys.exit(0)
 
@@ -228,7 +233,7 @@ class JavaScriptAPI:
             result = self.api.calculate_release_size(tag, force_refresh)
             return result if result else None
         except Exception as e:
-            print(f"Error calculating release size: {e}")
+            logger.error(f"Error calculating release size: {e}", exc_info=True)
             return None
 
     def calculate_all_release_sizes(self):
@@ -237,7 +242,7 @@ class JavaScriptAPI:
             results = self.api.calculate_all_release_sizes()
             return results
         except Exception as e:
-            print(f"Error calculating all release sizes: {e}")
+            logger.error(f"Error calculating all release sizes: {e}", exc_info=True)
             return {}
 
     def remove_version(self, tag):
@@ -584,9 +589,11 @@ def main():
         print(f"Connecting to development server at: {entry}")
         print("Make sure you have run 'npm run dev' in the frontend/ directory")
         print("=" * 60)
+        logger.info(f"Development mode: connecting to {entry}")
 
     if debug_mode:
         print("Developer console enabled (--debug flag)")
+        logger.info("Debug mode enabled")
 
     # Create and configure the webview window
     window = webview.create_window(

@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.logging_config import get_logger
 from backend.models import (
     CustomNodesMetadata,
     GitHubReleasesCache,
@@ -17,6 +18,8 @@ from backend.models import (
     VersionsMetadata,
     WorkflowsMetadata,
 )
+
+logger = get_logger(__name__)
 
 
 class MetadataManager:
@@ -68,7 +71,7 @@ class MetadataManager:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
-            print(f"Error reading {file_path}: {e}")
+            logger.error(f"Error reading {file_path}: {e}", exc_info=True)
             return default if default is not None else {}
 
     def _write_json(self, file_path: Path, data: Any) -> bool:
@@ -92,7 +95,7 @@ class MetadataManager:
             shutil.move(str(temp_file), str(file_path))
             return True
         except (IOError, OSError) as e:
-            print(f"Error writing {file_path}: {e}")
+            logger.error(f"Error writing {file_path}: {e}", exc_info=True)
             # Clean up temp file if it exists
             if temp_file.exists():
                 temp_file.unlink(missing_ok=True)

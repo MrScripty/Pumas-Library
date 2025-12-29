@@ -72,7 +72,7 @@ class DependencyManager:
                     stdout=subprocess.DEVNULL,
                     env=pip_env,
                 )
-            except Exception:
+            except (subprocess.CalledProcessError, OSError, FileNotFoundError):
                 success = False
 
         # Install system packages (requires sudo)
@@ -81,7 +81,7 @@ class DependencyManager:
             try:
                 subprocess.run(["sudo", "apt", "update"], check=True)
                 subprocess.run(["sudo", "apt", "install", "-y"] + system_pkgs, check=True)
-            except Exception:
+            except (subprocess.CalledProcessError, OSError, FileNotFoundError):
                 success = False
 
         return success

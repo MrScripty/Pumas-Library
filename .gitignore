@@ -55,3 +55,11 @@ comfyui-versions/
 
 #misc
 notes.txt
+
+# Testing artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+.tox/

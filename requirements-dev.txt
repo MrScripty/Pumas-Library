@@ -1,0 +1,16 @@
+# Development Dependencies for ComfyUI Setup Launcher
+# Install with: pip install -r requirements-dev.txt
+
+# Testing Framework
+pytest>=8.0,<9.0
+pytest-cov>=4.1,<5.0          # Coverage reporting
+pytest-mock>=3.12,<4.0        # Mocking utilities
+pytest-timeout>=2.2,<3.0      # Test timeout enforcement
+
+# Test Utilities
+freezegun>=1.4,<2.0           # Time mocking for tests
+responses>=0.24,<1.0          # Mock HTTP requests
+
+# Optional: For better test output
+pytest-xdist>=3.5,<4.0        # Parallel test execution
+pytest-clarity>=1.0,<2.0      # Better assertion output

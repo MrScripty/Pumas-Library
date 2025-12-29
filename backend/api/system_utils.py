@@ -114,7 +114,7 @@ class SystemUtils:
                 "free": stat.free,
                 "percent": round(usage_percent, 1),
             }
-        except Exception as e:
+        except (OSError, PermissionError) as e:
             return {
                 "success": False,
                 "error": str(e),
@@ -197,7 +197,7 @@ class SystemUtils:
                     return {"success": True}
                 return {"success": False, "error": "Unable to open browser"}
             return {"success": True}
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError) as e:
             return {"success": False, "error": str(e)}
 
     def open_active_install(self) -> Dict[str, Any]:

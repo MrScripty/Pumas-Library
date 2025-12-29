@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Pre-commit hook to detect print() statements in backend code.
+Pre-commit hook to detect print statements in Python code.
 
-This enforces the use of the logging system instead of print() for better
+This enforces the use of the logging system instead of print for better
 troubleshooting and monitoring in production.
 
 Exceptions:
@@ -47,8 +47,8 @@ def check_file(file_path: Path) -> list[tuple[int, str]]:
 
                     violations.append((line_num, line.rstrip()))
 
-    except Exception as e:
-        print(f"Error reading {file_path}: {e}", file=sys.stderr)
+    except OSError as e:
+        sys.stderr.write(f"Error reading {file_path}: {e}\n")
         return []
 
     return violations
@@ -62,30 +62,27 @@ def main() -> int:
         0 if no violations found, 1 otherwise
     """
     if len(sys.argv) < 2:
-        print("Usage: check_print_statements.py <file1> [file2] ...", file=sys.stderr)
+        sys.stderr.write("Usage: check_print_statements.py <file1> [file2] ...\n")
         return 1
 
     files_to_check = [Path(f) for f in sys.argv[1:]]
     total_violations = 0
 
     for file_path in files_to_check:
-        # Only check Python files in backend/
-        if not file_path.suffix == ".py":
-            continue
-        if not str(file_path).startswith("backend/"):
+        if file_path.suffix != ".py":
             continue
 
         violations = check_file(file_path)
         if violations:
-            print(f"\n❌ {file_path}:", file=sys.stderr)
+            sys.stderr.write(f"\n❌ {file_path}:\n")
             for line_num, line_content in violations:
-                print(f"  Line {line_num}: {line_content}", file=sys.stderr)
+                sys.stderr.write(f"  Line {line_num}: {line_content}\n")
                 total_violations += 1
 
     if total_violations > 0:
-        print(
+        sys.stderr.write(
             f"\n{'='*70}\n"
-            f"❌ Found {total_violations} print statement(s) in backend code.\n"
+            f"❌ Found {total_violations} print statement(s) in Python code.\n"
             f"\n"
             f"Please use the logging system instead:\n"
             f"  from backend.logging_config import get_logger\n"
@@ -93,8 +90,7 @@ def main() -> int:
             f"  logger.info('message')  # or .debug, .warning, .error\n"
             f"\n"
             f"If this is intentional user-facing output, add '# noqa: print'\n"
-            f"{'='*70}\n",
-            file=sys.stderr,
+            f"{'='*70}\n"
         )
         return 1
 

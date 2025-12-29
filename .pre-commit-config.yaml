@@ -41,11 +41,11 @@ repos:
   - repo: local
     hooks:
       - id: check-print-statements
-        name: Check for print statements in backend/
+        name: Check for print statements in Python files
         entry: python3 .pre-commit-hooks/check_print_statements.py
         language: system
         types: [python]
-        files: ^backend/
+        files: \.py$
       - id: check-generic-exceptions
         name: Check for generic exception handlers in Python files
         entry: python3 .pre-commit-hooks/check_generic_exceptions.py

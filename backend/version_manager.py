@@ -41,6 +41,7 @@ from backend.models import (
 )
 from backend.process_io_tracker import ProcessIOTracker
 from backend.resource_manager import ResourceManager
+from backend.retry_utils import calculate_backoff_delay
 from backend.utils import (
     ensure_directory,
     get_directory_size,
@@ -779,11 +780,16 @@ class VersionManager:
         """
         Poll the server URL until ready or process exits.
 
+        Uses exponential backoff with jitter to reduce server load during startup.
+        Starts with 0.5s delay, increases to max 5s between checks.
+
         Returns:
             (ready, error_message)
         """
         start = time.time()
         last_error = None
+        attempt = 0
+
         while True:
             if process.poll() is not None:
                 exit_code = process.returncode
@@ -803,7 +809,10 @@ class VersionManager:
             if time.time() - start > timeout:
                 return False, last_error or "Timed out waiting for server"
 
-            time.sleep(0.5)
+            # Exponential backoff with jitter (0.5s base, max 5s)
+            delay = calculate_backoff_delay(attempt, base_delay=0.5, max_delay=5.0)
+            time.sleep(delay)
+            attempt += 1
 
     def _tail_log(self, log_file: Path, lines: int = 20) -> List[str]:
         """Return the last N lines of a log file."""

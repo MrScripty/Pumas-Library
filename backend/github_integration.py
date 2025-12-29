@@ -5,6 +5,7 @@ Handles fetching releases, caching, and downloading
 """
 
 import json
+import random
 import threading
 import time
 import urllib.error
@@ -17,6 +18,7 @@ from packaging.version import InvalidVersion, Version
 
 from backend.metadata_manager import MetadataManager
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
+from backend.retry_utils import calculate_backoff_delay
 
 
 class GitHubReleasesFetcher:
@@ -44,19 +46,56 @@ class GitHubReleasesFetcher:
         self._cache_lock = threading.Lock()
         self._CACHE_KEY = "github_releases"
 
-    def _fetch_page(self, page: int) -> List[GitHubRelease]:
+    def _fetch_page(self, page: int, max_retries: int = 3) -> List[GitHubRelease]:
         """
-        Fetch a single page of releases from GitHub API.
+        Fetch a single page of releases from GitHub API with exponential backoff
+
+        Args:
+            page: Page number to fetch
+            max_retries: Maximum number of retry attempts
+
+        Returns:
+            List of GitHubRelease objects
+
+        Raises:
+            urllib.error.URLError: If all retries fail
         """
         url = f"{self.GITHUB_API_BASE}/repos/{self.COMFYUI_REPO}/releases?per_page={self.PER_PAGE}&page={page}"
 
-        # Create request with User-Agent header (required by GitHub API)
-        req = urllib.request.Request(url)
-        req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
-        req.add_header("Accept", "application/vnd.github.v3+json")
+        last_error = None
+        for attempt in range(max_retries):
+            try:
+                # Create request with User-Agent header (required by GitHub API)
+                req = urllib.request.Request(url)
+                req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
+                req.add_header("Accept", "application/vnd.github.v3+json")
 
-        with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode("utf-8"))
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    return json.loads(response.read().decode("utf-8"))
+
+            except urllib.error.HTTPError as e:
+                # Don't retry on rate limit (403) or client errors (4xx)
+                if e.code in (403, 404, 400, 401):
+                    raise
+                last_error = e
+
+            except (urllib.error.URLError, TimeoutError) as e:
+                # Network errors - retry with backoff
+                last_error = e
+
+            # If not the last attempt, wait with exponential backoff
+            if attempt < max_retries - 1:
+                delay = calculate_backoff_delay(attempt, base_delay=2.0, max_delay=30.0)
+                print(
+                    f"GitHub API fetch failed (attempt {attempt + 1}/{max_retries}). "
+                    f"Retrying in {delay:.1f}s..."
+                )
+                time.sleep(delay)
+
+        # All retries failed
+        if last_error:
+            raise last_error
+        raise urllib.error.URLError("GitHub API fetch failed after retries")
 
     def _fetch_from_github(self) -> List[GitHubRelease]:
         """
@@ -536,7 +575,10 @@ class DownloadManager:
         progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None,
     ) -> bool:
         """
-        Download with automatic retries on failure
+        Download with automatic retries using exponential backoff and jitter
+
+        Uses exponential backoff (2s, 4s, 8s...) with random jitter (0-1s)
+        to prevent thundering herd problems when services recover.
 
         Args:
             url: URL to download from
@@ -549,8 +591,10 @@ class DownloadManager:
         """
         for attempt in range(max_retries):
             if attempt > 0:
-                print(f"Retry attempt {attempt + 1}/{max_retries}...")
-                time.sleep(2)  # Wait 2 seconds between retries
+                # Calculate exponential backoff with jitter
+                delay = calculate_backoff_delay(attempt - 1, base_delay=2.0, max_delay=60.0)
+                print(f"Retry attempt {attempt + 1}/{max_retries} in {delay:.1f}s...")
+                time.sleep(delay)
 
             if self.download_file(url, destination, progress_callback):
                 return True

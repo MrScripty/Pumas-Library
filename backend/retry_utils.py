@@ -160,6 +160,6 @@ def retry_operation(
             exceptions=(Exception,),
         )
         return result is not None
-    except Exception:
-        logger.info(f"{operation_name} failed after {max_retries} attempts")
+    except (RuntimeError, OSError, ValueError) as e:
+        logger.info(f"{operation_name} failed after {max_retries} attempts: {e}")
         return False

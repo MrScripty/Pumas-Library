@@ -4,6 +4,7 @@ ComfyUI Setup Launcher - Main Entry Point
 Desktop application using PyWebView with React frontend
 """
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -44,7 +45,7 @@ class JavaScriptAPI:
         try:
             success = self.api.install_missing_dependencies()
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def toggle_patch(self):
@@ -52,7 +53,7 @@ class JavaScriptAPI:
         try:
             success = self.api.toggle_patch()
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def toggle_menu(self, tag=None):
@@ -60,7 +61,7 @@ class JavaScriptAPI:
         try:
             success = self.api.toggle_menu(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def toggle_desktop(self, tag=None):
@@ -68,7 +69,7 @@ class JavaScriptAPI:
         try:
             success = self.api.toggle_desktop(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def get_version_shortcuts(self, tag):
@@ -76,7 +77,7 @@ class JavaScriptAPI:
         try:
             state = self.api.get_version_shortcut_state(tag)
             return {"success": True, "state": state}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "state": {}}
 
     def get_all_shortcut_states(self):
@@ -84,7 +85,7 @@ class JavaScriptAPI:
         try:
             states = self.api.get_all_shortcut_states()
             return {"success": True, "states": states}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "states": {}}
 
     def set_version_shortcuts(self, tag, enabled):
@@ -97,7 +98,7 @@ class JavaScriptAPI:
                 "tag": tag,
                 "error": result.get("error"),
             }
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "state": {}}
 
     def toggle_version_menu(self, tag):
@@ -110,7 +111,7 @@ class JavaScriptAPI:
                 "tag": tag,
                 "error": result.get("error"),
             }
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "state": {}}
 
     def toggle_version_desktop(self, tag):
@@ -123,7 +124,7 @@ class JavaScriptAPI:
                 "tag": tag,
                 "error": result.get("error"),
             }
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def close_window(self):
@@ -145,7 +146,7 @@ class JavaScriptAPI:
             # Destroy all windows
             for window in webview.windows:
                 window.destroy()
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error during cleanup: {e}", exc_info=True)
         # Exit the application
         sys.exit(0)
@@ -160,7 +161,7 @@ class JavaScriptAPI:
                 "error": result.get("error"),
                 "ready": result.get("ready"),
             }
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def stop_comfyui(self):
@@ -168,7 +169,7 @@ class JavaScriptAPI:
         try:
             success = self.api.stop_comfyui()
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     # ==================== Version Management Methods (Phase 5) ====================
@@ -178,7 +179,7 @@ class JavaScriptAPI:
         try:
             versions = self.api.get_available_versions(force_refresh)
             return {"success": True, "versions": versions}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "versions": []}
 
     def get_installed_versions(self):
@@ -186,7 +187,7 @@ class JavaScriptAPI:
         try:
             versions = self.api.get_installed_versions()
             return {"success": True, "versions": versions}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "versions": []}
 
     def validate_installations(self):
@@ -194,7 +195,7 @@ class JavaScriptAPI:
         try:
             result = self.api.validate_installations()
             return {"success": True, "result": result}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {
                 "success": False,
                 "error": str(e),
@@ -206,7 +207,7 @@ class JavaScriptAPI:
         try:
             progress = self.api.get_installation_progress()
             return progress  # Can be None if no installation in progress
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
             return None
 
     def install_version(self, tag):
@@ -216,7 +217,7 @@ class JavaScriptAPI:
             # Frontend should poll get_installation_progress() for progress
             success = self.api.install_version(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def cancel_installation(self):
@@ -224,7 +225,7 @@ class JavaScriptAPI:
         try:
             success = self.api.cancel_installation()
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def calculate_release_size(self, tag, force_refresh=False):
@@ -232,7 +233,7 @@ class JavaScriptAPI:
         try:
             result = self.api.calculate_release_size(tag, force_refresh)
             return result if result else None
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error calculating release size: {e}", exc_info=True)
             return None
 
@@ -241,7 +242,7 @@ class JavaScriptAPI:
         try:
             results = self.api.calculate_all_release_sizes()
             return results
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error calculating all release sizes: {e}", exc_info=True)
             return {}
 
@@ -250,7 +251,7 @@ class JavaScriptAPI:
         try:
             success = self.api.remove_version(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def switch_version(self, tag):
@@ -258,7 +259,7 @@ class JavaScriptAPI:
         try:
             success = self.api.switch_version(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def get_active_version(self):
@@ -266,7 +267,7 @@ class JavaScriptAPI:
         try:
             version = self.api.get_active_version()
             return {"success": True, "version": version}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "version": ""}
 
     def get_default_version(self):
@@ -274,7 +275,7 @@ class JavaScriptAPI:
         try:
             version = self.api.get_default_version()
             return {"success": True, "version": version}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "version": ""}
 
     def set_default_version(self, tag=None):
@@ -282,7 +283,7 @@ class JavaScriptAPI:
         try:
             success = self.api.set_default_version(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def check_version_dependencies(self, tag):
@@ -290,7 +291,7 @@ class JavaScriptAPI:
         try:
             status = self.api.check_version_dependencies(tag)
             return {"success": True, "dependencies": status}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {
                 "success": False,
                 "error": str(e),
@@ -302,7 +303,7 @@ class JavaScriptAPI:
         try:
             success = self.api.install_version_dependencies(tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def get_version_status(self):
@@ -310,7 +311,7 @@ class JavaScriptAPI:
         try:
             status = self.api.get_version_status()
             return {"success": True, "status": status}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "status": {}}
 
     def get_version_info(self, tag):
@@ -318,28 +319,28 @@ class JavaScriptAPI:
         try:
             info = self.api.get_version_info(tag)
             return {"success": True, "info": info}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "info": {}}
 
     def open_path(self, path):
         """Open an arbitrary path in the system file manager"""
         try:
             return self.api.open_path(path)
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def open_active_install(self):
         """Open the active ComfyUI installation directory"""
         try:
             return self.api.open_active_install()
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def open_url(self, url):
         """Open a URL in the system browser"""
         try:
             return self.api.open_url(url)
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def launch_version(self, tag, extra_args=None):
@@ -352,7 +353,7 @@ class JavaScriptAPI:
                 "error": result.get("error"),
                 "ready": result.get("ready"),
             }
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     # ==================== Resource Management Methods (Phase 5) ====================
@@ -362,7 +363,7 @@ class JavaScriptAPI:
         try:
             models = self.api.get_models()
             return {"success": True, "models": models}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "models": {}}
 
     def get_custom_nodes(self, version_tag):
@@ -370,7 +371,7 @@ class JavaScriptAPI:
         try:
             nodes = self.api.get_custom_nodes(version_tag)
             return {"success": True, "nodes": nodes}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "nodes": []}
 
     def install_custom_node(self, git_url, version_tag, node_name=None):
@@ -378,7 +379,7 @@ class JavaScriptAPI:
         try:
             success = self.api.install_custom_node(git_url, version_tag, node_name)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def update_custom_node(self, node_name, version_tag):
@@ -386,7 +387,7 @@ class JavaScriptAPI:
         try:
             success = self.api.update_custom_node(node_name, version_tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def remove_custom_node(self, node_name, version_tag):
@@ -394,7 +395,7 @@ class JavaScriptAPI:
         try:
             success = self.api.remove_custom_node(node_name, version_tag)
             return {"success": success}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def scan_shared_storage(self):
@@ -402,7 +403,7 @@ class JavaScriptAPI:
         try:
             result = self.api.scan_shared_storage()
             return {"success": True, "result": result}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "result": {}}
 
     # ==================== Size Calculation Methods (Phase 6.2.5a/c) ====================
@@ -412,7 +413,7 @@ class JavaScriptAPI:
         try:
             info = self.api.get_release_size_info(tag, archive_size)
             return {"success": True, "info": info}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "info": None}
 
     def get_release_size_breakdown(self, tag):
@@ -420,7 +421,7 @@ class JavaScriptAPI:
         try:
             breakdown = self.api.get_release_size_breakdown(tag)
             return {"success": True, "breakdown": breakdown}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "breakdown": None}
 
     def get_release_dependencies(self, tag, top_n=None):
@@ -428,7 +429,7 @@ class JavaScriptAPI:
         try:
             dependencies = self.api.get_release_dependencies(tag, top_n)
             return {"success": True, "dependencies": dependencies}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "dependencies": []}
 
     # ==================== Cache Status Methods ====================
@@ -438,7 +439,7 @@ class JavaScriptAPI:
         try:
             status = self.api.get_github_cache_status()
             return {"success": True, "status": status}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def has_background_fetch_completed(self):
@@ -446,7 +447,7 @@ class JavaScriptAPI:
         try:
             completed = self.api.has_background_fetch_completed()
             return {"success": True, "completed": completed}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "completed": False}
 
     def reset_background_fetch_flag(self):
@@ -454,7 +455,7 @@ class JavaScriptAPI:
         try:
             self.api.reset_background_fetch_flag()
             return {"success": True}
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     # ==================== Launcher Update Methods ====================
@@ -470,7 +471,7 @@ class JavaScriptAPI:
                 "branch": __branch__,
                 "isGitRepo": is_git_repo(),
             }
-        except Exception as e:
+        except (AttributeError, ImportError, OSError) as e:
             return {"success": False, "error": str(e), "version": "unknown"}
 
     def check_launcher_updates(self, force_refresh=False):
@@ -484,7 +485,7 @@ class JavaScriptAPI:
 
             result = self.api.launcher_updater.check_for_updates(force_refresh)
             return {"success": True, **result}
-        except Exception as e:
+        except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "hasUpdate": False}
 
     def apply_launcher_update(self):
@@ -497,13 +498,12 @@ class JavaScriptAPI:
 
             result = self.api.launcher_updater.apply_update()
             return {"success": result.get("success", False), **result}
-        except Exception as e:
+        except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
     def restart_launcher(self):
         """Restart the launcher application"""
         import os
-        import subprocess
 
         try:
             # Get the launcher script path
@@ -532,7 +532,7 @@ class JavaScriptAPI:
             threading.Thread(target=delayed_exit, daemon=True).start()
 
             return {"success": True, "message": "Restarting..."}
-        except Exception as e:
+        except (OSError, subprocess.SubprocessError, FileNotFoundError) as e:
             return {"success": False, "error": str(e)}
 
 
@@ -567,7 +567,7 @@ def main():
         import setproctitle
 
         setproctitle.setproctitle("Linux AI Launcher")
-    except Exception:
+    except (AttributeError, ImportError, OSError):
         pass
 
     # Parse command-line arguments for debug mode
@@ -583,16 +583,16 @@ def main():
     is_dev = entry.startswith("http://")
 
     if is_dev:
-        print("=" * 60)
-        print("DEVELOPMENT MODE")
-        print("=" * 60)
-        print(f"Connecting to development server at: {entry}")
-        print("Make sure you have run 'npm run dev' in the frontend/ directory")
-        print("=" * 60)
+        print("=" * 60)  # noqa: print
+        print("DEVELOPMENT MODE")  # noqa: print
+        print("=" * 60)  # noqa: print
+        print(f"Connecting to development server at: {entry}")  # noqa: print
+        print("Make sure you have run 'npm run dev' in the frontend/ directory")  # noqa: print
+        print("=" * 60)  # noqa: print
         logger.info(f"Development mode: connecting to {entry}")
 
     if debug_mode:
-        print("Developer console enabled (--debug flag)")
+        print("Developer console enabled (--debug flag)")  # noqa: print
         logger.info("Debug mode enabled")
 
     # Create and configure the webview window

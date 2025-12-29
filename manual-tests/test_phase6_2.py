@@ -45,7 +45,7 @@ def main():
                 prerelease_tag = " [PRE-RELEASE]" if prerelease else ""
                 print(f"  {i}. {tag} - {name}{prerelease_tag}")
                 print(f"     Published: {date[:10]}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 
@@ -59,7 +59,7 @@ def main():
                 print(f"  - {tag}")
         else:
             print("  (No versions currently installed)")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 
@@ -73,7 +73,7 @@ def main():
         else:
             print("✗ install_version() method not found")
             return 1
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 

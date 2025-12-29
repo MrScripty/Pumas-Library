@@ -62,7 +62,7 @@ def main():
                 tag = release.get("tag_name", "unknown")
                 name = release.get("name", "Unnamed")
                 print(f"  {i}. {tag} - {name}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting available versions: {e}")
         return 1
 
@@ -78,7 +78,7 @@ def main():
                 print(f"  - {tag}")
         else:
             print("  (No versions installed)")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting installed versions: {e}")
         return 1
 
@@ -92,7 +92,7 @@ def main():
             print(f"✓ Active version: {active}")
         else:
             print("ℹ No active version set")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting active version: {e}")
         return 1
 
@@ -117,7 +117,7 @@ def main():
             print(
                 f"    - Dependencies: {len(dep_status.get('installed', []))} installed, {len(dep_status.get('missing', []))} missing"
             )
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting version status: {e}")
         return 1
 
@@ -133,7 +133,7 @@ def main():
             print(f"  - Path: {info.get('path', 'unknown')}")
             print(f"  - Installed date: {info.get('installedDate', 'unknown')}")
             print(f"  - Python version: {info.get('pythonVersion', 'unknown')}")
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             print(f"✗ Error getting version info: {e}")
             return 1
     else:
@@ -154,7 +154,7 @@ def main():
                 print(f"\n  Missing packages (first 5):")
                 for pkg in dep_status["missing"][:5]:
                     print(f"    - {pkg}")
-        except Exception as e:
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             print(f"✗ Error checking dependencies: {e}")
             return 1
     else:
@@ -175,7 +175,7 @@ def main():
                 print(f"     Size: {info.get('size', 0) / (1024*1024):.1f} MB")
         else:
             print("  (No models in shared storage)")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting models: {e}")
         return 1
 
@@ -196,7 +196,7 @@ def main():
                 print(f"  (No custom nodes for {test_tag})")
         else:
             print("ℹ Skipping (no versions installed)")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error getting custom nodes: {e}")
         return 1
 
@@ -215,7 +215,7 @@ def main():
             print(f"\n  Models by category:")
             for category, count in category_counts.items():
                 print(f"    - {category}: {count}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error scanning shared storage: {e}")
         return 1
 

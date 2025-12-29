@@ -31,7 +31,7 @@ def main():
         if installed:
             for tag in installed:
                 print(f"  - {tag}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 
@@ -43,7 +43,7 @@ def main():
             print(f"✓ Active version: {active}")
         else:
             print("ℹ No active version set")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 
@@ -54,7 +54,7 @@ def main():
         print(f"✓ Retrieved {len(available)} available versions from cache")
         if available:
             print(f"  First 3: {[r.get('tag_name') for r in available[:3]]}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 
@@ -65,7 +65,7 @@ def main():
         print(f"✓ Version status retrieved")
         print(f"  - Installed count: {status.get('installedCount', 0)}")
         print(f"  - Active version: {status.get('activeVersion', 'None')}")
-    except Exception as e:
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
         print(f"✗ Error: {e}")
         return 1
 

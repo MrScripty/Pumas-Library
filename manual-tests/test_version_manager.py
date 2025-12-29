@@ -4,6 +4,7 @@ Test script for Phase 4: Version Manager
 Tests version installation, switching, dependency management, and launching
 """
 
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -215,7 +216,7 @@ def main():
                                 try:
                                     process.wait(timeout=5)
                                     print("✓ Process terminated cleanly")
-                                except Exception as e:
+                                except (subprocess.TimeoutExpired, OSError) as e:
                                     print(f"Process didn't terminate gracefully: {e}")
                                     process.kill()
                             else:

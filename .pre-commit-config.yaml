@@ -47,11 +47,11 @@ repos:
         types: [python]
         files: ^backend/
       - id: check-generic-exceptions
-        name: Check for generic exception handlers in backend/
+        name: Check for generic exception handlers in Python files
         entry: python3 .pre-commit-hooks/check_generic_exceptions.py
         language: system
         types: [python]
-        files: ^backend/
+        files: \.py$
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

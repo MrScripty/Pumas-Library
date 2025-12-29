@@ -66,8 +66,6 @@ def main() -> int:
     for file_path in files_to_check:
         if file_path.suffix != ".py":
             continue
-        if not str(file_path).startswith("backend/"):
-            continue
 
         violations = check_file(file_path)
         if violations:

@@ -63,7 +63,7 @@ except ImportError as e:
     print("  1. Make sure you're running from the project root directory")
     print("  2. Use: python run_app.py (NOT python3 backend/main.py)")
 
-except Exception as e:
+except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
     print(f"✗ ERROR: {type(e).__name__}: {e}")
 
 print("\n" + "=" * 60)

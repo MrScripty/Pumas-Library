@@ -837,7 +837,7 @@ Track progress with:
 - [ ] version_manager.py under 500 lines
 - [x] All JSON writes are atomic (MetadataManager already uses atomic writes)
 - [ ] pip-audit shows 0 vulnerabilities
-- [x] Pre-commit hooks installed and running (Black, isort, flake8, general hooks)
+- [x] Pre-commit hooks installed and running (Black, isort, general hooks; flake8/mypy disabled for gradual adoption)
 - [ ] mypy passes with no errors
 - [ ] SBOM generated for latest release
 
@@ -927,16 +927,17 @@ Track progress with:
 
 ### ✅ Week 1: Quick Wins - IN PROGRESS
 
-**Task #12: Pre-commit hooks setup** - COMPLETED (2025-12-29)
+**Task #12: Pre-commit hooks setup** - COMPLETED (2025-12-29) - Commit 3e2e927
 - Added pre-commit, black, isort, flake8, mypy to requirements-dev.txt
-- Created .pre-commit-config.yaml with code quality hooks
-- Created .flake8 configuration file
-- Installed git hooks successfully
-- Black and isort auto-formatted 41 Python files
-- General hooks (trailing whitespace, EOF, YAML, JSON) all passing
-- mypy disabled for now (will be enabled in Task #13)
-- flake8 finding style issues (to be fixed incrementally)
-- Status: ✅ Pre-commit infrastructure functional and enforcing quality
+- Created .pre-commit-config.yaml with Black, isort, and general quality hooks
+- Created .flake8 configuration file (for manual use)
+- Installed git hooks successfully (`.git/hooks/pre-commit`)
+- Black auto-formatted 41 Python files to 100-character line length
+- isort sorted imports in 34 Python files (black-compatible profile)
+- Fixed trailing whitespace and EOF issues in frontend TypeScript files
+- Active hooks: Black, isort, trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-added-large-files, check-merge-conflict, detect-private-key
+- Disabled hooks (gradual adoption): flake8 and mypy (will enable in Tasks #17 and #13)
+- Status: ✅ Pre-commit infrastructure functional, all active hooks passing on every commit
 
 **Next tasks:**
 2. Task #7: Pin dependencies (~1 hour)

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 
 try:
     import psutil
-except Exception:
+except ImportError:
     psutil = None
 from datetime import datetime, timezone
 from pathlib import Path
@@ -28,6 +28,16 @@ from packaging.utils import canonicalize_name
 from packaging.version import Version
 
 from backend.config import INSTALLATION
+from backend.exceptions import (
+    CancellationError,
+    DependencyError,
+    InstallationError,
+    MetadataError,
+    NetworkError,
+    ProcessError,
+    ResourceError,
+    ValidationError,
+)
 from backend.github_integration import DownloadManager, GitHubReleasesFetcher
 from backend.installation_progress_tracker import InstallationProgressTracker, InstallationStage
 from backend.logging_config import get_logger
@@ -131,7 +141,7 @@ class VersionManager:
                 if self.active_version_file.exists():
                     self.active_version_file.unlink()
             return True
-        except Exception as exc:
+        except (IOError, OSError) as exc:
             logger.error(f"Error writing active version file: {exc}", exc_info=True)
             return False
 
@@ -187,7 +197,7 @@ class VersionManager:
                 with open(self._constraints_cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return data if isinstance(data, dict) else {}
-        except Exception as exc:
+        except (json.JSONDecodeError, IOError, OSError) as exc:
             logger.warning(f"Unable to read constraints cache: {exc}")
         return {}
 
@@ -198,7 +208,7 @@ class VersionManager:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._constraints_cache, f, indent=2)
             tmp.replace(self._constraints_cache_file)
-        except Exception as exc:
+        except (IOError, OSError, TypeError, ValueError) as exc:
             logger.warning(f"Unable to write constraints cache: {exc}")
 
     def _open_install_log(self, prefix: str) -> Path:
@@ -212,7 +222,7 @@ class VersionManager:
             header = f"{'='*30} INSTALL START {prefix} @ {datetime.now(timezone.utc).isoformat()} {'='*30}\n"
             self._install_log_handle.write(header)
             self._install_log_handle.flush()
-        except Exception as exc:
+        except (IOError, OSError) as exc:
             logger.warning(f"Unable to open install log at {log_path}: {exc}")
             self._install_log_handle = None
             self._current_install_log_path = log_path
@@ -226,7 +236,7 @@ class VersionManager:
             try:
                 self._install_log_handle.write(message.rstrip() + "\n")
                 self._install_log_handle.flush()
-            except Exception as exc:
+            except (IOError, OSError) as exc:
                 logger.warning(f"Failed to write to install log: {exc}")
 
     def _get_process_io_bytes(self, pid: int, include_children: bool = True) -> Optional[int]:
@@ -246,10 +256,12 @@ class VersionManager:
                 try:
                     io = p.io_counters()
                     total += io.read_bytes + io.write_bytes
-                except Exception:
+                except (AttributeError, OSError):
+                    # Process may have terminated or permissions denied
                     continue
             return total
-        except Exception:
+        except (AttributeError, OSError):
+            # Process not found or access denied
             return None
 
     def _get_release_date(self, tag: str, release: Optional[GitHubRelease]) -> Optional[datetime]:
@@ -264,7 +276,7 @@ class VersionManager:
             if isinstance(published_at, str):
                 ts = published_at.replace("Z", "+00:00")
                 return datetime.fromisoformat(ts).astimezone(timezone.utc)
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             logger.warning(f"Could not parse release date for {tag}: {exc}")
         return None
 
@@ -286,7 +298,7 @@ class VersionManager:
         try:
             with urllib.request.urlopen(url, timeout=INSTALLATION.URL_FETCH_TIMEOUT_SEC) as resp:
                 data = json.load(resp)
-        except Exception as exc:
+        except (urllib.error.URLError, json.JSONDecodeError, KeyError) as exc:
             logger.warning(f"Failed to fetch PyPI data for {package}: {exc}")
             return {}
 
@@ -306,7 +318,8 @@ class VersionManager:
                                 timezone.utc
                             )
                         )
-                    except Exception:
+                    except (ValueError, TypeError):
+                        # Invalid timestamp format
                         continue
             if upload_times:
                 result[version_str] = max(upload_times)
@@ -327,7 +340,7 @@ class VersionManager:
 
         try:
             spec_set = SpecifierSet(spec) if spec else SpecifierSet()
-        except Exception as exc:
+        except (ValueError, TypeError) as exc:
             logger.warning(f"Invalid specifier for {package} ({spec}): {exc}")
             spec_set = SpecifierSet()
 
@@ -335,7 +348,8 @@ class VersionManager:
         for ver_str, uploaded_at in releases.items():
             try:
                 ver = Version(ver_str)
-            except Exception:
+            except (ValueError, TypeError):
+                # Invalid version string
                 continue
             if spec_set and ver not in spec_set:
                 continue
@@ -407,7 +421,7 @@ class VersionManager:
                 with open(self._constraints_cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return data if isinstance(data, dict) else {}
-        except Exception as exc:
+        except (json.JSONDecodeError, IOError, OSError) as exc:
             logger.warning(f"Unable to read constraints cache: {exc}")
         return {}
 
@@ -418,7 +432,7 @@ class VersionManager:
             with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._constraints_cache, f, indent=2)
             tmp.replace(self._constraints_cache_file)
-        except Exception as exc:
+        except (IOError, OSError, TypeError, ValueError) as exc:
             logger.warning(f"Unable to write constraints cache: {exc}")
 
     def get_installation_progress(self) -> Optional[Dict]:

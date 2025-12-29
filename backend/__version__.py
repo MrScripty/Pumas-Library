@@ -17,7 +17,7 @@ def get_current_commit() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         pass
     return "unknown"
 
@@ -34,7 +34,7 @@ def get_current_branch() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         pass
     return "main"
 

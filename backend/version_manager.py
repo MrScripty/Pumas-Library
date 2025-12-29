@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from backend.config import PATHS
 from backend.github_integration import GitHubReleasesFetcher
 from backend.installation_progress_tracker import InstallationProgressTracker
 from backend.logging_config import get_logger
@@ -53,9 +54,11 @@ class VersionManager(
         self.resource_manager = resource_manager
         self.logs_dir = self.metadata_manager.launcher_data_dir / "logs"
         ensure_directory(self.logs_dir)
-        self.constraints_dir = self.metadata_manager.cache_dir / "constraints"
+        self.constraints_dir = self.metadata_manager.cache_dir / PATHS.CONSTRAINTS_DIR_NAME
         ensure_directory(self.constraints_dir)
-        self._constraints_cache_file = self.metadata_manager.cache_dir / "constraints-cache.json"
+        self._constraints_cache_file = (
+            self.metadata_manager.cache_dir / PATHS.CONSTRAINTS_CACHE_FILENAME
+        )
         self._constraints_cache: Dict[str, Dict[str, str]] = self._load_constraints_cache()
         self._pypi_release_cache: Dict[str, Dict[str, datetime]] = {}
 
@@ -69,7 +72,7 @@ class VersionManager(
         # Ensure versions directory exists
         ensure_directory(self.versions_dir)
         # Shared pip cache directory (persists across installs)
-        self.pip_cache_dir = self.metadata_manager.cache_dir / "pip"
+        self.pip_cache_dir = self.metadata_manager.cache_dir / PATHS.PIP_CACHE_DIR_NAME
         if ensure_directory(self.pip_cache_dir):
             logger.info(f"Using pip cache directory at {self.pip_cache_dir}")
         self.active_pip_cache_dir = self.pip_cache_dir

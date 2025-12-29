@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, List, Optional
 from cachetools import TTLCache
 from packaging.version import InvalidVersion, Version
 
+from backend.config import APP, NETWORK
 from backend.exceptions import MetadataError, NetworkError
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
@@ -28,13 +29,9 @@ logger = get_logger(__name__)
 class GitHubReleasesFetcher:
     """Fetches and caches ComfyUI releases from GitHub"""
 
-    GITHUB_API_BASE = "https://api.github.com"
-    COMFYUI_REPO = "comfyanonymous/ComfyUI"
-    PER_PAGE = 100
-    MAX_PAGES = 10  # Safety cap for pagination
-    DEFAULT_TTL = 3600  # 1 hour cache TTL
-
-    def __init__(self, metadata_manager: MetadataManager, ttl: int = DEFAULT_TTL):
+    def __init__(
+        self, metadata_manager: MetadataManager, ttl: int = NETWORK.GITHUB_RELEASES_TTL_SEC
+    ):
         """
         Initialize GitHub releases fetcher
 
@@ -44,6 +41,10 @@ class GitHubReleasesFetcher:
         """
         self.metadata_manager = metadata_manager
         self.ttl = ttl
+        self.github_api_base = NETWORK.GITHUB_API_BASE
+        self.github_repo = APP.GITHUB_REPO
+        self.per_page = NETWORK.GITHUB_RELEASES_PER_PAGE
+        self.max_pages = NETWORK.GITHUB_RELEASES_MAX_PAGES
 
         # In-memory cache with TTL and thread lock
         self._memory_cache = TTLCache(maxsize=1, ttl=ttl)
@@ -64,7 +65,10 @@ class GitHubReleasesFetcher:
         Raises:
             urllib.error.URLError: If all retries fail
         """
-        url = f"{self.GITHUB_API_BASE}/repos/{self.COMFYUI_REPO}/releases?per_page={self.PER_PAGE}&page={page}"
+        url = (
+            f"{self.github_api_base}/repos/{self.github_repo}/releases"
+            f"?per_page={self.per_page}&page={page}"
+        )
 
         last_error = None
         for attempt in range(max_retries):
@@ -113,12 +117,12 @@ class GitHubReleasesFetcher:
         """
         releases: List[GitHubRelease] = []
         try:
-            for page in range(1, self.MAX_PAGES + 1):
+            for page in range(1, self.max_pages + 1):
                 page_data = self._fetch_page(page)
                 if not page_data:
                     break
                 releases.extend(page_data)
-                if len(page_data) < self.PER_PAGE:
+                if len(page_data) < self.per_page:
                     break
             return releases
         except urllib.error.HTTPError as e:

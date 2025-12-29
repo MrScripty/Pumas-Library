@@ -13,7 +13,7 @@ from backend.api import ComfyUISetupAPI
 @pytest.fixture
 def api():
     """Create a ComfyUISetupAPI instance for testing."""
-    return ComfyUISetupAPI()
+    return ComfyUISetupAPI(enable_background_prefetch=False)
 
 
 @pytest.mark.unit

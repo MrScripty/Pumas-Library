@@ -26,9 +26,10 @@ logger = get_logger(__name__)
 class ComfyUISetupAPI:
     """Main API class for ComfyUI setup operations"""
 
-    def __init__(self):
+    def __init__(self, enable_background_prefetch: bool = True):
         # Determine directories based on launcher location
         # Handle both development mode and PyInstaller bundled mode
+        self._enable_background_prefetch = enable_background_prefetch
         if getattr(sys, "frozen", False):
             # Running as PyInstaller bundle
             # Search upward from executable location to find ComfyUI root
@@ -130,7 +131,8 @@ class ComfyUISetupAPI:
                 cache_dir, self.release_data_fetcher, self.package_size_resolver, cache_dir / "pip"
             )
 
-            self._prefetch_releases_if_needed()
+            if self._enable_background_prefetch:
+                self._prefetch_releases_if_needed()
         except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
             logger.warning(f"Version management initialization failed: {e}", exc_info=True)
             self.metadata_manager = None

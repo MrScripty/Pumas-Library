@@ -9,6 +9,16 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class AppConfig:
+    """Application-level configuration."""
+
+    APP_NAME: str = "ComfyUI Setup"
+    GITHUB_REPO: str = "comfyanonymous/ComfyUI"
+    LOG_FILE_MAX_BYTES: int = 10_485_760  # 10MB
+    LOG_FILE_BACKUP_COUNT: int = 5
+
+
+@dataclass(frozen=True)
 class InstallationConfig:
     """Configuration for installation process."""
 
@@ -51,6 +61,10 @@ class NetworkConfig:
     REQUEST_TIMEOUT_SEC: int = 15
     QUICK_REQUEST_TIMEOUT_SEC: int = 3
     MAX_RETRIES: int = 3
+    GITHUB_API_BASE: str = "https://api.github.com"
+    GITHUB_RELEASES_PER_PAGE: int = 100
+    GITHUB_RELEASES_MAX_PAGES: int = 10
+    GITHUB_RELEASES_TTL_SEC: int = 3600
 
 
 @dataclass(frozen=True)
@@ -58,12 +72,16 @@ class PathsConfig:
     """Shared directory and path configurations."""
 
     CACHE_DIR_NAME: str = "cache"
+    PIP_CACHE_DIR_NAME: str = "pip"
     SHARED_RESOURCES_DIR_NAME: str = "shared-resources"
     VERSIONS_DIR_NAME: str = "versions"
     ICONS_DIR_NAME: str = "icons"
+    CONSTRAINTS_DIR_NAME: str = "constraints"
+    CONSTRAINTS_CACHE_FILENAME: str = "constraints-cache.json"
 
 
 # Global configuration instances (frozen/immutable)
+APP = AppConfig()
 INSTALLATION = InstallationConfig()
 UI = UIConfig()
 NETWORK = NetworkConfig()

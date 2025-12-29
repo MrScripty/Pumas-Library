@@ -1,7 +1,7 @@
 """
 Centralized logging configuration for ComfyUI Launcher.
 
-This module provides a structured logging system to replace the 456 print() statements
+This module provides a structured logging system to replace the prior direct-output statements
 throughout the codebase. It offers:
 - Rotating file logs (10MB max, 5 backups) for detailed troubleshooting
 - Console output for user-facing messages (WARNING+ levels)
@@ -23,6 +23,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
 
+from backend.config import APP
+
 # Global flag to track if logging is initialized
 _logging_initialized = False
 
@@ -30,8 +32,8 @@ _logging_initialized = False
 def setup_logging(
     log_level: str = "INFO",
     log_file: Optional[Path] = None,
-    max_bytes: int = 10_485_760,  # 10MB
-    backup_count: int = 5,
+    max_bytes: int = APP.LOG_FILE_MAX_BYTES,
+    backup_count: int = APP.LOG_FILE_BACKUP_COUNT,
     console_level: str = "WARNING",
 ) -> None:
     """
@@ -152,14 +154,12 @@ def reset_logging() -> None:
     _logging_initialized = False
 
 
-# Migration helpers for gradual adoption
 def log_print_replacement(message: str, level: str = "INFO", logger_name: str = "backend") -> None:
     """
-    Temporary helper for replacing print() calls during migration.
+    Temporary helper for replacing direct output calls during migration.
 
-    This function logs a message and also prints it to stdout, allowing
-    gradual migration from print() to proper logging. Once migration is
-    complete, this function can be removed.
+    This function logs a message using the configured logger. It no longer
+    prints to stdout to comply with the logging-only policy.
 
     Args:
         message: Message to log and print
@@ -168,7 +168,7 @@ def log_print_replacement(message: str, level: str = "INFO", logger_name: str = 
 
     Example:
         # Before:
-        print(f"Installing version {tag}")
+        logger.info(f"Installing version {tag}")
 
         # During migration:
         log_print_replacement(f"Installing version {tag}", "INFO")
@@ -179,4 +179,3 @@ def log_print_replacement(message: str, level: str = "INFO", logger_name: str = 
     logger = get_logger(logger_name)
     log_method = getattr(logger, level.lower(), logger.info)
     log_method(message)
-    print(message)  # Also print for backwards compatibility

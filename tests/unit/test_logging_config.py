@@ -262,8 +262,8 @@ class TestResetLogging:
 class TestMigrationHelpers:
     """Tests for migration helper functions."""
 
-    def test_log_print_replacement_logs_message(self, temp_log_file, capsys):
-        """Test that log_print_replacement logs and prints message."""
+    def test_log_print_replacement_logs_message(self, temp_log_file):
+        """Test that log_print_replacement logs message."""
         setup_logging(log_file=temp_log_file, log_level="INFO")
 
         log_print_replacement("Test message", level="INFO")
@@ -273,11 +273,7 @@ class TestMigrationHelpers:
             content = f.read()
         assert "Test message" in content
 
-        # Check print output
-        captured = capsys.readouterr()
-        assert "Test message" in captured.out
-
-    def test_log_print_replacement_warning_level(self, temp_log_file, capsys):
+    def test_log_print_replacement_warning_level(self, temp_log_file):
         """Test that log_print_replacement handles WARNING level."""
         setup_logging(log_file=temp_log_file, log_level="INFO")
 

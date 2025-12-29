@@ -89,6 +89,7 @@ tests/
 - `backend/version_manager.py` - validate tags before use
 - `backend/api/core.py` - validate all API inputs
 - `backend/api/system_utils.py` - validate URLs and paths
+**Status:** ✅ Completed
 
 ---
 
@@ -196,6 +197,7 @@ except urllib.error.URLError as e:
     raise NetworkError("Network unavailable") from e
 # Don't catch Exception - let unexpected errors crash with traceback
 ```
+**Status:** ✅ Completed
 
 ---
 
@@ -937,6 +939,7 @@ Track progress with:
 - Fixed trailing whitespace and EOF issues in frontend TypeScript files
 - Active hooks: Black, isort, trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-added-large-files, check-merge-conflict, detect-private-key
 - Added pytest pre-commit hook (runs via repo venv and blocks commits on failing tests)
+- Added ruff undefined-name check (F821/F822/F823) to catch missing imports
 - Disabled hooks (gradual adoption): flake8 and mypy (will enable in Tasks #17 and #13)
 - Status: ✅ Pre-commit infrastructure functional, all active hooks passing on every commit
 

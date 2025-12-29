@@ -38,7 +38,7 @@ class ReleaseDataFetcher:
             try:
                 with open(self.requirements_cache_file, "r") as f:
                     return json.load(f)
-            except Exception as e:
+            except (IOError, OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Warning: Failed to load requirements cache: {e}")
         return {}
 
@@ -47,7 +47,7 @@ class ReleaseDataFetcher:
         try:
             with open(self.requirements_cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
-        except Exception as e:
+        except (IOError, OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving requirements cache: {e}", exc_info=True)
 
     def _compute_hash(self, content: str) -> str:
@@ -110,7 +110,7 @@ class ReleaseDataFetcher:
             else:
                 logger.error(f"HTTP error fetching requirements for {tag}: {e}", exc_info=True)
             return None
-        except Exception as e:
+        except (urllib.error.URLError, OSError, UnicodeDecodeError) as e:
             logger.error(f"Error fetching requirements for {tag}: {e}", exc_info=True)
             return None
 

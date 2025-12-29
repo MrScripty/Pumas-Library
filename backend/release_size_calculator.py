@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,7 +61,7 @@ class ReleaseSizeCalculator:
                         if isinstance(entry, dict) and entry.get("dependencies_size_source"):
                             cleaned[tag] = entry
                     return cleaned
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, ValueError) as e:
                 logger.warning(f"Warning: Failed to load release sizes cache: {e}")
         return {}
 
@@ -69,7 +70,7 @@ class ReleaseSizeCalculator:
         try:
             with open(self.cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
-        except Exception as e:
+        except (OSError, TypeError, ValueError) as e:
             logger.error(f"Error saving release sizes cache: {e}", exc_info=True)
 
     def _get_iso_timestamp(self) -> str:
@@ -233,7 +234,7 @@ class ReleaseSizeCalculator:
                 tag, "pip", cmd, temp_root, report_file
             )
 
-        except Exception as e:
+        except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error estimating dependency size via pip for {tag}: {e}", exc_info=True)
             return None
         finally:
@@ -241,7 +242,7 @@ class ReleaseSizeCalculator:
             try:
                 if temp_root.exists():
                     shutil.rmtree(temp_root)
-            except Exception:
+            except OSError:
                 pass
 
     def _estimate_dependencies_size_via_report(
@@ -265,7 +266,7 @@ class ReleaseSizeCalculator:
         try:
             with open(report_file, "r") as f:
                 report = json.load(f)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, ValueError) as e:
             logger.error(f"{tool_name} report parse failed for {tag}: {e}", exc_info=True)
             return None
 
@@ -317,7 +318,7 @@ class ReleaseSizeCalculator:
                 length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
-        except Exception as e:
+        except (urllib.error.URLError, OSError, ValueError) as e:
             logger.warning(f"Warning: HEAD failed for {url}: {e}")
         return None
 
@@ -330,7 +331,7 @@ class ReleaseSizeCalculator:
 
         try:
             self.pip_cache_dir.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
+        except OSError as e:
             logger.warning(
                 f"Warning: Could not ensure pip cache directory {self.pip_cache_dir}: {e}"
             )

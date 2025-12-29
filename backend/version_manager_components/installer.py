@@ -19,6 +19,7 @@ from backend.installation_progress_tracker import InstallationStage
 from backend.logging_config import get_logger
 from backend.models import VersionInfo, get_iso_timestamp
 from backend.utils import ensure_directory, safe_filename
+from backend.validators import validate_version_tag
 
 logger = get_logger(__name__)
 
@@ -161,6 +162,10 @@ class InstallationMixin:
         Returns:
             True if successful
         """
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag: {tag!r}")
+            return False
+
         # Check if already installed
         if tag in self.get_installed_versions():
             logger.info(f"Version {tag} is already installed")
@@ -451,6 +456,10 @@ class InstallationMixin:
         Returns:
             True if successful
         """
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag for removal: {tag!r}")
+            return False
+
         if tag not in self.get_installed_versions():
             logger.warning(f"Version {tag} is not installed")
             return False

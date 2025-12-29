@@ -15,6 +15,7 @@ from urllib import request as url_request
 from backend.config import INSTALLATION
 from backend.logging_config import get_logger
 from backend.retry_utils import calculate_backoff_delay
+from backend.validators import validate_version_tag
 
 logger = get_logger(__name__)
 
@@ -206,6 +207,9 @@ wait $SERVER_PID
         self, tag: str, extra_args: Optional[list[str]] = None
     ) -> tuple[bool, Optional[subprocess.Popen], Optional[str], Optional[str], Optional[bool]]:
         """Launch a ComfyUI version with readiness detection."""
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag for launch: {tag!r}")
+            return (False, None, None, "Invalid version tag", None)
         if tag not in self.get_installed_versions():
             logger.error(f"Version {tag} is not installed")
             return (False, None, None, "Version not installed", None)

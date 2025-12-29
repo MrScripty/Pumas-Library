@@ -22,6 +22,7 @@ from backend.logging_config import get_logger
 from backend.models import DependencyStatus
 from backend.process_io_tracker import ProcessIOTracker
 from backend.utils import ensure_directory, parse_requirements_file, run_command, safe_filename
+from backend.validators import validate_version_tag
 
 logger = get_logger(__name__)
 
@@ -143,6 +144,9 @@ class DependenciesMixin:
 
     def check_dependencies(self, tag: str) -> DependencyStatus:
         """Check dependency installation status for a version."""
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag for dependency check: {tag!r}")
+            return {"installed": [], "missing": [], "requirementsFile": None}
         version_path = self.versions_dir / tag
 
         if not version_path.exists():
@@ -293,6 +297,9 @@ class DependenciesMixin:
         self, tag: str, progress_callback: Optional[Callable[[str], None]] = None
     ) -> bool:
         """Install dependencies for a version."""
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag for dependency install: {tag!r}")
+            return False
         version_path = self.versions_dir / tag
 
         if not version_path.exists():
@@ -366,6 +373,9 @@ class DependenciesMixin:
 
     def _install_dependencies_with_progress(self, tag: str) -> bool:
         """Install Python dependencies with real-time progress tracking."""
+        if not validate_version_tag(tag):
+            logger.error(f"Invalid version tag for dependency install: {tag!r}")
+            return False
         version_path = self.versions_dir / tag
 
         if not version_path.exists():

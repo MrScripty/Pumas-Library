@@ -58,6 +58,11 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+      - id: ruff-undefined
+        name: ruff (undefined names)
+        entry: ./venv/bin/python -m ruff check --select F821,F822,F823
+        language: system
+        types: [python]
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

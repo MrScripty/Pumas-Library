@@ -22,12 +22,16 @@ class TestFileOpener:
 
     def test_open_path_rejects_missing(self, api):
         """Test that open_path rejects non-existent paths."""
-        result = api.open_path("/path/that/does/not/exist")
+        api.script_dir = Path.cwd()
+        api.system_utils.script_dir = api.script_dir
+        result = api.open_path("path/that/does/not/exist")
         assert result["success"] is False
         assert "does not exist" in result["error"]
 
     def test_open_path_uses_click_launch(self, api, tmp_path):
         """Test that open_path uses click.launch to open existing paths."""
+        api.script_dir = tmp_path
+        api.system_utils.script_dir = tmp_path
         target = tmp_path
 
         with mock.patch("backend.file_opener.click.launch", return_value=True) as mock_launch:
@@ -43,6 +47,8 @@ class TestFileOpener:
 
     def test_open_path_with_file(self, api, tmp_path):
         """Test opening a file path (not just directories)."""
+        api.script_dir = tmp_path
+        api.system_utils.script_dir = tmp_path
         test_file = tmp_path / "test.txt"
         test_file.write_text("test content")
 

@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from backend.logging_config import get_logger
 from backend.models import VersionInfo
+from backend.validators import validate_version_tag
 
 logger = get_logger(__name__)
 
@@ -215,6 +216,9 @@ class StateMixin:
         Returns:
             VersionInfo or None if not installed
         """
+        if not validate_version_tag(tag):
+            logger.warning(f"Invalid version tag for info lookup: {tag!r}")
+            return None
         versions_metadata = self.metadata_manager.load_versions()
         return versions_metadata.get("installed", {}).get(tag)
 
@@ -228,6 +232,10 @@ class StateMixin:
         Returns:
             Path to version directory or None if missing/incomplete
         """
+        if not validate_version_tag(tag):
+            logger.warning(f"Invalid version tag for path lookup: {tag!r}")
+            return None
+
         version_path = self.versions_dir / tag
         if not version_path.exists():
             return None
@@ -285,6 +293,10 @@ class StateMixin:
         Returns:
             True if successful
         """
+        if not validate_version_tag(tag):
+            logger.warning(f"Invalid version tag for activation: {tag!r}")
+            return False
+
         # Verify version is installed
         if tag not in self.get_installed_versions():
             logger.warning(f"Version {tag} is not installed")
@@ -308,6 +320,9 @@ class StateMixin:
         """
         Set a version as default (or clear if tag is None).
         """
+        if tag is not None and not validate_version_tag(tag):
+            logger.warning(f"Invalid version tag for default selection: {tag!r}")
+            return False
         versions_metadata = self.metadata_manager.load_versions()
         installed = versions_metadata.get("installed", {})
 

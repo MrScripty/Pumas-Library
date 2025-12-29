@@ -831,12 +831,12 @@ Independent tasks (can do anytime after testing framework):
 Track progress with:
 - [x] Unit testing framework established (pytest, 80% coverage target)
 - [x] TESTING.md documentation complete
-- [ ] All print() statements replaced with logging
-- [ ] No `except Exception:` in codebase
-- [ ] All user inputs validated
-- [ ] version_manager.py under 500 lines
+- [x] All print() statements replaced with logging
+- [x] No `except Exception:` in codebase
+- [x] All user inputs validated
+- [x] version_manager.py under 500 lines
 - [x] All JSON writes are atomic (MetadataManager already uses atomic writes)
-- [ ] pip-audit shows 0 vulnerabilities
+- [x] pip-audit shows 0 vulnerabilities
 - [x] Pre-commit hooks installed and running (Black, isort, general hooks; flake8/mypy disabled for gradual adoption)
 - [ ] mypy passes with no errors
 - [ ] SBOM generated for latest release
@@ -936,6 +936,7 @@ Track progress with:
 - isort sorted imports in 34 Python files (black-compatible profile)
 - Fixed trailing whitespace and EOF issues in frontend TypeScript files
 - Active hooks: Black, isort, trailing-whitespace, end-of-file-fixer, check-yaml, check-json, check-added-large-files, check-merge-conflict, detect-private-key
+- Added pytest pre-commit hook (runs via repo venv and blocks commits on failing tests)
 - Disabled hooks (gradual adoption): flake8 and mypy (will enable in Tasks #17 and #13)
 - Status: ✅ Pre-commit infrastructure functional, all active hooks passing on every commit
 
@@ -1040,16 +1041,29 @@ All 5 quick win tasks completed successfully:
 - Status: ✅ **COMPLETE** - All backend code now uses structured logging (100%)
 - All tests passing: 81/81 unit tests ✓
 
-**Task #3: Refactor version_manager.py** - 🟡 IN PROGRESS
+**Task #3: Refactor version_manager.py** - ✅ COMPLETED (2025-12-29)
 - Extracted focused components into `backend/version_manager_components/`:
   - `constraints.py` (constraints cache + PyPI pinning logic)
   - `dependencies.py` (venv/dependency install + inspection)
   - `launcher.py` (launch/health check/run script)
+  - `installer.py` (download/extract/venv/deps/symlink install flow)
+  - `state.py` (active/default selection, install validation, status)
 - VersionManager now composes these via mixins; behavior preserved.
-- Added unit tests for each new component (constraints/dependencies/launcher).
-- Status: 🟡 Refactor started and tested, but `version_manager.py` still >500 lines.
+- Added unit tests for component mixins (constraints/dependencies/launcher/installer/state).
+- `backend/version_manager.py` now 141 lines (under 500).
+- Status: ✅ Refactor complete and tested.
+
+**Task #4: Specific exception handling** - ✅ COMPLETED (2025-12-29)
+- Implemented custom exception hierarchy in `backend/exceptions.py`.
+- Replaced generic exception handling with specific exceptions across backend.
+- Verified no `except Exception` remaining in the codebase.
+
+**Task #1: Input validation and sanitization** - ✅ COMPLETED (2025-12-29)
+- Added `backend/validators.py` with version tag, URL, path, and package name validation.
+- Wired validation into API entrypoints (`backend/api/core.py`) and system utilities (`backend/api/system_utils.py`).
+- Added version tag checks across version manager components (installer/state/launcher/dependencies).
+- Added unit tests for validators and updated file opener tests for path validation.
 
 **Next steps:**
-- Task #4: Custom exceptions (~2 hours)
-- Task #1: Input validation (~3 hours)
 - Task #8: Consolidate config (~2 hours)
+- Task #5: Fix file race conditions (~1 day)

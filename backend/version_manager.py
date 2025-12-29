@@ -6,6 +6,7 @@ Handles installation, switching, and launching of ComfyUI versions
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 

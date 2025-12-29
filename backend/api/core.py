@@ -18,6 +18,7 @@ from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
 from backend.models import GitHubRelease
+from backend.validators import validate_package_name, validate_url, validate_version_tag
 
 logger = get_logger(__name__)
 
@@ -527,6 +528,9 @@ class ComfyUISetupAPI:
         """Install a ComfyUI version"""
         if not self.version_manager:
             return False
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected install for invalid tag: {tag!r}")
+            return False
         install_ok = self.version_manager.install_version(tag, progress_callback)
         if not install_ok:
             return False
@@ -549,6 +553,9 @@ class ComfyUISetupAPI:
         """Remove an installed ComfyUI version"""
         if not self.version_manager:
             return False
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected removal for invalid tag: {tag!r}")
+            return False
         removed = self.version_manager.remove_version(tag)
         if removed:
             # Clean up any version-specific shortcuts and icons
@@ -558,6 +565,9 @@ class ComfyUISetupAPI:
     def switch_version(self, tag: str) -> bool:
         """Switch to a different ComfyUI version"""
         if not self.version_manager:
+            return False
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected switch for invalid tag: {tag!r}")
             return False
         return self.version_manager.set_active_version(tag)
 
@@ -577,17 +587,26 @@ class ComfyUISetupAPI:
         """Set the default ComfyUI version (or clear when tag is None)"""
         if not self.version_manager:
             return False
+        if tag is not None and not validate_version_tag(tag):
+            logger.warning(f"Rejected default version for invalid tag: {tag!r}")
+            return False
         return self.version_manager.set_default_version(tag)
 
     def check_version_dependencies(self, tag: str) -> Dict[str, Any]:
         """Check dependency installation status for a version"""
         if not self.version_manager:
             return {"installed": [], "missing": []}
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected dependency check for invalid tag: {tag!r}")
+            return {"installed": [], "missing": []}
         return self.version_manager.check_dependencies(tag)
 
     def install_version_dependencies(self, tag: str, progress_callback=None) -> bool:
         """Install dependencies for a ComfyUI version"""
         if not self.version_manager:
+            return False
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected dependency install for invalid tag: {tag!r}")
             return False
         return self.version_manager.install_dependencies(tag, progress_callback)
 
@@ -601,12 +620,18 @@ class ComfyUISetupAPI:
         """Get detailed information about a specific version"""
         if not self.version_manager:
             return {}
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected version info request for invalid tag: {tag!r}")
+            return {}
         return self.version_manager.get_version_info(tag)
 
     def launch_version(self, tag: str, extra_args: List[str] = None) -> Dict[str, Any]:
         """Launch a specific ComfyUI version"""
         if not self.version_manager:
             return {"success": False, "error": "Version manager unavailable"}
+        if not validate_version_tag(tag):
+            logger.warning(f"Rejected launch for invalid tag: {tag!r}")
+            return {"success": False, "error": "Invalid version tag"}
         success, process, log_path, error_msg, ready = self.version_manager.launch_version(
             tag, extra_args
         )
@@ -650,11 +675,23 @@ class ComfyUISetupAPI:
         """Get list of custom nodes for a specific version"""
         if not self.resource_manager:
             return []
+        if not validate_version_tag(version_tag):
+            logger.warning(f"Rejected custom node list for invalid tag: {version_tag!r}")
+            return []
         return self.resource_manager.list_version_custom_nodes(version_tag)
 
     def install_custom_node(self, git_url: str, version_tag: str, node_name: str = None) -> bool:
         """Install a custom node for a specific version"""
         if not self.resource_manager:
+            return False
+        if not validate_version_tag(version_tag):
+            logger.warning(f"Rejected custom node install for invalid tag: {version_tag!r}")
+            return False
+        if not validate_url(git_url):
+            logger.warning(f"Rejected custom node install for invalid URL: {git_url!r}")
+            return False
+        if node_name and not validate_package_name(node_name):
+            logger.warning(f"Rejected custom node install for invalid name: {node_name!r}")
             return False
         return self.resource_manager.install_custom_node(git_url, version_tag, node_name)
 
@@ -662,11 +699,23 @@ class ComfyUISetupAPI:
         """Update a custom node to latest version"""
         if not self.resource_manager:
             return False
+        if not validate_version_tag(version_tag):
+            logger.warning(f"Rejected custom node update for invalid tag: {version_tag!r}")
+            return False
+        if not validate_package_name(node_name):
+            logger.warning(f"Rejected custom node update for invalid name: {node_name!r}")
+            return False
         return self.resource_manager.update_custom_node(node_name, version_tag)
 
     def remove_custom_node(self, node_name: str, version_tag: str) -> bool:
         """Remove a custom node from a specific version"""
         if not self.resource_manager:
+            return False
+        if not validate_version_tag(version_tag):
+            logger.warning(f"Rejected custom node removal for invalid tag: {version_tag!r}")
+            return False
+        if not validate_package_name(node_name):
+            logger.warning(f"Rejected custom node removal for invalid name: {node_name!r}")
             return False
         return self.resource_manager.remove_custom_node(node_name, version_tag)
 

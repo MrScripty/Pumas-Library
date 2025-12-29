@@ -10,8 +10,10 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.exceptions import ValidationError
 from backend.file_opener import open_in_file_manager
 from backend.logging_config import get_logger
+from backend.validators import sanitize_path, validate_url
 
 logger = get_logger(__name__)
 
@@ -167,7 +169,13 @@ class SystemUtils:
         Returns:
             Dict with success status and optional error message
         """
-        return open_in_file_manager(path, base_dir=self.script_dir)
+        try:
+            safe_path = sanitize_path(path, self.script_dir)
+        except ValidationError as exc:
+            logger.warning(f"Rejected open_path for {path!r}: {exc}")
+            return {"success": False, "error": "Invalid path"}
+
+        return open_in_file_manager(str(safe_path))
 
     def open_url(self, url: str) -> Dict[str, Any]:
         """
@@ -179,10 +187,7 @@ class SystemUtils:
         Returns:
             Dict with success status and optional error message
         """
-        if not url or not str(url).strip():
-            return {"success": False, "error": "URL is required"}
-
-        if not (url.startswith("http://") or url.startswith("https://")):
+        if not validate_url(url):
             return {"success": False, "error": "Only http/https URLs are allowed"}
 
         try:

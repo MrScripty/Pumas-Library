@@ -16,7 +16,10 @@ from backend.api.shortcut_manager import ShortcutManager
 from backend.api.size_calculator import SizeCalculator
 from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
+from backend.logging_config import get_logger
 from backend.models import GitHubRelease
+
+logger = get_logger(__name__)
 
 
 class ComfyUISetupAPI:
@@ -128,7 +131,7 @@ class ComfyUISetupAPI:
 
             self._prefetch_releases_if_needed()
         except Exception as e:
-            print(f"Warning: Version management initialization failed: {e}")
+            logger.warning(f"Version management initialization failed: {e}", exc_info=True)
             self.metadata_manager = None
             self.github_fetcher = None
             self.resource_manager = None
@@ -201,14 +204,18 @@ class ComfyUISetupAPI:
                     ttl = cache.get("ttl", 3600)
 
                     if cache_age < ttl:
-                        print(f"GitHub cache is valid ({int(cache_age)}s old) - skipping prefetch")
+                        logger.debug(
+                            f"GitHub cache is valid ({int(cache_age)}s old) - skipping prefetch"
+                        )
                         return
                     else:
-                        print(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
+                        logger.info(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
                 except Exception as e:
-                    print(f"Error checking cache validity: {e} - prefetching")
+                    logger.warning(
+                        f"Error checking cache validity: {e} - prefetching", exc_info=True
+                    )
             else:
-                print("No GitHub cache found - prefetching in background")
+                logger.info("No GitHub cache found - prefetching in background")
 
             # Track completion for frontend polling
             self._background_fetch_completed = False
@@ -219,21 +226,21 @@ class ComfyUISetupAPI:
                     # (blocking is OK in background thread)
                     releases = self.github_fetcher.get_releases(force_refresh=True)
                     if releases:
-                        print(f"✓ Background prefetch complete: {len(releases)} releases")
+                        logger.info(f"Background prefetch complete: {len(releases)} releases")
                         # Mark completion so frontend can detect
                         self._background_fetch_completed = True
                     else:
-                        print("Background prefetch returned empty (likely offline)")
+                        logger.warning("Background prefetch returned empty (likely offline)")
                 except Exception as exc:
-                    print(f"Background prefetch failed: {exc}")
-                    print("App will continue using stale cache")
+                    logger.error(f"Background prefetch failed: {exc}", exc_info=True)
+                    logger.info("App will continue using stale cache")
 
             import threading
 
             threading.Thread(target=_background_fetch, daemon=True).start()
 
         except Exception as e:
-            print(f"Prefetch init error: {e}")
+            logger.error(f"Prefetch init error: {e}", exc_info=True)
 
     def has_background_fetch_completed(self) -> bool:
         """Check if background fetch has completed (for frontend polling)"""
@@ -432,7 +439,9 @@ class ComfyUISetupAPI:
             releases = self.version_manager.get_available_releases(force_refresh)
             releases_source = "remote" if force_refresh else "cache/remote"
         except Exception as e:
-            print(f"Error fetching releases (force_refresh={force_refresh}): {e}")
+            logger.error(
+                f"Error fetching releases (force_refresh={force_refresh}): {e}", exc_info=True
+            )
             releases = []
 
         if force_refresh and not releases:
@@ -441,9 +450,11 @@ class ComfyUISetupAPI:
                 if cache and cache.get("releases"):
                     releases = cache.get("releases", [])
                     releases_source = "cache-fallback"
-                    print("Using cached releases due to fetch error/rate-limit.")
+                    logger.info("Using cached releases due to fetch error/rate-limit.")
             except Exception as e:
-                print(f"Error loading cached releases after fetch failure: {e}")
+                logger.error(
+                    f"Error loading cached releases after fetch failure: {e}", exc_info=True
+                )
 
         # Enrich releases with size information (Phase 6.2.5c) + installing flag
         installing_tag = None
@@ -453,7 +464,7 @@ class ComfyUISetupAPI:
             if active_progress and not active_progress.get("completed_at"):
                 installing_tag = active_progress.get("tag")
         except Exception as e:
-            print(f"Error checking installation progress for releases: {e}")
+            logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
 
         enriched_releases = []
         for release in releases:
@@ -490,7 +501,7 @@ class ComfyUISetupAPI:
                 enriched_releases, installed_tags, force_refresh
             )
         except Exception as e:
-            print(f"Error scheduling size refresh: {e}")
+            logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
 
         return enriched_releases
 
@@ -523,7 +534,7 @@ class ComfyUISetupAPI:
         # Automatically patch the newly installed version so the UI button isn't needed
         patched = self.patch_mgr.patch_main_py(tag)
         if not patched and not self.patch_mgr.is_patched(tag):
-            print(f"Warning: Installation succeeded but patching {tag} failed.")
+            logger.warning(f"Installation succeeded but patching {tag} failed.")
             return False
 
         return True

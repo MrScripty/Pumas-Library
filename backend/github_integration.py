@@ -16,9 +16,12 @@ from typing import Any, Callable, Dict, List, Optional
 from cachetools import TTLCache
 from packaging.version import InvalidVersion, Version
 
+from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
 from backend.retry_utils import calculate_backoff_delay
+
+logger = get_logger(__name__)
 
 
 class GitHubReleasesFetcher:
@@ -86,7 +89,7 @@ class GitHubReleasesFetcher:
             # If not the last attempt, wait with exponential backoff
             if attempt < max_retries - 1:
                 delay = calculate_backoff_delay(attempt, base_delay=2.0, max_delay=30.0)
-                print(
+                logger.warning(
                     f"GitHub API fetch failed (attempt {attempt + 1}/{max_retries}). "
                     f"Retrying in {delay:.1f}s..."
                 )
@@ -119,13 +122,13 @@ class GitHubReleasesFetcher:
             return releases
         except urllib.error.HTTPError as e:
             if e.code == 403:
-                print("GitHub API rate limit exceeded. Using cached data if available.")
+                logger.warning("GitHub API rate limit exceeded. Using cached data if available.")
                 raise
             else:
-                print(f"GitHub API error: {e.code} {e.reason}")
+                logger.error(f"GitHub API error: {e.code} {e.reason}")
                 raise
         except urllib.error.URLError as e:
-            print(f"Network error fetching releases: {e}")
+            logger.error(f"Network error fetching releases: {e}")
             raise
 
     def _is_cache_valid(self, cache: Optional[GitHubReleasesCache]) -> bool:
@@ -149,7 +152,7 @@ class GitHubReleasesFetcher:
             age_seconds = (now - last_fetched).total_seconds()
             return age_seconds < cache.get("ttl", self.ttl)
         except (KeyError, ValueError) as e:
-            print(f"Error validating cache: {e}")
+            logger.error(f"Error validating cache: {e}", exc_info=True)
             return False
 
     def get_releases(self, force_refresh: bool = False) -> List[GitHubRelease]:
@@ -170,14 +173,14 @@ class GitHubReleasesFetcher:
         """
         # FAST PATH: Check in-memory cache first (no lock needed for read)
         if not force_refresh and self._CACHE_KEY in self._memory_cache:
-            print("Using in-memory cached releases data")
+            logger.debug("Using in-memory cached releases data")
             return self._memory_cache[self._CACHE_KEY]
 
         # SLOW PATH: Coordinated cache check or fetch
         with self._cache_lock:
             # Double-check pattern: another thread might have cached while we waited
             if not force_refresh and self._CACHE_KEY in self._memory_cache:
-                print("Using in-memory cached releases data (after lock)")
+                logger.debug("Using in-memory cached releases data (after lock)")
                 return self._memory_cache[self._CACHE_KEY]
 
             # Check disk cache
@@ -186,24 +189,24 @@ class GitHubReleasesFetcher:
 
                 # Valid cache - load into memory
                 if self._is_cache_valid(disk_cache):
-                    print("Loading releases from disk cache")
+                    logger.info("Loading releases from disk cache")
                     releases = disk_cache["releases"]
                     self._memory_cache[self._CACHE_KEY] = releases
                     return releases
 
                 # Stale cache exists - use it anyway (offline-first)
                 if disk_cache and disk_cache.get("releases"):
-                    print("Using stale disk cache (offline-first)")
+                    logger.info("Using stale disk cache (offline-first)")
                     stale_releases = disk_cache["releases"]
                     self._memory_cache[self._CACHE_KEY] = stale_releases
                     return stale_releases
 
                 # No cache at all - return empty (background will fetch)
-                print("No cache available - returning empty (background fetch will populate)")
+                logger.info("No cache available - returning empty (background fetch will populate)")
                 return []
 
             # force_refresh=True: Actually fetch from GitHub (blocking)
-            print("Fetching releases from GitHub (forced refresh)...")
+            logger.info("Fetching releases from GitHub (forced refresh)...")
             try:
                 releases = self._fetch_from_github()
 
@@ -216,16 +219,16 @@ class GitHubReleasesFetcher:
                 self.metadata_manager.save_github_cache(cache_data)
                 self._memory_cache[self._CACHE_KEY] = releases
 
-                print(f"Fetched {len(releases)} releases from GitHub")
+                logger.info(f"Fetched {len(releases)} releases from GitHub")
                 return releases
 
             except urllib.error.URLError as e:
                 # Network error (offline, timeout, DNS failure)
                 if force_refresh:
-                    print(f"⚠️  Cannot refresh: Network unavailable ({e})")
-                    print("Returning cached data (if available)")
+                    logger.warning(f"Cannot refresh: Network unavailable ({e})")
+                    logger.info("Returning cached data (if available)")
                 else:
-                    print(f"Network unavailable: {e}")
+                    logger.warning(f"Network unavailable: {e}")
 
                 # Return stale cache if available
                 disk_cache = self.metadata_manager.load_github_cache()
@@ -234,30 +237,30 @@ class GitHubReleasesFetcher:
                     self._memory_cache[self._CACHE_KEY] = stale_releases
 
                     if force_refresh:
-                        print(f"Using stale cache ({len(stale_releases)} releases)")
+                        logger.info(f"Using stale cache ({len(stale_releases)} releases)")
                     else:
-                        print("Using stale disk cache (network unavailable)")
+                        logger.info("Using stale disk cache (network unavailable)")
 
                     return stale_releases
 
                 if force_refresh:
-                    print("❌ No cache available - cannot refresh while offline")
+                    logger.error("No cache available - cannot refresh while offline")
                 else:
-                    print("No cache available and network unavailable - returning empty")
+                    logger.warning("No cache available and network unavailable - returning empty")
 
                 return []
 
             except Exception as e:
                 # Other errors (rate limit, parse error, etc.)
-                print(f"Error fetching from GitHub: {e}")
+                logger.error(f"Error fetching from GitHub: {e}", exc_info=True)
 
                 # Try stale cache
                 disk_cache = self.metadata_manager.load_github_cache()
                 if disk_cache and disk_cache.get("releases"):
-                    print("Using stale disk cache (fetch error)")
+                    logger.info("Using stale disk cache (fetch error)")
                     return disk_cache["releases"]
 
-                print("No cache available and fetch failed - returning empty")
+                logger.warning("No cache available and fetch failed - returning empty")
                 return []
 
     def get_cache_status(self) -> Dict[str, Any]:
@@ -305,7 +308,7 @@ class GitHubReleasesFetcher:
                     status["age_seconds"] = int((now - last_fetched).total_seconds())
                     status["last_fetched"] = disk_cache.get("lastFetched")
             except Exception as e:
-                print(f"Error getting cache age: {e}")
+                logger.error(f"Error getting cache age: {e}", exc_info=True)
             return status
 
         # Check disk cache
@@ -325,7 +328,7 @@ class GitHubReleasesFetcher:
                 status["age_seconds"] = int(age_seconds)
                 status["is_valid"] = age_seconds < disk_cache.get("ttl", self.ttl)
             except Exception as e:
-                print(f"Error validating disk cache in get_cache_status: {e}")
+                logger.error(f"Error validating disk cache in get_cache_status: {e}", exc_info=True)
                 # If we can't parse the timestamp, assume it's invalid but exists
                 status["is_valid"] = False
 
@@ -468,7 +471,7 @@ class DownloadManager:
     def cancel(self):
         """Request cancellation of current download"""
         self._cancel_requested = True
-        print("Download cancellation requested")
+        logger.info("Download cancellation requested")
 
     def download_file(
         self,
@@ -513,7 +516,7 @@ class DownloadManager:
                     while True:
                         # Check for cancellation before reading next chunk
                         if self._cancel_requested:
-                            print("Download cancelled by user")
+                            logger.info("Download cancelled by user")
                             raise InterruptedError("Download cancelled")
 
                         chunk = response.read(8192)  # 8KB chunks
@@ -555,13 +558,13 @@ class DownloadManager:
                 return True
 
         except urllib.error.URLError as e:
-            print(f"Download error: {e}")
+            logger.error(f"Download error: {e}")
             # Clean up partial download
             if destination.exists():
                 destination.unlink()
             return False
         except Exception as e:
-            print(f"Unexpected error during download: {e}")
+            logger.error(f"Unexpected error during download: {e}", exc_info=True)
             # Clean up partial download
             if destination.exists():
                 destination.unlink()
@@ -593,13 +596,13 @@ class DownloadManager:
             if attempt > 0:
                 # Calculate exponential backoff with jitter
                 delay = calculate_backoff_delay(attempt - 1, base_delay=2.0, max_delay=60.0)
-                print(f"Retry attempt {attempt + 1}/{max_retries} in {delay:.1f}s...")
+                logger.warning(f"Retry attempt {attempt + 1}/{max_retries} in {delay:.1f}s...")
                 time.sleep(delay)
 
             if self.download_file(url, destination, progress_callback):
                 return True
 
-        print(f"Download failed after {max_retries} attempts")
+        logger.error(f"Download failed after {max_retries} attempts")
         return False
 
 
@@ -652,13 +655,13 @@ if __name__ == "__main__":
     # Initialize GitHub fetcher
     github = GitHubReleasesFetcher(metadata_mgr)
 
-    print("=== ComfyUI Releases ===\n")
+    logger.info("=== ComfyUI Releases ===")
 
     # Fetch releases
     releases = github.get_releases()
 
     if releases:
-        print(f"Found {len(releases)} releases:\n")
+        logger.info(f"Found {len(releases)} releases")
 
         # Display first 5 releases
         for i, release in enumerate(releases[:5]):
@@ -667,30 +670,29 @@ if __name__ == "__main__":
             date = release.get("published_at", "unknown")
             prerelease = " (pre-release)" if release.get("prerelease") else ""
 
-            print(f"{i+1}. {tag} - {name}{prerelease}")
-            print(f"   Published: {date}")
-            print()
+            logger.info(f"{i+1}. {tag} - {name}{prerelease}")
+            logger.info(f"   Published: {date}")
 
         # Get latest stable release
         latest = github.get_latest_release(include_prerelease=False)
         if latest:
-            print(f"\nLatest stable release: {latest.get('tag_name')}")
-            print(f"Published: {latest.get('published_at')}")
+            logger.info(f"Latest stable release: {latest.get('tag_name')}")
+            logger.info(f"Published: {latest.get('published_at')}")
     else:
-        print("No releases found")
+        logger.warning("No releases found")
 
-    print("\n=== Testing Download (sample file) ===\n")
+    logger.info("=== Testing Download (sample file) ===")
 
     # Test download with a small file (GitHub API response as example)
     downloader = DownloadManager()
     test_url = "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest"
     test_dest = launcher_root / "test-download.json"
 
-    print(f"Downloading test file to {test_dest}...")
+    logger.info(f"Downloading test file to {test_dest}...")
     success = downloader.download_file(test_url, test_dest, print_progress)
 
     if success:
-        print(f"\n✓ Download successful! Size: {format_bytes(test_dest.stat().st_size)}")
+        logger.info(f"Download successful! Size: {format_bytes(test_dest.stat().st_size)}")
         test_dest.unlink()  # Clean up
     else:
-        print("\n✗ Download failed")
+        logger.error("Download failed")

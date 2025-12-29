@@ -1003,8 +1003,35 @@ All 5 quick win tasks completed successfully:
 - ✅ Task #11: Security audit setup
 - ✅ Task #10: Exponential backoff
 
-**Next phase:** Week 2 - Foundation (Core Infrastructure)
-- Task #2: Structured logging (~4 hours)
+---
+
+### ✅ Week 2: Foundation (Core Infrastructure) - IN PROGRESS
+
+**Task #2: Structured logging system** - PARTIALLY COMPLETED (2025-12-29) - Commits 56ee4ef, [current]
+- Created backend/logging_config.py with centralized logging infrastructure:
+  - Rotating file handler (10MB max, 5 backups) for detailed logs
+  - Console handler (WARNING+ only) to avoid terminal spam
+  - Auto-creates launcher-data/logs/launcher.log
+  - Thread-safe with proper handler cleanup
+  - Migration helper (log_print_replacement) for gradual adoption
+- Wrote comprehensive unit tests:
+  - 23 tests covering all functionality
+  - 100% code coverage on logging_config.py
+  - Tests for file/console handlers, log levels, rotation, reset, migration helpers
+- Initialized logging in main.py entry point
+- Migrated print() statements to logging:
+  - ✅ metadata_manager.py (2 print → logger.error calls)
+  - ✅ main.py (3 print → logger.info/error calls)
+  - ✅ github_integration.py (42 print → logger calls, 2 kept for user-facing progress)
+  - ✅ installation_progress_tracker.py (10 print → logger.info/error calls)
+  - ✅ api/core.py (16 print → logger calls)
+  - ⏳ version_manager.py (~120 print statements remaining)
+  - ⏳ Other backend modules (~317 print statements remaining)
+- Status: 🚧 Infrastructure complete, gradual migration ongoing (73/456 print statements migrated - 16%)
+
+**Next steps:**
+- Migrate version_manager.py to logging (largest module, ~120 statements)
+- Continue migrating remaining backend modules (~317 statements)
 - Task #4: Custom exceptions (~2 hours)
 - Task #1: Input validation (~3 hours)
 - Task #8: Consolidate config (~2 hours)

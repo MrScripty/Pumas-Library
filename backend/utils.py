@@ -227,7 +227,7 @@ def run_command(
         return (result.returncode == 0, result.stdout, result.stderr)
     except subprocess.TimeoutExpired:
         return (False, "", "Command timed out")
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         return (False, "", str(e))
 
 
@@ -244,7 +244,7 @@ def check_command_exists(command: str) -> bool:
     try:
         result = subprocess.run(["which", command], capture_output=True, text=True)
         return result.returncode == 0
-    except Exception:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError):
         return False
 
 
@@ -308,7 +308,7 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                     package_name = req.name
                     version_spec = str(req.specifier) if req.specifier else ""
                     requirements[package_name] = version_spec
-                except Exception:
+                except (ValueError, TypeError):
                     # If parsing fails, try simple split
                     if "==" in line:
                         package, version = line.split("==", 1)
@@ -320,7 +320,7 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                     else:
                         # No version specifier
                         requirements[line.strip()] = ""
-    except Exception as e:
+    except (IOError, OSError, UnicodeDecodeError) as e:
         logger.error(f"Error parsing requirements file {requirements_path}: {e}", exc_info=True)
 
     return requirements
@@ -342,6 +342,6 @@ def find_files_by_extension(directory: Path, extension: str) -> List[Path]:
 
     try:
         return list(directory.rglob(f"*{extension}"))
-    except Exception as e:
+    except (OSError, PermissionError) as e:
         logger.error(f"Error searching for {extension} files in {directory}: {e}", exc_info=True)
         return []

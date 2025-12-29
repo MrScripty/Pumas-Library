@@ -939,8 +939,23 @@ Track progress with:
 - Disabled hooks (gradual adoption): flake8 and mypy (will enable in Tasks #17 and #13)
 - Status: ✅ Pre-commit infrastructure functional, all active hooks passing on every commit
 
+**Task #6: Remove browser logs** - COMPLETED (2025-12-29)
+- Verified no log files are tracked in git repository (`git ls-files | grep -i '\.log$'` returned 0 results)
+- Confirmed .gitignore properly configured with `*.log` pattern (line 22)
+- Confirmed .gitignore properly excludes `launcher-data/` directory (line 47, contains application logs)
+- Confirmed .gitignore properly excludes `comfyui-versions/` directory (line 53, contains launcher-run.log files)
+- Log files exist locally (launcher-data/logs/, browser profile logs) but are properly ignored by git
+- Status: ✅ No log files are being tracked in the repository, .gitignore properly configured
+
+**Task #7: Pin dependencies** - COMPLETED (2025-12-29)
+- Generated requirements-lock.txt using pip-compile with SHA256 hashes for all dependencies
+- Lock file includes 13 pinned packages with exact versions (altgraph 0.17.5, bottle 0.13.4, cachetools 5.5.2, click 8.3.1, packaging 24.2, pillow 10.4.0, proxy-tools 0.1.0, psutil 5.9.8, pyinstaller 6.17.0, pyinstaller-hooks-contrib 2025.11, pywebview 5.4, setproctitle 1.3.7, typing-extensions 4.15.0)
+- Removed frontend/package-lock.json from .gitignore to track it in repository
+- Updated install.sh to prefer requirements-lock.txt over requirements.txt with fallback
+- Updated install.sh to use `npm ci` (clean install with locked dependencies) instead of `npm install`
+- Frontend package-lock.json already exists and tracked (57KB, npm lockfile format v3)
+- Status: ✅ Reproducible builds ensured with pinned Python and npm dependencies
+
 **Next tasks:**
-2. Task #7: Pin dependencies (~1 hour)
-3. Task #6: Remove browser logs (~30 min)
-4. Task #11: Security audit setup (~30 min)
-5. Task #10: Exponential backoff (~1 hour)
+2. Task #11: Security audit setup (~30 min)
+3. Task #10: Exponential backoff (~1 hour)

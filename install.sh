@@ -158,12 +158,18 @@ echo "Upgrading pip..."
 pip install --upgrade pip > /dev/null
 
 # Install Python dependencies
-echo "Installing Python dependencies from requirements.txt..."
-if [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+echo "Installing Python dependencies..."
+if [ -f "$SCRIPT_DIR/requirements-lock.txt" ]; then
+    echo "Using locked dependencies (requirements-lock.txt)..."
+    pip install -r "$SCRIPT_DIR/requirements-lock.txt"
+    echo -e "${GREEN}✓ Python dependencies installed (pinned versions)${NC}"
+elif [ -f "$SCRIPT_DIR/requirements.txt" ]; then
+    echo -e "${YELLOW}Warning: requirements-lock.txt not found, using requirements.txt${NC}"
     pip install -r "$SCRIPT_DIR/requirements.txt"
     echo -e "${GREEN}✓ Python dependencies installed${NC}"
 else
-    echo -e "${YELLOW}Warning: requirements.txt not found${NC}"
+    echo -e "${RED}Error: No requirements file found${NC}"
+    exit 1
 fi
 
 echo ""
@@ -183,14 +189,19 @@ if [ -d "node_modules" ]; then
     read -p "Reinstall npm packages? [y/N]: " -n 1 -r
     echo
     if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf node_modules package-lock.json
-        npm install
+        rm -rf node_modules
+        npm ci
     else
         echo "Using existing node_modules"
     fi
 else
-    echo "Installing npm packages..."
-    npm install
+    echo "Installing npm packages with locked dependencies..."
+    if [ -f "package-lock.json" ]; then
+        npm ci
+    else
+        echo -e "${YELLOW}Warning: package-lock.json not found, using 'npm install'${NC}"
+        npm install
+    fi
 fi
 
 echo -e "${GREEN}✓ Frontend dependencies installed${NC}"

@@ -6,11 +6,13 @@ Handles fetching releases, caching, and downloading
 
 import json
 import time
+import threading
 import urllib.request
 import urllib.error
 from pathlib import Path
-from typing import Optional, List, Callable, Dict
+from typing import Optional, List, Callable, Dict, Any
 from packaging.version import Version, InvalidVersion
+from cachetools import TTLCache
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
 from backend.metadata_manager import MetadataManager
 
@@ -34,6 +36,11 @@ class GitHubReleasesFetcher:
         """
         self.metadata_manager = metadata_manager
         self.ttl = ttl
+
+        # In-memory cache with TTL and thread lock
+        self._memory_cache = TTLCache(maxsize=1, ttl=ttl)
+        self._cache_lock = threading.Lock()
+        self._CACHE_KEY = 'github_releases'
 
     def _fetch_page(self, page: int) -> List[GitHubRelease]:
         """
@@ -105,46 +112,180 @@ class GitHubReleasesFetcher:
 
     def get_releases(self, force_refresh: bool = False) -> List[GitHubRelease]:
         """
-        Get ComfyUI releases (from cache or GitHub)
+        Get ComfyUI releases with offline-first strategy
+
+        Strategy:
+        1. Check in-memory cache (instant, ~0.1ms)
+        2. Check disk cache (fast, ~5ms)
+        3. If no valid cache: return stale cache or empty list
+        4. Network fetch ONLY happens in background thread (never blocks)
 
         Args:
-            force_refresh: If True, bypass cache and fetch from GitHub
+            force_refresh: If True, bypass cache and fetch from GitHub (blocking)
 
         Returns:
-            List of GitHubRelease objects
+            List of GitHubRelease objects (may be empty if offline with no cache)
         """
-        # Check cache first unless forced refresh
-        if not force_refresh:
-            cache = self.metadata_manager.load_github_cache()
-            if self._is_cache_valid(cache):
-                print("Using cached releases data")
-                return cache['releases']
+        # FAST PATH: Check in-memory cache first (no lock needed for read)
+        if not force_refresh and self._CACHE_KEY in self._memory_cache:
+            print("Using in-memory cached releases data")
+            return self._memory_cache[self._CACHE_KEY]
 
-        # Fetch from GitHub
-        print("Fetching releases from GitHub...")
-        try:
-            releases = self._fetch_from_github()
+        # SLOW PATH: Coordinated cache check or fetch
+        with self._cache_lock:
+            # Double-check pattern: another thread might have cached while we waited
+            if not force_refresh and self._CACHE_KEY in self._memory_cache:
+                print("Using in-memory cached releases data (after lock)")
+                return self._memory_cache[self._CACHE_KEY]
 
-            # Update cache
-            cache_data: GitHubReleasesCache = {
-                'lastFetched': get_iso_timestamp(),
-                'ttl': self.ttl,
-                'releases': releases
-            }
-            self.metadata_manager.save_github_cache(cache_data)
+            # Check disk cache
+            if not force_refresh:
+                disk_cache = self.metadata_manager.load_github_cache()
 
-            print(f"Fetched {len(releases)} releases from GitHub")
-            return releases
-        except Exception as e:
-            # On error, try to return stale cache if available
-            print(f"Error fetching from GitHub: {e}")
-            cache = self.metadata_manager.load_github_cache()
-            if cache:
-                print("Using stale cached data due to fetch error")
-                return cache['releases']
-            else:
-                print("No cache available and fetch failed")
+                # Valid cache - load into memory
+                if self._is_cache_valid(disk_cache):
+                    print("Loading releases from disk cache")
+                    releases = disk_cache['releases']
+                    self._memory_cache[self._CACHE_KEY] = releases
+                    return releases
+
+                # Stale cache exists - use it anyway (offline-first)
+                if disk_cache and disk_cache.get('releases'):
+                    print("Using stale disk cache (offline-first)")
+                    stale_releases = disk_cache['releases']
+                    self._memory_cache[self._CACHE_KEY] = stale_releases
+                    return stale_releases
+
+                # No cache at all - return empty (background will fetch)
+                print("No cache available - returning empty (background fetch will populate)")
                 return []
+
+            # force_refresh=True: Actually fetch from GitHub (blocking)
+            print("Fetching releases from GitHub (forced refresh)...")
+            try:
+                releases = self._fetch_from_github()
+
+                # Update both caches
+                cache_data: GitHubReleasesCache = {
+                    'lastFetched': get_iso_timestamp(),
+                    'ttl': self.ttl,
+                    'releases': releases
+                }
+                self.metadata_manager.save_github_cache(cache_data)
+                self._memory_cache[self._CACHE_KEY] = releases
+
+                print(f"Fetched {len(releases)} releases from GitHub")
+                return releases
+
+            except urllib.error.URLError as e:
+                # Network error (offline, timeout, DNS failure)
+                if force_refresh:
+                    print(f"⚠️  Cannot refresh: Network unavailable ({e})")
+                    print("Returning cached data (if available)")
+                else:
+                    print(f"Network unavailable: {e}")
+
+                # Return stale cache if available
+                disk_cache = self.metadata_manager.load_github_cache()
+                if disk_cache and disk_cache.get('releases'):
+                    stale_releases = disk_cache['releases']
+                    self._memory_cache[self._CACHE_KEY] = stale_releases
+
+                    if force_refresh:
+                        print(f"Using stale cache ({len(stale_releases)} releases)")
+                    else:
+                        print("Using stale disk cache (network unavailable)")
+
+                    return stale_releases
+
+                if force_refresh:
+                    print("❌ No cache available - cannot refresh while offline")
+                else:
+                    print("No cache available and network unavailable - returning empty")
+
+                return []
+
+            except Exception as e:
+                # Other errors (rate limit, parse error, etc.)
+                print(f"Error fetching from GitHub: {e}")
+
+                # Try stale cache
+                disk_cache = self.metadata_manager.load_github_cache()
+                if disk_cache and disk_cache.get('releases'):
+                    print("Using stale disk cache (fetch error)")
+                    return disk_cache['releases']
+
+                print("No cache available and fetch failed - returning empty")
+                return []
+
+    def get_cache_status(self) -> Dict[str, Any]:
+        """
+        Get current cache status for UI display
+
+        Returns:
+            {
+                'has_cache': bool,
+                'is_valid': bool,
+                'age_seconds': int,
+                'last_fetched': str (ISO timestamp),
+                'ttl': int,
+                'releases_count': int,
+                'is_fetching': bool
+            }
+        """
+        status = {
+            'has_cache': False,
+            'is_valid': False,
+            'age_seconds': None,
+            'last_fetched': None,
+            'ttl': self.ttl,
+            'releases_count': 0,
+            'is_fetching': False
+        }
+
+        # Check if fetch is in progress
+        status['is_fetching'] = self._cache_lock.locked()
+
+        # Check in-memory cache first
+        if self._CACHE_KEY in self._memory_cache:
+            releases = self._memory_cache[self._CACHE_KEY]
+            status['has_cache'] = True
+            status['is_valid'] = True  # In-memory is always valid (TTL enforced)
+            status['releases_count'] = len(releases)
+            # Try to get age from disk cache for display
+            try:
+                disk_cache = self.metadata_manager.load_github_cache()
+                if disk_cache and disk_cache.get('lastFetched'):
+                    from backend.models import parse_iso_timestamp
+                    last_fetched = parse_iso_timestamp(disk_cache['lastFetched'])
+                    now = parse_iso_timestamp(get_iso_timestamp())
+                    status['age_seconds'] = int((now - last_fetched).total_seconds())
+                    status['last_fetched'] = disk_cache.get('lastFetched')
+            except Exception as e:
+                print(f"Error getting cache age: {e}")
+            return status
+
+        # Check disk cache
+        disk_cache = self.metadata_manager.load_github_cache()
+        if disk_cache and disk_cache.get('releases'):
+            status['has_cache'] = True
+            status['releases_count'] = len(disk_cache['releases'])
+            status['last_fetched'] = disk_cache.get('lastFetched')
+
+            # Check validity
+            try:
+                from backend.models import parse_iso_timestamp
+                last_fetched = parse_iso_timestamp(disk_cache['lastFetched'])
+                now = parse_iso_timestamp(get_iso_timestamp())
+                age_seconds = (now - last_fetched).total_seconds()
+                status['age_seconds'] = int(age_seconds)
+                status['is_valid'] = age_seconds < disk_cache.get('ttl', self.ttl)
+            except Exception as e:
+                print(f"Error validating disk cache in get_cache_status: {e}")
+                # If we can't parse the timestamp, assume it's invalid but exists
+                status['is_valid'] = False
+
+        return status
 
     def get_latest_release(self, include_prerelease: bool = False) -> Optional[GitHubRelease]:
         """

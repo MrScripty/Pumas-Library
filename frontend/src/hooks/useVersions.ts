@@ -62,6 +62,15 @@ export interface InstallationProgress {
 
 export type InstallNetworkStatus = 'idle' | 'downloading' | 'stalled' | 'failed';
 
+export interface CacheStatus {
+  has_cache: boolean;
+  is_valid: boolean;
+  is_fetching: boolean;
+  age_seconds?: number;
+  last_fetched?: string;
+  releases_count?: number;
+}
+
 export function useVersions() {
   const [installedVersions, setInstalledVersions] = useState<string[]>([]);
   const [activeVersion, setActiveVersion] = useState<string | null>(null);
@@ -84,6 +93,12 @@ export function useVersions() {
   const initializedRef = useRef(false);
   const refreshAllRef = useRef<(forceRefresh?: boolean) => Promise<void>>(() => Promise.resolve());
   const fetchInstallationProgressRef = useRef<() => Promise<InstallationProgress | null>>(() => Promise.resolve(null));
+  const fetchAvailableVersionsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(() => Promise.resolve());
+  const [cacheStatus, setCacheStatus] = useState<CacheStatus>({
+    has_cache: false,
+    is_valid: false,
+    is_fetching: false
+  });
 
   // Fetch installed versions
   const fetchInstalledVersions = useCallback(async () => {
@@ -303,7 +318,7 @@ export function useVersions() {
             clearTimeout(followupRefreshRef.current);
           }
           followupRefreshRef.current = setTimeout(() => {
-            void fetchAvailableVersions(false);
+            void fetchAvailableVersionsRef.current(false);
           }, 1500) as any;
         }
       } else {
@@ -315,6 +330,9 @@ export function useVersions() {
       setError(e instanceof Error ? e.message : String(e));
     }
   }, []);
+
+  // Update ref to latest function
+  fetchAvailableVersionsRef.current = fetchAvailableVersions;
 
   // Fetch comprehensive version status
   const fetchVersionStatus = useCallback(async () => {
@@ -607,6 +625,47 @@ export function useVersions() {
     waitForPyWebView();
   }, []);
 
+  // Poll for background fetch completion and cache status
+  useEffect(() => {
+    if (!window.pywebview?.api) return;
+
+    const checkBackgroundFetch = async () => {
+      try {
+        // Update cache status for footer (do this first for immediate feedback)
+        const statusResult = await window.pywebview.api.get_github_cache_status();
+        console.log('Cache status result:', statusResult);
+        if (statusResult.success) {
+          setCacheStatus(statusResult.status);
+        } else {
+          console.error('Failed to get cache status:', statusResult.error);
+        }
+
+        // Check if background fetch completed
+        const result = await window.pywebview.api.has_background_fetch_completed();
+
+        if (result.success && result.completed) {
+          console.log('✓ Background fetch completed - refreshing UI with new data');
+
+          // Reset the flag
+          await window.pywebview.api.reset_background_fetch_flag();
+
+          // Refresh versions (will get fresh data from cache)
+          await fetchAvailableVersionsRef.current(false);
+        }
+      } catch (error) {
+        console.error('Error checking background fetch:', error);
+      }
+    };
+
+    // Initial check immediately
+    void checkBackgroundFetch();
+
+    // Poll every 2 seconds
+    const interval = setInterval(checkBackgroundFetch, 2000);
+
+    return () => clearInterval(interval);
+  }, []); // Empty dependency array - run once on mount
+
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
@@ -632,6 +691,7 @@ export function useVersions() {
     defaultVersion,
     setDefaultVersion,
     installNetworkStatus,
+    cacheStatus,
 
     // Actions
     switchVersion,

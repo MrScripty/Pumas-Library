@@ -194,25 +194,80 @@ class ComfyUISetupAPI:
         )
 
     def _prefetch_releases_if_needed(self):
-        """Fetch releases in background on startup when cache is empty."""
+        """
+        Smart background prefetch - never blocks startup
+
+        Logic:
+        - Valid cache → Skip prefetch (app starts instantly)
+        - Stale/no cache → Prefetch in background (app still starts instantly)
+        """
         try:
             if not self.github_fetcher or not self.metadata_manager:
                 return
 
+            # Quick check: do we have a valid cache?
             cache = self.metadata_manager.load_github_cache()
+            cache_age = None
+
             if cache and cache.get("releases"):
-                return
+                try:
+                    from backend.models import parse_iso_timestamp, get_iso_timestamp
+                    last_fetched = parse_iso_timestamp(cache['lastFetched'])
+                    now = parse_iso_timestamp(get_iso_timestamp())
+                    cache_age = (now - last_fetched).total_seconds()
+                    ttl = cache.get('ttl', 3600)
+
+                    if cache_age < ttl:
+                        print(f"GitHub cache is valid ({int(cache_age)}s old) - skipping prefetch")
+                        return
+                    else:
+                        print(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
+                except Exception as e:
+                    print(f"Error checking cache validity: {e} - prefetching")
+            else:
+                print("No GitHub cache found - prefetching in background")
+
+            # Track completion for frontend polling
+            self._background_fetch_completed = False
 
             def _background_fetch():
                 try:
-                    self.github_fetcher.get_releases(force_refresh=False)
+                    # Use force_refresh=True to actually fetch
+                    # (blocking is OK in background thread)
+                    releases = self.github_fetcher.get_releases(force_refresh=True)
+                    if releases:
+                        print(f"✓ Background prefetch complete: {len(releases)} releases")
+                        # Mark completion so frontend can detect
+                        self._background_fetch_completed = True
+                    else:
+                        print("Background prefetch returned empty (likely offline)")
                 except Exception as exc:
-                    print(f"Background release fetch failed: {exc}")
+                    print(f"Background prefetch failed: {exc}")
+                    print("App will continue using stale cache")
 
             import threading
             threading.Thread(target=_background_fetch, daemon=True).start()
+
         except Exception as e:
             print(f"Prefetch init error: {e}")
+
+    def has_background_fetch_completed(self) -> bool:
+        """Check if background fetch has completed (for frontend polling)"""
+        return getattr(self, '_background_fetch_completed', False)
+
+    def reset_background_fetch_flag(self):
+        """Reset the completion flag (called by frontend after refresh)"""
+        self._background_fetch_completed = False
+
+    def get_github_cache_status(self) -> Dict[str, Any]:
+        """Get GitHub releases cache status for UI display"""
+        if not self.github_fetcher:
+            return {
+                'has_cache': False,
+                'is_valid': False,
+                'is_fetching': False
+            }
+        return self.github_fetcher.get_cache_status()
 
     # ==================== Dependency Checking ====================
 

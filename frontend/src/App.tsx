@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, Play, Square, AlertTriangle, FileText, SquareArrowUp } from 'lucide-react';
 import { VersionSelector } from './components/VersionSelector';
 import { InstallDialog } from './components/InstallDialog';
+import { StatusFooter } from './components/StatusFooter';
 import { useVersions } from './hooks/useVersions';
 
 // TypeScript definitions for PyWebView API
@@ -64,6 +65,29 @@ declare global {
         check_launcher_updates: (force_refresh?: boolean) => Promise<{ success: boolean; hasUpdate: boolean; currentCommit: string; latestCommit: string; commitsBehind: number; commits: any[]; error?: string }>;
         apply_launcher_update: () => Promise<{ success: boolean; message: string; newCommit?: string; error?: string }>;
         restart_launcher: () => Promise<{ success: boolean; message: string; error?: string }>;
+
+        // Cache Status API
+        get_github_cache_status: () => Promise<{
+          success: boolean;
+          status: {
+            has_cache: boolean;
+            is_valid: boolean;
+            is_fetching: boolean;
+            age_seconds?: number;
+            last_fetched?: string;
+            releases_count?: number;
+          };
+          error?: string;
+        }>;
+        has_background_fetch_completed: () => Promise<{
+          success: boolean;
+          completed: boolean;
+          error?: string;
+        }>;
+        reset_background_fetch_flag: () => Promise<{
+          success: boolean;
+          error?: string;
+        }>;
       };
     };
   }
@@ -127,6 +151,7 @@ export default function App() {
     installNetworkStatus,
     defaultVersion,
     setDefaultVersion,
+    cacheStatus,
   } = useVersions();
 
   // --- API Helpers ---
@@ -483,7 +508,7 @@ export default function App() {
   const spinnerFrames = ['/', '-', '\\', '|'];
 
   return (
-    <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-auto flex flex-col relative font-sans selection:bg-gray-700">
+    <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-auto flex flex-col relative font-sans selection:bg-gray-700 pb-8">
 
       {/* Title Bar */}
       <div className="sticky top-0 z-20 h-14 bg-[#252525] flex items-center justify-between px-6 select-none border-b border-[#333] shadow-sm">
@@ -738,6 +763,9 @@ export default function App() {
           </>
         )}
       </div>
+
+      {/* Status Footer */}
+      <StatusFooter cacheStatus={cacheStatus} />
     </div>
   );
 }

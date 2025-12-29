@@ -403,6 +403,32 @@ class JavaScriptAPI:
         except Exception as e:
             return {"success": False, "error": str(e), "dependencies": []}
 
+    # ==================== Cache Status Methods ====================
+
+    def get_github_cache_status(self):
+        """Get GitHub releases cache status"""
+        try:
+            status = self.api.get_github_cache_status()
+            return {"success": True, "status": status}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def has_background_fetch_completed(self):
+        """Check if background fetch completed"""
+        try:
+            completed = self.api.has_background_fetch_completed()
+            return {"success": True, "completed": completed}
+        except Exception as e:
+            return {"success": False, "error": str(e), "completed": False}
+
+    def reset_background_fetch_flag(self):
+        """Reset background fetch completion flag"""
+        try:
+            self.api.reset_background_fetch_flag()
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     # ==================== Launcher Update Methods ====================
 
     def get_launcher_version(self):

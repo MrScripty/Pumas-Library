@@ -62,3 +62,6 @@ htmlcov/
 *.cover
 .hypothesis/
 .tox/
+
+# Security audit reports
+security-audit-*.json

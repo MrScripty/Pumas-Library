@@ -21,3 +21,6 @@ black>=24.1,<25.0             # Code formatting
 isort>=5.13,<6.0              # Import sorting
 flake8>=7.0,<8.0              # Style enforcement
 mypy>=1.8,<2.0                # Type checking
+
+# Security Tools
+pip-audit>=2.6,<3.0           # Vulnerability scanning for Python packages

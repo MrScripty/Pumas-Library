@@ -583,16 +583,16 @@ def main():
     is_dev = entry.startswith("http://")
 
     if is_dev:
-        print("=" * 60)  # noqa: print
-        print("DEVELOPMENT MODE")  # noqa: print
-        print("=" * 60)  # noqa: print
-        print(f"Connecting to development server at: {entry}")  # noqa: print
-        print("Make sure you have run 'npm run dev' in the frontend/ directory")  # noqa: print
-        print("=" * 60)  # noqa: print
+        logger.info("=" * 60)
+        logger.info("DEVELOPMENT MODE")
+        logger.info("=" * 60)
+        logger.info(f"Connecting to development server at: {entry}")
+        logger.info("Make sure you have run 'npm run dev' in the frontend/ directory")
+        logger.info("=" * 60)
         logger.info(f"Development mode: connecting to {entry}")
 
     if debug_mode:
-        print("Developer console enabled (--debug flag)")  # noqa: print
+        logger.info("Developer console enabled (--debug flag)")
         logger.info("Debug mode enabled")
 
     # Create and configure the webview window

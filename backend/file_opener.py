@@ -5,6 +5,7 @@ Cross-platform file opener utility for launching paths in the system file manage
 Uses click.launch to avoid OS-specific command branches.
 """
 
+import subprocess
 from pathlib import Path
 from typing import Optional, Union
 
@@ -44,7 +45,7 @@ def open_in_file_manager(
 
     try:
         target_path = resolve_target_path(path, base_dir=base_dir)
-    except Exception as exc:
+    except (OSError, ValueError, RuntimeError) as exc:
         return {"success": False, "error": f"Invalid path: {exc}"}
 
     if not target_path.exists():
@@ -56,5 +57,5 @@ def open_in_file_manager(
         if not launched:
             return {"success": False, "error": "Unable to open file manager"}
         return {"success": True, "path": str(target_path)}
-    except Exception as exc:
+    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
         return {"success": False, "error": str(exc)}

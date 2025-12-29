@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+from backend.exceptions import MetadataError, ResourceError
 from backend.logging_config import get_logger
 from backend.models import (
     CustomNodesMetadata,
@@ -63,6 +64,10 @@ class MetadataManager:
 
         Returns:
             Parsed JSON data or default value
+
+        Raises:
+            MetadataError: If JSON parsing fails and no default is provided
+            ResourceError: If file I/O fails and no default is provided
         """
         if not file_path.exists():
             return default if default is not None else {}
@@ -70,9 +75,18 @@ class MetadataManager:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+        except json.JSONDecodeError as e:
+            logger.error(f"Error parsing JSON in {file_path}: {e}", exc_info=True)
+            if default is None:
+                raise MetadataError(f"Failed to parse JSON: {e}", file_path=str(file_path)) from e
+            return default
+        except IOError as e:
             logger.error(f"Error reading {file_path}: {e}", exc_info=True)
-            return default if default is not None else {}
+            if default is None:
+                raise ResourceError(
+                    f"Failed to read metadata file: {e}", resource_type="file"
+                ) from e
+            return default
 
     def _write_json(self, file_path: Path, data: Any) -> bool:
         """
@@ -84,22 +98,36 @@ class MetadataManager:
 
         Returns:
             True if successful, False otherwise
+
+        Raises:
+            MetadataError: If JSON serialization fails
+            ResourceError: If file I/O fails
         """
+        temp_file = file_path.with_suffix(".tmp")
         try:
             # Write to temporary file first
-            temp_file = file_path.with_suffix(".tmp")
             with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
             # Atomic rename (overwrites existing file)
             shutil.move(str(temp_file), str(file_path))
             return True
+        except (TypeError, ValueError) as e:
+            # JSON serialization errors
+            logger.error(f"Error serializing data for {file_path}: {e}", exc_info=True)
+            # Clean up temp file if it exists
+            if temp_file.exists():
+                temp_file.unlink(missing_ok=True)
+            raise MetadataError(
+                f"Failed to serialize metadata to JSON: {e}", file_path=str(file_path)
+            ) from e
         except (IOError, OSError) as e:
+            # File I/O errors
             logger.error(f"Error writing {file_path}: {e}", exc_info=True)
             # Clean up temp file if it exists
             if temp_file.exists():
                 temp_file.unlink(missing_ok=True)
-            return False
+            raise ResourceError(f"Failed to write metadata file: {e}", resource_type="file") from e
 
     # ==================== Versions Metadata ====================
 

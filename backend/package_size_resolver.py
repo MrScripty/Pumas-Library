@@ -8,12 +8,13 @@ import json
 import platform
 import sys
 import urllib.request
-from pathlib import Path
-from typing import Dict, Optional, Tuple, List, Set
 from datetime import datetime, timezone
-from packaging.requirements import Requirement
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
+
 from packaging.markers import default_environment
-from packaging.version import Version, InvalidVersion
+from packaging.requirements import Requirement
+from packaging.version import InvalidVersion, Version
 
 
 class PackageSizeResolver:
@@ -40,9 +41,9 @@ class PackageSizeResolver:
         """Load package sizes cache from disk"""
         if self.cache_file.exists():
             try:
-                with open(self.cache_file, 'r') as f:
+                with open(self.cache_file, "r") as f:
                     data = json.load(f)
-                    return data.get('packages', {})
+                    return data.get("packages", {})
             except Exception as e:
                 print(f"Warning: Failed to load package sizes cache: {e}")
         return {}
@@ -50,11 +51,8 @@ class PackageSizeResolver:
     def _save_cache(self):
         """Save package sizes cache to disk"""
         try:
-            cache_data = {
-                'packages': self._cache,
-                'last_updated': self._get_iso_timestamp()
-            }
-            with open(self.cache_file, 'w') as f:
+            cache_data = {"packages": self._cache, "last_updated": self._get_iso_timestamp()}
+            with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
         except Exception as e:
             print(f"Error saving package sizes cache: {e}")
@@ -73,26 +71,26 @@ class PackageSizeResolver:
         system = platform.system().lower()
         machine = platform.machine().lower()
 
-        if system == 'linux':
-            if 'x86_64' in machine or 'amd64' in machine:
-                return 'linux_x86_64'
-            elif 'aarch64' in machine or 'arm64' in machine:
-                return 'linux_aarch64'
+        if system == "linux":
+            if "x86_64" in machine or "amd64" in machine:
+                return "linux_x86_64"
+            elif "aarch64" in machine or "arm64" in machine:
+                return "linux_aarch64"
             else:
-                return f'linux_{machine}'
-        elif system == 'darwin':
+                return f"linux_{machine}"
+        elif system == "darwin":
             # macOS
-            if 'arm' in machine or 'aarch64' in machine:
-                return 'macosx_11_0_arm64'
+            if "arm" in machine or "aarch64" in machine:
+                return "macosx_11_0_arm64"
             else:
-                return 'macosx_10_9_x86_64'
-        elif system == 'windows':
-            if 'amd64' in machine or 'x86_64' in machine:
-                return 'win_amd64'
+                return "macosx_10_9_x86_64"
+        elif system == "windows":
+            if "amd64" in machine or "x86_64" in machine:
+                return "win_amd64"
             else:
-                return 'win32'
+                return "win32"
         else:
-            return 'any'
+            return "any"
 
     def _get_python_version(self) -> str:
         """
@@ -117,10 +115,7 @@ class PackageSizeResolver:
         return f"{normalized_spec}|{self.platform}|{self.python_version}"
 
     def query_pypi_package_size(
-        self,
-        package_name: str,
-        version: Optional[str] = None,
-        specifier: Optional[str] = None
+        self, package_name: str, version: Optional[str] = None, specifier: Optional[str] = None
     ) -> Optional[Dict[str, any]]:
         """
         Query PyPI JSON API for package size
@@ -140,16 +135,16 @@ class PackageSizeResolver:
                 url = f"https://pypi.org/pypi/{package_name}/json"
 
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'ComfyUI-Launcher')
+            req.add_header("User-Agent", "ComfyUI-Launcher")
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.load(response)
 
             # Get release info
             if version:
-                release_files = data.get('urls', [])
+                release_files = data.get("urls", [])
             else:
-                releases = data.get('releases', {})
+                releases = data.get("releases", {})
 
                 if specifier:
                     # Select the latest version that satisfies the specifier
@@ -170,23 +165,23 @@ class PackageSizeResolver:
                         release_files = releases.get(version, [])
                     else:
                         # Fall back to the latest if no matching versions found
-                        version = data.get('info', {}).get('version')
+                        version = data.get("info", {}).get("version")
                         release_files = releases.get(version, [])
                 else:
                     # Get latest version
-                    version = data.get('info', {}).get('version')
+                    version = data.get("info", {}).get("version")
                     release_files = releases.get(version, [])
 
             if not release_files:
                 return None
 
             # Ensure we use correct metadata for a non-latest version
-            requires_dist = data.get('info', {}).get('requires_dist') or []
-            if version and version != data.get('info', {}).get('version'):
+            requires_dist = data.get("info", {}).get("requires_dist") or []
+            if version and version != data.get("info", {}).get("version"):
                 version_data = self._fetch_pypi_version_data(package_name, version)
                 if version_data:
-                    requires_dist = version_data.get('info', {}).get('requires_dist') or []
-                    release_files = version_data.get('urls', release_files)
+                    requires_dist = version_data.get("info", {}).get("requires_dist") or []
+                    release_files = version_data.get("urls", release_files)
 
             # Find best matching wheel for our platform
             best_match = self._find_best_wheel(release_files, package_name)
@@ -194,13 +189,13 @@ class PackageSizeResolver:
             if best_match:
                 dependencies = self._parse_requires_dist(requires_dist)
                 return {
-                    'size': best_match['size'],
-                    'dependencies': dependencies,
-                    'platform': self.platform,
-                    'python_version': self.python_version,
-                    'checked_at': self._get_iso_timestamp(),
-                    'wheel_filename': best_match['filename'],
-                    'resolved_version': version
+                    "size": best_match["size"],
+                    "dependencies": dependencies,
+                    "platform": self.platform,
+                    "python_version": self.python_version,
+                    "checked_at": self._get_iso_timestamp(),
+                    "wheel_filename": best_match["filename"],
+                    "resolved_version": version,
                 }
 
             return None
@@ -215,11 +210,7 @@ class PackageSizeResolver:
             print(f"Error querying PyPI for {package_name}: {e}")
             return None
 
-    def _find_best_wheel(
-        self,
-        release_files: list,
-        package_name: str
-    ) -> Optional[Dict]:
+    def _find_best_wheel(self, release_files: list, package_name: str) -> Optional[Dict]:
         """
         Find best matching wheel file for current platform
 
@@ -231,28 +222,27 @@ class PackageSizeResolver:
             Best matching file dict or None
         """
         # Filter for wheels
-        wheels = [f for f in release_files if f['packagetype'] == 'bdist_wheel']
+        wheels = [f for f in release_files if f["packagetype"] == "bdist_wheel"]
 
         if not wheels:
             # Try source distribution as fallback
-            sdists = [f for f in release_files if f['packagetype'] == 'sdist']
+            sdists = [f for f in release_files if f["packagetype"] == "sdist"]
             if sdists:
                 # Return the largest sdist (most complete)
-                return max(sdists, key=lambda f: f['size'])
+                return max(sdists, key=lambda f: f["size"])
             return None
 
         # Try to find platform-specific wheel
         platform_wheels = [
-            w for w in wheels
-            if self.platform in w['filename'] or 'any' in w['filename']
+            w for w in wheels if self.platform in w["filename"] or "any" in w["filename"]
         ]
 
         if platform_wheels:
             # Return the largest matching wheel
-            return max(platform_wheels, key=lambda w: w['size'])
+            return max(platform_wheels, key=lambda w: w["size"])
 
         # Fallback to any wheel
-        return max(wheels, key=lambda w: w['size'])
+        return max(wheels, key=lambda w: w["size"])
 
     def _fetch_pypi_version_data(self, package_name: str, version: str) -> Optional[Dict[str, any]]:
         """
@@ -261,7 +251,7 @@ class PackageSizeResolver:
         try:
             url = f"https://pypi.org/pypi/{package_name}/{version}/json"
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'ComfyUI-Launcher')
+            req.add_header("User-Agent", "ComfyUI-Launcher")
             with urllib.request.urlopen(req, timeout=10) as response:
                 return json.load(response)
         except Exception as e:
@@ -269,9 +259,7 @@ class PackageSizeResolver:
             return None
 
     def get_package_metadata(
-        self,
-        package_spec: str,
-        force_refresh: bool = False
+        self, package_spec: str, force_refresh: bool = False
     ) -> Optional[Dict[str, any]]:
         """
         Get cached or fresh package metadata including size and dependencies.
@@ -288,7 +276,7 @@ class PackageSizeResolver:
         # Check cache
         if not force_refresh and cache_key in self._cache:
             cached = self._cache[cache_key]
-            if cached and 'dependencies' in cached:
+            if cached and "dependencies" in cached:
                 return cached
             # Refresh stale cache entries that are missing dependency data
             force_refresh = True
@@ -312,24 +300,17 @@ class PackageSizeResolver:
 
         return None
 
-    def get_package_size(
-        self,
-        package_spec: str,
-        force_refresh: bool = False
-    ) -> Optional[int]:
+    def get_package_size(self, package_spec: str, force_refresh: bool = False) -> Optional[int]:
         """
         Get size of a package in bytes (no dependency expansion).
         """
         metadata = self.get_package_metadata(package_spec, force_refresh)
         if metadata:
-            return metadata.get('size')
+            return metadata.get("size")
         return None
 
     def get_package_total_size(
-        self,
-        package_spec: str,
-        seen: Optional[Set[str]] = None,
-        force_refresh: bool = False
+        self, package_spec: str, seen: Optional[Set[str]] = None, force_refresh: bool = False
     ) -> Optional[int]:
         """
         Get total download size for a package including its transitive dependencies.
@@ -350,13 +331,13 @@ class PackageSizeResolver:
             return 0
 
         metadata = self.get_package_metadata(package_spec, force_refresh)
-        if not metadata or metadata.get('size') is None:
+        if not metadata or metadata.get("size") is None:
             return None
 
         seen.add(key)
-        total = metadata['size']
+        total = metadata["size"]
 
-        for dep_spec in metadata.get('dependencies', []):
+        for dep_spec in metadata.get("dependencies", []):
             dep_size = self.get_package_total_size(dep_spec, seen, force_refresh)
             if dep_size is not None:
                 total += dep_size
@@ -378,18 +359,22 @@ class PackageSizeResolver:
             package_name = requirement.name
             version = None
             specifiers = list(requirement.specifier)
-            if len(specifiers) == 1 and specifiers[0].operator == '==' and '*' not in specifiers[0].version:
+            if (
+                len(specifiers) == 1
+                and specifiers[0].operator == "=="
+                and "*" not in specifiers[0].version
+            ):
                 version = specifiers[0].version
             return (package_name, version)
         except Exception:
             # Handle various operators in raw specs as a fallback
-            for op in ['==', '>=', '<=', '~=', '>', '<', '!=']:
+            for op in ["==", ">=", "<=", "~=", ">", "<", "!="]:
                 if op in package_spec:
                     parts = package_spec.split(op, 1)
                     package_name = parts[0].strip()
 
                     # For exact version (==), use it; otherwise None for latest
-                    if op == '==':
+                    if op == "==":
                         version = parts[1].strip()
                     else:
                         version = None
@@ -444,7 +429,7 @@ class PackageSizeResolver:
                 if req.marker and not req.marker.evaluate(env):
                     continue
 
-                spec = str(req.specifier) if req.specifier else ''
+                spec = str(req.specifier) if req.specifier else ""
                 dependencies.append(f"{req.name}{spec}")
             except Exception as e:
                 print(f"Warning: Failed to parse requires_dist entry '{entry}': {e}")
@@ -453,9 +438,7 @@ class PackageSizeResolver:
         return dependencies
 
     def get_multiple_package_sizes(
-        self,
-        package_specs: list,
-        progress_callback: Optional[callable] = None
+        self, package_specs: list, progress_callback: Optional[callable] = None
     ) -> Dict[str, Optional[int]]:
         """
         Get sizes for multiple packages
@@ -498,7 +481,7 @@ if __name__ == "__main__":
     print(f"Python: {resolver.python_version}\n")
 
     # Test querying a package
-    test_packages = ['pillow', 'numpy', 'torch==2.1.0']
+    test_packages = ["pillow", "numpy", "torch==2.1.0"]
 
     for pkg in test_packages:
         print(f"Querying {pkg}...")
@@ -512,6 +495,7 @@ if __name__ == "__main__":
 
     # Cleanup
     import shutil
+
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
         print("✓ Test cache cleaned up")

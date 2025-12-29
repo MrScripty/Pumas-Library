@@ -48,14 +48,12 @@ class DirectorySetup:
             self.comfyui_versions_dir,
             self.shared_resources_dir,
             self.launcher_data_dir,
-
             # Shared resources
             self.shared_models_dir,
             self.shared_custom_nodes_cache_dir,
             self.shared_user_dir,
             self.shared_user_dir / "workflows",
             self.shared_user_dir / "settings",
-
             # Launcher data
             self.metadata_dir,
             self.config_dir,

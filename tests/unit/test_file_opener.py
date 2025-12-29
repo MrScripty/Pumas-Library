@@ -2,9 +2,10 @@
 Unit tests for file manager path opening functionality.
 """
 
-import pytest
 from pathlib import Path
 from unittest import mock
+
+import pytest
 
 from backend.api import ComfyUISetupAPI
 

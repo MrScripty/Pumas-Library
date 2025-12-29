@@ -11,11 +11,11 @@ from pathlib import Path
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from backend.metadata_manager import MetadataManager
 from backend.github_integration import GitHubReleasesFetcher, format_bytes
+from backend.metadata_manager import MetadataManager
 from backend.resource_manager import ResourceManager
-from backend.version_manager import VersionManager
 from backend.utils import get_launcher_root
+from backend.version_manager import VersionManager
 
 
 def main():
@@ -40,10 +40,10 @@ def main():
         print(f"✓ Found {len(releases)} releases")
         print(f"\nFirst 5 releases:")
         for i, release in enumerate(releases[:5], 1):
-            tag = release.get('tag_name', 'unknown')
-            name = release.get('name', 'Unnamed')
-            date = release.get('published_at', 'unknown')
-            prerelease = " (pre-release)" if release.get('prerelease') else ""
+            tag = release.get("tag_name", "unknown")
+            name = release.get("name", "Unnamed")
+            date = release.get("published_at", "unknown")
+            prerelease = " (pre-release)" if release.get("prerelease") else ""
             print(f"  {i}. {tag} - {name}{prerelease}")
             print(f"     Published: {date}")
     else:
@@ -85,13 +85,15 @@ def main():
     print(f"  - Installed count: {status['installedCount']}")
     print(f"  - Active version: {status['activeVersion']}")
 
-    if status['versions']:
+    if status["versions"]:
         print(f"\nVersion details:")
-        for tag, details in list(status['versions'].items())[:3]:
+        for tag, details in list(status["versions"].items())[:3]:
             print(f"  {tag}:")
             print(f"    Active: {details['isActive']}")
-            dep_status = details['dependencies']
-            print(f"    Dependencies: {len(dep_status['installed'])} installed, {len(dep_status['missing'])} missing")
+            dep_status = details["dependencies"]
+            print(
+                f"    Dependencies: {len(dep_status['installed'])} installed, {len(dep_status['missing'])} missing"
+            )
 
     # Test 5: Install a version (optional - user can skip)
     print("\n" + "=" * 50)
@@ -111,7 +113,7 @@ def main():
     # Get user confirmation
     response = input("Do you want to test installation? (yes/no): ").strip().lower()
 
-    if response in ['yes', 'y']:
+    if response in ["yes", "y"]:
         # Find a suitable version to install
         # Use latest stable release
         latest = github_fetcher.get_latest_release(include_prerelease=False)
@@ -120,7 +122,7 @@ def main():
             print("✗ Could not find latest release")
             return 1
 
-        install_tag = latest.get('tag_name')
+        install_tag = latest.get("tag_name")
 
         # Check if already installed
         if install_tag in installed:
@@ -142,7 +144,7 @@ def main():
                     print("✓ Version appears in installed list")
 
                     info = version_mgr.get_version_info(install_tag)
-                    version_path = launcher_root / info['path']
+                    version_path = launcher_root / info["path"]
 
                     print(f"\nVerifying installation:")
                     print(f"  - Version directory: {version_path.exists()}")
@@ -160,11 +162,11 @@ def main():
                     print(f"  - Installed: {len(dep_status['installed'])} packages")
                     print(f"  - Missing: {len(dep_status['missing'])} packages")
 
-                    if dep_status['missing']:
+                    if dep_status["missing"]:
                         print(f"\n  Missing packages:")
-                        for pkg in dep_status['missing'][:10]:
+                        for pkg in dep_status["missing"][:10]:
                             print(f"    - {pkg}")
-                        if len(dep_status['missing']) > 10:
+                        if len(dep_status["missing"]) > 10:
                             print(f"    ... and {len(dep_status['missing']) - 10} more")
 
                     # Test 7: Switch active version
@@ -179,7 +181,9 @@ def main():
                         if current_active == install_tag:
                             print(f"✓ Active version verified: {current_active}")
                         else:
-                            print(f"✗ Active version mismatch: expected {install_tag}, got {current_active}")
+                            print(
+                                f"✗ Active version mismatch: expected {install_tag}, got {current_active}"
+                            )
                     else:
                         print(f"✗ Failed to switch to {install_tag}")
 
@@ -193,7 +197,7 @@ def main():
 
                     response = input("Proceed with launch test? (yes/no): ").strip().lower()
 
-                    if response in ['yes', 'y']:
+                    if response in ["yes", "y"]:
                         success, process = version_mgr.launch_version(install_tag)
 
                         if success and process:
@@ -245,7 +249,7 @@ def main():
         print("This test can remove a version (not the active one).")
         response = input("Do you want to test version removal? (yes/no): ").strip().lower()
 
-        if response in ['yes', 'y']:
+        if response in ["yes", "y"]:
             # Find a non-active version to remove
             active_ver = version_mgr.get_active_version()
             removable = [v for v in current_installed if v != active_ver]
@@ -283,7 +287,7 @@ def main():
     print("  ✓ Get active version")
     print("  ✓ Get comprehensive version status")
 
-    if response in ['yes', 'y']:
+    if response in ["yes", "y"]:
         print("  ✓ Version installation")
         print("  ✓ Virtual environment creation with UV")
         print("  ✓ Dependency installation")

@@ -5,10 +5,10 @@ Handles status reporting, disk space, and file/URL operations
 """
 
 import shutil
-import webbrowser
 import subprocess
+import webbrowser
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from backend.file_opener import open_in_file_manager
 
@@ -24,7 +24,7 @@ class SystemUtils:
         shortcut_manager,
         process_manager,
         version_info_manager,
-        version_manager=None
+        version_manager=None,
     ):
         """
         Initialize system utilities
@@ -90,7 +90,7 @@ class SystemUtils:
             "message": message,
             "release_info": release_info,
             "last_launch_log": self.process_manager.last_launch_log,
-            "last_launch_error": self.process_manager.last_launch_error
+            "last_launch_error": self.process_manager.last_launch_error,
         }
 
     def get_disk_space(self) -> Dict[str, Any]:
@@ -109,7 +109,7 @@ class SystemUtils:
                 "total": stat.total,
                 "used": stat.used,
                 "free": stat.free,
-                "percent": round(usage_percent, 1)
+                "percent": round(usage_percent, 1),
             }
         except Exception as e:
             return {
@@ -118,7 +118,7 @@ class SystemUtils:
                 "total": 0,
                 "used": 0,
                 "free": 0,
-                "percent": 0
+                "percent": 0,
             }
 
     def toggle_patch(self) -> bool:
@@ -130,7 +130,9 @@ class SystemUtils:
 
     def toggle_menu(self, tag: Optional[str] = None) -> bool:
         """Toggle menu shortcut (version-specific when available)"""
-        target = tag or (self.version_manager.get_active_version() if self.version_manager else None)
+        target = tag or (
+            self.version_manager.get_active_version() if self.version_manager else None
+        )
 
         if target:
             result = self.shortcut_manager.toggle_version_menu_shortcut(target)
@@ -141,7 +143,9 @@ class SystemUtils:
 
     def toggle_desktop(self, tag: Optional[str] = None) -> bool:
         """Toggle desktop shortcut (version-specific when available)"""
-        target = tag or (self.version_manager.get_active_version() if self.version_manager else None)
+        target = tag or (
+            self.version_manager.get_active_version() if self.version_manager else None
+        )
 
         if target:
             result = self.shortcut_manager.toggle_version_desktop_shortcut(target)

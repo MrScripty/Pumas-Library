@@ -107,4 +107,3 @@ Run the launcher with different modes:
 | `./launcher help` | Display usage information |
 
 ## More Details Later (WIP)
-

@@ -5,8 +5,10 @@ Desktop application using PyWebView with React frontend
 """
 
 import sys
-import webview
 from pathlib import Path
+
+import webview
+
 from backend.api import ComfyUISetupAPI
 from backend.config import UI
 
@@ -84,7 +86,12 @@ class JavaScriptAPI:
         """Enable/disable menu and desktop shortcuts for a version"""
         try:
             result = self.api.set_version_shortcuts(tag, bool(enabled))
-            return {"success": result.get("success", False), "state": result.get("state"), "tag": tag, "error": result.get("error")}
+            return {
+                "success": result.get("success", False),
+                "state": result.get("state"),
+                "tag": tag,
+                "error": result.get("error"),
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "state": {}}
 
@@ -92,7 +99,12 @@ class JavaScriptAPI:
         """Toggle only the menu shortcut for a version"""
         try:
             result = self.api.toggle_version_menu_shortcut(tag)
-            return {"success": result.get("success", False), "state": result.get("state"), "tag": tag, "error": result.get("error")}
+            return {
+                "success": result.get("success", False),
+                "state": result.get("state"),
+                "tag": tag,
+                "error": result.get("error"),
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "state": {}}
 
@@ -100,7 +112,12 @@ class JavaScriptAPI:
         """Toggle only the desktop shortcut for a version"""
         try:
             result = self.api.toggle_version_desktop_shortcut(tag)
-            return {"success": result.get("success", False), "state": result.get("state"), "tag": tag, "error": result.get("error")}
+            return {
+                "success": result.get("success", False),
+                "state": result.get("state"),
+                "tag": tag,
+                "error": result.get("error"),
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -112,11 +129,12 @@ class JavaScriptAPI:
             if self.api.version_manager:
                 # Check if there's an active installation
                 progress = self.api.get_installation_progress()
-                if progress and not progress.get('completed_at'):
+                if progress and not progress.get("completed_at"):
                     print("Active installation detected - cancelling...")
                     self.api.cancel_installation()
                     # Give it a moment to clean up
                     import time
+
                     time.sleep(1)
 
             # Destroy all windows
@@ -131,7 +149,12 @@ class JavaScriptAPI:
         """Launch ComfyUI using run.sh"""
         try:
             result = self.api.launch_comfyui()
-            return {"success": result.get("success", False), "log_path": result.get("log_path"), "error": result.get("error"), "ready": result.get("ready")}
+            return {
+                "success": result.get("success", False),
+                "log_path": result.get("log_path"),
+                "error": result.get("error"),
+                "ready": result.get("ready"),
+            }
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -170,11 +193,7 @@ class JavaScriptAPI:
             return {
                 "success": False,
                 "error": str(e),
-                "result": {
-                    "had_invalid": False,
-                    "removed": [],
-                    "valid": []
-                }
+                "result": {"had_invalid": False, "removed": [], "valid": []},
             }
 
     def get_installation_progress(self):
@@ -267,7 +286,11 @@ class JavaScriptAPI:
             status = self.api.check_version_dependencies(tag)
             return {"success": True, "dependencies": status}
         except Exception as e:
-            return {"success": False, "error": str(e), "dependencies": {"installed": [], "missing": []}}
+            return {
+                "success": False,
+                "error": str(e),
+                "dependencies": {"installed": [], "missing": []},
+            }
 
     def install_version_dependencies(self, tag):
         """Install dependencies for a ComfyUI version"""
@@ -434,12 +457,13 @@ class JavaScriptAPI:
     def get_launcher_version(self):
         """Get current launcher version (git commit)"""
         try:
-            from backend.__version__ import __version__, __branch__, is_git_repo
+            from backend.__version__ import __branch__, __version__, is_git_repo
+
             return {
                 "success": True,
                 "version": __version__,
                 "branch": __branch__,
-                "isGitRepo": is_git_repo()
+                "isGitRepo": is_git_repo(),
             }
         except Exception as e:
             return {"success": False, "error": str(e), "version": "unknown"}
@@ -448,8 +472,9 @@ class JavaScriptAPI:
         """Check if launcher updates are available"""
         try:
             # Initialize updater if not exists
-            if not hasattr(self.api, 'launcher_updater'):
+            if not hasattr(self.api, "launcher_updater"):
                 from backend.launcher_updater import LauncherUpdater
+
                 self.api.launcher_updater = LauncherUpdater(self.api.metadata_manager)
 
             result = self.api.launcher_updater.check_for_updates(force_refresh)
@@ -460,12 +485,13 @@ class JavaScriptAPI:
     def apply_launcher_update(self):
         """Apply launcher update (pull + rebuild)"""
         try:
-            if not hasattr(self.api, 'launcher_updater'):
+            if not hasattr(self.api, "launcher_updater"):
                 from backend.launcher_updater import LauncherUpdater
+
                 self.api.launcher_updater = LauncherUpdater(self.api.metadata_manager)
 
             result = self.api.launcher_updater.apply_update()
-            return {"success": result.get('success', False), **result}
+            return {"success": result.get("success", False), **result}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -477,7 +503,7 @@ class JavaScriptAPI:
         try:
             # Get the launcher script path
             launcher_root = Path(__file__).parent.parent
-            launcher_script = launcher_root / 'launcher'
+            launcher_script = launcher_root / "launcher"
 
             if launcher_script.exists():
                 # Restart via launcher script
@@ -485,12 +511,16 @@ class JavaScriptAPI:
             else:
                 # Restart Python directly
                 python = sys.executable
-                subprocess.Popen([python, str(launcher_root / 'backend' / 'main.py')], start_new_session=True)
+                subprocess.Popen(
+                    [python, str(launcher_root / "backend" / "main.py")], start_new_session=True
+                )
 
             # Exit current process after a brief delay
             import threading
+
             def delayed_exit():
                 import time
+
                 time.sleep(1)
                 os._exit(0)
 
@@ -507,7 +537,7 @@ def get_entrypoint():
     Returns either the built frontend or development server URL
     """
     # Determine base directory
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # Running as PyInstaller bundle - use extracted temp directory
         base_dir = Path(sys._MEIPASS)
     else:
@@ -530,12 +560,13 @@ def main():
     """Main application entry point"""
     try:
         import setproctitle
+
         setproctitle.setproctitle("Linux AI Launcher")
     except Exception:
         pass
 
     # Parse command-line arguments for debug mode
-    debug_mode = '--debug' in sys.argv or '--dev' in sys.argv
+    debug_mode = "--debug" in sys.argv or "--dev" in sys.argv
 
     # Create JavaScript API instance
     js_api = JavaScriptAPI()
@@ -567,13 +598,13 @@ def main():
         resizable=False,
         frameless=True,
         easy_drag=True,
-        background_color='#000000'
+        background_color="#000000",
     )
 
     # Start the webview application
     # Use 'gtk' backend on Linux for best compatibility with Debian/Mint
     # Enable debug console only if --debug or --dev flag is passed
-    webview.start(debug=debug_mode, gui='gtk')
+    webview.start(debug=debug_mode, gui="gtk")
 
 
 if __name__ == "__main__":

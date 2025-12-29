@@ -8,7 +8,7 @@ import os
 import subprocess
 import time
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 
 class ProcessManager:
@@ -77,9 +77,7 @@ class ProcessManager:
         pid_candidates: List[tuple[Optional[str], Path]] = [
             (None, self.comfyui_dir / "comfyui.pid")
         ]
-        pid_candidates.extend([
-            (tag, path / "comfyui.pid") for tag, path in tag_paths.items()
-        ])
+        pid_candidates.extend([(tag, path / "comfyui.pid") for tag, path in tag_paths.items()])
 
         for tag, pid_file in pid_candidates:
             if not pid_file.exists():
@@ -88,12 +86,9 @@ class ProcessManager:
                 pid = int(pid_file.read_text().strip())
                 os.kill(pid, 0)
                 if pid not in seen_pids:
-                    processes.append({
-                        "pid": pid,
-                        "source": "pid_file",
-                        "tag": tag,
-                        "pid_file": str(pid_file)
-                    })
+                    processes.append(
+                        {"pid": pid, "source": "pid_file", "tag": tag, "pid_file": str(pid_file)}
+                    )
                     seen_pids.add(pid)
             except (ValueError, ProcessLookupError, OSError):
                 continue
@@ -101,10 +96,7 @@ class ProcessManager:
         # 2) Process table scan (helps when PID files are missing/stale)
         try:
             ps = subprocess.run(
-                ['ps', '-eo', 'pid=,args='],
-                capture_output=True,
-                text=True,
-                timeout=3
+                ["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=3
             )
             ps_output = ps.stdout.splitlines()
         except Exception as e:
@@ -142,12 +134,9 @@ class ProcessManager:
                     inferred_tag = tag
                     break
 
-            processes.append({
-                "pid": pid,
-                "source": "process_scan",
-                "tag": inferred_tag,
-                "cmd": cmdline
-            })
+            processes.append(
+                {"pid": pid, "source": "process_scan", "tag": inferred_tag, "cmd": cmdline}
+            )
             seen_pids.add(pid)
 
         return processes
@@ -166,15 +155,15 @@ class ProcessManager:
             try:
                 # Find and kill Brave processes with ComfyUI in the command line
                 result = subprocess.run(
-                    ['pgrep', '-f', 'brave.*--app=http://127.0.0.1'],
+                    ["pgrep", "-f", "brave.*--app=http://127.0.0.1"],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=5,
                 )
 
                 if result.returncode == 0 and result.stdout.strip():
                     # Kill each Brave process found
-                    pids = result.stdout.strip().split('\n')
+                    pids = result.stdout.strip().split("\n")
                     for pid in pids:
                         try:
                             os.kill(int(pid), 9)  # SIGKILL - force kill immediately
@@ -216,7 +205,7 @@ class ProcessManager:
 
             # Fallback: try process name kill if nothing was found
             try:
-                subprocess.run(['pkill', '-9', '-f', 'ComfyUI Server'], check=False)
+                subprocess.run(["pkill", "-9", "-f", "ComfyUI Server"], check=False)
                 return True
             except Exception:
                 pass
@@ -232,7 +221,9 @@ class ProcessManager:
             if self.version_manager:
                 active_tag = self.version_manager.get_active_version()
                 if active_tag:
-                    success, _process, log_path, error_msg, ready = self.version_manager.launch_version(active_tag)
+                    success, _process, log_path, error_msg, ready = (
+                        self.version_manager.launch_version(active_tag)
+                    )
                     if success:
                         print(f"Launched active managed version: {active_tag}")
                         self.last_launch_log = log_path
@@ -242,7 +233,12 @@ class ProcessManager:
                     print(f"Failed to launch managed version {active_tag}")
                     self.last_launch_log = log_path
                     self.last_launch_error = error_msg
-                    return {"success": False, "log_path": log_path, "error": error_msg, "ready": ready}
+                    return {
+                        "success": False,
+                        "log_path": log_path,
+                        "error": error_msg,
+                        "ready": ready,
+                    }
 
             self.last_launch_error = "No active version selected"
             self.last_launch_log = None

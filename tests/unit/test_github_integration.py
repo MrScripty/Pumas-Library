@@ -2,8 +2,9 @@
 Unit tests for GitHub release fetching and collapse logic.
 """
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from backend.github_integration import GitHubReleasesFetcher
 from backend.metadata_manager import MetadataManager
@@ -85,5 +86,7 @@ class TestGitHubReleaseCollapse:
         assert len(collapsed_with) == 2
 
         # Without prerelease - should return empty
-        collapsed_without = fetcher.collapse_latest_patch_per_minor(releases, include_prerelease=False)
+        collapsed_without = fetcher.collapse_latest_patch_per_minor(
+            releases, include_prerelease=False
+        )
         assert collapsed_without == []

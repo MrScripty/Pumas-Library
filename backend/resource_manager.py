@@ -4,25 +4,21 @@ Resource Manager for ComfyUI Version Manager
 Handles shared storage, symlinks, custom nodes, and resource management
 """
 
-import shutil
 import json
+import shutil
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
-from backend.models import (
-    RepairReport,
-    ScanResult,
-    ModelInfo,
-    get_iso_timestamp
-)
-from backend.utils import (
-    make_relative_symlink,
-    is_valid_symlink,
-    is_broken_symlink,
-    get_directory_size,
-    calculate_file_hash,
-    ensure_directory
-)
+from typing import Dict, List, Optional, Tuple
+
 from backend.metadata_manager import MetadataManager
+from backend.models import ModelInfo, RepairReport, ScanResult, get_iso_timestamp
+from backend.utils import (
+    calculate_file_hash,
+    ensure_directory,
+    get_directory_size,
+    is_broken_symlink,
+    is_valid_symlink,
+    make_relative_symlink,
+)
 
 
 class ResourceManager:
@@ -92,7 +88,7 @@ class ResourceManager:
 
         try:
             # Read and parse folder_paths.py to find model directories
-            with open(folder_paths_file, 'r') as f:
+            with open(folder_paths_file, "r") as f:
                 content = f.read()
 
             # Look for folder_names_and_paths dictionary
@@ -101,6 +97,7 @@ class ResourceManager:
 
             # Common pattern: folder_names_and_paths["checkpoints"] = ...
             import re
+
             pattern = r'folder_names_and_paths\["([^"]+)"\]'
             matches = re.findall(pattern, content)
 
@@ -222,11 +219,7 @@ class ResourceManager:
         """
         version_path = self.versions_dir / version_tag
 
-        report: RepairReport = {
-            'broken': [],
-            'repaired': [],
-            'removed': []
-        }
+        report: RepairReport = {"broken": [], "repaired": [], "removed": []}
 
         if not version_path.exists():
             print(f"Error: Version directory not found: {version_path}")
@@ -234,42 +227,40 @@ class ResourceManager:
 
         # Check key symlinks
         symlinks_to_check = {
-            'models': self.shared_models_dir,
-            'user': self.shared_user_dir,
+            "models": self.shared_models_dir,
+            "user": self.shared_user_dir,
         }
 
         for link_name, expected_target in symlinks_to_check.items():
             link_path = version_path / link_name
 
             if is_broken_symlink(link_path):
-                report['broken'].append(str(link_path.relative_to(self.launcher_root)))
+                report["broken"].append(str(link_path.relative_to(self.launcher_root)))
 
                 # Try to repair
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
-                        report['repaired'].append(str(link_path.relative_to(self.launcher_root)))
+                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
                         print(f"Repaired symlink: {link_name}")
                     else:
                         print(f"Failed to repair symlink: {link_name}")
                 else:
                     # Target doesn't exist, remove broken symlink
                     link_path.unlink()
-                    report['removed'].append(str(link_path.relative_to(self.launcher_root)))
+                    report["removed"].append(str(link_path.relative_to(self.launcher_root)))
                     print(f"Removed broken symlink: {link_name}")
 
             elif not link_path.exists():
                 # Symlink doesn't exist, create it
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
-                        report['repaired'].append(str(link_path.relative_to(self.launcher_root)))
+                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
                         print(f"Created missing symlink: {link_name}")
 
         return report
 
     def migrate_existing_files(
-        self,
-        version_path: Path,
-        auto_merge: bool = False
+        self, version_path: Path, auto_merge: bool = False
     ) -> Tuple[int, int, List[str]]:
         """
         Scan version directory for real files and move to shared storage
@@ -382,12 +373,7 @@ class ResourceManager:
         """
         return self.metadata_manager.load_models()
 
-    def add_model(
-        self,
-        source_path: Path,
-        category: str,
-        update_metadata: bool = True
-    ) -> bool:
+    def add_model(self, source_path: Path, category: str, update_metadata: bool = True) -> bool:
         """
         Add a model to shared storage
 
@@ -448,15 +434,15 @@ class ResourceManager:
             relative_path = str(model_path.relative_to(self.shared_models_dir))
 
             model_info: ModelInfo = {
-                'path': relative_path,
-                'size': model_path.stat().st_size,
-                'sha256': file_hash or '',
-                'addedDate': get_iso_timestamp(),
-                'lastUsed': get_iso_timestamp(),
-                'tags': [],
-                'modelType': category,
-                'usedByVersions': [],
-                'source': 'manual'
+                "path": relative_path,
+                "size": model_path.stat().st_size,
+                "sha256": file_hash or "",
+                "addedDate": get_iso_timestamp(),
+                "lastUsed": get_iso_timestamp(),
+                "tags": [],
+                "modelType": category,
+                "usedByVersions": [],
+                "source": "manual",
             }
 
             # Add to metadata
@@ -532,10 +518,10 @@ class ResourceManager:
                     total_size += workflow_file.stat().st_size
 
         result: ScanResult = {
-            'modelsFound': models_found,
-            'workflowsFound': workflows_found,
-            'customNodesFound': 0,  # Custom nodes not in shared storage
-            'totalSize': total_size
+            "modelsFound": models_found,
+            "workflowsFound": workflows_found,
+            "customNodesFound": 0,  # Custom nodes not in shared storage
+            "totalSize": total_size,
         }
 
         return result
@@ -569,18 +555,16 @@ class ResourceManager:
 
         try:
             return [
-                d.name for d in custom_nodes_dir.iterdir()
-                if d.is_dir() and not d.name.startswith('.')
+                d.name
+                for d in custom_nodes_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
             ]
         except Exception as e:
             print(f"Error listing custom nodes: {e}")
             return []
 
     def install_custom_node(
-        self,
-        git_url: str,
-        version_tag: str,
-        node_name: Optional[str] = None
+        self, git_url: str, version_tag: str, node_name: Optional[str] = None
     ) -> bool:
         """
         Install a custom node for a specific ComfyUI version
@@ -599,8 +583,8 @@ class ResourceManager:
         # Extract node name from git URL if not provided
         if node_name is None:
             # Extract from URL like: https://github.com/user/ComfyUI-CustomNode.git
-            node_name = git_url.rstrip('/').split('/')[-1]
-            if node_name.endswith('.git'):
+            node_name = git_url.rstrip("/").split("/")[-1]
+            if node_name.endswith(".git"):
                 node_name = node_name[:-4]
 
         # Get custom nodes directory for this version
@@ -617,8 +601,8 @@ class ResourceManager:
         print(f"Installing custom node {node_name} for {version_tag}...")
 
         success, stdout, stderr = run_command(
-            ['git', 'clone', git_url, str(node_install_path)],
-            timeout=300  # 5 minute timeout for large repos
+            ["git", "clone", git_url, str(node_install_path)],
+            timeout=300,  # 5 minute timeout for large repos
         )
 
         if not success:
@@ -662,11 +646,7 @@ class ResourceManager:
         print(f"Updating custom node {node_name}...")
 
         # Git pull
-        success, stdout, stderr = run_command(
-            ['git', 'pull'],
-            cwd=node_path,
-            timeout=60
-        )
+        success, stdout, stderr = run_command(["git", "pull"], cwd=node_path, timeout=60)
 
         if not success:
             print(f"Error updating custom node: {stderr}")
@@ -721,8 +701,8 @@ class ResourceManager:
         from backend.utils import run_command
 
         # Extract repo name from URL
-        repo_name = git_url.rstrip('/').split('/')[-1]
-        if repo_name.endswith('.git'):
+        repo_name = git_url.rstrip("/").split("/")[-1]
+        if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
 
         cache_path = self.shared_custom_nodes_cache_dir / f"{repo_name}.git"
@@ -731,9 +711,7 @@ class ResourceManager:
             # Update existing cache
             print(f"Updating cached repo: {repo_name}")
             success, stdout, stderr = run_command(
-                ['git', 'fetch', '--all'],
-                cwd=cache_path,
-                timeout=60
+                ["git", "fetch", "--all"], cwd=cache_path, timeout=60
             )
 
             if not success:
@@ -746,8 +724,7 @@ class ResourceManager:
             ensure_directory(self.shared_custom_nodes_cache_dir)
 
             success, stdout, stderr = run_command(
-                ['git', 'clone', '--bare', git_url, str(cache_path)],
-                timeout=300
+                ["git", "clone", "--bare", git_url, str(cache_path)], timeout=300
             )
 
             if not success:
@@ -790,9 +767,9 @@ if __name__ == "__main__":
 
     # Check if we have any installed versions
     versions = metadata_mgr.load_versions_metadata()
-    if versions.get('installed'):
+    if versions.get("installed"):
         print("Testing symlink setup for installed versions:")
-        for version_tag in versions['installed'].keys():
+        for version_tag in versions["installed"].keys():
             print(f"\nVersion: {version_tag}")
 
             # Setup symlinks
@@ -803,8 +780,10 @@ if __name__ == "__main__":
 
             # Validate symlinks
             repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
-            print(f"  Validation: {len(repair_report['broken'])} broken, "
-                  f"{len(repair_report['repaired'])} repaired, "
-                  f"{len(repair_report['removed'])} removed")
+            print(
+                f"  Validation: {len(repair_report['broken'])} broken, "
+                f"{len(repair_report['repaired'])} repaired, "
+                f"{len(repair_report['removed'])} removed"
+            )
     else:
         print("No versions installed yet")

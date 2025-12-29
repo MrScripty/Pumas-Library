@@ -4,14 +4,15 @@ Data models for ComfyUI Version Manager
 Defines TypedDict classes for all metadata structures
 """
 
-from typing import TypedDict, Dict, List, Optional, Literal
 from datetime import datetime
-
+from typing import Dict, List, Literal, Optional, TypedDict
 
 # ==================== Version Metadata ====================
 
+
 class VersionInfo(TypedDict, total=False):
     """Information about an installed ComfyUI version"""
+
     path: str
     installedDate: str  # ISO 8601 format
     pythonVersion: str
@@ -27,6 +28,7 @@ class VersionInfo(TypedDict, total=False):
 
 class VersionsMetadata(TypedDict):
     """Root metadata structure for versions.json"""
+
     installed: Dict[str, VersionInfo]  # tag -> version info
     lastSelectedVersion: Optional[str]
     defaultVersion: Optional[str]
@@ -34,8 +36,10 @@ class VersionsMetadata(TypedDict):
 
 # ==================== Custom Node Metadata ====================
 
+
 class CustomNodeVersionStatus(TypedDict, total=False):
     """Per-version status of a custom node"""
+
     enabled: bool
     gitCommit: str
     gitTag: Optional[str]
@@ -48,6 +52,7 @@ class CustomNodeVersionStatus(TypedDict, total=False):
 
 class VersionConfig(TypedDict, total=False):
     """Per-version configuration"""
+
     version: str
     customNodes: Dict[str, CustomNodeVersionStatus]  # node name -> status
     launchArgs: List[str]
@@ -59,6 +64,7 @@ class VersionConfig(TypedDict, total=False):
 
 class CompatibilityCache(TypedDict, total=False):
     """Cached compatibility check result"""
+
     status: Literal["compatible", "incompatible", "unknown"]
     checkedAt: str  # ISO 8601
     requirementsHash: str
@@ -69,6 +75,7 @@ class CompatibilityCache(TypedDict, total=False):
 
 class CustomNodeInfo(TypedDict, total=False):
     """Global metadata about a custom node"""
+
     cacheRepo: str  # path to bare git repo
     gitUrl: str
     lastFetched: str  # ISO 8601
@@ -82,13 +89,16 @@ class CustomNodeInfo(TypedDict, total=False):
 
 class CustomNodesMetadata(TypedDict):
     """Root metadata structure for custom_nodes.json"""
+
     # node name -> node info (note: this is a dict, not TypedDict)
 
 
 # ==================== Model Metadata ====================
 
+
 class ModelInfo(TypedDict, total=False):
     """Metadata about a model file"""
+
     path: str
     size: int  # bytes
     sha256: str
@@ -104,13 +114,16 @@ class ModelInfo(TypedDict, total=False):
 
 class ModelsMetadata(TypedDict):
     """Root metadata structure for models.json"""
+
     # relative path -> model info (note: this is a dict, not TypedDict)
 
 
 # ==================== Workflow Metadata ====================
 
+
 class WorkflowInfo(TypedDict, total=False):
     """Metadata about a workflow file"""
+
     path: str
     createdDate: str  # ISO 8601
     modifiedDate: str  # ISO 8601
@@ -123,13 +136,16 @@ class WorkflowInfo(TypedDict, total=False):
 
 class WorkflowsMetadata(TypedDict):
     """Root metadata structure for workflows.json"""
+
     # workflow filename -> workflow info (note: this is a dict, not TypedDict)
 
 
 # ==================== GitHub Release Metadata ====================
 
+
 class GitHubRelease(TypedDict, total=False):
     """GitHub release information"""
+
     tag_name: str
     name: str
     published_at: str  # ISO 8601
@@ -146,6 +162,7 @@ class GitHubRelease(TypedDict, total=False):
 
 class GitHubReleasesCache(TypedDict):
     """Cached GitHub releases"""
+
     lastFetched: str  # ISO 8601
     ttl: int  # seconds
     releases: List[GitHubRelease]
@@ -153,8 +170,10 @@ class GitHubReleasesCache(TypedDict):
 
 # ==================== Status & Result Types ====================
 
+
 class DependencyStatus(TypedDict):
     """Status of version dependencies"""
+
     status: Literal["complete", "incomplete", "unknown"]
     missing: List[str]
     outdated: List[Dict[str, str]]  # package, required, installed
@@ -163,6 +182,7 @@ class DependencyStatus(TypedDict):
 
 class CompatibilityReport(TypedDict):
     """Compatibility check report for a version"""
+
     compatible: bool
     issues: List[str]
     warnings: List[str]
@@ -170,6 +190,7 @@ class CompatibilityReport(TypedDict):
 
 class RepairReport(TypedDict):
     """Report from symlink validation/repair"""
+
     broken: List[str]
     repaired: List[str]
     removed: List[str]
@@ -177,6 +198,7 @@ class RepairReport(TypedDict):
 
 class ScanResult(TypedDict):
     """Result from scanning shared storage"""
+
     modelsFound: int
     workflowsFound: int
     customNodesFound: int
@@ -185,6 +207,7 @@ class ScanResult(TypedDict):
 
 class Release(TypedDict):
     """Simplified release info for internal use"""
+
     tag: str
     name: str
     date: str
@@ -195,6 +218,7 @@ class Release(TypedDict):
 
 # ==================== Helper Functions ====================
 
+
 def get_iso_timestamp() -> str:
     """Get current time as ISO 8601 string"""
     return datetime.utcnow().isoformat() + "Z"
@@ -203,6 +227,6 @@ def get_iso_timestamp() -> str:
 def parse_iso_timestamp(iso_str: str) -> datetime:
     """Parse ISO 8601 string to datetime"""
     # Handle both with and without 'Z' suffix
-    if iso_str.endswith('Z'):
+    if iso_str.endswith("Z"):
         iso_str = iso_str[:-1]
     return datetime.fromisoformat(iso_str)

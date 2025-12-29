@@ -9,8 +9,8 @@ import shutil
 from pathlib import Path
 from typing import List, Tuple
 
-from backend.utils import ensure_directory
 from backend.models import ScanResult
+from backend.utils import ensure_directory
 
 
 class SharedStorageManager:
@@ -78,7 +78,7 @@ class SharedStorageManager:
 
         try:
             # Read and parse folder_paths.py to find model directories
-            with open(folder_paths_file, 'r') as f:
+            with open(folder_paths_file, "r") as f:
                 content = f.read()
 
             # Look for folder_names_and_paths dictionary
@@ -157,9 +157,7 @@ class SharedStorageManager:
         return success
 
     def migrate_existing_files(
-        self,
-        version_path: Path,
-        auto_merge: bool = False
+        self, version_path: Path, auto_merge: bool = False
     ) -> Tuple[int, int, List[str]]:
         """
         Scan version directory for real files and move to shared storage
@@ -293,10 +291,10 @@ class SharedStorageManager:
                     total_size += workflow_file.stat().st_size
 
         result: ScanResult = {
-            'modelsFound': models_found,
-            'workflowsFound': workflows_found,
-            'customNodesFound': 0,  # Custom nodes not in shared storage
-            'totalSize': total_size
+            "modelsFound": models_found,
+            "workflowsFound": workflows_found,
+            "customNodesFound": 0,  # Custom nodes not in shared storage
+            "totalSize": total_size,
         }
 
         return result

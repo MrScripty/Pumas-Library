@@ -7,7 +7,7 @@ Handles desktop shortcuts, menu entries, and icon generation
 import shutil
 import subprocess
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from backend.config import INSTALLATION
 
@@ -30,7 +30,7 @@ class ShortcutManager:
         shortcut_scripts_dir: Path,
         generated_icons_dir: Path,
         version_manager=None,
-        metadata_manager=None
+        metadata_manager=None,
     ):
         """
         Initialize shortcut manager
@@ -59,8 +59,8 @@ class ShortcutManager:
         """Convert a version tag into a filesystem-safe slug"""
         if not tag:
             return "unknown"
-        safe = ''.join(c if c.isalnum() or c in ('-', '_') else '-' for c in tag.strip().lower())
-        safe = safe.strip('-_') or "unknown"
+        safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in tag.strip().lower())
+        safe = safe.strip("-_") or "unknown"
         return safe
 
     def _get_version_paths(self, tag: str) -> Optional[Dict[str, Path]]:
@@ -157,7 +157,7 @@ class ShortcutManager:
 
     def _prepare_version_label(self, tag: str) -> str:
         """Prepare version label text from tag."""
-        label = tag.lstrip('v')
+        label = tag.lstrip("v")
         if len(label) > 12:
             label = label[:12]
         return label
@@ -263,15 +263,17 @@ class ShortcutManager:
                 if Image:
                     with Image.open(icon_source) as img:
                         img = img.convert("RGBA")
-                        resampling = getattr(getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS)
+                        resampling = getattr(
+                            getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS
+                        )
                         img.thumbnail((size, size), resample=resampling)
                         img.save(dest_icon, format="PNG")
                         conversion_success = True
                 else:
                     result = subprocess.run(
-                        ['convert', str(icon_source), '-resize', f'{size}x{size}', str(dest_icon)],
+                        ["convert", str(icon_source), "-resize", f"{size}x{size}", str(dest_icon)],
                         capture_output=True,
-                        timeout=10
+                        timeout=10,
                     )
                     if result.returncode == 0:
                         conversion_success = True
@@ -297,24 +299,36 @@ class ShortcutManager:
 
         # Update icon cache if available
         try:
-            subprocess.run(['gtk-update-icon-cache', '-f', '-t', str(icon_base_dir)],
-                           capture_output=True, timeout=5)
+            subprocess.run(
+                ["gtk-update-icon-cache", "-f", "-t", str(icon_base_dir)],
+                capture_output=True,
+                timeout=5,
+            )
         except Exception:
             pass
 
         try:
             subprocess.run(
-                ['xdg-icon-resource', 'install', '--novendor', '--size', '256',
-                 str(icon_source), icon_name],
+                [
+                    "xdg-icon-resource",
+                    "install",
+                    "--novendor",
+                    "--size",
+                    "256",
+                    str(icon_source),
+                    icon_name,
+                ],
                 capture_output=True,
-                timeout=5
+                timeout=5,
             )
         except Exception:
             pass
 
         return icon_name
 
-    def _write_version_launch_script(self, tag: str, version_dir: Path, slug: str) -> Optional[Path]:
+    def _write_version_launch_script(
+        self, tag: str, version_dir: Path, slug: str
+    ) -> Optional[Path]:
         """Create a launch script for a specific version"""
         script_path = self.shortcut_scripts_dir / f"launch-{slug}.sh"
 
@@ -448,7 +462,9 @@ wait $SERVER_PID
             "states": states,
         }
 
-    def create_version_shortcuts(self, tag: str, create_menu: bool = True, create_desktop: bool = True) -> Dict[str, Any]:
+    def create_version_shortcuts(
+        self, tag: str, create_menu: bool = True, create_desktop: bool = True
+    ) -> Dict[str, Any]:
         """Create menu/desktop shortcuts for a specific version"""
         paths = self._get_version_paths(tag)
         shortcut_paths = self._get_version_shortcut_paths(tag)
@@ -465,7 +481,9 @@ wait $SERVER_PID
         if not desktop_icon_name:
             desktop_icon_name = base_icon_name
 
-        launcher_script = self._write_version_launch_script(tag, paths["version_dir"], shortcut_paths["slug"])
+        launcher_script = self._write_version_launch_script(
+            tag, paths["version_dir"], shortcut_paths["slug"]
+        )
 
         if not launcher_script:
             return {"success": False, "error": "Failed to write launch script"}
@@ -510,11 +528,15 @@ Categories=Graphics;ArtificialIntelligence;
             except Exception as e:
                 print(f"Error creating desktop shortcut for {tag}: {e}")
 
-        results["success"] = (not create_menu or results["menu"]) and (not create_desktop or results["desktop"])
+        results["success"] = (not create_menu or results["menu"]) and (
+            not create_desktop or results["desktop"]
+        )
         results["state"] = self.get_version_shortcut_state(tag)
         return results
 
-    def remove_version_shortcuts(self, tag: str, remove_menu: bool = True, remove_desktop: bool = True) -> Dict[str, Any]:
+    def remove_version_shortcuts(
+        self, tag: str, remove_menu: bool = True, remove_desktop: bool = True
+    ) -> Dict[str, Any]:
         """Remove version-specific shortcuts and icons"""
         paths = self._get_version_shortcut_paths(tag)
         if remove_menu:
@@ -540,7 +562,9 @@ Categories=Graphics;ArtificialIntelligence;
 
         return {"success": True, "state": state_after}
 
-    def set_version_shortcuts(self, tag: str, enabled: bool, menu: bool = True, desktop: bool = True) -> Dict[str, Any]:
+    def set_version_shortcuts(
+        self, tag: str, enabled: bool, menu: bool = True, desktop: bool = True
+    ) -> Dict[str, Any]:
         """Ensure shortcuts for a version are enabled/disabled"""
         if enabled:
             result = self.create_version_shortcuts(tag, create_menu=menu, create_desktop=desktop)
@@ -590,9 +614,15 @@ Categories=Graphics;ArtificialIntelligence;
 
                     # Try ImageMagick convert
                     result = subprocess.run(
-                        ['convert', str(self.icon_webp), '-resize', f'{size}x{size}', str(dest_icon)],
+                        [
+                            "convert",
+                            str(self.icon_webp),
+                            "-resize",
+                            f"{size}x{size}",
+                            str(dest_icon),
+                        ],
                         capture_output=True,
-                        timeout=10
+                        timeout=10,
                     )
                     if result.returncode == 0:
                         conversion_success = True
@@ -618,16 +648,29 @@ Categories=Graphics;ArtificialIntelligence;
 
             # Update icon cache if available
             try:
-                subprocess.run(['gtk-update-icon-cache', '-f', '-t', str(icon_base_dir)],
-                              capture_output=True, timeout=5)
+                subprocess.run(
+                    ["gtk-update-icon-cache", "-f", "-t", str(icon_base_dir)],
+                    capture_output=True,
+                    timeout=5,
+                )
             except Exception:
                 pass
 
             # Also try xdg-icon-resource as alternative installation method
             try:
-                subprocess.run(['xdg-icon-resource', 'install', '--novendor', '--size', '256',
-                               str(self.icon_webp), 'comfyui'],
-                              capture_output=True, timeout=5)
+                subprocess.run(
+                    [
+                        "xdg-icon-resource",
+                        "install",
+                        "--novendor",
+                        "--size",
+                        "256",
+                        str(self.icon_webp),
+                        "comfyui",
+                    ],
+                    capture_output=True,
+                    timeout=5,
+                )
             except Exception:
                 pass
 

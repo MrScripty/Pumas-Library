@@ -7,7 +7,7 @@ Path resolution, validation, and helper functions
 import hashlib
 import subprocess
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Dict, List, Optional
 
 
 def get_launcher_root() -> Path:
@@ -52,9 +52,9 @@ def calculate_file_hash(file_path: Path, algorithm: str = "sha256") -> Optional[
     """
     try:
         hasher = hashlib.new(algorithm)
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             # Read in chunks to handle large files
-            for chunk in iter(lambda: f.read(65536), b''):
+            for chunk in iter(lambda: f.read(65536), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
     except (IOError, OSError) as e:
@@ -74,7 +74,7 @@ def calculate_string_hash(content: str, algorithm: str = "sha256") -> str:
         Hex digest of hash
     """
     hasher = hashlib.new(algorithm)
-    hasher.update(content.encode('utf-8'))
+    hasher.update(content.encode("utf-8"))
     return hasher.hexdigest()
 
 
@@ -90,7 +90,7 @@ def get_directory_size(path: Path) -> int:
     """
     total = 0
     try:
-        for item in path.rglob('*'):
+        for item in path.rglob("*"):
             if item.is_file():
                 total += item.stat().st_size
     except (OSError, PermissionError) as e:
@@ -188,7 +188,7 @@ def relative_path(from_path: Path, to_path: Path) -> str:
 
         # Calculate ".." jumps needed
         up_count = len(from_parts) - common_length
-        rel_parts = ['..'] * up_count + list(to_parts[common_length:])
+        rel_parts = [".."] * up_count + list(to_parts[common_length:])
 
         return str(Path(*rel_parts))
 
@@ -197,7 +197,7 @@ def run_command(
     cmd: List[str],
     cwd: Optional[Path] = None,
     timeout: Optional[int] = None,
-    env: Optional[Dict[str, str]] = None
+    env: Optional[Dict[str, str]] = None,
 ) -> tuple[bool, str, str]:
     """
     Run a shell command and capture output
@@ -218,7 +218,7 @@ def run_command(
             capture_output=True,
             text=True,
             timeout=timeout,
-            env=env
+            env=env,
         )
         return (result.returncode == 0, result.stdout, result.stderr)
     except subprocess.TimeoutExpired:
@@ -238,11 +238,7 @@ def check_command_exists(command: str) -> bool:
         True if command exists
     """
     try:
-        result = subprocess.run(
-            ['which', command],
-            capture_output=True,
-            text=True
-        )
+        result = subprocess.run(["which", command], capture_output=True, text=True)
         return result.returncode == 0
     except Exception:
         return False
@@ -259,12 +255,13 @@ def safe_filename(name: str) -> str:
         Safe filename (alphanumeric, dash, underscore only)
     """
     import re
+
     # Replace unsafe characters with dash
-    safe = re.sub(r'[^a-zA-Z0-9._-]', '-', name)
+    safe = re.sub(r"[^a-zA-Z0-9._-]", "-", name)
     # Remove multiple consecutive dashes
-    safe = re.sub(r'-+', '-', safe)
+    safe = re.sub(r"-+", "-", safe)
     # Strip leading/trailing dashes
-    safe = safe.strip('-')
+    safe = safe.strip("-")
     return safe or "unnamed"
 
 
@@ -284,22 +281,23 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
         return requirements
 
     try:
-        with open(requirements_path, 'r') as f:
+        with open(requirements_path, "r") as f:
             for line in f:
                 # Strip comments and whitespace
-                line = line.split('#')[0].strip()
+                line = line.split("#")[0].strip()
 
                 # Skip empty lines
                 if not line:
                     continue
 
                 # Skip pip flags (lines starting with -)
-                if line.startswith('-'):
+                if line.startswith("-"):
                     continue
 
                 # Parse package spec
                 # Handle formats like: package, package==1.0, package>=1.0,<2.0
                 from packaging.requirements import Requirement
+
                 try:
                     req = Requirement(line)
                     # Get package name and version specifier
@@ -308,13 +306,13 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                     requirements[package_name] = version_spec
                 except Exception:
                     # If parsing fails, try simple split
-                    if '==' in line:
-                        package, version = line.split('==', 1)
+                    if "==" in line:
+                        package, version = line.split("==", 1)
                         requirements[package.strip()] = f"=={version.strip()}"
-                    elif '>=' in line or '<=' in line or '>' in line or '<' in line:
+                    elif ">=" in line or "<=" in line or ">" in line or "<" in line:
                         # Complex version specifier, store as-is
-                        package = line.split('>')[0].split('<')[0].split('=')[0].strip()
-                        requirements[package] = line[len(package):].strip()
+                        package = line.split(">")[0].split("<")[0].split("=")[0].strip()
+                        requirements[package] = line[len(package) :].strip()
                     else:
                         # No version specifier
                         requirements[line.strip()] = ""
@@ -335,11 +333,11 @@ def find_files_by_extension(directory: Path, extension: str) -> List[Path]:
     Returns:
         List of matching file paths
     """
-    if not extension.startswith('.'):
-        extension = '.' + extension
+    if not extension.startswith("."):
+        extension = "." + extension
 
     try:
-        return list(directory.rglob(f'*{extension}'))
+        return list(directory.rglob(f"*{extension}"))
     except Exception as e:
         print(f"Error searching for {extension} files in {directory}: {e}")
         return []

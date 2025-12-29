@@ -6,13 +6,13 @@ Calculates total size per release (archive + dependencies)
 
 import json
 import os
-import sys
-import subprocess
 import shutil
+import subprocess
+import sys
 import urllib.request
-from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Set
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Dict, List, Optional, Set, Tuple
 
 
 class ReleaseSizeCalculator:
@@ -23,7 +23,7 @@ class ReleaseSizeCalculator:
         cache_dir: Path,
         release_data_fetcher,
         package_size_resolver,
-        pip_cache_dir: Optional[Path] = None
+        pip_cache_dir: Optional[Path] = None,
     ):
         """
         Initialize ReleaseSizeCalculator
@@ -48,12 +48,12 @@ class ReleaseSizeCalculator:
         """Load release sizes cache from disk"""
         if self.cache_file.exists():
             try:
-                with open(self.cache_file, 'r') as f:
+                with open(self.cache_file, "r") as f:
                     data = json.load(f)
                     # Drop old cache entries that don't include source info
                     cleaned = {}
                     for tag, entry in data.items():
-                        if isinstance(entry, dict) and entry.get('dependencies_size_source'):
+                        if isinstance(entry, dict) and entry.get("dependencies_size_source"):
                             cleaned[tag] = entry
                     return cleaned
             except Exception as e:
@@ -63,7 +63,7 @@ class ReleaseSizeCalculator:
     def _save_cache(self):
         """Save release sizes cache to disk"""
         try:
-            with open(self.cache_file, 'w') as f:
+            with open(self.cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
         except Exception as e:
             print(f"Error saving release sizes cache: {e}")
@@ -73,10 +73,7 @@ class ReleaseSizeCalculator:
         return datetime.now(timezone.utc).isoformat()
 
     def calculate_release_size(
-        self,
-        tag: str,
-        archive_size: int,
-        force_refresh: bool = False
+        self, tag: str, archive_size: int, force_refresh: bool = False
     ) -> Optional[Dict[str, any]]:
         """
         Calculate total size for a release
@@ -96,42 +93,43 @@ class ReleaseSizeCalculator:
 
         if not requirements_data:
             # Try to fetch if not cached or when forcing refresh
-            requirements_data = self.release_data_fetcher.fetch_requirements_for_release(tag, force_refresh)
+            requirements_data = self.release_data_fetcher.fetch_requirements_for_release(
+                tag, force_refresh
+            )
 
         if not requirements_data:
             return None
 
         # Check if we need to recalculate
-        requirements_hash = requirements_data['requirements_hash']
+        requirements_hash = requirements_data["requirements_hash"]
         cache_key = tag
 
         if not force_refresh and cache_key in self._cache:
             cached = self._cache[cache_key]
             # Validate cache is for same requirements
-            if cached.get('requirements_hash') == requirements_hash:
+            if cached.get("requirements_hash") == requirements_hash:
                 return cached
 
         # Parse requirements
         requirements = self.release_data_fetcher.parse_requirements(
-            requirements_data['requirements_txt']
+            requirements_data["requirements_txt"]
         )
 
         # Fast total estimate using pip resolver (captures transitives)
         print(f"Estimating total dependency download size for {tag} via resolver report...")
         pip_estimate = self._estimate_dependencies_size_via_pip(
-            requirements_data['requirements_txt'],
-            tag
+            requirements_data["requirements_txt"], tag
         )
 
         deps_size = pip_estimate if pip_estimate is not None else 0
-        deps_source = 'pip_report' if pip_estimate is not None else 'unknown'
+        deps_source = "pip_report" if pip_estimate is not None else "unknown"
         if pip_estimate is None:
             cached = self._cache.get(cache_key)
-            if cached and cached.get('requirements_hash') == requirements_hash:
-                cached_deps = cached.get('dependencies_size')
+            if cached and cached.get("requirements_hash") == requirements_hash:
+                cached_deps = cached.get("dependencies_size")
                 if cached_deps:
                     deps_size = cached_deps
-                    deps_source = 'cache_fallback'
+                    deps_source = "cache_fallback"
         dependency_sizes = []
         unknown_count = 0
 
@@ -142,18 +140,18 @@ class ReleaseSizeCalculator:
 
         # Build result
         result = {
-            'tag': tag,
-            'total_size': total_size,
-            'archive_size': archive_size,
-            'dependencies_size': deps_size,
-            'dependency_count': len(requirements),
-            'unknown_size_count': unknown_count,
-            'dependencies': dependency_sizes,
-            'requirements_hash': requirements_hash,
-            'calculated_at': self._get_iso_timestamp(),
-            'platform': self.package_size_resolver.platform,
-            'python_version': self.package_size_resolver.python_version,
-            'dependencies_size_source': deps_source
+            "tag": tag,
+            "total_size": total_size,
+            "archive_size": archive_size,
+            "dependencies_size": deps_size,
+            "dependency_count": len(requirements),
+            "unknown_size_count": unknown_count,
+            "dependencies": dependency_sizes,
+            "requirements_hash": requirements_hash,
+            "calculated_at": self._get_iso_timestamp(),
+            "platform": self.package_size_resolver.platform,
+            "python_version": self.package_size_resolver.python_version,
+            "dependencies_size_source": deps_source,
         }
 
         # Cache the result
@@ -176,9 +174,7 @@ class ReleaseSizeCalculator:
         return self._cache.get(tag)
 
     def get_sorted_dependencies(
-        self,
-        tag: str,
-        top_n: Optional[int] = None
+        self, tag: str, top_n: Optional[int] = None
     ) -> List[Dict[str, any]]:
         """
         Get dependencies sorted by size
@@ -194,18 +190,14 @@ class ReleaseSizeCalculator:
         if not cached:
             return []
 
-        dependencies = cached.get('dependencies', [])
+        dependencies = cached.get("dependencies", [])
 
         if top_n:
             return dependencies[:top_n]
 
         return dependencies
 
-    def _estimate_dependencies_size_via_pip(
-        self,
-        requirements_txt: str,
-        tag: str
-    ) -> Optional[int]:
+    def _estimate_dependencies_size_via_pip(self, requirements_txt: str, tag: str) -> Optional[int]:
         """
         Use pip --dry-run --report to estimate total download size including transitives.
         """
@@ -234,11 +226,7 @@ class ReleaseSizeCalculator:
             ]
 
             return self._estimate_dependencies_size_via_report(
-                tag,
-                "pip",
-                cmd,
-                temp_root,
-                report_file
+                tag, "pip", cmd, temp_root, report_file
             )
 
         except Exception as e:
@@ -253,22 +241,13 @@ class ReleaseSizeCalculator:
                 pass
 
     def _estimate_dependencies_size_via_report(
-        self,
-        tag: str,
-        tool_name: str,
-        cmd: List[str],
-        temp_root: Path,
-        report_file: Path
+        self, tag: str, tool_name: str, cmd: List[str], temp_root: Path, report_file: Path
     ) -> Optional[int]:
         """
         Shared helper to run a resolver command that produces a pip-compatible report.
         """
         result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env=self._build_pip_env()
+            cmd, capture_output=True, text=True, timeout=600, env=self._build_pip_env()
         )
 
         if result.returncode != 0:
@@ -280,23 +259,23 @@ class ReleaseSizeCalculator:
             return None
 
         try:
-            with open(report_file, 'r') as f:
+            with open(report_file, "r") as f:
                 report = json.load(f)
         except Exception as e:
             print(f"{tool_name} report parse failed for {tag}: {e}")
             return None
 
         total_size = 0
-        install_items = report.get('install', [])
+        install_items = report.get("install", [])
         seen: Set[str] = set()
 
         for item in install_items:
             # Avoid double counting the same file/name/version
-            name = item.get('metadata', {}).get('name') or item.get('name')
-            version = item.get('metadata', {}).get('version') or item.get('version')
-            download_info = item.get('download_info') or {}
-            url = download_info.get('url')
-            size = download_info.get('size')
+            name = item.get("metadata", {}).get("name") or item.get("name")
+            version = item.get("metadata", {}).get("version") or item.get("version")
+            download_info = item.get("download_info") or {}
+            url = download_info.get("url")
+            size = download_info.get("size")
 
             key = f"{name or ''}:{version or ''}:{url or ''}"
             if key in seen:
@@ -328,10 +307,10 @@ class ReleaseSizeCalculator:
         Perform a HEAD request to get Content-Length for a URL.
         """
         try:
-            req = urllib.request.Request(url, method='HEAD')
-            req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+            req = urllib.request.Request(url, method="HEAD")
+            req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
             with urllib.request.urlopen(req, timeout=10) as resp:
-                length = resp.headers.get('Content-Length')
+                length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
         except Exception as e:
@@ -352,7 +331,7 @@ class ReleaseSizeCalculator:
             return None
 
         env = os.environ.copy()
-        env['PIP_CACHE_DIR'] = str(self.pip_cache_dir)
+        env["PIP_CACHE_DIR"] = str(self.pip_cache_dir)
         return env
 
     def get_size_breakdown(self, tag: str) -> Optional[Dict[str, any]]:
@@ -369,25 +348,25 @@ class ReleaseSizeCalculator:
         if not cached:
             return None
 
-        total_size = cached['total_size']
-        archive_size = cached['archive_size']
-        dependencies_size = cached['dependencies_size']
+        total_size = cached["total_size"]
+        archive_size = cached["archive_size"]
+        dependencies_size = cached["dependencies_size"]
 
         # Calculate percentages
         archive_pct = (archive_size / total_size * 100) if total_size > 0 else 0
         deps_pct = (dependencies_size / total_size * 100) if total_size > 0 else 0
 
         return {
-            'total_size': total_size,
-            'total_size_formatted': self._format_size(total_size),
-            'archive_size': archive_size,
-            'archive_size_formatted': self._format_size(archive_size),
-            'archive_percentage': archive_pct,
-            'dependencies_size': dependencies_size,
-            'dependencies_size_formatted': self._format_size(dependencies_size),
-            'dependencies_percentage': deps_pct,
-            'dependency_count': cached['dependency_count'],
-            'unknown_count': cached.get('unknown_size_count', 0)
+            "total_size": total_size,
+            "total_size_formatted": self._format_size(total_size),
+            "archive_size": archive_size,
+            "archive_size_formatted": self._format_size(archive_size),
+            "archive_percentage": archive_pct,
+            "dependencies_size": dependencies_size,
+            "dependencies_size_formatted": self._format_size(dependencies_size),
+            "dependencies_percentage": deps_pct,
+            "dependency_count": cached["dependency_count"],
+            "unknown_count": cached.get("unknown_size_count", 0),
         }
 
     def _format_size(self, size_bytes: int) -> str:
@@ -428,9 +407,7 @@ class ReleaseSizeCalculator:
         print("✓ Release sizes cache cleared")
 
     def calculate_multiple_releases(
-        self,
-        releases: List[Tuple[str, int]],
-        progress_callback: Optional[callable] = None
+        self, releases: List[Tuple[str, int]], progress_callback: Optional[callable] = None
     ) -> Dict[str, Dict]:
         """
         Calculate sizes for multiple releases
@@ -459,8 +436,9 @@ class ReleaseSizeCalculator:
 if __name__ == "__main__":
     # Test the ReleaseSizeCalculator
     from pathlib import Path
-    from backend.release_data_fetcher import ReleaseDataFetcher
+
     from backend.package_size_resolver import PackageSizeResolver
+    from backend.release_data_fetcher import ReleaseDataFetcher
 
     test_cache_dir = Path("./test-cache")
 
@@ -487,18 +465,23 @@ if __name__ == "__main__":
         print("\nTop 5 Dependencies:")
         top_deps = calculator.get_sorted_dependencies(tag, top_n=5)
         for i, dep in enumerate(top_deps, 1):
-            if dep['size']:
-                size_str = calculator._format_size(dep['size'])
+            if dep["size"]:
+                size_str = calculator._format_size(dep["size"])
                 print(f"  {i}. {dep['package']}{dep['version_spec']} - {size_str}")
 
         print("\nSize Breakdown:")
         breakdown = calculator.get_size_breakdown(tag)
         if breakdown:
-            print(f"  Archive: {breakdown['archive_size_formatted']} ({breakdown['archive_percentage']:.1f}%)")
-            print(f"  Dependencies: {breakdown['dependencies_size_formatted']} ({breakdown['dependencies_percentage']:.1f}%)")
+            print(
+                f"  Archive: {breakdown['archive_size_formatted']} ({breakdown['archive_percentage']:.1f}%)"
+            )
+            print(
+                f"  Dependencies: {breakdown['dependencies_size_formatted']} ({breakdown['dependencies_percentage']:.1f}%)"
+            )
 
     # Cleanup
     import shutil
+
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
         print("\n✓ Test cache cleaned up")

@@ -33,6 +33,7 @@ print("=" * 60)
 try:
     print("\nAttempting: from backend.api import ComfyUISetupAPI")
     from backend.api import ComfyUISetupAPI
+
     print("✓ SUCCESS: backend.api imported")
 
     print("\nAttempting: api = ComfyUISetupAPI()")
@@ -40,7 +41,7 @@ try:
     print("✓ SUCCESS: ComfyUISetupAPI initialized")
 
     print("\nChecking version manager state:")
-    if hasattr(api, 'version_manager'):
+    if hasattr(api, "version_manager"):
         if api.version_manager is None:
             print("✗ PROBLEM: api.version_manager is None")
         else:

@@ -7,7 +7,7 @@ speeds and progress during package installations.
 
 import time
 from pathlib import Path
-from typing import Optional, Tuple, Callable
+from typing import Callable, Optional, Tuple
 
 from backend.utils import get_directory_size
 
@@ -28,7 +28,7 @@ class ProcessIOTracker:
         self,
         pid: Optional[int],
         cache_dir: Optional[Path],
-        io_bytes_getter: Optional[Callable[[int, bool], Optional[int]]] = None
+        io_bytes_getter: Optional[Callable[[int, bool], Optional[int]]] = None,
     ):
         """
         Initialize the process I/O tracker.
@@ -54,7 +54,9 @@ class ProcessIOTracker:
             self.io_last_time = time.time()
 
         # Cache size tracking
-        self.cache_start_size = get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
+        self.cache_start_size = (
+            get_directory_size(cache_dir) if cache_dir and cache_dir.exists() else 0
+        )
         self.last_cache_size = self.cache_start_size
         self.last_sample_time = time.time()
 
@@ -73,10 +75,12 @@ class ProcessIOTracker:
         # Try I/O-based tracking first (more accurate)
         if self.pid and self.io_bytes_getter:
             current_io = self.io_bytes_getter(self.pid, include_children=True)
-            if (current_io is not None and
-                self.io_baseline is not None and
-                self.io_last_bytes is not None and
-                self.io_last_time is not None):
+            if (
+                current_io is not None
+                and self.io_baseline is not None
+                and self.io_last_bytes is not None
+                and self.io_last_time is not None
+            ):
 
                 elapsed_io = now - self.io_last_time
                 delta_io = current_io - self.io_last_bytes

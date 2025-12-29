@@ -7,14 +7,15 @@ Handles reading/writing metadata JSON files with atomic updates and validation
 import json
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
+
 from backend.models import (
-    VersionsMetadata,
-    VersionConfig,
-    ModelsMetadata,
     CustomNodesMetadata,
-    WorkflowsMetadata,
     GitHubReleasesCache,
+    ModelsMetadata,
+    VersionConfig,
+    VersionsMetadata,
+    WorkflowsMetadata,
 )
 
 
@@ -64,7 +65,7 @@ class MetadataManager:
             return default if default is not None else {}
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, IOError) as e:
             print(f"Error reading {file_path}: {e}")
@@ -83,8 +84,8 @@ class MetadataManager:
         """
         try:
             # Write to temporary file first
-            temp_file = file_path.with_suffix('.tmp')
-            with open(temp_file, 'w', encoding='utf-8') as f:
+            temp_file = file_path.with_suffix(".tmp")
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
 
             # Atomic rename (overwrites existing file)
@@ -109,7 +110,7 @@ class MetadataManager:
         default: VersionsMetadata = {
             "installed": {},
             "lastSelectedVersion": None,
-            "defaultVersion": None
+            "defaultVersion": None,
         }
         return self._read_json(self.versions_file, default)
 

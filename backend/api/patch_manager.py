@@ -42,7 +42,9 @@ class PatchManager:
             return f"{base} - {tag}"
         return base
 
-    def _get_target_main_py(self, tag: Optional[str] = None) -> tuple[Optional[Path], Optional[str]]:
+    def _get_target_main_py(
+        self, tag: Optional[str] = None
+    ) -> tuple[Optional[Path], Optional[str]]:
         """
         Resolve which main.py should be patched.
 
@@ -113,7 +115,9 @@ class PatchManager:
                 )
 
             # Fallback: any ComfyUI Server setproctitle call (with or without version suffix)
-            return bool(re.search(r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)', content))
+            return bool(
+                re.search(r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)', content)
+            )
         except Exception as e:
             print(f"Error reading {main_py} to check patch state: {e}")
             return False
@@ -161,18 +165,16 @@ class PatchManager:
 
         # Insert patch code
         insert_code = (
-            '\ntry:\n'
-            '    import setproctitle\n'
+            "\ntry:\n"
+            "    import setproctitle\n"
             f'    setproctitle.setproctitle("{server_title}")\n'
-            'except ImportError:\n'
-            '    pass\n'
+            "except ImportError:\n"
+            "    pass\n"
         )
 
         if 'if __name__ == "__main__":' in content:
             content = content.replace(
-                'if __name__ == "__main__":',
-                insert_code + 'if __name__ == "__main__":',
-                1
+                'if __name__ == "__main__":', insert_code + 'if __name__ == "__main__":', 1
             )
         else:
             content += insert_code
@@ -200,9 +202,9 @@ class PatchManager:
         if (repo_dir / ".git").exists():
             try:
                 subprocess.run(
-                    ['git', '-C', str(repo_dir), 'checkout', '--', main_py.name],
+                    ["git", "-C", str(repo_dir), "checkout", "--", main_py.name],
                     capture_output=True,
-                    check=True
+                    check=True,
                 )
                 return True
             except Exception:

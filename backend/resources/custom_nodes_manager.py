@@ -6,9 +6,9 @@ Handles custom node installation, updates, and caching
 
 import shutil
 from pathlib import Path
-from typing import Optional, List
+from typing import List, Optional
 
-from backend.utils import run_command, ensure_directory
+from backend.utils import ensure_directory, run_command
 
 
 class CustomNodesManager:
@@ -54,18 +54,16 @@ class CustomNodesManager:
 
         try:
             return [
-                d.name for d in custom_nodes_dir.iterdir()
-                if d.is_dir() and not d.name.startswith('.')
+                d.name
+                for d in custom_nodes_dir.iterdir()
+                if d.is_dir() and not d.name.startswith(".")
             ]
         except Exception as e:
             print(f"Error listing custom nodes: {e}")
             return []
 
     def install_custom_node(
-        self,
-        git_url: str,
-        version_tag: str,
-        node_name: Optional[str] = None
+        self, git_url: str, version_tag: str, node_name: Optional[str] = None
     ) -> bool:
         """
         Install a custom node for a specific ComfyUI version
@@ -82,8 +80,8 @@ class CustomNodesManager:
         # Extract node name from git URL if not provided
         if node_name is None:
             # Extract from URL like: https://github.com/user/ComfyUI-CustomNode.git
-            node_name = git_url.rstrip('/').split('/')[-1]
-            if node_name.endswith('.git'):
+            node_name = git_url.rstrip("/").split("/")[-1]
+            if node_name.endswith(".git"):
                 node_name = node_name[:-4]
 
         # Get custom nodes directory for this version
@@ -100,8 +98,8 @@ class CustomNodesManager:
         print(f"Installing custom node {node_name} for {version_tag}...")
 
         success, stdout, stderr = run_command(
-            ['git', 'clone', git_url, str(node_install_path)],
-            timeout=300  # 5 minute timeout for large repos
+            ["git", "clone", git_url, str(node_install_path)],
+            timeout=300,  # 5 minute timeout for large repos
         )
 
         if not success:
@@ -143,11 +141,7 @@ class CustomNodesManager:
         print(f"Updating custom node {node_name}...")
 
         # Git pull
-        success, stdout, stderr = run_command(
-            ['git', 'pull'],
-            cwd=node_path,
-            timeout=60
-        )
+        success, stdout, stderr = run_command(["git", "pull"], cwd=node_path, timeout=60)
 
         if not success:
             print(f"Error updating custom node: {stderr}")
@@ -200,8 +194,8 @@ class CustomNodesManager:
             Path to cached repo or None on failure
         """
         # Extract repo name from URL
-        repo_name = git_url.rstrip('/').split('/')[-1]
-        if repo_name.endswith('.git'):
+        repo_name = git_url.rstrip("/").split("/")[-1]
+        if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
 
         cache_path = self.shared_custom_nodes_cache_dir / f"{repo_name}.git"
@@ -210,9 +204,7 @@ class CustomNodesManager:
             # Update existing cache
             print(f"Updating cached repo: {repo_name}")
             success, stdout, stderr = run_command(
-                ['git', 'fetch', '--all'],
-                cwd=cache_path,
-                timeout=60
+                ["git", "fetch", "--all"], cwd=cache_path, timeout=60
             )
 
             if not success:
@@ -225,8 +217,7 @@ class CustomNodesManager:
             ensure_directory(self.shared_custom_nodes_cache_dir)
 
             success, stdout, stderr = run_command(
-                ['git', 'clone', '--bare', git_url, str(cache_path)],
-                timeout=300
+                ["git", "clone", "--bare", git_url, str(cache_path)], timeout=300
             )
 
             if not success:

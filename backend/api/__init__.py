@@ -6,4 +6,4 @@ Provides modular components for ComfyUI setup and management
 
 from backend.api.core import ComfyUISetupAPI
 
-__all__ = ['ComfyUISetupAPI']
+__all__ = ["ComfyUISetupAPI"]

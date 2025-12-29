@@ -4,18 +4,18 @@ Test script for Phase 3: Resource Manager
 Tests shared storage, symlinks, model management, and custom node isolation
 """
 
+import shutil
 import sys
 import tempfile
-import shutil
 from pathlib import Path
 
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
 
+from backend.github_integration import format_bytes
 from backend.metadata_manager import MetadataManager
 from backend.resource_manager import ResourceManager
 from backend.utils import get_launcher_root
-from backend.github_integration import format_bytes
 
 
 def main():
@@ -71,8 +71,8 @@ def main():
     print("\nTest 4: Version Symlinks\n")
 
     versions = metadata_mgr.load_versions()
-    if versions.get('installed'):
-        for version_tag in list(versions['installed'].keys())[:1]:  # Test first version only
+    if versions.get("installed"):
+        for version_tag in list(versions["installed"].keys())[:1]:  # Test first version only
             print(f"Testing symlinks for version: {version_tag}")
 
             # Setup symlinks
@@ -100,7 +100,7 @@ def main():
                 print(f"\n  Validating symlinks...")
                 repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
 
-                if repair_report['broken']:
+                if repair_report["broken"]:
                     print(f"  ⚠ Found {len(repair_report['broken'])} broken symlinks")
                 else:
                     print(f"  ✓ All symlinks valid")
@@ -118,7 +118,7 @@ def main():
     print("\nTest 6: Model Management\n")
 
     # Create a temporary test model file
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.safetensors', delete=False) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".safetensors", delete=False) as f:
         f.write("Test model data - not a real model")
         test_model_path = Path(f.name)
 
@@ -152,8 +152,8 @@ def main():
     print("\nTest 7: Custom Node Management\n")
 
     # Check if we have any installed versions
-    if versions.get('installed'):
-        test_version = list(versions['installed'].keys())[0]
+    if versions.get("installed"):
+        test_version = list(versions["installed"].keys())[0]
         print(f"Testing custom nodes for version: {test_version}")
 
         # List current custom nodes

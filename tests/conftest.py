@@ -8,10 +8,11 @@ for all tests in the test suite.
 import tempfile
 from pathlib import Path
 from typing import Generator
+
 import pytest
 
-
 # ==================== Path Fixtures ====================
+
 
 @pytest.fixture
 def temp_launcher_root(tmp_path: Path) -> Path:
@@ -67,6 +68,7 @@ def temp_versions_dir(temp_launcher_root: Path) -> Path:
 
 # ==================== Manager Fixtures ====================
 
+
 @pytest.fixture
 def metadata_manager(temp_metadata_dir: Path):
     """
@@ -84,6 +86,7 @@ def metadata_manager(temp_metadata_dir: Path):
             assert metadata_manager.get_active_version() == "v0.5.0"
     """
     from backend.metadata_manager import MetadataManager
+
     return MetadataManager(temp_metadata_dir)
 
 
@@ -106,10 +109,12 @@ def github_fetcher(metadata_manager):
             releases = github_fetcher.fetch_releases()
     """
     from backend.github_integration import GitHubReleasesFetcher
+
     return GitHubReleasesFetcher(metadata_manager)
 
 
 # ==================== Sample Data Fixtures ====================
+
 
 @pytest.fixture
 def sample_releases() -> list[dict]:
@@ -182,6 +187,7 @@ def sample_version_metadata() -> dict:
 
 # ==================== Markers ====================
 
+
 def pytest_configure(config):
     """
     Register custom pytest markers.
@@ -189,21 +195,16 @@ def pytest_configure(config):
     This is called by pytest during initialization and allows us to define
     custom markers that can be used to categorize tests.
     """
-    config.addinivalue_line(
-        "markers", "unit: Unit tests with mocked external dependencies"
-    )
-    config.addinivalue_line(
-        "markers", "integration: Integration tests with real file I/O"
-    )
-    config.addinivalue_line(
-        "markers", "slow: Tests that take longer than 1 second"
-    )
+    config.addinivalue_line("markers", "unit: Unit tests with mocked external dependencies")
+    config.addinivalue_line("markers", "integration: Integration tests with real file I/O")
+    config.addinivalue_line("markers", "slow: Tests that take longer than 1 second")
     config.addinivalue_line(
         "markers", "network: Tests that require network access (should be mocked)"
     )
 
 
 # ==================== Test Hooks ====================
+
 
 @pytest.hookimpl(tryfirst=True, hookwrapper=True)
 def pytest_runtest_makereport(item, call):

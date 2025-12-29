@@ -4,12 +4,12 @@ Version Information Manager for ComfyUI
 Handles version detection and release checking
 """
 
-import subprocess
-import urllib.request
 import json
+import subprocess
 import tomllib
+import urllib.request
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 
 class VersionInfoManager:
@@ -33,9 +33,9 @@ class VersionInfoManager:
         pyproject_path = self.comfyui_dir / "pyproject.toml"
         if pyproject_path.exists():
             try:
-                with open(pyproject_path, 'rb') as f:
+                with open(pyproject_path, "rb") as f:
                     data = tomllib.load(f)
-                    version = data.get('project', {}).get('version')
+                    version = data.get("project", {}).get("version")
                     if version:
                         return version
             except Exception:
@@ -44,9 +44,9 @@ class VersionInfoManager:
         # Try git describe
         try:
             version = subprocess.check_output(
-                ['git', '-C', str(self.comfyui_dir), 'describe', '--tags', '--always'],
+                ["git", "-C", str(self.comfyui_dir), "describe", "--tags", "--always"],
                 text=True,
-                stderr=subprocess.DEVNULL
+                stderr=subprocess.DEVNULL,
             ).strip()
             if version:
                 return version
@@ -56,11 +56,10 @@ class VersionInfoManager:
         # Fallback to GitHub API
         try:
             with urllib.request.urlopen(
-                "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest",
-                timeout=5
+                "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest", timeout=5
             ) as resp:
                 data = json.loads(resp.read())
-                return data['tag_name'] + " (latest)"
+                return data["tag_name"] + " (latest)"
         except Exception:
             pass
 
@@ -79,22 +78,22 @@ class VersionInfoManager:
             try:
                 # Try to get the exact tag first
                 current_tag = subprocess.check_output(
-                    ['git', '-C', str(self.comfyui_dir), 'describe', '--tags', '--exact-match'],
+                    ["git", "-C", str(self.comfyui_dir), "describe", "--tags", "--exact-match"],
                     text=True,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
                 ).strip()
                 current_version = current_tag
             except Exception:
                 # If not on an exact tag, get the description
                 try:
                     current_version = subprocess.check_output(
-                        ['git', '-C', str(self.comfyui_dir), 'describe', '--tags', '--always'],
+                        ["git", "-C", str(self.comfyui_dir), "describe", "--tags", "--always"],
                         text=True,
-                        stderr=subprocess.DEVNULL
+                        stderr=subprocess.DEVNULL,
                     ).strip()
                     # Extract just the tag part (before any -N-hash suffix)
-                    if '-' in current_version:
-                        current_tag = current_version.split('-')[0]
+                    if "-" in current_version:
+                        current_tag = current_version.split("-")[0]
                     else:
                         current_tag = current_version
                 except Exception:
@@ -106,7 +105,7 @@ class VersionInfoManager:
                 try:
                     releases = self.github_fetcher.get_releases(force_refresh=False)
                     if releases:
-                        latest_tag = releases[0].get('tag_name') or None
+                        latest_tag = releases[0].get("tag_name") or None
                 except Exception as e:
                     print(f"Warning: using cached/stale releases after error: {e}")
 
@@ -115,20 +114,20 @@ class VersionInfoManager:
                 self._release_info_cache = {
                     "has_update": has_update,
                     "latest_version": latest_tag,
-                    "current_version": current_version or current_tag
+                    "current_version": current_version or current_tag,
                 }
             else:
                 self._release_info_cache = {
                     "has_update": False,
                     "latest_version": latest_tag,
-                    "current_version": current_version
+                    "current_version": current_version,
                 }
         except Exception as e:
             print(f"Error checking for new release: {e}")
             self._release_info_cache = {
                 "has_update": False,
                 "latest_version": None,
-                "current_version": None
+                "current_version": None,
             }
 
         return self._release_info_cache

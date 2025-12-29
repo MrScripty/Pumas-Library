@@ -5,14 +5,14 @@ Main coordinator for shared storage, symlinks, custom nodes, and resource manage
 """
 
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from backend.metadata_manager import MetadataManager
 from backend.models import RepairReport, ScanResult
+from backend.resources.custom_nodes_manager import CustomNodesManager
+from backend.resources.model_manager import ModelManager
 from backend.resources.shared_storage import SharedStorageManager
 from backend.resources.symlink_manager import SymlinkManager
-from backend.resources.model_manager import ModelManager
-from backend.resources.custom_nodes_manager import CustomNodesManager
 
 
 class ResourceManager:
@@ -42,26 +42,17 @@ class ResourceManager:
 
         # Initialize specialized managers
         self.storage_mgr = SharedStorageManager(
-            self.shared_dir,
-            self.versions_dir,
-            self.launcher_root
+            self.shared_dir, self.versions_dir, self.launcher_root
         )
 
         self.symlink_mgr = SymlinkManager(
-            self.shared_models_dir,
-            self.shared_user_dir,
-            self.versions_dir,
-            self.launcher_root
+            self.shared_models_dir, self.shared_user_dir, self.versions_dir, self.launcher_root
         )
 
-        self.model_mgr = ModelManager(
-            self.shared_models_dir,
-            self.metadata_manager
-        )
+        self.model_mgr = ModelManager(self.shared_models_dir, self.metadata_manager)
 
         self.custom_nodes_mgr = CustomNodesManager(
-            self.shared_custom_nodes_cache_dir,
-            self.versions_dir
+            self.shared_custom_nodes_cache_dir, self.versions_dir
         )
 
     # ==================== Shared Storage Operations ====================
@@ -102,9 +93,7 @@ class ResourceManager:
         return self.storage_mgr.sync_shared_model_structure(comfyui_version_path)
 
     def migrate_existing_files(
-        self,
-        version_path: Path,
-        auto_merge: bool = False
+        self, version_path: Path, auto_merge: bool = False
     ) -> Tuple[int, int, List[str]]:
         """
         Scan version directory for real files and move to shared storage
@@ -167,12 +156,7 @@ class ResourceManager:
         """
         return self.model_mgr.get_models()
 
-    def add_model(
-        self,
-        source_path: Path,
-        category: str,
-        update_metadata: bool = True
-    ) -> bool:
+    def add_model(self, source_path: Path, category: str, update_metadata: bool = True) -> bool:
         """
         Add a model to shared storage
 
@@ -225,10 +209,7 @@ class ResourceManager:
         return self.custom_nodes_mgr.list_version_custom_nodes(version_tag)
 
     def install_custom_node(
-        self,
-        git_url: str,
-        version_tag: str,
-        node_name: Optional[str] = None
+        self, git_url: str, version_tag: str, node_name: Optional[str] = None
     ) -> bool:
         """
         Install a custom node for a specific ComfyUI version
@@ -316,9 +297,9 @@ if __name__ == "__main__":
 
     # Check if we have any installed versions
     versions = metadata_mgr.load_versions_metadata()
-    if versions.get('installed'):
+    if versions.get("installed"):
         print("Testing symlink setup for installed versions:")
-        for version_tag in versions['installed'].keys():
+        for version_tag in versions["installed"].keys():
             print(f"\nVersion: {version_tag}")
 
             # Setup symlinks
@@ -329,8 +310,10 @@ if __name__ == "__main__":
 
             # Validate symlinks
             repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
-            print(f"  Validation: {len(repair_report['broken'])} broken, "
-                  f"{len(repair_report['repaired'])} repaired, "
-                  f"{len(repair_report['removed'])} removed")
+            print(
+                f"  Validation: {len(repair_report['broken'])} broken, "
+                f"{len(repair_report['repaired'])} repaired, "
+                f"{len(repair_report['removed'])} removed"
+            )
     else:
         print("No versions installed yet")

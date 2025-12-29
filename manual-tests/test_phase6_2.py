@@ -38,10 +38,10 @@ def main():
         if versions_fresh:
             print(f"\nFirst 5 available releases:")
             for i, release in enumerate(versions_fresh[:5], 1):
-                tag = release.get('tag_name', 'unknown')
-                name = release.get('name', 'Unnamed')
-                date = release.get('published_at', 'unknown')
-                prerelease = release.get('prerelease', False)
+                tag = release.get("tag_name", "unknown")
+                name = release.get("name", "Unnamed")
+                date = release.get("published_at", "unknown")
+                prerelease = release.get("prerelease", False)
                 prerelease_tag = " [PRE-RELEASE]" if prerelease else ""
                 print(f"  {i}. {tag} - {name}{prerelease_tag}")
                 print(f"     Published: {date[:10]}")
@@ -66,7 +66,7 @@ def main():
     # Test install_version API method (what happens when clicking Install button)
     print("\nTesting install_version() API availability...")
     try:
-        if hasattr(api, 'install_version'):
+        if hasattr(api, "install_version"):
             print("✓ install_version() method available")
             print("  (Actual installation test skipped to preserve system state)")
             print("  Method signature: install_version(tag: str, progress_callback=None)")
@@ -126,7 +126,7 @@ def main():
     installed_set = set(installed)
 
     # Count pre-releases
-    prerelease_count = sum(1 for v in all_versions if v.get('prerelease', False))
+    prerelease_count = sum(1 for v in all_versions if v.get("prerelease", False))
     stable_count = len(all_versions) - prerelease_count
     installed_count = len(installed)
 
@@ -139,8 +139,12 @@ def main():
     print(f"\nFilter scenarios:")
     print(f"  Show pre-releases OFF, Show installed ON: {stable_count} versions")
     print(f"  Show pre-releases ON, Show installed ON: {len(all_versions)} versions")
-    print(f"  Show pre-releases OFF, Show installed OFF: {stable_count - installed_count} versions (approx)")
-    print(f"  Show pre-releases ON, Show installed OFF: {len(all_versions) - installed_count} versions (approx)")
+    print(
+        f"  Show pre-releases OFF, Show installed OFF: {stable_count - installed_count} versions (approx)"
+    )
+    print(
+        f"  Show pre-releases ON, Show installed OFF: {len(all_versions) - installed_count} versions (approx)"
+    )
 
     print("\n" + "=" * 50)
     print("\nTest 5: Installation Flow\n")

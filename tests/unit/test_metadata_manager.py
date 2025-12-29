@@ -3,8 +3,9 @@ Unit tests for MetadataManager functionality.
 """
 
 import json
-import pytest
 from pathlib import Path
+
+import pytest
 
 from backend.metadata_manager import MetadataManager
 
@@ -276,7 +277,7 @@ class TestAtomicWrites:
         metadata_manager.save_versions(test_data)
 
         # Temp file should not exist after successful write
-        temp_file = metadata_manager.versions_file.with_suffix('.tmp')
+        temp_file = metadata_manager.versions_file.with_suffix(".tmp")
         assert not temp_file.exists()
 
         # Final file should exist

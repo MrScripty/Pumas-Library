@@ -8,9 +8,9 @@ import shutil
 from pathlib import Path
 from typing import Dict
 
-from backend.utils import ensure_directory, calculate_file_hash
-from backend.models import ModelInfo, get_iso_timestamp
 from backend.metadata_manager import MetadataManager
+from backend.models import ModelInfo, get_iso_timestamp
+from backend.utils import calculate_file_hash, ensure_directory
 
 
 class ModelManager:
@@ -36,12 +36,7 @@ class ModelManager:
         """
         return self.metadata_manager.load_models()
 
-    def add_model(
-        self,
-        source_path: Path,
-        category: str,
-        update_metadata: bool = True
-    ) -> bool:
+    def add_model(self, source_path: Path, category: str, update_metadata: bool = True) -> bool:
         """
         Add a model to shared storage
 
@@ -102,15 +97,15 @@ class ModelManager:
             relative_path = str(model_path.relative_to(self.shared_models_dir))
 
             model_info: ModelInfo = {
-                'path': relative_path,
-                'size': model_path.stat().st_size,
-                'sha256': file_hash or '',
-                'addedDate': get_iso_timestamp(),
-                'lastUsed': get_iso_timestamp(),
-                'tags': [],
-                'modelType': category,
-                'usedByVersions': [],
-                'source': 'manual'
+                "path": relative_path,
+                "size": model_path.stat().st_size,
+                "sha256": file_hash or "",
+                "addedDate": get_iso_timestamp(),
+                "lastUsed": get_iso_timestamp(),
+                "tags": [],
+                "modelType": category,
+                "usedByVersions": [],
+                "source": "manual",
             }
 
             # Add to metadata

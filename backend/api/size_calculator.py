@@ -7,7 +7,7 @@ Handles calculation and caching of release download sizes
 import threading
 import urllib.request
 from pathlib import Path
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
 
 from backend.models import GitHubRelease
 
@@ -15,12 +15,7 @@ from backend.models import GitHubRelease
 class SizeCalculator:
     """Manages release size calculation and caching"""
 
-    def __init__(
-        self,
-        release_size_calculator,
-        github_fetcher,
-        version_manager=None
-    ):
+    def __init__(self, release_size_calculator, github_fetcher, version_manager=None):
         """
         Initialize size calculator
 
@@ -34,10 +29,7 @@ class SizeCalculator:
         self.version_manager = version_manager
 
     def _refresh_release_sizes_async(
-        self,
-        releases: List[GitHubRelease],
-        installed_tags: set[str],
-        force_refresh: bool = False
+        self, releases: List[GitHubRelease], installed_tags: set[str], force_refresh: bool = False
     ):
         """
         Calculate release sizes in the background, prioritizing non-installed releases.
@@ -47,14 +39,14 @@ class SizeCalculator:
 
         # Build priority queue: non-installed first
         def sort_key(release: GitHubRelease):
-            tag = release.get('tag_name', '')
+            tag = release.get("tag_name", "")
             return 0 if tag not in installed_tags else 1
 
         pending = sorted(releases, key=sort_key)
 
         def _worker():
             for release in pending:
-                tag = release.get('tag_name', '')
+                tag = release.get("tag_name", "")
                 if not tag:
                     continue
                 # Skip if already cached and not forcing
@@ -67,7 +59,9 @@ class SizeCalculator:
 
         threading.Thread(target=_worker, daemon=True).start()
 
-    def calculate_release_size(self, tag: str, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+    def calculate_release_size(
+        self, tag: str, force_refresh: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """
         Calculate total download size for a release (Phase 6.2.5c)
 
@@ -86,7 +80,7 @@ class SizeCalculator:
                 return None
 
             # Get archive size from zipball_url
-            download_url = release.get('zipball_url') or release.get('tarball_url')
+            download_url = release.get("zipball_url") or release.get("tarball_url")
             archive_size = None
 
             if download_url:
@@ -98,9 +92,7 @@ class SizeCalculator:
 
             # Calculate total size including dependencies
             result = self.release_size_calculator.calculate_release_size(
-                tag=tag,
-                archive_size=archive_size,
-                force_refresh=force_refresh
+                tag=tag, archive_size=archive_size, force_refresh=force_refresh
             )
 
             return result
@@ -126,7 +118,7 @@ class SizeCalculator:
         total = len(releases)
 
         for i, release in enumerate(releases):
-            tag = release.get('tag_name', '')
+            tag = release.get("tag_name", "")
             if progress_callback:
                 progress_callback(i + 1, total, tag)
 
@@ -141,10 +133,10 @@ class SizeCalculator:
         Perform a HEAD request to retrieve Content-Length for a URL.
         """
         try:
-            req = urllib.request.Request(url, method='HEAD')
-            req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+            req = urllib.request.Request(url, method="HEAD")
+            req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
             with urllib.request.urlopen(req, timeout=10) as resp:
-                length = resp.headers.get('Content-Length')
+                length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
         except Exception as e:
@@ -192,7 +184,9 @@ class SizeCalculator:
             print(f"Error getting size breakdown: {e}")
             return None
 
-    def get_release_dependencies(self, tag: str, top_n: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_release_dependencies(
+        self, tag: str, top_n: Optional[int] = None
+    ) -> List[Dict[str, Any]]:
         """
         Get dependencies for a release sorted by size (Phase 6.2.5c)
 

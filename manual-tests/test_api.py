@@ -59,8 +59,8 @@ def main():
         if versions:
             print(f"\nFirst 3 releases:")
             for i, release in enumerate(versions[:3], 1):
-                tag = release.get('tag_name', 'unknown')
-                name = release.get('name', 'Unnamed')
+                tag = release.get("tag_name", "unknown")
+                name = release.get("name", "Unnamed")
                 print(f"  {i}. {tag} - {name}")
     except Exception as e:
         print(f"✗ Error getting available versions: {e}")
@@ -108,13 +108,15 @@ def main():
         print(f"  - Total versions: {len(status.get('versions', {}))}")
 
         # Show first version details if available
-        if status.get('versions'):
-            first_tag = list(status['versions'].keys())[0]
-            first_details = status['versions'][first_tag]
+        if status.get("versions"):
+            first_tag = list(status["versions"].keys())[0]
+            first_details = status["versions"][first_tag]
             print(f"\n  Details for {first_tag}:")
             print(f"    - Is active: {first_details.get('isActive', False)}")
-            dep_status = first_details.get('dependencies', {})
-            print(f"    - Dependencies: {len(dep_status.get('installed', []))} installed, {len(dep_status.get('missing', []))} missing")
+            dep_status = first_details.get("dependencies", {})
+            print(
+                f"    - Dependencies: {len(dep_status.get('installed', []))} installed, {len(dep_status.get('missing', []))} missing"
+            )
     except Exception as e:
         print(f"✗ Error getting version status: {e}")
         return 1
@@ -148,9 +150,9 @@ def main():
             print(f"✓ Dependency status for {test_tag}:")
             print(f"  - Installed: {len(dep_status.get('installed', []))} packages")
             print(f"  - Missing: {len(dep_status.get('missing', []))} packages")
-            if dep_status.get('missing'):
+            if dep_status.get("missing"):
                 print(f"\n  Missing packages (first 5):")
-                for pkg in dep_status['missing'][:5]:
+                for pkg in dep_status["missing"][:5]:
                     print(f"    - {pkg}")
         except Exception as e:
             print(f"✗ Error checking dependencies: {e}")
@@ -208,7 +210,7 @@ def main():
         print(f"  - Total models: {scan_result.get('modelCount', 0)}")
         print(f"  - Total size: {scan_result.get('totalSize', 0) / (1024*1024*1024):.2f} GB")
 
-        category_counts = scan_result.get('categoryCounts', {})
+        category_counts = scan_result.get("categoryCounts", {})
         if category_counts:
             print(f"\n  Models by category:")
             for category, count in category_counts.items():
@@ -222,14 +224,14 @@ def main():
     print("\nTest 11: API Method Availability Check\n")
 
     methods_to_check = [
-        'switch_version',
-        'install_version',
-        'remove_version',
-        'install_version_dependencies',
-        'launch_version',
-        'install_custom_node',
-        'update_custom_node',
-        'remove_custom_node',
+        "switch_version",
+        "install_version",
+        "remove_version",
+        "install_version_dependencies",
+        "launch_version",
+        "install_custom_node",
+        "update_custom_node",
+        "remove_custom_node",
     ]
 
     all_present = True

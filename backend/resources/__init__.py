@@ -6,4 +6,4 @@ Provides modular components for resource management
 
 from backend.resources.resource_manager import ResourceManager
 
-__all__ = ['ResourceManager']
+__all__ = ["ResourceManager"]

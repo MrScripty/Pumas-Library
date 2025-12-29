@@ -1,0 +1,52 @@
+# Pre-commit hooks for code quality enforcement
+# Install: pre-commit install
+# Run manually: pre-commit run --all-files
+# Update hooks: pre-commit autoupdate
+
+repos:
+  # Black: Code formatting
+  - repo: https://github.com/psf/black
+    rev: 24.1.1
+    hooks:
+      - id: black
+        language_version: python3.12
+        args: [--line-length=100]
+        exclude: ^(venv/|\.venv/|env/|\.env/)
+
+  # isort: Import sorting
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: [--profile=black, --line-length=100]
+        exclude: ^(venv/|\.venv/|env/|\.env/)
+
+  # flake8: Style enforcement (disabled for now - will be enabled incrementally)
+  # - repo: https://github.com/pycqa/flake8
+  #   rev: 7.0.0
+  #   hooks:
+  #     - id: flake8
+  #       exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
+
+  # mypy: Type checking (disabled for now - will be enabled in Task #13)
+  # - repo: https://github.com/pre-commit/mirrors-mypy
+  #   rev: v1.8.0
+  #   hooks:
+  #     - id: mypy
+  #       args: [--ignore-missing-imports, --allow-untyped-calls, --no-strict-optional, --explicit-package-bases, --namespace-packages]
+  #       exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
+  #       files: ^backend/
+
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: check-merge-conflict
+      - id: check-json
+        exclude: ^(frontend/|\.vscode/)
+      - id: detect-private-key

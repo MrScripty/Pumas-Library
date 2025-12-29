@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict
 
 from backend.models import RepairReport
-from backend.utils import make_relative_symlink, is_broken_symlink
+from backend.utils import is_broken_symlink, make_relative_symlink
 
 
 class SymlinkManager:
@@ -19,7 +19,7 @@ class SymlinkManager:
         shared_models_dir: Path,
         shared_user_dir: Path,
         versions_dir: Path,
-        launcher_root: Path
+        launcher_root: Path,
     ):
         """
         Initialize symlink manager
@@ -86,11 +86,7 @@ class SymlinkManager:
         """
         version_path = self.versions_dir / version_tag
 
-        report: RepairReport = {
-            'broken': [],
-            'repaired': [],
-            'removed': []
-        }
+        report: RepairReport = {"broken": [], "repaired": [], "removed": []}
 
         if not version_path.exists():
             print(f"Error: Version directory not found: {version_path}")
@@ -98,34 +94,34 @@ class SymlinkManager:
 
         # Check key symlinks
         symlinks_to_check = {
-            'models': self.shared_models_dir,
-            'user': self.shared_user_dir,
+            "models": self.shared_models_dir,
+            "user": self.shared_user_dir,
         }
 
         for link_name, expected_target in symlinks_to_check.items():
             link_path = version_path / link_name
 
             if is_broken_symlink(link_path):
-                report['broken'].append(str(link_path.relative_to(self.launcher_root)))
+                report["broken"].append(str(link_path.relative_to(self.launcher_root)))
 
                 # Try to repair
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
-                        report['repaired'].append(str(link_path.relative_to(self.launcher_root)))
+                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
                         print(f"Repaired symlink: {link_name}")
                     else:
                         print(f"Failed to repair symlink: {link_name}")
                 else:
                     # Target doesn't exist, remove broken symlink
                     link_path.unlink()
-                    report['removed'].append(str(link_path.relative_to(self.launcher_root)))
+                    report["removed"].append(str(link_path.relative_to(self.launcher_root)))
                     print(f"Removed broken symlink: {link_name}")
 
             elif not link_path.exists():
                 # Symlink doesn't exist, create it
                 if expected_target.exists():
                     if make_relative_symlink(expected_target, link_path):
-                        report['repaired'].append(str(link_path.relative_to(self.launcher_root)))
+                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
                         print(f"Created missing symlink: {link_name}")
 
         return report

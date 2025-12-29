@@ -6,41 +6,48 @@ Handles installation, switching, and launching of ComfyUI versions
 
 import json
 import os
-import shutil
-import tarfile
-import zipfile
-import subprocess
-import time
 import re
+import shutil
+import subprocess
+import tarfile
+import time
 import urllib.request
+import zipfile
 from datetime import datetime, timezone
+
 try:
     import psutil
 except Exception:
     psutil = None
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, List, Callable, Dict, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+
+from packaging.specifiers import SpecifierSet
 from packaging.utils import canonicalize_name
 from packaging.version import Version
-from packaging.specifiers import SpecifierSet
-from backend.models import (
-    VersionsMetadata, VersionInfo, VersionConfig, DependencyStatus,
-    GitHubRelease, get_iso_timestamp
-)
+
+from backend.config import INSTALLATION
+from backend.github_integration import DownloadManager, GitHubReleasesFetcher
+from backend.installation_progress_tracker import InstallationProgressTracker, InstallationStage
 from backend.metadata_manager import MetadataManager
-from backend.github_integration import GitHubReleasesFetcher, DownloadManager
+from backend.models import (
+    DependencyStatus,
+    GitHubRelease,
+    VersionConfig,
+    VersionInfo,
+    VersionsMetadata,
+    get_iso_timestamp,
+)
+from backend.process_io_tracker import ProcessIOTracker
 from backend.resource_manager import ResourceManager
 from backend.utils import (
-    ensure_directory, run_command, get_directory_size,
-    parse_requirements_file, safe_filename
+    ensure_directory,
+    get_directory_size,
+    parse_requirements_file,
+    run_command,
+    safe_filename,
 )
-from backend.installation_progress_tracker import (
-    InstallationProgressTracker,
-    InstallationStage
-)
-from backend.config import INSTALLATION
-from backend.process_io_tracker import ProcessIOTracker
 
 
 class VersionManager:
@@ -51,7 +58,7 @@ class VersionManager:
         launcher_root: Path,
         metadata_manager: MetadataManager,
         github_fetcher: GitHubReleasesFetcher,
-        resource_manager: ResourceManager
+        resource_manager: ResourceManager,
     ):
         """
         Initialize VersionManager
@@ -137,7 +144,7 @@ class VersionManager:
 
         if update_last_selected:
             versions_metadata = self.metadata_manager.load_versions()
-            versions_metadata['lastSelectedVersion'] = tag
+            versions_metadata["lastSelectedVersion"] = tag
             success = self.metadata_manager.save_versions(versions_metadata) and success
 
         return success
@@ -156,8 +163,8 @@ class VersionManager:
 
         versions_metadata = self.metadata_manager.load_versions()
         candidates = [
-            versions_metadata.get('defaultVersion'),
-            versions_metadata.get('lastSelectedVersion')
+            versions_metadata.get("defaultVersion"),
+            versions_metadata.get("lastSelectedVersion"),
         ]
 
         for candidate in candidates:
@@ -173,7 +180,7 @@ class VersionManager:
         """Load cached per-tag constraints to avoid recomputation."""
         try:
             if self._constraints_cache_file.exists():
-                with open(self._constraints_cache_file, 'r', encoding='utf-8') as f:
+                with open(self._constraints_cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return data if isinstance(data, dict) else {}
         except Exception as exc:
@@ -183,8 +190,8 @@ class VersionManager:
     def _save_constraints_cache(self):
         """Persist constraints cache safely."""
         try:
-            tmp = self._constraints_cache_file.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8') as f:
+            tmp = self._constraints_cache_file.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._constraints_cache, f, indent=2)
             tmp.replace(self._constraints_cache_file)
         except Exception as exc:
@@ -241,7 +248,6 @@ class VersionManager:
         except Exception:
             return None
 
-
     def _get_release_date(self, tag: str, release: Optional[GitHubRelease]) -> Optional[datetime]:
         """Return release date in UTC for a tag."""
         if not release:
@@ -286,10 +292,16 @@ class VersionManager:
         for version_str, files in releases.items():
             upload_times = []
             for file_entry in files or []:
-                upload_time = file_entry.get("upload_time_iso_8601") or file_entry.get("upload_time")
+                upload_time = file_entry.get("upload_time_iso_8601") or file_entry.get(
+                    "upload_time"
+                )
                 if upload_time:
                     try:
-                        upload_times.append(datetime.fromisoformat(upload_time.replace("Z", "+00:00")).astimezone(timezone.utc))
+                        upload_times.append(
+                            datetime.fromisoformat(upload_time.replace("Z", "+00:00")).astimezone(
+                                timezone.utc
+                            )
+                        )
                     except Exception:
                         continue
             if upload_times:
@@ -298,7 +310,9 @@ class VersionManager:
         self._pypi_release_cache[canon] = result
         return result
 
-    def _select_version_for_date(self, package: str, spec: str, release_date: Optional[datetime]) -> Optional[str]:
+    def _select_version_for_date(
+        self, package: str, spec: str, release_date: Optional[datetime]
+    ) -> Optional[str]:
         """
         Choose the newest version that satisfies the spec and is uploaded on/before the release date.
         If release_date is None, picks the newest version satisfying the spec.
@@ -331,7 +345,9 @@ class VersionManager:
         candidates.sort()
         return candidates[-1][1]
 
-    def _build_constraints_for_tag(self, tag: str, requirements_file: Path, release: Optional[GitHubRelease]) -> Optional[Path]:
+    def _build_constraints_for_tag(
+        self, tag: str, requirements_file: Path, release: Optional[GitHubRelease]
+    ) -> Optional[Path]:
         """
         Build a constraints file when requirements are not fully pinned.
         """
@@ -343,7 +359,9 @@ class VersionManager:
             return None
 
         requirements = parse_requirements_file(requirements_file)
-        unpinned = {pkg: spec for pkg, spec in requirements.items() if not spec or not spec.startswith("==")}
+        unpinned = {
+            pkg: spec for pkg, spec in requirements.items() if not spec or not spec.startswith("==")
+        }
         if not unpinned:
             return None  # already pinned
 
@@ -363,7 +381,7 @@ class VersionManager:
             combined[pkg] = resolved.get(pkg, spec if spec else "")
 
         try:
-            with open(constraints_path, 'w', encoding='utf-8') as f:
+            with open(constraints_path, "w", encoding="utf-8") as f:
                 for pkg, spec in combined.items():
                     if spec:
                         f.write(f"{pkg}{spec}\n")
@@ -382,7 +400,7 @@ class VersionManager:
         """Load cached per-tag constraints to avoid recomputation."""
         try:
             if self._constraints_cache_file.exists():
-                with open(self._constraints_cache_file, 'r', encoding='utf-8') as f:
+                with open(self._constraints_cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return data if isinstance(data, dict) else {}
         except Exception as exc:
@@ -392,8 +410,8 @@ class VersionManager:
     def _save_constraints_cache(self):
         """Persist constraints cache safely."""
         try:
-            tmp = self._constraints_cache_file.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8') as f:
+            tmp = self._constraints_cache_file.with_suffix(".tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(self._constraints_cache, f, indent=2)
             tmp.replace(self._constraints_cache_file)
         except Exception as exc:
@@ -440,7 +458,7 @@ class VersionManager:
 
                     # Kill the entire process group to ensure all children are terminated
                     try:
-                        if hasattr(os, 'killpg'):
+                        if hasattr(os, "killpg"):
                             # Send SIGTERM first for graceful shutdown
                             os.killpg(os.getpgid(pid), 15)
                             # Wait a moment
@@ -460,7 +478,9 @@ class VersionManager:
 
                         # Wait for process to die
                         try:
-                            self._current_process.wait(timeout=INSTALLATION.SUBPROCESS_STOP_TIMEOUT_SEC)
+                            self._current_process.wait(
+                                timeout=INSTALLATION.SUBPROCESS_STOP_TIMEOUT_SEC
+                            )
                         except Exception:
                             pass  # Process might already be gone
                         print("✓ All processes terminated")
@@ -471,7 +491,9 @@ class VersionManager:
                         # Fallback: try killing just the main process
                         try:
                             self._current_process.kill()
-                            self._current_process.wait(timeout=INSTALLATION.SUBPROCESS_KILL_TIMEOUT_SEC)
+                            self._current_process.wait(
+                                timeout=INSTALLATION.SUBPROCESS_KILL_TIMEOUT_SEC
+                            )
                             print("✓ Main process killed")
                         except Exception:
                             pass
@@ -486,10 +508,7 @@ class VersionManager:
         return False
 
     def get_available_releases(
-        self,
-        force_refresh: bool = False,
-        collapse: bool = True,
-        include_prerelease: bool = True
+        self, force_refresh: bool = False, collapse: bool = True, include_prerelease: bool = True
     ) -> List[GitHubRelease]:
         """
         Get available ComfyUI releases from GitHub
@@ -505,8 +524,7 @@ class VersionManager:
         releases = self.github_fetcher.get_releases(force_refresh)
         if collapse:
             releases = self.github_fetcher.collapse_latest_patch_per_minor(
-                releases,
-                include_prerelease=include_prerelease
+                releases, include_prerelease=include_prerelease
             )
         return releases
 
@@ -518,7 +536,7 @@ class VersionManager:
             List of version tags that are both in metadata and have valid directories
         """
         versions_metadata = self.metadata_manager.load_versions()
-        metadata_versions = set(versions_metadata.get('installed', {}).keys())
+        metadata_versions = set(versions_metadata.get("installed", {}).keys())
 
         # Verify each version actually exists on disk
         validated_versions = []
@@ -539,9 +557,11 @@ class VersionManager:
         if needs_cleanup:
             for tag in metadata_versions:
                 if tag not in validated_versions:
-                    del versions_metadata['installed'][tag]
+                    del versions_metadata["installed"][tag]
             self.metadata_manager.save_versions(versions_metadata)
-            print(f"✓ Cleaned up metadata - removed {len(metadata_versions) - len(validated_versions)} incomplete version(s)")
+            print(
+                f"✓ Cleaned up metadata - removed {len(metadata_versions) - len(validated_versions)} incomplete version(s)"
+            )
 
         return validated_versions
 
@@ -564,7 +584,7 @@ class VersionManager:
                 - valid: List[str] - tags of valid installed versions
         """
         versions_metadata = self.metadata_manager.load_versions()
-        metadata_versions = set(versions_metadata.get('installed', {}).keys())
+        metadata_versions = set(versions_metadata.get("installed", {}).keys())
 
         validated_versions = []
         removed_versions = []
@@ -586,7 +606,9 @@ class VersionManager:
                     # If directory exists but NOT in metadata, it's an incomplete install
                     if tag not in metadata_versions:
                         removed_versions.append(tag)
-                        print(f"Warning: Found incomplete installation directory: {tag} (not in metadata)")
+                        print(
+                            f"Warning: Found incomplete installation directory: {tag} (not in metadata)"
+                        )
                         # Remove the orphaned directory
                         try:
                             shutil.rmtree(version_dir)
@@ -597,15 +619,17 @@ class VersionManager:
         # Clean up metadata if we found incomplete versions in metadata
         if any(tag in metadata_versions for tag in removed_versions):
             for tag in removed_versions:
-                if tag in versions_metadata['installed']:
-                    del versions_metadata['installed'][tag]
+                if tag in versions_metadata["installed"]:
+                    del versions_metadata["installed"][tag]
             self.metadata_manager.save_versions(versions_metadata)
-            print(f"✓ Cleaned up {len(removed_versions)} incomplete installation(s): {', '.join(removed_versions)}")
+            print(
+                f"✓ Cleaned up {len(removed_versions)} incomplete installation(s): {', '.join(removed_versions)}"
+            )
 
         return {
-            'had_invalid': len(removed_versions) > 0,
-            'removed': removed_versions,
-            'valid': validated_versions
+            "had_invalid": len(removed_versions) > 0,
+            "removed": removed_versions,
+            "valid": validated_versions,
         }
 
     def _is_version_complete(self, version_path: Path) -> bool:
@@ -624,7 +648,7 @@ class VersionManager:
         # Check for essential files/directories
         required_paths = [
             version_path / "main.py",  # Core ComfyUI file
-            version_path / "venv",     # Virtual environment
+            version_path / "venv",  # Virtual environment
             version_path / "venv" / "bin" / "python",  # Python in venv
         ]
 
@@ -645,7 +669,7 @@ class VersionManager:
             VersionInfo or None if not installed
         """
         versions_metadata = self.metadata_manager.load_versions()
-        return versions_metadata.get('installed', {}).get(tag)
+        return versions_metadata.get("installed", {}).get(tag)
 
     def get_version_path(self, tag: str) -> Optional[Path]:
         """
@@ -731,25 +755,27 @@ class VersionManager:
         Get the default version set in metadata.
         """
         versions_metadata = self.metadata_manager.load_versions()
-        return versions_metadata.get('defaultVersion')
+        return versions_metadata.get("defaultVersion")
 
     def set_default_version(self, tag: Optional[str]) -> bool:
         """
         Set a version as default (or clear if tag is None).
         """
         versions_metadata = self.metadata_manager.load_versions()
-        installed = versions_metadata.get('installed', {})
+        installed = versions_metadata.get("installed", {})
 
         if tag is not None and tag not in installed:
             print(f"Cannot set default to {tag}: not installed")
             return False
 
-        versions_metadata['defaultVersion'] = tag
+        versions_metadata["defaultVersion"] = tag
         self.metadata_manager.save_versions(versions_metadata)
         print(f"✓ Default version set to: {tag}")
         return True
 
-    def _wait_for_server_ready(self, url: str, process: subprocess.Popen, log_file: Path, timeout: int = 90) -> Tuple[bool, Optional[str]]:
+    def _wait_for_server_ready(
+        self, url: str, process: subprocess.Popen, log_file: Path, timeout: int = 90
+    ) -> Tuple[bool, Optional[str]]:
         """
         Poll the server URL until ready or process exits.
 
@@ -766,7 +792,9 @@ class VersionManager:
                 return False, msg
 
             try:
-                with urllib.request.urlopen(url, timeout=INSTALLATION.URL_QUICK_CHECK_TIMEOUT_SEC) as resp:
+                with urllib.request.urlopen(
+                    url, timeout=INSTALLATION.URL_QUICK_CHECK_TIMEOUT_SEC
+                ) as resp:
                     if resp.status == 200:
                         return True, None
             except Exception as exc:
@@ -799,24 +827,20 @@ class VersionManager:
                         f"--app={url}",
                         "--new-window",
                         f"--user-data-dir={profile_dir}",
-                        f"--class=ComfyUI-{slug}"
+                        f"--class=ComfyUI-{slug}",
                     ],
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    stderr=subprocess.DEVNULL,
                 )
             else:
                 subprocess.Popen(
-                    ["xdg-open", url],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
+                    ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
         except Exception as exc:
             print(f"Warning: failed to open frontend: {exc}")
 
     def install_version(
-        self,
-        tag: str,
-        progress_callback: Optional[Callable[[str, int, int], None]] = None
+        self, tag: str, progress_callback: Optional[Callable[[str, int, int], None]] = None
     ) -> bool:
         """
         Install a ComfyUI version (Enhanced with Phase 6.2.5b progress tracking)
@@ -867,7 +891,7 @@ class VersionManager:
             if self._cancel_installation:
                 raise InterruptedError("Installation cancelled by user")
 
-            download_url = release.get('zipball_url') or release.get('tarball_url')
+            download_url = release.get("zipball_url") or release.get("tarball_url")
             if not download_url:
                 error_msg = "No download URL found in release"
                 print(error_msg)
@@ -876,13 +900,13 @@ class VersionManager:
                 return False
 
             # Determine archive type
-            is_zip = 'zipball' in download_url
+            is_zip = "zipball" in download_url
 
             # Download to temporary file
             download_dir = self.launcher_root / "temp"
             ensure_directory(download_dir)
 
-            archive_ext = '.zip' if is_zip else '.tar.gz'
+            archive_ext = ".zip" if is_zip else ".tar.gz"
             archive_path = download_dir / f"{tag}{archive_ext}"
 
             # Track download progress and speed for UI feedback
@@ -901,16 +925,12 @@ class VersionManager:
 
                 total_bytes = total if total and total > 0 else None
                 self.progress_tracker.update_download_progress(
-                    downloaded,
-                    total_bytes,
-                    effective_speed
+                    downloaded, total_bytes, effective_speed
                 )
 
             try:
                 success = downloader.download_with_retry(
-                    download_url,
-                    archive_path,
-                    progress_callback=on_download_progress
+                    download_url, archive_path, progress_callback=on_download_progress
                 )
 
                 if not success:
@@ -925,7 +945,7 @@ class VersionManager:
             # Get archive size
             archive_size = archive_path.stat().st_size
             self.progress_tracker.update_download_progress(archive_size, archive_size)
-            self.progress_tracker.add_completed_item(archive_path.name, 'archive', archive_size)
+            self.progress_tracker.add_completed_item(archive_path.name, "archive", archive_size)
             self._log_install(f"Downloaded archive to {archive_path} ({archive_size} bytes)")
 
             # Check for cancellation after download
@@ -943,13 +963,15 @@ class VersionManager:
             ensure_directory(temp_extract_dir)
 
             if is_zip:
-                with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+                with zipfile.ZipFile(archive_path, "r") as zip_ref:
                     zip_ref.extractall(temp_extract_dir)
             else:
-                with tarfile.open(archive_path, 'r:gz') as tar_ref:
+                with tarfile.open(archive_path, "r:gz") as tar_ref:
                     tar_ref.extractall(temp_extract_dir)
 
-            self.progress_tracker.update_stage(InstallationStage.EXTRACT, 100, "Extraction complete")
+            self.progress_tracker.update_stage(
+                InstallationStage.EXTRACT, 100, "Extraction complete"
+            )
 
             # Check for cancellation
             if self._cancel_installation:
@@ -976,7 +998,9 @@ class VersionManager:
                 raise InterruptedError("Installation cancelled by user")
 
             # Step 3: Create venv with python3
-            self.progress_tracker.update_stage(InstallationStage.VENV, 0, "Creating virtual environment")
+            self.progress_tracker.update_stage(
+                InstallationStage.VENV, 0, "Creating virtual environment"
+            )
             if progress_callback:
                 progress_callback("Creating virtual environment...", 3, 5)
 
@@ -988,7 +1012,9 @@ class VersionManager:
                 shutil.rmtree(version_path)
                 return False
 
-            self.progress_tracker.update_stage(InstallationStage.VENV, 100, "Virtual environment created")
+            self.progress_tracker.update_stage(
+                InstallationStage.VENV, 100, "Virtual environment created"
+            )
             self._log_install("Virtual environment created successfully")
 
             # Check for cancellation
@@ -996,7 +1022,9 @@ class VersionManager:
                 raise InterruptedError("Installation cancelled by user")
 
             # Step 4: Install dependencies with progress tracking
-            self.progress_tracker.update_stage(InstallationStage.DEPENDENCIES, 0, "Installing dependencies")
+            self.progress_tracker.update_stage(
+                InstallationStage.DEPENDENCIES, 0, "Installing dependencies"
+            )
             if progress_callback:
                 progress_callback("Installing dependencies...", 4, 5)
 
@@ -1027,17 +1055,17 @@ class VersionManager:
 
             # Update metadata
             version_info: VersionInfo = {
-                'path': str(version_path.relative_to(self.launcher_root)),
-                'installedDate': get_iso_timestamp(),
-                'pythonVersion': self._get_python_version(version_path),
-                'releaseTag': tag
+                "path": str(version_path.relative_to(self.launcher_root)),
+                "installedDate": get_iso_timestamp(),
+                "pythonVersion": self._get_python_version(version_path),
+                "releaseTag": tag,
             }
 
             versions_metadata = self.metadata_manager.load_versions()
-            if 'installed' not in versions_metadata:
-                versions_metadata['installed'] = {}
+            if "installed" not in versions_metadata:
+                versions_metadata["installed"] = {}
 
-            versions_metadata['installed'][tag] = version_info
+            versions_metadata["installed"][tag] = version_info
             self.metadata_manager.save_versions(versions_metadata)
 
             # Mark installation as complete
@@ -1104,7 +1132,7 @@ class VersionManager:
         env = os.environ.copy()
         cache_dir = self.pip_cache_dir
         if ensure_directory(cache_dir):
-            env['PIP_CACHE_DIR'] = str(cache_dir)
+            env["PIP_CACHE_DIR"] = str(cache_dir)
             self.active_pip_cache_dir = cache_dir
         else:
             print(f"Warning: Unable to create pip cache directory at {cache_dir}")
@@ -1112,10 +1140,7 @@ class VersionManager:
         return env
 
     def _create_space_safe_requirements(
-        self,
-        tag: str,
-        requirements_file: Optional[Path],
-        constraints_path: Optional[Path]
+        self, tag: str, requirements_file: Optional[Path], constraints_path: Optional[Path]
     ) -> tuple[Optional[Path], Optional[Path]]:
         """
         Some tools can stumble on paths with spaces; copy requirements/constraints to a cache dir without spaces.
@@ -1173,9 +1198,9 @@ class VersionManager:
         print("Creating virtual environment with python3...")
         pip_env = self._build_pip_env()
         success, stdout, stderr = run_command(
-            ['python3', '-m', 'venv', str(venv_path)],
+            ["python3", "-m", "venv", str(venv_path)],
             timeout=INSTALLATION.VENV_CREATION_TIMEOUT_SEC,
-            env=pip_env
+            env=pip_env,
         )
 
         if not success:
@@ -1206,8 +1231,7 @@ class VersionManager:
             return "unknown"
 
         success, stdout, stderr = run_command(
-            [str(venv_python), '--version'],
-            timeout=INSTALLATION.SUBPROCESS_QUICK_TIMEOUT_SEC
+            [str(venv_python), "--version"], timeout=INSTALLATION.SUBPROCESS_QUICK_TIMEOUT_SEC
         )
 
         if success:
@@ -1229,35 +1253,45 @@ class VersionManager:
         version_path = self.versions_dir / tag
 
         if not version_path.exists():
-            return {
-                'installed': [],
-                'missing': [],
-                'requirementsFile': None
-            }
+            return {"installed": [], "missing": [], "requirementsFile": None}
 
         requirements_file = version_path / "requirements.txt"
-        requirements_file_rel = str(requirements_file.relative_to(self.launcher_root)) if requirements_file.exists() else None
+        requirements_file_rel = (
+            str(requirements_file.relative_to(self.launcher_root))
+            if requirements_file.exists()
+            else None
+        )
 
-        requirements = parse_requirements_file(requirements_file) if requirements_file.exists() else {}
+        requirements = (
+            parse_requirements_file(requirements_file) if requirements_file.exists() else {}
+        )
 
         # Parse requirements (split required vs optional)
         optional_requirements: set[str] = set()
         if requirements_file.exists():
             try:
                 optional_mode = False
-                with open(requirements_file, 'r') as f:
+                with open(requirements_file, "r") as f:
                     for line in f:
                         raw = line.strip()
                         if not raw:
                             continue
-                        if raw.startswith('#'):
+                        if raw.startswith("#"):
                             if raw.lower().startswith("#non essential dependencies"):
                                 optional_mode = True
                             continue
-                        if raw.startswith('-'):
+                        if raw.startswith("-"):
                             continue
                         if optional_mode:
-                            pkg = raw.split('==')[0].split('>=')[0].split('<=')[0].split('<')[0].split('>')[0].split('@')[0].strip()
+                            pkg = (
+                                raw.split("==")[0]
+                                .split(">=")[0]
+                                .split("<=")[0]
+                                .split("<")[0]
+                                .split(">")[0]
+                                .split("@")[0]
+                                .strip()
+                            )
                             if pkg:
                                 optional_requirements.add(canonicalize_name(pkg))
             except Exception as e:
@@ -1277,16 +1311,16 @@ class VersionManager:
         if not venv_python.exists():
             # No venv, all packages are missing
             return {
-                'installed': [],
-                'missing': list(requirements.keys()),
-                'requirementsFile': requirements_file_rel
+                "installed": [],
+                "missing": list(requirements.keys()),
+                "requirementsFile": requirements_file_rel,
             }
 
         pip_env = self._build_pip_env()
         pip_ok, _stdout, _stderr = run_command(
             [str(venv_python), "-m", "pip", "--version"],
             timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC,
-            env=pip_env
+            env=pip_env,
         )
         if not pip_ok:
             run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
@@ -1298,7 +1332,9 @@ class VersionManager:
 
         installed_names = self._get_installed_package_names(tag, venv_python)
         if installed_names is None:
-            print(f"Warning: Could not inspect installed packages for {tag}, treating dependencies as missing")
+            print(
+                f"Warning: Could not inspect installed packages for {tag}, treating dependencies as missing"
+            )
             installed_names = set()
 
         for package in requirements.keys():
@@ -1311,9 +1347,9 @@ class VersionManager:
                 missing.append(package)
 
         return {
-            'installed': installed,
-            'missing': missing,
-            'requirementsFile': requirements_file_rel
+            "installed": installed,
+            "missing": missing,
+            "requirementsFile": requirements_file_rel,
         }
 
     def _get_installed_package_names(self, tag: str, venv_python: Path) -> Optional[set[str]]:
@@ -1328,19 +1364,18 @@ class VersionManager:
         errors: list[str] = []
 
         success, stdout, stderr = run_command(
-            [str(venv_python), '-m', 'pip', 'list', '--format=json'],
+            [str(venv_python), "-m", "pip", "list", "--format=json"],
             timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC,
-            env=pip_env
+            env=pip_env,
         )
 
         if success:
             try:
                 import json as _json
+
                 parsed = _json.loads(stdout)
                 installed_names = {
-                    canonicalize_name(pkg.get('name', ''))
-                    for pkg in parsed
-                    if pkg.get('name')
+                    canonicalize_name(pkg.get("name", "")) for pkg in parsed if pkg.get("name")
                 }
                 return installed_names
             except Exception as e:
@@ -1350,23 +1385,23 @@ class VersionManager:
             errors.append(f"pip json: {stderr}")
 
         success, stdout, stderr = run_command(
-            [str(venv_python), '-m', 'pip', 'list', '--format=freeze'],
+            [str(venv_python), "-m", "pip", "list", "--format=freeze"],
             timeout=INSTALLATION.SUBPROCESS_STANDARD_TIMEOUT_SEC,
-            env=pip_env
+            env=pip_env,
         )
         if success:
             for line in stdout.splitlines():
                 line = line.strip()
                 if not line:
                     continue
-                pkg = line.split('==')[0].split('@')[0].strip()
+                pkg = line.split("==")[0].split("@")[0].strip()
                 if pkg:
                     installed_names.add(canonicalize_name(pkg))
             return installed_names
         else:
             errors.append(f"pip freeze: {stderr}")
 
-        error_msg = '; '.join([e for e in errors if e]) or "unknown error"
+        error_msg = "; ".join([e for e in errors if e]) or "unknown error"
         print(f"Warning: dependency inspection failed for {tag}: {error_msg}")
         return None
 
@@ -1374,11 +1409,11 @@ class VersionManager:
         """Safe slug for filenames"""
         if not tag:
             return "comfyui"
-        safe = ''.join(c if c.isalnum() or c in ('-', '_') else '-' for c in tag.strip().lower())
+        safe = "".join(c if c.isalnum() or c in ("-", "_") else "-" for c in tag.strip().lower())
         # Drop a leading 'v' (v0.5.1 -> 0-5-1) to match requested naming
-        if safe.startswith('v') and len(safe) > 1:
+        if safe.startswith("v") and len(safe) > 1:
             safe = safe[1:]
-        safe = re.sub(r'-+', '-', safe).strip('-_')
+        safe = re.sub(r"-+", "-", safe).strip("-_")
         return safe or "comfyui"
 
     def _ensure_version_run_script(self, tag: str, version_path: Path) -> Path:
@@ -1495,9 +1530,7 @@ wait $SERVER_PID
         return script_path
 
     def install_dependencies(
-        self,
-        tag: str,
-        progress_callback: Optional[Callable[[str], None]] = None
+        self, tag: str, progress_callback: Optional[Callable[[str], None]] = None
     ) -> bool:
         """
         Install dependencies for a version
@@ -1550,9 +1583,7 @@ wait $SERVER_PID
 
         pip_env = self._build_pip_env()
         safe_req, safe_constraints = self._create_space_safe_requirements(
-            tag,
-            requirements_file if requirements_file.exists() else None,
-            constraints_path
+            tag, requirements_file if requirements_file.exists() else None, constraints_path
         )
 
         run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
@@ -1571,9 +1602,7 @@ wait $SERVER_PID
         install_cmd += global_required
 
         success, stdout, stderr = run_command(
-            install_cmd,
-            timeout=INSTALLATION.PIP_FALLBACK_TIMEOUT_SEC,
-            env=pip_env
+            install_cmd, timeout=INSTALLATION.PIP_FALLBACK_TIMEOUT_SEC, env=pip_env
         )
 
         if success:
@@ -1636,7 +1665,9 @@ wait $SERVER_PID
                 return False
 
         # Parse requirements to get package list
-        requirements = parse_requirements_file(requirements_file) if requirements_file.exists() else {}
+        requirements = (
+            parse_requirements_file(requirements_file) if requirements_file.exists() else {}
+        )
         global_required = self._get_global_required_packages()
         constraints_path = None
         try:
@@ -1669,21 +1700,15 @@ wait $SERVER_PID
         # Update progress tracker with dependency count
         current_state = self.progress_tracker.get_current_state()
         if current_state:
-            current_state['dependency_count'] = package_count
-            self.progress_tracker.update_dependency_progress(
-                "Preparing...",
-                0,
-                package_count
-            )
+            current_state["dependency_count"] = package_count
+            self.progress_tracker.update_dependency_progress("Preparing...", 0, package_count)
 
         # Use pip to install requirements
         # Use Popen to allow immediate cancellation
         print("Starting dependency installation...")
         pip_env = self._build_pip_env()
         safe_req, safe_constraints = self._create_space_safe_requirements(
-            tag,
-            requirements_file if requirements_file.exists() else None,
-            constraints_path
+            tag, requirements_file if requirements_file.exists() else None, constraints_path
         )
 
         run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
@@ -1711,15 +1736,15 @@ wait $SERVER_PID
             text=True,
             bufsize=1,  # Line buffered for real-time output
             # Create new process group so we can kill the entire tree
-            preexec_fn=os.setsid if hasattr(os, 'setsid') else None,
-            env=pip_env
+            preexec_fn=os.setsid if hasattr(os, "setsid") else None,
+            env=pip_env,
         )
 
         # Initialize process I/O tracker for monitoring download progress
         io_tracker = ProcessIOTracker(
             pid=self._current_process.pid if self._current_process else None,
             cache_dir=cache_dir,
-            io_bytes_getter=self._get_process_io_bytes
+            io_bytes_getter=self._get_process_io_bytes,
         )
 
         # Track completed packages
@@ -1731,6 +1756,7 @@ wait $SERVER_PID
             while self._current_process.poll() is None:
                 # Try to read a line with short timeout
                 import select
+
                 if self._current_process.stdout:
                     # Check if data is available
                     readable, _, _ = select.select([self._current_process.stdout], [], [], 0.1)
@@ -1745,13 +1771,15 @@ wait $SERVER_PID
 
                             # Detect package being collected/downloaded
                             if "collecting" in line_lower:
-                                match = re.search(r"collecting\s+([a-zA-Z0-9_-]+)", line, re.IGNORECASE)
+                                match = re.search(
+                                    r"collecting\s+([a-zA-Z0-9_-]+)", line, re.IGNORECASE
+                                )
                                 if match:
                                     current_package = match.group(1)
                                     self.progress_tracker.update_dependency_progress(
                                         f"Collecting {current_package}",
                                         len(completed_packages),
-                                        package_count
+                                        package_count,
                                     )
 
                             # Detect package being downloaded
@@ -1763,21 +1791,25 @@ wait $SERVER_PID
                                     self.progress_tracker.update_dependency_progress(
                                         f"Downloading {current_package} ({size_str})",
                                         len(completed_packages),
-                                        package_count
+                                        package_count,
                                     )
 
                             # Detect successful installation
                             elif "successfully installed" in line_lower:
                                 # Parse all installed packages: "Successfully installed pkg1-1.0 pkg2-2.0"
-                                match = re.search(r"successfully installed\s+(.+)", line, re.IGNORECASE)
+                                match = re.search(
+                                    r"successfully installed\s+(.+)", line, re.IGNORECASE
+                                )
                                 if match:
                                     packages_str = match.group(1).strip()
                                     for pkg_ver in packages_str.split():
-                                        pkg_name = pkg_ver.split('-')[0]
+                                        pkg_name = pkg_ver.split("-")[0]
                                         if pkg_name and pkg_name.lower() not in completed_packages:
                                             completed_packages.add(pkg_name.lower())
                                             self.progress_tracker.complete_package(pkg_name)
-                                            self.progress_tracker.add_completed_item(pkg_name, 'package')
+                                            self.progress_tracker.add_completed_item(
+                                                pkg_name, "package"
+                                            )
 
                 # Update I/O metrics periodically
                 if io_tracker.should_update(min_interval_sec=0.75):
@@ -1787,9 +1819,9 @@ wait $SERVER_PID
                         # Update download bytes but don't interfere with weighted progress
                         current_state = self.progress_tracker.get_current_state()
                         if current_state:
-                            current_state['downloaded_bytes'] = downloaded
+                            current_state["downloaded_bytes"] = downloaded
                             if speed is not None:
-                                current_state['download_speed'] = speed
+                                current_state["download_speed"] = speed
 
                 # Check if process was killed by cancel_installation()
                 if self._cancel_installation:
@@ -1810,7 +1842,7 @@ wait $SERVER_PID
             if self._current_process:
                 # Kill entire process group
                 try:
-                    if hasattr(os, 'killpg'):
+                    if hasattr(os, "killpg"):
                         os.killpg(os.getpgid(self._current_process.pid), 9)
                     else:
                         self._current_process.kill()
@@ -1825,14 +1857,12 @@ wait $SERVER_PID
             for package, _ in package_entries:
                 if package.lower() not in completed_packages:
                     self.progress_tracker.complete_package(package)
-                    self.progress_tracker.add_completed_item(package, 'package')
+                    self.progress_tracker.add_completed_item(package, "package")
                     completed_packages.add(package.lower())
 
             # Ensure progress reaches 100%
             self.progress_tracker.update_dependency_progress(
-                "Complete",
-                package_count,
-                package_count
+                "Complete", package_count, package_count
             )
 
             print("✓ Dependencies installed successfully")
@@ -1876,11 +1906,11 @@ wait $SERVER_PID
             # Update metadata
             versions_metadata = self.metadata_manager.load_versions()
 
-            if tag in versions_metadata.get('installed', {}):
-                del versions_metadata['installed'][tag]
+            if tag in versions_metadata.get("installed", {}):
+                del versions_metadata["installed"][tag]
 
-            if versions_metadata.get('defaultVersion') == tag:
-                versions_metadata['defaultVersion'] = None
+            if versions_metadata.get("defaultVersion") == tag:
+                versions_metadata["defaultVersion"] = None
 
             self.metadata_manager.save_versions(versions_metadata)
 
@@ -1892,9 +1922,7 @@ wait $SERVER_PID
             return False
 
     def launch_version(
-        self,
-        tag: str,
-        extra_args: Optional[List[str]] = None
+        self, tag: str, extra_args: Optional[List[str]] = None
     ) -> Tuple[bool, Optional[subprocess.Popen], Optional[str], Optional[str], Optional[bool]]:
         """
         Launch a ComfyUI version with readiness detection.
@@ -1913,7 +1941,7 @@ wait $SERVER_PID
 
         # Check dependencies
         dep_status = self.check_dependencies(tag)
-        if dep_status['missing']:
+        if dep_status["missing"]:
             print(f"Missing dependencies detected for {tag}: {len(dep_status['missing'])}")
             print("Attempting to install missing dependencies before launch...")
             if not self.install_dependencies(tag):
@@ -1921,13 +1949,13 @@ wait $SERVER_PID
                 return (False, None, None, "Dependencies missing", None)
             # Re-check after install
             dep_status = self.check_dependencies(tag)
-            if dep_status['missing']:
+            if dep_status["missing"]:
                 print(f"Dependencies still missing after install: {dep_status['missing']}")
                 return (False, None, None, "Dependencies still missing after install", None)
 
         # Validate symlinks
         repair_report = self.resource_manager.validate_and_repair_symlinks(tag)
-        if repair_report['broken']:
+        if repair_report["broken"]:
             print(f"Warning: Repaired {len(repair_report['repaired'])} broken symlinks")
 
         version_path = self.versions_dir / tag
@@ -1955,7 +1983,7 @@ wait $SERVER_PID
         except Exception as e:
             print(f"Warning: could not open log file {log_file} for {tag}: {e}")
 
-        cmd = ['bash', str(run_script)]
+        cmd = ["bash", str(run_script)]
         if extra_args:
             cmd.extend(extra_args)
 
@@ -1973,7 +2001,7 @@ wait $SERVER_PID
                 stdout=log_handle or subprocess.DEVNULL,
                 stderr=log_handle or subprocess.DEVNULL,
                 start_new_session=True,
-                env=env
+                env=env,
             )
 
             ready, ready_error = self._wait_for_server_ready(url, process, log_file)
@@ -1989,7 +2017,13 @@ wait $SERVER_PID
                 print("Launch log tail:")
                 for line in tail:
                     print(line)
-            return (False, process if process and process.poll() is None else None, str(log_file), ready_error, False)
+            return (
+                False,
+                process if process and process.poll() is None else None,
+                str(log_file),
+                ready_error,
+                False,
+            )
 
         except Exception as e:
             print(f"Error launching ComfyUI: {e}")
@@ -2012,20 +2046,20 @@ wait $SERVER_PID
         active = self.get_active_version()
 
         status = {
-            'installedCount': len(installed),
-            'activeVersion': active,
-            'defaultVersion': self.get_default_version(),
-            'versions': {}
+            "installedCount": len(installed),
+            "activeVersion": active,
+            "defaultVersion": self.get_default_version(),
+            "versions": {},
         }
 
         for tag in installed:
             version_info = self.get_version_info(tag)
             dep_status = self.check_dependencies(tag)
 
-            status['versions'][tag] = {
-                'info': version_info,
-                'dependencies': dep_status,
-                'isActive': tag == active
+            status["versions"][tag] = {
+                "info": version_info,
+                "dependencies": dep_status,
+                "isActive": tag == active,
             }
 
         return status

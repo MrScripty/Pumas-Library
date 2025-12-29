@@ -5,16 +5,18 @@ Handles fetching releases, caching, and downloading
 """
 
 import json
-import time
 import threading
-import urllib.request
+import time
 import urllib.error
+import urllib.request
 from pathlib import Path
-from typing import Optional, List, Callable, Dict, Any
-from packaging.version import Version, InvalidVersion
+from typing import Any, Callable, Dict, List, Optional
+
 from cachetools import TTLCache
-from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
+from packaging.version import InvalidVersion, Version
+
 from backend.metadata_manager import MetadataManager
+from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
 
 
 class GitHubReleasesFetcher:
@@ -40,7 +42,7 @@ class GitHubReleasesFetcher:
         # In-memory cache with TTL and thread lock
         self._memory_cache = TTLCache(maxsize=1, ttl=ttl)
         self._cache_lock = threading.Lock()
-        self._CACHE_KEY = 'github_releases'
+        self._CACHE_KEY = "github_releases"
 
     def _fetch_page(self, page: int) -> List[GitHubRelease]:
         """
@@ -50,11 +52,11 @@ class GitHubReleasesFetcher:
 
         # Create request with User-Agent header (required by GitHub API)
         req = urllib.request.Request(url)
-        req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
-        req.add_header('Accept', 'application/vnd.github.v3+json')
+        req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
+        req.add_header("Accept", "application/vnd.github.v3+json")
 
         with urllib.request.urlopen(req, timeout=10) as response:
-            return json.loads(response.read().decode('utf-8'))
+            return json.loads(response.read().decode("utf-8"))
 
     def _fetch_from_github(self) -> List[GitHubRelease]:
         """
@@ -102,10 +104,11 @@ class GitHubReleasesFetcher:
 
         try:
             from backend.models import parse_iso_timestamp
-            last_fetched = parse_iso_timestamp(cache['lastFetched'])
+
+            last_fetched = parse_iso_timestamp(cache["lastFetched"])
             now = parse_iso_timestamp(get_iso_timestamp())
             age_seconds = (now - last_fetched).total_seconds()
-            return age_seconds < cache.get('ttl', self.ttl)
+            return age_seconds < cache.get("ttl", self.ttl)
         except (KeyError, ValueError) as e:
             print(f"Error validating cache: {e}")
             return False
@@ -145,14 +148,14 @@ class GitHubReleasesFetcher:
                 # Valid cache - load into memory
                 if self._is_cache_valid(disk_cache):
                     print("Loading releases from disk cache")
-                    releases = disk_cache['releases']
+                    releases = disk_cache["releases"]
                     self._memory_cache[self._CACHE_KEY] = releases
                     return releases
 
                 # Stale cache exists - use it anyway (offline-first)
-                if disk_cache and disk_cache.get('releases'):
+                if disk_cache and disk_cache.get("releases"):
                     print("Using stale disk cache (offline-first)")
-                    stale_releases = disk_cache['releases']
+                    stale_releases = disk_cache["releases"]
                     self._memory_cache[self._CACHE_KEY] = stale_releases
                     return stale_releases
 
@@ -167,9 +170,9 @@ class GitHubReleasesFetcher:
 
                 # Update both caches
                 cache_data: GitHubReleasesCache = {
-                    'lastFetched': get_iso_timestamp(),
-                    'ttl': self.ttl,
-                    'releases': releases
+                    "lastFetched": get_iso_timestamp(),
+                    "ttl": self.ttl,
+                    "releases": releases,
                 }
                 self.metadata_manager.save_github_cache(cache_data)
                 self._memory_cache[self._CACHE_KEY] = releases
@@ -187,8 +190,8 @@ class GitHubReleasesFetcher:
 
                 # Return stale cache if available
                 disk_cache = self.metadata_manager.load_github_cache()
-                if disk_cache and disk_cache.get('releases'):
-                    stale_releases = disk_cache['releases']
+                if disk_cache and disk_cache.get("releases"):
+                    stale_releases = disk_cache["releases"]
                     self._memory_cache[self._CACHE_KEY] = stale_releases
 
                     if force_refresh:
@@ -211,9 +214,9 @@ class GitHubReleasesFetcher:
 
                 # Try stale cache
                 disk_cache = self.metadata_manager.load_github_cache()
-                if disk_cache and disk_cache.get('releases'):
+                if disk_cache and disk_cache.get("releases"):
                     print("Using stale disk cache (fetch error)")
-                    return disk_cache['releases']
+                    return disk_cache["releases"]
 
                 print("No cache available and fetch failed - returning empty")
                 return []
@@ -234,56 +237,58 @@ class GitHubReleasesFetcher:
             }
         """
         status = {
-            'has_cache': False,
-            'is_valid': False,
-            'age_seconds': None,
-            'last_fetched': None,
-            'ttl': self.ttl,
-            'releases_count': 0,
-            'is_fetching': False
+            "has_cache": False,
+            "is_valid": False,
+            "age_seconds": None,
+            "last_fetched": None,
+            "ttl": self.ttl,
+            "releases_count": 0,
+            "is_fetching": False,
         }
 
         # Check if fetch is in progress
-        status['is_fetching'] = self._cache_lock.locked()
+        status["is_fetching"] = self._cache_lock.locked()
 
         # Check in-memory cache first
         if self._CACHE_KEY in self._memory_cache:
             releases = self._memory_cache[self._CACHE_KEY]
-            status['has_cache'] = True
-            status['is_valid'] = True  # In-memory is always valid (TTL enforced)
-            status['releases_count'] = len(releases)
+            status["has_cache"] = True
+            status["is_valid"] = True  # In-memory is always valid (TTL enforced)
+            status["releases_count"] = len(releases)
             # Try to get age from disk cache for display
             try:
                 disk_cache = self.metadata_manager.load_github_cache()
-                if disk_cache and disk_cache.get('lastFetched'):
+                if disk_cache and disk_cache.get("lastFetched"):
                     from backend.models import parse_iso_timestamp
-                    last_fetched = parse_iso_timestamp(disk_cache['lastFetched'])
+
+                    last_fetched = parse_iso_timestamp(disk_cache["lastFetched"])
                     now = parse_iso_timestamp(get_iso_timestamp())
-                    status['age_seconds'] = int((now - last_fetched).total_seconds())
-                    status['last_fetched'] = disk_cache.get('lastFetched')
+                    status["age_seconds"] = int((now - last_fetched).total_seconds())
+                    status["last_fetched"] = disk_cache.get("lastFetched")
             except Exception as e:
                 print(f"Error getting cache age: {e}")
             return status
 
         # Check disk cache
         disk_cache = self.metadata_manager.load_github_cache()
-        if disk_cache and disk_cache.get('releases'):
-            status['has_cache'] = True
-            status['releases_count'] = len(disk_cache['releases'])
-            status['last_fetched'] = disk_cache.get('lastFetched')
+        if disk_cache and disk_cache.get("releases"):
+            status["has_cache"] = True
+            status["releases_count"] = len(disk_cache["releases"])
+            status["last_fetched"] = disk_cache.get("lastFetched")
 
             # Check validity
             try:
                 from backend.models import parse_iso_timestamp
-                last_fetched = parse_iso_timestamp(disk_cache['lastFetched'])
+
+                last_fetched = parse_iso_timestamp(disk_cache["lastFetched"])
                 now = parse_iso_timestamp(get_iso_timestamp())
                 age_seconds = (now - last_fetched).total_seconds()
-                status['age_seconds'] = int(age_seconds)
-                status['is_valid'] = age_seconds < disk_cache.get('ttl', self.ttl)
+                status["age_seconds"] = int(age_seconds)
+                status["is_valid"] = age_seconds < disk_cache.get("ttl", self.ttl)
             except Exception as e:
                 print(f"Error validating disk cache in get_cache_status: {e}")
                 # If we can't parse the timestamp, assume it's invalid but exists
-                status['is_valid'] = False
+                status["is_valid"] = False
 
         return status
 
@@ -300,7 +305,7 @@ class GitHubReleasesFetcher:
         releases = self.get_releases()
 
         for release in releases:
-            if not include_prerelease and release.get('prerelease', False):
+            if not include_prerelease and release.get("prerelease", False):
                 continue
             return release
 
@@ -319,7 +324,7 @@ class GitHubReleasesFetcher:
         releases = self.get_releases()
 
         for release in releases:
-            if release.get('tag_name') == tag:
+            if release.get("tag_name") == tag:
                 return release
 
         return None
@@ -336,20 +341,20 @@ class GitHubReleasesFetcher:
         """
         formatted = []
         for release in releases:
-            formatted.append({
-                'tag': release.get('tag_name', ''),
-                'name': release.get('name', ''),
-                'date': release.get('published_at', ''),
-                'notes': release.get('body', ''),
-                'url': release.get('zipball_url', ''),
-                'prerelease': release.get('prerelease', False)
-            })
+            formatted.append(
+                {
+                    "tag": release.get("tag_name", ""),
+                    "name": release.get("name", ""),
+                    "date": release.get("published_at", ""),
+                    "notes": release.get("body", ""),
+                    "url": release.get("zipball_url", ""),
+                    "prerelease": release.get("prerelease", False),
+                }
+            )
         return formatted
 
     def collapse_latest_patch_per_minor(
-        self,
-        releases: List[GitHubRelease],
-        include_prerelease: bool = True
+        self, releases: List[GitHubRelease], include_prerelease: bool = True
     ) -> List[GitHubRelease]:
         """
         Reduce releases to the latest patch per minor (major.minor).
@@ -357,15 +362,15 @@ class GitHubReleasesFetcher:
         best_by_minor: Dict[str, GitHubRelease] = {}
 
         for release in releases:
-            if release.get('prerelease', False) and not include_prerelease:
+            if release.get("prerelease", False) and not include_prerelease:
                 continue
 
-            tag = release.get('tag_name') or ""
+            tag = release.get("tag_name") or ""
             if not tag:
                 continue
 
             # Strip leading 'v' or 'V' for parsing
-            normalized = tag.lstrip('vV')
+            normalized = tag.lstrip("vV")
 
             try:
                 parsed = Version(normalized)
@@ -380,7 +385,7 @@ class GitHubReleasesFetcher:
                 best_by_minor[minor_key] = release
                 continue
 
-            current_tag = (current_best.get('tag_name') or "").lstrip('vV')
+            current_tag = (current_best.get("tag_name") or "").lstrip("vV")
             try:
                 current_version = Version(current_tag)
             except InvalidVersion:
@@ -394,17 +399,17 @@ class GitHubReleasesFetcher:
         collapsed: List[GitHubRelease] = []
         seen = set()
         for release in releases:
-            tag = release.get('tag_name')
+            tag = release.get("tag_name")
             if not tag:
                 continue
-            normalized = tag.lstrip('vV')
+            normalized = tag.lstrip("vV")
             try:
                 parsed = Version(normalized)
             except InvalidVersion:
                 continue
             minor_key = f"{parsed.major}.{parsed.minor}"
             best = best_by_minor.get(minor_key)
-            if best and best.get('tag_name') == tag and minor_key not in seen:
+            if best and best.get("tag_name") == tag and minor_key not in seen:
                 collapsed.append(release)
                 seen.add(minor_key)
 
@@ -430,7 +435,7 @@ class DownloadManager:
         self,
         url: str,
         destination: Path,
-        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None
+        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None,
     ) -> bool:
         """
         Download a file with progress tracking
@@ -454,18 +459,18 @@ class DownloadManager:
 
             # Create request with User-Agent
             req = urllib.request.Request(url)
-            req.add_header('User-Agent', 'ComfyUI-Version-Manager/1.0')
+            req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
 
             # Download with progress tracking
             with urllib.request.urlopen(req, timeout=30) as response:
-                total_size = int(response.headers.get('Content-Length', 0))
+                total_size = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
 
                 # Initial progress update so listeners know total size
                 if progress_callback:
                     progress_callback(downloaded, total_size, None)
 
-                with open(destination, 'wb') as f:
+                with open(destination, "wb") as f:
                     while True:
                         # Check for cancellation before reading next chunk
                         if self._cancel_requested:
@@ -482,7 +487,10 @@ class DownloadManager:
                         # Call progress callback if provided
                         if progress_callback:
                             current_time = time.time()
-                            should_update = current_time - self.last_progress_time >= self.progress_update_interval
+                            should_update = (
+                                current_time - self.last_progress_time
+                                >= self.progress_update_interval
+                            )
                             if should_update or downloaded == total_size:
                                 speed = None
                                 elapsed = current_time - self.last_progress_time
@@ -525,7 +533,7 @@ class DownloadManager:
         url: str,
         destination: Path,
         max_retries: int = 3,
-        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None
+        progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None,
     ) -> bool:
         """
         Download with automatic retries on failure
@@ -561,7 +569,7 @@ def format_bytes(size: int) -> str:
     Returns:
         Formatted string (e.g., "1.5 MB")
     """
-    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+    for unit in ["B", "KB", "MB", "GB", "TB"]:
         if size < 1024.0:
             return f"{size:.1f} {unit}"
         size /= 1024.0
@@ -578,9 +586,13 @@ def print_progress(downloaded: int, total: int) -> None:
     """
     if total > 0:
         percent = (downloaded / total) * 100
-        print(f"\rDownloading: {format_bytes(downloaded)} / {format_bytes(total)} ({percent:.1f}%)", end='', flush=True)
+        print(
+            f"\rDownloading: {format_bytes(downloaded)} / {format_bytes(total)} ({percent:.1f}%)",
+            end="",
+            flush=True,
+        )
     else:
-        print(f"\rDownloading: {format_bytes(downloaded)}", end='', flush=True)
+        print(f"\rDownloading: {format_bytes(downloaded)}", end="", flush=True)
 
 
 if __name__ == "__main__":
@@ -606,10 +618,10 @@ if __name__ == "__main__":
 
         # Display first 5 releases
         for i, release in enumerate(releases[:5]):
-            tag = release.get('tag_name', 'unknown')
-            name = release.get('name', 'Unnamed')
-            date = release.get('published_at', 'unknown')
-            prerelease = " (pre-release)" if release.get('prerelease') else ""
+            tag = release.get("tag_name", "unknown")
+            name = release.get("name", "Unnamed")
+            date = release.get("published_at", "unknown")
+            prerelease = " (pre-release)" if release.get("prerelease") else ""
 
             print(f"{i+1}. {tag} - {name}{prerelease}")
             print(f"   Published: {date}")

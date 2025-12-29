@@ -9,15 +9,15 @@ interface SpringyToggleProps {
   disabled?: boolean;
 }
 
-export const SpringyToggle: React.FC<SpringyToggleProps> = ({ 
-  isOn, 
-  onToggle, 
-  labelOn, 
+export const SpringyToggle: React.FC<SpringyToggleProps> = ({
+  isOn,
+  onToggle,
+  labelOn,
   labelOff,
   disabled = false
 }) => {
   return (
-    <div 
+    <div
       className={`relative w-[220px] h-[36px] bg-[#2d2d2d] border border-[#3d3d3d] overflow-hidden cursor-pointer select-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       onClick={!disabled ? onToggle : undefined}
     >

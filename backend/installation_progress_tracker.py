@@ -6,14 +6,15 @@ Thread-safe progress tracking for version installations
 
 import json
 import threading
-from pathlib import Path
-from typing import Dict, Optional, List
 from datetime import datetime, timezone
 from enum import Enum
+from pathlib import Path
+from typing import Dict, List, Optional
 
 
 class InstallationStage(Enum):
     """Installation stages"""
+
     DOWNLOAD = "download"
     EXTRACT = "extract"
     VENV = "venv"
@@ -23,36 +24,36 @@ class InstallationStage(Enum):
 
 # Stage weights for overall progress calculation
 STAGE_WEIGHTS = {
-    InstallationStage.DOWNLOAD: 0.15,      # 15% - downloading archive
-    InstallationStage.EXTRACT: 0.05,        # 5% - extracting archive
-    InstallationStage.VENV: 0.05,           # 5% - creating venv
-    InstallationStage.DEPENDENCIES: 0.70,   # 70% - installing dependencies (largest)
-    InstallationStage.SETUP: 0.05           # 5% - final setup/symlinks
+    InstallationStage.DOWNLOAD: 0.15,  # 15% - downloading archive
+    InstallationStage.EXTRACT: 0.05,  # 5% - extracting archive
+    InstallationStage.VENV: 0.05,  # 5% - creating venv
+    InstallationStage.DEPENDENCIES: 0.70,  # 70% - installing dependencies (largest)
+    InstallationStage.SETUP: 0.05,  # 5% - final setup/symlinks
 }
 
 # Package weights for progress calculation
 # Larger packages get higher weights to reflect actual download/install time
 PACKAGE_WEIGHTS = {
-    'torch': 15,              # ~2-3 GB depending on version/platform
-    'torchvision': 5,         # ~500 MB
-    'torchaudio': 3,          # ~300 MB
-    'tensorflow': 12,         # ~500 MB - 2 GB
-    'tensorflow-gpu': 15,     # ~2 GB
-    'opencv-python': 4,       # ~80 MB
-    'opencv-contrib-python': 6,  # ~120 MB
-    'opencv-python-headless': 4,  # ~80 MB
-    'scipy': 3,               # ~40 MB
-    'pandas': 2,              # ~15 MB
-    'matplotlib': 2,          # ~20 MB
-    'scikit-learn': 3,        # ~30 MB
-    'scikit-image': 3,        # ~35 MB
-    'transformers': 3,        # ~30 MB
-    'diffusers': 2,           # ~20 MB
-    'accelerate': 2,          # ~15 MB
-    'xformers': 4,            # ~50 MB
-    'onnxruntime': 4,         # ~50 MB
-    'onnxruntime-gpu': 5,     # ~100 MB
-    '_default': 1             # Default weight for unknown packages
+    "torch": 15,  # ~2-3 GB depending on version/platform
+    "torchvision": 5,  # ~500 MB
+    "torchaudio": 3,  # ~300 MB
+    "tensorflow": 12,  # ~500 MB - 2 GB
+    "tensorflow-gpu": 15,  # ~2 GB
+    "opencv-python": 4,  # ~80 MB
+    "opencv-contrib-python": 6,  # ~120 MB
+    "opencv-python-headless": 4,  # ~80 MB
+    "scipy": 3,  # ~40 MB
+    "pandas": 2,  # ~15 MB
+    "matplotlib": 2,  # ~20 MB
+    "scikit-learn": 3,  # ~30 MB
+    "scikit-image": 3,  # ~35 MB
+    "transformers": 3,  # ~30 MB
+    "diffusers": 2,  # ~20 MB
+    "accelerate": 2,  # ~15 MB
+    "xformers": 4,  # ~50 MB
+    "onnxruntime": 4,  # ~50 MB
+    "onnxruntime-gpu": 5,  # ~100 MB
+    "_default": 1,  # Default weight for unknown packages
 }
 
 
@@ -83,7 +84,7 @@ class InstallationProgressTracker:
         tag: str,
         total_size: Optional[int] = None,
         dependency_count: Optional[int] = None,
-        log_path: Optional[str] = None
+        log_path: Optional[str] = None,
     ):
         """
         Start tracking a new installation
@@ -95,30 +96,27 @@ class InstallationProgressTracker:
         """
         with self._lock:
             self._current_state = {
-                'tag': tag,
-                'started_at': self._get_iso_timestamp(),
-                'stage': InstallationStage.DOWNLOAD.value,
-                'stage_progress': 0,
-                'overall_progress': 0,
-                'current_item': None,
-                'download_speed': None,
-                'eta_seconds': None,
-                'total_size': total_size,
-                'downloaded_bytes': 0,
-                'dependency_count': dependency_count,
-                'completed_dependencies': 0,
-                'completed_items': [],
-                'error': None,
-                'pid': None,
-                'log_path': log_path
+                "tag": tag,
+                "started_at": self._get_iso_timestamp(),
+                "stage": InstallationStage.DOWNLOAD.value,
+                "stage_progress": 0,
+                "overall_progress": 0,
+                "current_item": None,
+                "download_speed": None,
+                "eta_seconds": None,
+                "total_size": total_size,
+                "downloaded_bytes": 0,
+                "dependency_count": dependency_count,
+                "completed_dependencies": 0,
+                "completed_items": [],
+                "error": None,
+                "pid": None,
+                "log_path": log_path,
             }
             self._save_state()
 
     def update_stage(
-        self,
-        stage: InstallationStage,
-        progress: int = 0,
-        current_item: Optional[str] = None
+        self, stage: InstallationStage, progress: int = 0, current_item: Optional[str] = None
     ):
         """
         Update current installation stage
@@ -132,12 +130,12 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['stage'] = stage.value
-            self._current_state['stage_progress'] = progress
-            self._current_state['current_item'] = current_item
+            self._current_state["stage"] = stage.value
+            self._current_state["stage_progress"] = progress
+            self._current_state["current_item"] = current_item
 
             # Calculate overall progress
-            self._current_state['overall_progress'] = self._calculate_overall_progress()
+            self._current_state["overall_progress"] = self._calculate_overall_progress()
 
             self._save_state()
 
@@ -145,7 +143,7 @@ class InstallationProgressTracker:
         self,
         downloaded_bytes: int,
         total_bytes: Optional[int] = None,
-        speed_bytes_per_sec: Optional[float] = None
+        speed_bytes_per_sec: Optional[float] = None,
     ):
         """
         Update download progress
@@ -159,27 +157,27 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['downloaded_bytes'] = downloaded_bytes
+            self._current_state["downloaded_bytes"] = downloaded_bytes
 
             if total_bytes:
-                self._current_state['total_size'] = total_bytes
+                self._current_state["total_size"] = total_bytes
                 progress = int((downloaded_bytes / total_bytes) * 100)
-                self._current_state['stage_progress'] = progress
+                self._current_state["stage_progress"] = progress
 
             if speed_bytes_per_sec is not None:
-                self._current_state['download_speed'] = speed_bytes_per_sec
+                self._current_state["download_speed"] = speed_bytes_per_sec
 
                 # Calculate ETA
                 if total_bytes and downloaded_bytes < total_bytes and speed_bytes_per_sec > 0:
                     remaining_bytes = total_bytes - downloaded_bytes
                     eta_seconds = remaining_bytes / speed_bytes_per_sec
-                    self._current_state['eta_seconds'] = int(eta_seconds)
+                    self._current_state["eta_seconds"] = int(eta_seconds)
                 elif total_bytes and speed_bytes_per_sec == 0:
                     # No progress yet, clear ETA
-                    self._current_state['eta_seconds'] = None
+                    self._current_state["eta_seconds"] = None
 
             # Calculate overall progress
-            self._current_state['overall_progress'] = self._calculate_overall_progress()
+            self._current_state["overall_progress"] = self._calculate_overall_progress()
 
             self._save_state()
 
@@ -188,7 +186,7 @@ class InstallationProgressTracker:
         current_package: str,
         completed_count: int,
         total_count: Optional[int] = None,
-        package_size: Optional[int] = None
+        package_size: Optional[int] = None,
     ):
         """
         Update dependency installation progress
@@ -203,25 +201,20 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['current_item'] = current_package
-            self._current_state['completed_dependencies'] = completed_count
+            self._current_state["current_item"] = current_package
+            self._current_state["completed_dependencies"] = completed_count
 
             if total_count:
-                self._current_state['dependency_count'] = total_count
+                self._current_state["dependency_count"] = total_count
                 progress = int((completed_count / total_count) * 100)
-                self._current_state['stage_progress'] = progress
+                self._current_state["stage_progress"] = progress
 
             # Calculate overall progress
-            self._current_state['overall_progress'] = self._calculate_overall_progress()
+            self._current_state["overall_progress"] = self._calculate_overall_progress()
 
             self._save_state()
 
-    def add_completed_item(
-        self,
-        item_name: str,
-        item_type: str,
-        size: Optional[int] = None
-    ):
+    def add_completed_item(self, item_name: str, item_type: str, size: Optional[int] = None):
         """
         Add an item to the completed list
 
@@ -235,13 +228,13 @@ class InstallationProgressTracker:
                 return
 
             completed_item = {
-                'name': item_name,
-                'type': item_type,
-                'size': size,
-                'completed_at': self._get_iso_timestamp()
+                "name": item_name,
+                "type": item_type,
+                "size": size,
+                "completed_at": self._get_iso_timestamp(),
             }
 
-            self._current_state['completed_items'].append(completed_item)
+            self._current_state["completed_items"].append(completed_item)
             self._save_state()
 
     def set_dependency_weights(self, packages: List[str]):
@@ -255,7 +248,7 @@ class InstallationProgressTracker:
             self._package_weights = {}
             for pkg in packages:
                 pkg_name = self._extract_package_name(pkg)
-                weight = PACKAGE_WEIGHTS.get(pkg_name.lower(), PACKAGE_WEIGHTS['_default'])
+                weight = PACKAGE_WEIGHTS.get(pkg_name.lower(), PACKAGE_WEIGHTS["_default"])
                 self._package_weights[pkg_name.lower()] = weight
 
             self._total_weight = sum(self._package_weights.values())
@@ -263,8 +256,8 @@ class InstallationProgressTracker:
 
             # Store in state for visibility
             if self._current_state:
-                self._current_state['total_weight'] = self._total_weight
-                self._current_state['completed_weight'] = 0
+                self._current_state["total_weight"] = self._total_weight
+                self._current_state["completed_weight"] = 0
                 self._save_state()
 
     def complete_package(self, package_name: str):
@@ -279,15 +272,15 @@ class InstallationProgressTracker:
                 return
 
             pkg_name = self._extract_package_name(package_name)
-            weight = self._package_weights.get(pkg_name.lower(), PACKAGE_WEIGHTS['_default'])
+            weight = self._package_weights.get(pkg_name.lower(), PACKAGE_WEIGHTS["_default"])
             self._completed_weight += weight
 
             # Calculate progress based on weight
             if self._total_weight > 0:
                 progress = int((self._completed_weight / self._total_weight) * 100)
-                self._current_state['stage_progress'] = min(progress, 100)
-                self._current_state['completed_weight'] = self._completed_weight
-                self._current_state['overall_progress'] = self._calculate_overall_progress()
+                self._current_state["stage_progress"] = min(progress, 100)
+                self._current_state["completed_weight"] = self._completed_weight
+                self._current_state["overall_progress"] = self._calculate_overall_progress()
 
             self._save_state()
 
@@ -302,14 +295,14 @@ class InstallationProgressTracker:
             Package name (e.g., 'torch', 'numpy')
         """
         # Remove version specifiers
-        for op in ['==', '>=', '<=', '~=', '!=', '>', '<', '@']:
+        for op in ["==", ">=", "<=", "~=", "!=", ">", "<", "@"]:
             if op in package_spec:
                 package_spec = package_spec.split(op)[0]
                 break
 
         # Remove extras like [dev]
-        if '[' in package_spec:
-            package_spec = package_spec.split('[')[0]
+        if "[" in package_spec:
+            package_spec = package_spec.split("[")[0]
 
         return package_spec.strip()
 
@@ -324,7 +317,7 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['error'] = error_message
+            self._current_state["error"] = error_message
             self._save_state()
 
     def set_pid(self, pid: int):
@@ -338,7 +331,7 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['pid'] = pid
+            self._current_state["pid"] = pid
             self._save_state()
 
     def complete_installation(self, success: bool = True):
@@ -352,9 +345,11 @@ class InstallationProgressTracker:
             if not self._current_state:
                 return
 
-            self._current_state['completed_at'] = self._get_iso_timestamp()
-            self._current_state['success'] = success
-            self._current_state['overall_progress'] = 100 if success else self._current_state['overall_progress']
+            self._current_state["completed_at"] = self._get_iso_timestamp()
+            self._current_state["success"] = success
+            self._current_state["overall_progress"] = (
+                100 if success else self._current_state["overall_progress"]
+            )
 
             self._save_state()
 
@@ -385,9 +380,9 @@ class InstallationProgressTracker:
         if not self._current_state:
             return 0
 
-        current_stage_name = self._current_state['stage']
+        current_stage_name = self._current_state["stage"]
         current_stage = InstallationStage(current_stage_name)
-        stage_progress = self._current_state['stage_progress']
+        stage_progress = self._current_state["stage_progress"]
 
         # Calculate cumulative progress from completed stages
         cumulative_progress = 0.0
@@ -414,7 +409,7 @@ class InstallationProgressTracker:
             return
 
         try:
-            with open(self.state_file, 'w') as f:
+            with open(self.state_file, "w") as f:
                 json.dump(self._current_state, f, indent=2)
         except Exception as e:
             print(f"Error saving installation state: {e}")
@@ -425,7 +420,7 @@ class InstallationProgressTracker:
             return None
 
         try:
-            with open(self.state_file, 'r') as f:
+            with open(self.state_file, "r") as f:
                 return json.load(f)
         except Exception as e:
             print(f"Error loading installation state: {e}")
@@ -454,11 +449,7 @@ if __name__ == "__main__":
     tracker.update_stage(InstallationStage.DOWNLOAD, 0, "ComfyUI-v0.2.7.tar.gz")
     for i in range(0, 101, 20):
         downloaded = int(125_000_000 * i / 100)
-        tracker.update_download_progress(
-            downloaded,
-            125_000_000,
-            5_200_000  # 5.2 MB/s
-        )
+        tracker.update_download_progress(downloaded, 125_000_000, 5_200_000)  # 5.2 MB/s
         time.sleep(0.1)
         state = tracker.get_current_state()
         print(f"Download: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
@@ -477,10 +468,10 @@ if __name__ == "__main__":
 
     # Simulate dependency installation
     tracker.update_stage(InstallationStage.DEPENDENCIES, 0)
-    packages = ['pillow', 'numpy', 'torch', 'torchvision']
+    packages = ["pillow", "numpy", "torch", "torchvision"]
     for i, pkg in enumerate(packages):
         tracker.update_dependency_progress(pkg, i, len(packages))
-        tracker.add_completed_item(pkg, 'package', 28_000_000)
+        tracker.add_completed_item(pkg, "package", 28_000_000)
         time.sleep(0.1)
         state = tracker.get_current_state()
         print(f"Installing {pkg}: Overall {state['overall_progress']}%")
@@ -494,6 +485,7 @@ if __name__ == "__main__":
     # Cleanup
     tracker.clear_state()
     import shutil
+
     if test_cache_dir.exists():
         shutil.rmtree(test_cache_dir)
     print("\n✓ Test cleanup complete")

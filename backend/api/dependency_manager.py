@@ -4,9 +4,9 @@ Dependency Manager for ComfyUI Setup
 Handles system dependency checking and installation
 """
 
+import os
 import shutil
 import subprocess
-import os
 from pathlib import Path
 from typing import List
 
@@ -27,17 +27,18 @@ class DependencyManager:
         """Check if setproctitle module is installed"""
         try:
             import setproctitle
+
             return True
         except ImportError:
             return False
 
     def check_git(self) -> bool:
         """Check if git is installed"""
-        return shutil.which('git') is not None
+        return shutil.which("git") is not None
 
     def check_brave(self) -> bool:
         """Check if Brave browser is installed"""
-        return shutil.which('brave-browser') is not None
+        return shutil.which("brave-browser") is not None
 
     def get_missing_dependencies(self) -> List[str]:
         """Get list of missing dependencies"""
@@ -66,10 +67,10 @@ class DependencyManager:
                 pip_env = os.environ.copy()
                 pip_env["PIP_CACHE_DIR"] = str(pip_cache_dir)
                 subprocess.run(
-                    ['pip3', 'install', '--user', 'setproctitle'],
+                    ["pip3", "install", "--user", "setproctitle"],
                     check=True,
                     stdout=subprocess.DEVNULL,
-                    env=pip_env
+                    env=pip_env,
                 )
             except Exception:
                 success = False
@@ -78,8 +79,8 @@ class DependencyManager:
         system_pkgs = [p for p in missing if p in ("git", "brave-browser")]
         if system_pkgs:
             try:
-                subprocess.run(['sudo', 'apt', 'update'], check=True)
-                subprocess.run(['sudo', 'apt', 'install', '-y'] + system_pkgs, check=True)
+                subprocess.run(["sudo", "apt", "update"], check=True)
+                subprocess.run(["sudo", "apt", "install", "-y"] + system_pkgs, check=True)
             except Exception:
                 success = False
 

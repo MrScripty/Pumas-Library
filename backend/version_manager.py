@@ -6,13 +6,14 @@ Handles installation, switching, and launching of ComfyUI versions
 
 from __future__ import annotations
 
+import subprocess
 import threading
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import IO, Dict, List, Optional
 
 from backend.config import PATHS
-from backend.github_integration import GitHubReleasesFetcher
+from backend.github_integration import DownloadManager, GitHubReleasesFetcher
 from backend.installation_progress_tracker import InstallationProgressTracker
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
@@ -84,11 +85,11 @@ class VersionManager(
         self.progress_tracker = InstallationProgressTracker(cache_dir)
 
         # Cancellation flag (Phase 6.2.5d)
-        self._cancel_installation = False
-        self._installing_tag = None
-        self._current_process = None  # Track active subprocess for immediate kill
-        self._current_downloader = None  # Track active downloader for immediate cancel
-        self._install_log_handle = None
+        self._cancel_installation: bool = False
+        self._installing_tag: Optional[str] = None
+        self._current_process: Optional[subprocess.Popen[str]] = None
+        self._current_downloader: Optional[DownloadManager] = None
+        self._install_log_handle: Optional[IO[str]] = None
         self._current_install_log_path: Optional[Path] = None
 
         # Establish startup active version using priority rules
@@ -141,7 +142,8 @@ if __name__ == "__main__":
     logger.info(f"Installed versions: {len(installed)}")
     for tag in installed:
         info = version_mgr.get_version_info(tag)
-        logger.info(f"  - {tag} (installed: {info['installDate']})")
+        installed_date = info.get("installedDate") if info else None
+        logger.info(f"  - {tag} (installed: {installed_date})")
 
     # Show active version
     active = version_mgr.get_active_version()

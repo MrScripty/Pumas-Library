@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import time
 from collections import defaultdict, deque
-from typing import Deque, DefaultDict
+from typing import DefaultDict, Deque
 
 
 class RateLimiter:

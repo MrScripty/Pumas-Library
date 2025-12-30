@@ -10,7 +10,7 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import IO, Any, Callable, Dict, Optional
 
 from backend.config import INSTALLATION
 from backend.exceptions import DependencyError, InstallationError, NetworkError, ResourceError
@@ -20,12 +20,19 @@ from backend.logging_config import get_logger
 from backend.models import VersionInfo, get_iso_timestamp
 from backend.utils import ensure_directory, safe_filename
 from backend.validators import validate_version_tag
+from backend.version_manager_components.protocols import InstallationContext, MixinBase
 
 logger = get_logger(__name__)
 
 
-class InstallationMixin:
+class InstallationMixin(MixinBase, InstallationContext):
     """Mix-in for installation and removal workflows."""
+
+    _installing_tag: Optional[str]
+    _current_downloader: Optional[DownloadManager]
+    _install_log_handle: Optional[IO[str]]
+    _current_install_log_path: Optional[Path]
+    _current_process: Optional[subprocess.Popen[str]]
 
     def _open_install_log(self, prefix: str) -> Path:
         """Create/open an install log file for the current attempt."""

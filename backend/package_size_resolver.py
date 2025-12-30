@@ -10,7 +10,7 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, cast
 
 from packaging.markers import default_environment
 from packaging.requirements import InvalidRequirement, Requirement
@@ -35,19 +35,26 @@ class PackageSizeResolver:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.cache_file = self.cache_dir / "package-sizes.json"
-        self._cache: Dict = self._load_cache()
+        self._cache: Dict[str, Dict[str, Any]] = self._load_cache()
 
         # Detect platform
         self.platform = self._detect_platform()
         self.python_version = self._get_python_version()
 
-    def _load_cache(self) -> Dict:
+    def _load_cache(self) -> Dict[str, Dict[str, Any]]:
         """Load package sizes cache from disk"""
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "r") as f:
                     data = json.load(f)
-                    return data.get("packages", {})
+                    if isinstance(data, dict):
+                        packages = data.get("packages", {})
+                        if isinstance(packages, dict):
+                            cleaned: Dict[str, Dict[str, Any]] = {}
+                            for key, value in packages.items():
+                                if isinstance(key, str) and isinstance(value, dict):
+                                    cleaned[key] = value
+                            return cleaned
             except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                 logger.warning(f"Warning: Failed to load package sizes cache: {e}")
         return {}
@@ -120,7 +127,7 @@ class PackageSizeResolver:
 
     def query_pypi_package_size(
         self, package_name: str, version: Optional[str] = None, specifier: Optional[str] = None
-    ) -> Optional[Dict[str, any]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Query PyPI JSON API for package size
 
@@ -143,6 +150,8 @@ class PackageSizeResolver:
 
             with urllib.request.urlopen(req, timeout=10) as response:
                 data = json.load(response)
+                if not isinstance(data, dict):
+                    return None
 
             # Get release info
             if version:
@@ -214,7 +223,9 @@ class PackageSizeResolver:
             logger.error(f"Error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
 
-    def _find_best_wheel(self, release_files: list, package_name: str) -> Optional[Dict]:
+    def _find_best_wheel(
+        self, release_files: list, package_name: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Find best matching wheel file for current platform
 
@@ -233,7 +244,7 @@ class PackageSizeResolver:
             sdists = [f for f in release_files if f["packagetype"] == "sdist"]
             if sdists:
                 # Return the largest sdist (most complete)
-                return max(sdists, key=lambda f: f["size"])
+                return cast(Dict[str, Any], max(sdists, key=lambda f: f["size"]))
             return None
 
         # Try to find platform-specific wheel
@@ -243,12 +254,14 @@ class PackageSizeResolver:
 
         if platform_wheels:
             # Return the largest matching wheel
-            return max(platform_wheels, key=lambda w: w["size"])
+            return cast(Dict[str, Any], max(platform_wheels, key=lambda w: w["size"]))
 
         # Fallback to any wheel
-        return max(wheels, key=lambda w: w["size"])
+        return cast(Dict[str, Any], max(wheels, key=lambda w: w["size"]))
 
-    def _fetch_pypi_version_data(self, package_name: str, version: str) -> Optional[Dict[str, any]]:
+    def _fetch_pypi_version_data(
+        self, package_name: str, version: str
+    ) -> Optional[Dict[str, Any]]:
         """
         Fetch PyPI JSON metadata for a specific version.
         """
@@ -257,7 +270,8 @@ class PackageSizeResolver:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "ComfyUI-Launcher")
             with urllib.request.urlopen(req, timeout=10) as response:
-                return json.load(response)
+                data = json.load(response)
+                return data if isinstance(data, dict) else None
         except (urllib.error.URLError, OSError, json.JSONDecodeError, ValueError) as e:
             logger.warning(
                 f"Warning: Failed to fetch PyPI metadata for {package_name} {version}: {e}"
@@ -266,7 +280,7 @@ class PackageSizeResolver:
 
     def get_package_metadata(
         self, package_spec: str, force_refresh: bool = False
-    ) -> Optional[Dict[str, any]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Get cached or fresh package metadata including size and dependencies.
 
@@ -312,7 +326,9 @@ class PackageSizeResolver:
         """
         metadata = self.get_package_metadata(package_spec, force_refresh)
         if metadata:
-            return metadata.get("size")
+            size_value = metadata.get("size")
+            if isinstance(size_value, int):
+                return size_value
         return None
 
     def get_package_total_size(
@@ -337,11 +353,14 @@ class PackageSizeResolver:
             return 0
 
         metadata = self.get_package_metadata(package_spec, force_refresh)
-        if not metadata or metadata.get("size") is None:
+        if metadata is None:
+            return None
+        size_value = metadata.get("size")
+        if not isinstance(size_value, int):
             return None
 
         seen.add(key)
-        total = metadata["size"]
+        total = size_value
 
         for dep_spec in metadata.get("dependencies", []):
             dep_size = self.get_package_total_size(dep_spec, seen, force_refresh)
@@ -427,7 +446,7 @@ class PackageSizeResolver:
             List of package specs (e.g., ['torch==2.3.1', 'numpy>=1.25.0'])
         """
         dependencies: List[str] = []
-        env = default_environment()
+        env = cast(Dict[str, str], default_environment())
 
         for entry in requires_dist:
             try:
@@ -444,7 +463,9 @@ class PackageSizeResolver:
         return dependencies
 
     def get_multiple_package_sizes(
-        self, package_specs: list, progress_callback: Optional[callable] = None
+        self,
+        package_specs: List[str],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
     ) -> Dict[str, Optional[int]]:
         """
         Get sizes for multiple packages

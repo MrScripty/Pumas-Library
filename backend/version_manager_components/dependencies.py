@@ -23,12 +23,16 @@ from backend.models import DependencyStatus
 from backend.process_io_tracker import ProcessIOTracker
 from backend.utils import ensure_directory, parse_requirements_file, run_command, safe_filename
 from backend.validators import validate_version_tag
+from backend.version_manager_components.protocols import DependenciesContext, MixinBase
 
 logger = get_logger(__name__)
 
 
-class DependenciesMixin:
+class DependenciesMixin(MixinBase, DependenciesContext):
     """Mix-in for dependency creation, inspection, and installation."""
+
+    _current_process: Optional[subprocess.Popen[str]]
+    _cancel_installation: bool
 
     def _get_process_io_bytes(self, pid: int, include_children: bool = True) -> Optional[int]:
         """Return total read+write bytes for a process (and optionally its children)."""
@@ -465,7 +469,7 @@ class DependenciesMixin:
             io_bytes_getter=self._get_process_io_bytes,
         )
 
-        completed_packages = set()
+        completed_packages: set[str] = set()
         current_package = None
 
         try:

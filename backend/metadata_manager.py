@@ -7,7 +7,7 @@ Handles reading/writing metadata JSON files with atomic updates and validation
 import json
 import threading
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 from backend.exceptions import MetadataError, ResourceError
 from backend.file_utils import atomic_write_json
@@ -133,7 +133,7 @@ class MetadataManager:
             "lastSelectedVersion": None,
             "defaultVersion": None,
         }
-        return self._read_json(self.versions_file, default)
+        return cast(VersionsMetadata, self._read_json(self.versions_file, default))
 
     def save_versions(self, data: VersionsMetadata) -> bool:
         """
@@ -162,7 +162,7 @@ class MetadataManager:
         config_file = self.version_configs_dir / f"{tag}-config.json"
         if not config_file.exists():
             return None
-        return self._read_json(config_file)
+        return cast(VersionConfig, self._read_json(config_file))
 
     def save_version_config(self, tag: str, data: VersionConfig) -> bool:
         """
@@ -203,7 +203,7 @@ class MetadataManager:
         Returns:
             ModelsMetadata with model information
         """
-        return self._read_json(self.models_file, {})
+        return cast(ModelsMetadata, self._read_json(self.models_file, {}))
 
     def save_models(self, data: ModelsMetadata) -> bool:
         """
@@ -226,7 +226,7 @@ class MetadataManager:
         Returns:
             CustomNodesMetadata with custom node information
         """
-        return self._read_json(self.custom_nodes_file, {})
+        return cast(CustomNodesMetadata, self._read_json(self.custom_nodes_file, {}))
 
     def save_custom_nodes(self, data: CustomNodesMetadata) -> bool:
         """
@@ -249,7 +249,7 @@ class MetadataManager:
         Returns:
             WorkflowsMetadata with workflow information
         """
-        return self._read_json(self.workflows_file, {})
+        return cast(WorkflowsMetadata, self._read_json(self.workflows_file, {}))
 
     def save_workflows(self, data: WorkflowsMetadata) -> bool:
         """
@@ -274,7 +274,7 @@ class MetadataManager:
         """
         if not self.github_cache_file.exists():
             return None
-        return self._read_json(self.github_cache_file)
+        return cast(GitHubReleasesCache, self._read_json(self.github_cache_file))
 
     def save_github_cache(self, data: GitHubReleasesCache) -> bool:
         """

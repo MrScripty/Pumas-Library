@@ -4,10 +4,12 @@ ComfyUI Setup API - Core Module
 Main API class that coordinates all setup operations
 """
 
+from __future__ import annotations
+
 import sys
 import tomllib
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from backend.api.dependency_manager import DependencyManager
 from backend.api.patch_manager import PatchManager
@@ -17,17 +19,28 @@ from backend.api.size_calculator import SizeCalculator
 from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
-from backend.models import GitHubRelease
+from backend.models import DependencyStatus, GitHubRelease, ScanResult, VersionInfo
 from backend.rate_limiter import RateLimiter
 from backend.validators import validate_package_name, validate_url, validate_version_tag
 
+if TYPE_CHECKING:
+    from backend.github_integration import GitHubReleasesFetcher
+    from backend.metadata_manager import MetadataManager
+    from backend.release_size_calculator import ReleaseSizeCalculator
+    from backend.resource_manager import ResourceManager
+    from backend.version_manager import VersionManager
+
 logger = get_logger(__name__)
+
+InstallProgressCallback = Optional[Callable[[str, int, int], None]]
+DependencyProgressCallback = Optional[Callable[[str], None]]
+ReleaseSizeProgressCallback = Optional[Callable[[int, int, str], None]]
 
 
 class ComfyUISetupAPI:
     """Main API class for ComfyUI setup operations"""
 
-    def __init__(self, enable_background_prefetch: bool = True):
+    def __init__(self, enable_background_prefetch: bool = True) -> None:
         # Determine directories based on launcher location
         # Handle both development mode and PyInstaller bundled mode
         self._enable_background_prefetch = enable_background_prefetch
@@ -42,22 +55,24 @@ class ComfyUISetupAPI:
                 Path(sys.executable).parent.parent,  # dist/ parent
                 Path(sys.executable).parent,  # same dir as executable
             ]
-            self.script_dir = None
+            script_dir: Optional[Path] = None
             for candidate in launcher_candidates:
                 if candidate.exists():
-                    self.script_dir = candidate
+                    script_dir = candidate
                     break
-            if not self.script_dir:
+            if script_dir is None:
                 # Fallback to executable directory
-                self.script_dir = Path(sys.executable).parent
+                script_dir = Path(sys.executable).parent
+            assert script_dir is not None
+            self.script_dir = script_dir
         else:
             # Running in development mode
             self.script_dir = Path(__file__).parent.parent.parent.resolve()
             self.comfyui_dir = self.script_dir.parent
 
-        self.main_py = self.comfyui_dir / "main.py"
-        self.icon_webp = self.script_dir / "comfyui-icon.webp"
-        self.launcher_data_dir = self.script_dir / "launcher-data"
+        self.main_py: Path = self.comfyui_dir / "main.py"
+        self.icon_webp: Path = self.script_dir / "comfyui-icon.webp"
+        self.launcher_data_dir: Path = self.script_dir / "launcher-data"
         self.shortcut_scripts_dir = self.launcher_data_dir / "shortcuts"
         self.generated_icons_dir = self.launcher_data_dir / "icons"
 
@@ -66,6 +81,12 @@ class ComfyUISetupAPI:
         self.generated_icons_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize version management components (Phase 2-4)
+        self.metadata_manager: Optional[MetadataManager] = None
+        self.github_fetcher: Optional[GitHubReleasesFetcher] = None
+        self.resource_manager: Optional[ResourceManager] = None
+        self.version_manager: Optional[VersionManager] = None
+        self.release_size_calculator: Optional[ReleaseSizeCalculator] = None
+        self.size_calc: Optional[SizeCalculator] = None
         self._init_version_management()
 
         # Initialize specialized managers
@@ -121,7 +142,7 @@ class ComfyUISetupAPI:
         # Fallback: return the parent of start_path
         return start_path.parent
 
-    def _init_version_management(self):
+    def _init_version_management(self) -> None:
         """Initialize version management components"""
         try:
             from backend.github_integration import GitHubReleasesFetcher
@@ -159,7 +180,7 @@ class ComfyUISetupAPI:
             self.version_manager = None
             self.release_size_calculator = None
 
-    def _init_managers(self):
+    def _init_managers(self) -> None:
         """Initialize all specialized manager components"""
         # Dependency manager
         self.dependency_mgr = DependencyManager(self.script_dir)
@@ -184,9 +205,11 @@ class ComfyUISetupAPI:
         self.process_mgr = ProcessManager(self.comfyui_dir, self.version_manager)
 
         # Size calculator
-        self.size_calc = SizeCalculator(
-            self.release_size_calculator, self.github_fetcher, self.version_manager
-        )
+        self.size_calc = None
+        if self.release_size_calculator and self.github_fetcher:
+            self.size_calc = SizeCalculator(
+                self.release_size_calculator, self.github_fetcher, self.version_manager
+            )
 
         # System utilities
         self.system_utils = SystemUtils(
@@ -199,7 +222,7 @@ class ComfyUISetupAPI:
             self.version_manager,
         )
 
-    def _prefetch_releases_if_needed(self):
+    def _prefetch_releases_if_needed(self) -> None:
         """
         Smart background prefetch - never blocks startup
 
@@ -267,7 +290,7 @@ class ComfyUISetupAPI:
         """Check if background fetch has completed (for frontend polling)"""
         return getattr(self, "_background_fetch_completed", False)
 
-    def reset_background_fetch_flag(self):
+    def reset_background_fetch_flag(self) -> None:
         """Reset the completion flag (called by frontend after refresh)"""
         self._background_fetch_completed = False
 
@@ -453,7 +476,7 @@ class ComfyUISetupAPI:
             return []
 
         releases_source = "cache"
-        releases = []
+        releases: List[GitHubRelease] = []
 
         # Try to fetch (optionally forced); on failure, fall back to cached data without clearing it
         try:
@@ -476,6 +499,8 @@ class ComfyUISetupAPI:
                 logger.error(
                     f"Error loading cached releases after fetch failure: {e}", exc_info=True
                 )
+        if releases:
+            releases = [release for release in releases if isinstance(release, dict)]
 
         # Enrich releases with size information (Phase 6.2.5c) + installing flag
         installing_tag = None
@@ -487,12 +512,16 @@ class ComfyUISetupAPI:
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
 
-        enriched_releases = []
+        enriched_releases: List[Dict[str, Any]] = []
         for release in releases:
             tag = release.get("tag_name", "")
 
             # Get cached size data if available
-            size_data = self.release_size_calculator.get_cached_size(tag)
+            size_data = (
+                self.release_size_calculator.get_cached_size(tag)
+                if self.release_size_calculator
+                else None
+            )
 
             # Add size information to release
             release_with_size = dict(release)
@@ -518,9 +547,8 @@ class ComfyUISetupAPI:
         # Kick off background size refresh prioritizing non-installed releases
         try:
             installed_tags = set(self.get_installed_versions())
-            self.size_calc._refresh_release_sizes_async(
-                enriched_releases, installed_tags, force_refresh
-            )
+            if self.size_calc:
+                self.size_calc._refresh_release_sizes_async(releases, installed_tags, force_refresh)
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
 
@@ -544,7 +572,7 @@ class ComfyUISetupAPI:
             return None
         return self.version_manager.get_installation_progress()
 
-    def install_version(self, tag: str, progress_callback=None) -> bool:
+    def install_version(self, tag: str, progress_callback: InstallProgressCallback = None) -> bool:
         """Install a ComfyUI version"""
         if not self.version_manager:
             return False
@@ -618,16 +646,18 @@ class ComfyUISetupAPI:
             return False
         return self.version_manager.set_default_version(tag)
 
-    def check_version_dependencies(self, tag: str) -> Dict[str, Any]:
+    def check_version_dependencies(self, tag: str) -> DependencyStatus:
         """Check dependency installation status for a version"""
         if not self.version_manager:
-            return {"installed": [], "missing": []}
+            return {"installed": [], "missing": [], "requirementsFile": None}
         if not validate_version_tag(tag):
             logger.warning(f"Rejected dependency check for invalid tag: {tag!r}")
-            return {"installed": [], "missing": []}
+            return {"installed": [], "missing": [], "requirementsFile": None}
         return self.version_manager.check_dependencies(tag)
 
-    def install_version_dependencies(self, tag: str, progress_callback=None) -> bool:
+    def install_version_dependencies(
+        self, tag: str, progress_callback: DependencyProgressCallback = None
+    ) -> bool:
         """Install dependencies for a ComfyUI version"""
         if not self.version_manager:
             return False
@@ -642,16 +672,16 @@ class ComfyUISetupAPI:
             return {"installedCount": 0, "activeVersion": None, "versions": {}}
         return self.version_manager.get_version_status()
 
-    def get_version_info(self, tag: str) -> Dict[str, Any]:
+    def get_version_info(self, tag: str) -> Optional[VersionInfo]:
         """Get detailed information about a specific version"""
         if not self.version_manager:
-            return {}
+            return None
         if not validate_version_tag(tag):
             logger.warning(f"Rejected version info request for invalid tag: {tag!r}")
-            return {}
+            return None
         return self.version_manager.get_version_info(tag)
 
-    def launch_version(self, tag: str, extra_args: List[str] = None) -> Dict[str, Any]:
+    def launch_version(self, tag: str, extra_args: Optional[List[str]] = None) -> Dict[str, Any]:
         """Launch a specific ComfyUI version"""
         if not self.version_manager:
             return {"success": False, "error": "Version manager unavailable"}
@@ -669,24 +699,36 @@ class ComfyUISetupAPI:
         self, tag: str, force_refresh: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Calculate total download size for a release (Phase 6.2.5c)"""
+        if not self.size_calc:
+            return None
         return self.size_calc.calculate_release_size(tag, force_refresh)
 
-    def calculate_all_release_sizes(self, progress_callback=None) -> Dict[str, Dict[str, Any]]:
+    def calculate_all_release_sizes(
+        self, progress_callback: ReleaseSizeProgressCallback = None
+    ) -> Dict[str, Dict[str, Any]]:
         """Calculate sizes for all available releases (Phase 6.2.5c)"""
+        if not self.size_calc:
+            return {}
         return self.size_calc.calculate_all_release_sizes(progress_callback)
 
     def get_release_size_info(self, tag: str, archive_size: int) -> Optional[Dict[str, Any]]:
         """Get size information for a release (Phase 6.2.5a/c)"""
+        if not self.size_calc:
+            return None
         return self.size_calc.get_release_size_info(tag, archive_size)
 
     def get_release_size_breakdown(self, tag: str) -> Optional[Dict[str, Any]]:
         """Get size breakdown for display (Phase 6.2.5c)"""
+        if not self.size_calc:
+            return None
         return self.size_calc.get_release_size_breakdown(tag)
 
     def get_release_dependencies(
         self, tag: str, top_n: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """Get dependencies for a release sorted by size (Phase 6.2.5c)"""
+        if not self.size_calc:
+            return []
         return self.size_calc.get_release_dependencies(tag, top_n)
 
     # ==================== Resource Management API (Phase 5) ====================
@@ -706,7 +748,9 @@ class ComfyUISetupAPI:
             return []
         return self.resource_manager.list_version_custom_nodes(version_tag)
 
-    def install_custom_node(self, git_url: str, version_tag: str, node_name: str = None) -> bool:
+    def install_custom_node(
+        self, git_url: str, version_tag: str, node_name: Optional[str] = None
+    ) -> bool:
         """Install a custom node for a specific version"""
         if not self.resource_manager:
             return False
@@ -745,8 +789,8 @@ class ComfyUISetupAPI:
             return False
         return self.resource_manager.remove_custom_node(node_name, version_tag)
 
-    def scan_shared_storage(self) -> Dict[str, Any]:
+    def scan_shared_storage(self) -> ScanResult:
         """Scan shared storage and get statistics"""
         if not self.resource_manager:
-            return {"modelCount": 0, "totalSize": 0, "categoryCounts": {}}
+            return {"modelsFound": 0, "workflowsFound": 0, "customNodesFound": 0, "totalSize": 0}
         return self.resource_manager.scan_shared_storage()

@@ -129,9 +129,8 @@ class SystemUtils:
     def toggle_patch(self) -> bool:
         """Toggle main.py patch"""
         if self.patch_manager.is_patched():
-            return self.patch_manager.revert_main_py()
-        else:
-            return self.patch_manager.patch_main_py()
+            return bool(self.patch_manager.revert_main_py())
+        return bool(self.patch_manager.patch_main_py())
 
     def toggle_menu(self, tag: Optional[str] = None) -> bool:
         """Toggle menu shortcut (version-specific when available)"""

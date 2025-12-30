@@ -6,6 +6,8 @@ throughout the codebase. This allows for more precise error handling and better
 debugging by distinguishing between different types of failures.
 """
 
+from typing import Optional
+
 
 class ComfyUILauncherError(Exception):
     """
@@ -34,7 +36,7 @@ class InstallationError(ComfyUILauncherError):
         version_tag: The version that failed to install (optional)
     """
 
-    def __init__(self, message: str, version_tag: str = None):
+    def __init__(self, message: str, version_tag: Optional[str] = None):
         self.version_tag = version_tag
         if version_tag:
             super().__init__(f"{message} (version: {version_tag})")
@@ -57,7 +59,7 @@ class DependencyError(ComfyUILauncherError):
         package_name: The problematic package (optional)
     """
 
-    def __init__(self, message: str, package_name: str = None):
+    def __init__(self, message: str, package_name: Optional[str] = None):
         self.package_name = package_name
         if package_name:
             super().__init__(f"{message} (package: {package_name})")
@@ -81,7 +83,7 @@ class NetworkError(ComfyUILauncherError):
         status_code: HTTP status code if applicable (optional)
     """
 
-    def __init__(self, message: str, url: str = None, status_code: int = None):
+    def __init__(self, message: str, url: Optional[str] = None, status_code: Optional[int] = None):
         self.url = url
         self.status_code = status_code
         error_parts = [message]
@@ -108,7 +110,9 @@ class ValidationError(ComfyUILauncherError):
         invalid_value: The value that failed validation (optional)
     """
 
-    def __init__(self, message: str, field_name: str = None, invalid_value: str = None):
+    def __init__(
+        self, message: str, field_name: Optional[str] = None, invalid_value: Optional[str] = None
+    ):
         self.field_name = field_name
         self.invalid_value = invalid_value
         error_parts = [message]
@@ -135,7 +139,7 @@ class MetadataError(ComfyUILauncherError):
         file_path: The metadata file that caused the error (optional)
     """
 
-    def __init__(self, message: str, file_path: str = None):
+    def __init__(self, message: str, file_path: Optional[str] = None):
         self.file_path = file_path
         if file_path:
             super().__init__(f"{message} (file: {file_path})")
@@ -159,7 +163,7 @@ class ProcessError(ComfyUILauncherError):
         command: The command that failed (optional)
     """
 
-    def __init__(self, message: str, exit_code: int = None, command: str = None):
+    def __init__(self, message: str, exit_code: Optional[int] = None, command: Optional[str] = None):
         self.exit_code = exit_code
         self.command = command
         error_parts = [message]
@@ -186,7 +190,7 @@ class ResourceError(ComfyUILauncherError):
         resource_type: Type of resource (disk, memory, file, etc.)
     """
 
-    def __init__(self, message: str, resource_type: str = None):
+    def __init__(self, message: str, resource_type: Optional[str] = None):
         self.resource_type = resource_type
         if resource_type:
             super().__init__(f"{message} (resource: {resource_type})")

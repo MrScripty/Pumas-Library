@@ -279,7 +279,7 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
     Returns:
         Dict mapping package names to version specifiers
     """
-    requirements = {}
+    requirements: dict[str, str] = {}
 
     if not requirements_path.exists():
         return requirements

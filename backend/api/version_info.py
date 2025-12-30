@@ -41,7 +41,7 @@ class VersionInfoManager:
                 with open(pyproject_path, "rb") as f:
                     data = tomllib.load(f)
                     version = data.get("project", {}).get("version")
-                    if version:
+                    if isinstance(version, str) and version:
                         return version
             except (OSError, tomllib.TOMLDecodeError):
                 pass
@@ -64,7 +64,10 @@ class VersionInfoManager:
                 "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest", timeout=5
             ) as resp:
                 data = json.loads(resp.read())
-                return data["tag_name"] + " (latest)"
+                if isinstance(data, dict):
+                    tag_name = data.get("tag_name")
+                    if isinstance(tag_name, str):
+                        return f"{tag_name} (latest)"
         except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
             pass
 

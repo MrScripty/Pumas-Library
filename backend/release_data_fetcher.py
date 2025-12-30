@@ -9,7 +9,7 @@ import json
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from backend.logging_config import get_logger
 
@@ -30,14 +30,20 @@ class ReleaseDataFetcher:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.requirements_cache_file = self.cache_dir / "release-requirements.json"
-        self._cache: Dict = self._load_cache()
+        self._cache: Dict[str, Dict[str, Any]] = self._load_cache()
 
-    def _load_cache(self) -> Dict:
+    def _load_cache(self) -> Dict[str, Dict[str, Any]]:
         """Load requirements cache from disk"""
         if self.requirements_cache_file.exists():
             try:
                 with open(self.requirements_cache_file, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        cleaned: Dict[str, Dict[str, Any]] = {}
+                        for key, value in data.items():
+                            if isinstance(key, str) and isinstance(value, dict):
+                                cleaned[key] = value
+                        return cleaned
             except (IOError, OSError, json.JSONDecodeError) as e:
                 logger.warning(f"Warning: Failed to load requirements cache: {e}")
         return {}
@@ -60,7 +66,7 @@ class ReleaseDataFetcher:
 
     def fetch_requirements_for_release(
         self, tag: str, force_refresh: bool = False
-    ) -> Optional[Dict[str, any]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Fetch requirements.txt for a specific release
 
@@ -115,8 +121,10 @@ class ReleaseDataFetcher:
             return None
 
     def fetch_requirements_for_releases(
-        self, tags: List[str], progress_callback: Optional[callable] = None
-    ) -> Dict[str, Dict]:
+        self,
+        tags: List[str],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Fetch requirements.txt for multiple releases (background task)
 
@@ -140,7 +148,7 @@ class ReleaseDataFetcher:
 
         return results
 
-    def get_cached_requirements(self, tag: str) -> Optional[Dict[str, any]]:
+    def get_cached_requirements(self, tag: str) -> Optional[Dict[str, Any]]:
         """
         Get cached requirements without fetching
 

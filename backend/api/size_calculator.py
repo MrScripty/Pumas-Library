@@ -7,10 +7,15 @@ Handles calculation and caching of release download sizes
 import threading
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from backend.logging_config import get_logger
 from backend.models import GitHubRelease
+
+if TYPE_CHECKING:
+    from backend.github_integration import GitHubReleasesFetcher
+    from backend.release_size_calculator import ReleaseSizeCalculator
+    from backend.version_manager import VersionManager
 
 logger = get_logger(__name__)
 
@@ -18,7 +23,12 @@ logger = get_logger(__name__)
 class SizeCalculator:
     """Manages release size calculation and caching"""
 
-    def __init__(self, release_size_calculator, github_fetcher, version_manager=None):
+    def __init__(
+        self,
+        release_size_calculator: "ReleaseSizeCalculator",
+        github_fetcher: "GitHubReleasesFetcher",
+        version_manager: Optional["VersionManager"] = None,
+    ):
         """
         Initialize size calculator
 
@@ -103,7 +113,9 @@ class SizeCalculator:
             logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
             return None
 
-    def calculate_all_release_sizes(self, progress_callback=None) -> Dict[str, Dict[str, Any]]:
+    def calculate_all_release_sizes(
+        self, progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Calculate sizes for all available releases (Phase 6.2.5c)
 

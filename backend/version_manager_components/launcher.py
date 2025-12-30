@@ -16,11 +16,12 @@ from backend.config import INSTALLATION
 from backend.logging_config import get_logger
 from backend.retry_utils import calculate_backoff_delay
 from backend.validators import validate_version_tag
+from backend.version_manager_components.protocols import LauncherContext, MixinBase
 
 logger = get_logger(__name__)
 
 
-class LauncherMixin:
+class LauncherMixin(MixinBase, LauncherContext):
     """Mix-in for preparing and launching ComfyUI versions."""
 
     def _wait_for_server_ready(

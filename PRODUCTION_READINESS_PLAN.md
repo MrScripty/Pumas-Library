@@ -1085,5 +1085,15 @@ All 5 quick win tasks completed successfully:
 - Added `backend/rate_limiter.py` to enforce fixed-window limits per action.
 - Applied limits to installs, removals, and cancellation in `backend/api/core.py`.
 
+**Task #13: Type hints + mypy** - ✅ COMPLETED (2025-12-29)
+- Added baseline `mypy.ini` with lenient settings for incremental adoption.
+- Added typed progress callback aliases and explicit return types in `backend/api/core.py`.
+- Added `backend/__init__.py` to resolve mypy module mapping conflict.
+- Fixed implicit Optional defaults in `backend/exceptions.py` and `backend/api/core.py`.
+- Added mixin Protocols to define VersionManager attribute contracts.
+- Replaced invalid `any`/`callable` annotations with proper `Any`/`Callable` types.
+- Tightened JSON cache handling and return typing in metadata and size-calculation helpers.
+- Normalized metadata models, added local stubs, and resolved remaining Optional/Any issues so mypy passes.
+
 **Next steps:**
-- Task #13: Type hints + mypy (ongoing)
+- Task #14: SBOM generation (~2 hours)

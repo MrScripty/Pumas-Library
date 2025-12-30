@@ -168,9 +168,9 @@ class ProcessManager:
                 if result.returncode == 0 and result.stdout.strip():
                     # Kill each Brave process found
                     pids = result.stdout.strip().split("\n")
-                    for pid in pids:
+                    for pid_str in pids:
                         try:
-                            os.kill(int(pid), 9)  # SIGKILL - force kill immediately
+                            os.kill(int(pid_str), 9)  # SIGKILL - force kill immediately
                         except (ValueError, ProcessLookupError):
                             pass
             except (subprocess.SubprocessError, OSError, FileNotFoundError):
@@ -181,9 +181,10 @@ class ProcessManager:
             killed = False
 
             for proc in processes:
-                pid = proc.get("pid")
-                if pid is None:
+                pid_value = proc.get("pid")
+                if not isinstance(pid_value, int):
                     continue
+                pid = pid_value
                 try:
                     os.kill(pid, 15)  # SIGTERM for graceful shutdown
                     time.sleep(0.5)
@@ -198,7 +199,7 @@ class ProcessManager:
                     logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
 
                 pid_file = proc.get("pid_file")
-                if pid_file:
+                if isinstance(pid_file, str) and pid_file:
                     try:
                         Path(pid_file).unlink(missing_ok=True)
                     except (OSError, TypeError):

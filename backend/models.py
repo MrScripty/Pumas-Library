@@ -87,10 +87,8 @@ class CustomNodeInfo(TypedDict, total=False):
     compatibilityCache: Dict[str, CompatibilityCache]  # version -> compatibility
 
 
-class CustomNodesMetadata(TypedDict):
-    """Root metadata structure for custom_nodes.json"""
-
-    # node name -> node info (note: this is a dict, not TypedDict)
+CustomNodesMetadata = Dict[str, "CustomNodeInfo"]
+"""Root metadata structure for custom_nodes.json."""
 
 
 # ==================== Model Metadata ====================
@@ -112,10 +110,8 @@ class ModelInfo(TypedDict, total=False):
     baseModel: Optional[str]  # for loras
 
 
-class ModelsMetadata(TypedDict):
-    """Root metadata structure for models.json"""
-
-    # relative path -> model info (note: this is a dict, not TypedDict)
+ModelsMetadata = Dict[str, ModelInfo]
+"""Root metadata structure for models.json."""
 
 
 # ==================== Workflow Metadata ====================
@@ -134,10 +130,8 @@ class WorkflowInfo(TypedDict, total=False):
     requiredModels: List[str]  # model paths
 
 
-class WorkflowsMetadata(TypedDict):
-    """Root metadata structure for workflows.json"""
-
-    # workflow filename -> workflow info (note: this is a dict, not TypedDict)
+WorkflowsMetadata = Dict[str, WorkflowInfo]
+"""Root metadata structure for workflows.json."""
 
 
 # ==================== GitHub Release Metadata ====================
@@ -174,10 +168,9 @@ class GitHubReleasesCache(TypedDict):
 class DependencyStatus(TypedDict):
     """Status of version dependencies"""
 
-    status: Literal["complete", "incomplete", "unknown"]
+    installed: List[str]
     missing: List[str]
-    outdated: List[Dict[str, str]]  # package, required, installed
-    satisfied: List[str]
+    requirementsFile: Optional[str]
 
 
 class CompatibilityReport(TypedDict):

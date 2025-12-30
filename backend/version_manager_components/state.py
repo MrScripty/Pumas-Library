@@ -9,11 +9,12 @@ from typing import Any, Dict, List, Optional
 from backend.logging_config import get_logger
 from backend.models import VersionInfo
 from backend.validators import validate_version_tag
+from backend.version_manager_components.protocols import MixinBase, StateContext
 
 logger = get_logger(__name__)
 
 
-class StateMixin:
+class StateMixin(MixinBase, StateContext):
     """Mix-in for installed version state and metadata management."""
 
     def _write_active_version_file(self, tag: Optional[str]) -> bool:
@@ -345,18 +346,19 @@ class StateMixin:
         installed = self.get_installed_versions()
         active = self.get_active_version()
 
-        status = {
+        versions_status: Dict[str, Any] = {}
+        status: Dict[str, Any] = {
             "installedCount": len(installed),
             "activeVersion": active,
             "defaultVersion": self.get_default_version(),
-            "versions": {},
+            "versions": versions_status,
         }
 
         for tag in installed:
             version_info = self.get_version_info(tag)
             dep_status = self.check_dependencies(tag)
 
-            status["versions"][tag] = {
+            versions_status[tag] = {
                 "info": version_info,
                 "dependencies": dep_status,
                 "isActive": tag == active,

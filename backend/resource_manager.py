@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Tuple
 
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
-from backend.models import ModelInfo, RepairReport, ScanResult, get_iso_timestamp
+from backend.models import ModelInfo, ModelsMetadata, RepairReport, ScanResult, get_iso_timestamp
 from backend.utils import (
     calculate_file_hash,
     ensure_directory,
@@ -369,7 +369,7 @@ class ResourceManager:
 
         return (files_moved, conflicts, conflict_paths)
 
-    def get_models(self) -> dict:
+    def get_models(self) -> ModelsMetadata:
         """
         Get all models from shared storage
 
@@ -771,7 +771,7 @@ if __name__ == "__main__":
     logger.info(f"  Total size: {scan_result['totalSize']:,} bytes\n")
 
     # Check if we have any installed versions
-    versions = metadata_mgr.load_versions_metadata()
+    versions = metadata_mgr.load_versions()
     if versions.get("installed"):
         logger.info("Testing symlink setup for installed versions:")
         for version_tag in versions["installed"].keys():

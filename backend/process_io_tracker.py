@@ -49,7 +49,7 @@ class ProcessIOTracker:
         self.io_last_time: Optional[float] = None
 
         if pid and io_bytes_getter:
-            self.io_baseline = io_bytes_getter(pid, include_children=True)
+            self.io_baseline = io_bytes_getter(pid, True)
             self.io_last_bytes = self.io_baseline
             self.io_last_time = time.time()
 
@@ -74,7 +74,7 @@ class ProcessIOTracker:
 
         # Try I/O-based tracking first (more accurate)
         if self.pid and self.io_bytes_getter:
-            current_io = self.io_bytes_getter(self.pid, include_children=True)
+            current_io = self.io_bytes_getter(self.pid, True)
             if (
                 current_io is not None
                 and self.io_baseline is not None

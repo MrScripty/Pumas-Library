@@ -18,11 +18,12 @@ from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
 from backend.models import GitHubRelease
 from backend.utils import parse_requirements_file, safe_filename
+from backend.version_manager_components.protocols import ConstraintsContext, MixinBase
 
 logger = get_logger(__name__)
 
 
-class ConstraintsMixin:
+class ConstraintsMixin(MixinBase, ConstraintsContext):
     """Mix-in for resolving and caching dependency constraints."""
 
     def _get_release_date(self, tag: str, release: Optional[GitHubRelease]) -> Optional[datetime]:

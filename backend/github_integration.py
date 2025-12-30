@@ -11,7 +11,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, cast
 
 from cachetools import TTLCache
 from packaging.version import InvalidVersion, Version
@@ -47,7 +47,7 @@ class GitHubReleasesFetcher:
         self.max_pages = NETWORK.GITHUB_RELEASES_MAX_PAGES
 
         # In-memory cache with TTL and thread lock
-        self._memory_cache = TTLCache(maxsize=1, ttl=ttl)
+        self._memory_cache: TTLCache[str, List[GitHubRelease]] = TTLCache(maxsize=1, ttl=ttl)
         self._cache_lock = threading.Lock()
         self._CACHE_KEY = "github_releases"
 
@@ -70,7 +70,7 @@ class GitHubReleasesFetcher:
             f"?per_page={self.per_page}&page={page}"
         )
 
-        last_error = None
+        last_error: Optional[Exception] = None
         for attempt in range(max_retries):
             try:
                 # Create request with User-Agent header (required by GitHub API)
@@ -79,7 +79,8 @@ class GitHubReleasesFetcher:
                 req.add_header("Accept", "application/vnd.github.v3+json")
 
                 with urllib.request.urlopen(req, timeout=10) as response:
-                    return json.loads(response.read().decode("utf-8"))
+                    data = json.loads(response.read().decode("utf-8"))
+                    return self._parse_release_list(data)
 
             except urllib.error.HTTPError as e:
                 # Don't retry on rate limit (403) or client errors (4xx)
@@ -104,6 +105,16 @@ class GitHubReleasesFetcher:
         if last_error:
             raise last_error
         raise urllib.error.URLError("GitHub API fetch failed after retries")
+
+    def _parse_release_list(self, data: Any) -> List[GitHubRelease]:
+        """Normalize GitHub API response into a list of releases."""
+        if not isinstance(data, list):
+            return []
+        releases: List[GitHubRelease] = []
+        for item in data:
+            if isinstance(item, dict):
+                releases.append(cast(GitHubRelease, item))
+        return releases
 
     def _fetch_from_github(self) -> List[GitHubRelease]:
         """
@@ -179,32 +190,34 @@ class GitHubReleasesFetcher:
         # FAST PATH: Check in-memory cache first (no lock needed for read)
         if not force_refresh and self._CACHE_KEY in self._memory_cache:
             logger.debug("Using in-memory cached releases data")
-            return self._memory_cache[self._CACHE_KEY]
+            return self._parse_release_list(self._memory_cache[self._CACHE_KEY])
 
         # SLOW PATH: Coordinated cache check or fetch
         with self._cache_lock:
             # Double-check pattern: another thread might have cached while we waited
             if not force_refresh and self._CACHE_KEY in self._memory_cache:
                 logger.debug("Using in-memory cached releases data (after lock)")
-                return self._memory_cache[self._CACHE_KEY]
+                return self._parse_release_list(self._memory_cache[self._CACHE_KEY])
 
             # Check disk cache
             if not force_refresh:
                 disk_cache = self.metadata_manager.load_github_cache()
 
                 # Valid cache - load into memory
-                if self._is_cache_valid(disk_cache):
+                if disk_cache and self._is_cache_valid(disk_cache):
                     logger.info("Loading releases from disk cache")
                     releases = disk_cache["releases"]
-                    self._memory_cache[self._CACHE_KEY] = releases
-                    return releases
+                    parsed = self._parse_release_list(releases)
+                    self._memory_cache[self._CACHE_KEY] = parsed
+                    return parsed
 
                 # Stale cache exists - use it anyway (offline-first)
                 if disk_cache and disk_cache.get("releases"):
                     logger.info("Using stale disk cache (offline-first)")
                     stale_releases = disk_cache["releases"]
-                    self._memory_cache[self._CACHE_KEY] = stale_releases
-                    return stale_releases
+                    parsed = self._parse_release_list(stale_releases)
+                    self._memory_cache[self._CACHE_KEY] = parsed
+                    return parsed
 
                 # No cache at all - return empty (background will fetch)
                 logger.info("No cache available - returning empty (background fetch will populate)")
@@ -239,14 +252,15 @@ class GitHubReleasesFetcher:
                 disk_cache = self.metadata_manager.load_github_cache()
                 if disk_cache and disk_cache.get("releases"):
                     stale_releases = disk_cache["releases"]
-                    self._memory_cache[self._CACHE_KEY] = stale_releases
+                    parsed = self._parse_release_list(stale_releases)
+                    self._memory_cache[self._CACHE_KEY] = parsed
 
                     if force_refresh:
                         logger.info(f"Using stale cache ({len(stale_releases)} releases)")
                     else:
                         logger.info("Using stale disk cache (network unavailable)")
 
-                    return stale_releases
+                    return parsed
 
                 if force_refresh:
                     logger.error("No cache available - cannot refresh while offline")
@@ -263,7 +277,7 @@ class GitHubReleasesFetcher:
                 disk_cache = self.metadata_manager.load_github_cache()
                 if disk_cache and disk_cache.get("releases"):
                     logger.info("Using stale disk cache (parse error)")
-                    return disk_cache["releases"]
+                    return self._parse_release_list(disk_cache["releases"])
 
                 logger.warning("No cache available and fetch failed - returning empty")
                 return []
@@ -283,7 +297,7 @@ class GitHubReleasesFetcher:
                 'is_fetching': bool
             }
         """
-        status = {
+        status: Dict[str, Any] = {
             "has_cache": False,
             "is_valid": False,
             "age_seconds": None,
@@ -386,7 +400,7 @@ class GitHubReleasesFetcher:
         Returns:
             List of simplified Release objects
         """
-        formatted = []
+        formatted: List[Release] = []
         for release in releases:
             formatted.append(
                 {
@@ -446,7 +460,7 @@ class GitHubReleasesFetcher:
         collapsed: List[GitHubRelease] = []
         seen = set()
         for release in releases:
-            tag = release.get("tag_name")
+            tag = release.get("tag_name") or ""
             if not tag:
                 continue
             normalized = tag.lstrip("vV")
@@ -629,14 +643,15 @@ def format_bytes(size: int) -> str:
     Returns:
         Formatted string (e.g., "1.5 MB")
     """
+    size_value = float(size)
     for unit in ["B", "KB", "MB", "GB", "TB"]:
-        if size < 1024.0:
-            return f"{size:.1f} {unit}"
-        size /= 1024.0
-    return f"{size:.1f} PB"
+        if size_value < 1024.0:
+            return f"{size_value:.1f} {unit}"
+        size_value /= 1024.0
+    return f"{size_value:.1f} PB"
 
 
-def print_progress(downloaded: int, total: int) -> None:
+def print_progress(downloaded: int, total: int, _speed: Optional[float] = None) -> None:
     """
     Print download progress to console
 

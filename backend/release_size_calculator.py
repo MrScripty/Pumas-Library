@@ -13,7 +13,7 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from backend.logging_config import get_logger
 
@@ -45,11 +45,11 @@ class ReleaseSizeCalculator:
         self.release_data_fetcher = release_data_fetcher
         self.package_size_resolver = package_size_resolver
 
-        self._cache: Dict = self._load_cache()
+        self._cache: Dict[str, Dict[str, Any]] = self._load_cache()
         # Optional shared pip cache to reuse metadata downloads if present
         self.pip_cache_dir = Path(pip_cache_dir) if pip_cache_dir else None
 
-    def _load_cache(self) -> Dict:
+    def _load_cache(self) -> Dict[str, Dict[str, Any]]:
         """Load release sizes cache from disk"""
         if self.cache_file.exists():
             try:
@@ -79,7 +79,7 @@ class ReleaseSizeCalculator:
 
     def calculate_release_size(
         self, tag: str, archive_size: int, force_refresh: bool = False
-    ) -> Optional[Dict[str, any]]:
+    ) -> Optional[Dict[str, Any]]:
         """
         Calculate total size for a release
 
@@ -92,7 +92,7 @@ class ReleaseSizeCalculator:
             Dict with size breakdown or None if requirements not available
         """
         # Get requirements data
-        requirements_data = None
+        requirements_data: Optional[Dict[str, Any]] = None
         if not force_refresh:
             requirements_data = self.release_data_fetcher.get_cached_requirements(tag)
 
@@ -129,13 +129,13 @@ class ReleaseSizeCalculator:
         deps_size = pip_estimate if pip_estimate is not None else 0
         deps_source = "pip_report" if pip_estimate is not None else "unknown"
         if pip_estimate is None:
-            cached = self._cache.get(cache_key)
-            if cached and cached.get("requirements_hash") == requirements_hash:
-                cached_deps = cached.get("dependencies_size")
+            cached_entry = self._cache.get(cache_key)
+            if cached_entry and cached_entry.get("requirements_hash") == requirements_hash:
+                cached_deps = cached_entry.get("dependencies_size")
                 if cached_deps:
                     deps_size = cached_deps
                     deps_source = "cache_fallback"
-        dependency_sizes = []
+        dependency_sizes: List[Dict[str, Any]] = []
         unknown_count = 0
 
         # Calculate total size
@@ -166,7 +166,7 @@ class ReleaseSizeCalculator:
         logger.info(f"✓ Calculated total size for {tag}: {self._format_size(total_size)}")
         return result
 
-    def get_cached_size(self, tag: str) -> Optional[Dict[str, any]]:
+    def get_cached_size(self, tag: str) -> Optional[Dict[str, Any]]:
         """
         Get cached size data for a release
 
@@ -180,7 +180,7 @@ class ReleaseSizeCalculator:
 
     def get_sorted_dependencies(
         self, tag: str, top_n: Optional[int] = None
-    ) -> List[Dict[str, any]]:
+    ) -> List[Dict[str, Any]]:
         """
         Get dependencies sorted by size
 
@@ -196,11 +196,18 @@ class ReleaseSizeCalculator:
             return []
 
         dependencies = cached.get("dependencies", [])
+        if not isinstance(dependencies, list):
+            return []
+
+        filtered: List[Dict[str, Any]] = []
+        for entry in dependencies:
+            if isinstance(entry, dict):
+                filtered.append(entry)
 
         if top_n:
-            return dependencies[:top_n]
+            return filtered[:top_n]
 
-        return dependencies
+        return filtered
 
     def _estimate_dependencies_size_via_pip(self, requirements_txt: str, tag: str) -> Optional[int]:
         """
@@ -341,7 +348,7 @@ class ReleaseSizeCalculator:
         env["PIP_CACHE_DIR"] = str(self.pip_cache_dir)
         return env
 
-    def get_size_breakdown(self, tag: str) -> Optional[Dict[str, any]]:
+    def get_size_breakdown(self, tag: str) -> Optional[Dict[str, Any]]:
         """
         Get size breakdown for display
 
@@ -414,8 +421,10 @@ class ReleaseSizeCalculator:
         logger.info("✓ Release sizes cache cleared")
 
     def calculate_multiple_releases(
-        self, releases: List[Tuple[str, int]], progress_callback: Optional[callable] = None
-    ) -> Dict[str, Dict]:
+        self,
+        releases: List[Tuple[str, int]],
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    ) -> Dict[str, Dict[str, Any]]:
         """
         Calculate sizes for multiple releases
 

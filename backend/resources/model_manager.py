@@ -10,7 +10,7 @@ from typing import Dict
 
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
-from backend.models import ModelInfo, get_iso_timestamp
+from backend.models import ModelInfo, ModelsMetadata, get_iso_timestamp
 from backend.utils import calculate_file_hash, ensure_directory
 
 logger = get_logger(__name__)
@@ -30,7 +30,7 @@ class ModelManager:
         self.shared_models_dir = Path(shared_models_dir)
         self.metadata_manager = metadata_manager
 
-    def get_models(self) -> dict:
+    def get_models(self) -> ModelsMetadata:
         """
         Get all models from shared storage
 

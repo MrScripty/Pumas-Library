@@ -5,25 +5,31 @@ import logging
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional
 
 import requests
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from backend.metadata_manager import MetadataManager
 
 
 class LauncherUpdater:
     """Manages launcher updates via git"""
 
     def __init__(
-        self, metadata_manager, repo_owner="MrScripty", repo_name="Linux-ComfyUI-Launcher"
+        self,
+        metadata_manager: "MetadataManager",
+        repo_owner: str = "MrScripty",
+        repo_name: str = "Linux-ComfyUI-Launcher",
     ):
         self.metadata = metadata_manager
         self.repo_owner = repo_owner
         self.repo_name = repo_name
         self.repo_url = f"https://github.com/{repo_owner}/{repo_name}.git"
         self.api_url = f"https://api.github.com/repos/{repo_owner}/{repo_name}"
-        self.launcher_root = Path(__file__).parent.parent
+        self.launcher_root: Path = Path(__file__).parent.parent
         self.cache_file = (
             self.launcher_root / "launcher-data" / "cache" / "launcher-update-check.json"
         )
@@ -59,7 +65,9 @@ class LauncherUpdater:
                     cache_time = datetime.fromisoformat(cached_data["lastChecked"])
                     if datetime.now() - cache_time < timedelta(hours=1):
                         logger.info("Using cached update info")
-                        return cached_data["result"]
+                        cached_result = cached_data.get("result")
+                        if isinstance(cached_result, dict):
+                            return cached_result
 
             # Fetch latest commits from GitHub API
             commits_url = f"{self.api_url}/commits"
@@ -149,6 +157,8 @@ class LauncherUpdater:
 
             # Step 1: Backup current state (record commit)
             current_commit = self._get_current_commit()
+            if not current_commit:
+                return {"success": False, "error": "Unable to determine current commit"}
             logger.info(f"Starting update from commit {current_commit}")
 
             if progress_callback:
@@ -324,17 +334,22 @@ class LauncherUpdater:
             pass
         return "main"
 
-    def _get_cached_update_info(self) -> Optional[Dict]:
+    def _get_cached_update_info(self) -> Optional[Dict[str, Any]]:
         """Get cached update check result"""
         if self.cache_file.exists():
             try:
                 with open(self.cache_file, "r") as f:
-                    return json.load(f)
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        last_checked = data.get("lastChecked")
+                        result = data.get("result")
+                        if isinstance(last_checked, str) and isinstance(result, dict):
+                            return {"lastChecked": last_checked, "result": result}
             except (json.JSONDecodeError, OSError, ValueError) as e:
                 logger.warning(f"Failed to read cache: {e}")
         return None
 
-    def _cache_update_info(self, result: Dict):
+    def _cache_update_info(self, result: Dict[str, Any]) -> None:
         """Cache update check result"""
         self.cache_file.parent.mkdir(parents=True, exist_ok=True)
 

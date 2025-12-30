@@ -9,7 +9,7 @@ import threading
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
@@ -421,14 +421,15 @@ class InstallationProgressTracker:
         except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as e:
             logger.error(f"Error saving installation state: {e}", exc_info=True)
 
-    def _load_state(self) -> Optional[Dict]:
+    def _load_state(self) -> Optional[Dict[str, Any]]:
         """Load state from disk"""
         if not self.state_file.exists():
             return None
 
         try:
             with open(self.state_file, "r") as f:
-                return json.load(f)
+                data = json.load(f)
+                return data if isinstance(data, dict) else None
         except (IOError, OSError, json.JSONDecodeError) as e:
             logger.error(f"Error loading installation state: {e}", exc_info=True)
             return None
@@ -459,19 +460,23 @@ if __name__ == "__main__":
         tracker.update_download_progress(downloaded, 125_000_000, 5_200_000)  # 5.2 MB/s
         time.sleep(0.1)
         state = tracker.get_current_state()
+        if not state:
+            continue
         logger.info(f"Download: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
 
     # Simulate extraction
     tracker.update_stage(InstallationStage.EXTRACT, 50, "Extracting...")
     time.sleep(0.1)
     state = tracker.get_current_state()
-    logger.info(f"Extract: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
+    if state:
+        logger.info(f"Extract: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
 
     # Simulate venv creation
     tracker.update_stage(InstallationStage.VENV, 100, "Creating venv...")
     time.sleep(0.1)
     state = tracker.get_current_state()
-    logger.info(f"Venv: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
+    if state:
+        logger.info(f"Venv: {state['stage_progress']}% - Overall: {state['overall_progress']}%")
 
     # Simulate dependency installation
     tracker.update_stage(InstallationStage.DEPENDENCIES, 0)
@@ -481,13 +486,16 @@ if __name__ == "__main__":
         tracker.add_completed_item(pkg, "package", 28_000_000)
         time.sleep(0.1)
         state = tracker.get_current_state()
+        if not state:
+            continue
         logger.info(f"Installing {pkg}: Overall {state['overall_progress']}%")
 
     # Complete
     tracker.update_stage(InstallationStage.SETUP, 100)
     tracker.complete_installation(True)
     state = tracker.get_current_state()
-    logger.info(f"Completed: Overall {state['overall_progress']}%")
+    if state:
+        logger.info(f"Completed: Overall {state['overall_progress']}%")
 
     # Cleanup
     tracker.clear_state()

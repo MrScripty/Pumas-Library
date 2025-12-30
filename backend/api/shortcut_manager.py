@@ -7,6 +7,7 @@ Handles desktop shortcuts, menu entries, and icon generation
 import shutil
 import subprocess
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Dict, Optional
 
 from backend.config import INSTALLATION
@@ -15,6 +16,10 @@ from backend.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
+Image: Optional[ModuleType]
+ImageDraw: Optional[ModuleType]
+ImageFont: Optional[ModuleType]
+
 try:
     from PIL import Image, ImageDraw, ImageFont
 except ImportError:
@@ -136,11 +141,15 @@ class ShortcutManager:
         if not (Image and ImageDraw and ImageFont):
             logger.warning("Pillow not available; skipping version label overlay")
             return False
+        assert Image is not None
+        assert ImageDraw is not None
+        assert ImageFont is not None
 
         return True
 
     def _create_icon_canvas(self):
         """Create a square canvas with the base icon centered."""
+        assert Image is not None
         base = Image.open(self.icon_webp).convert("RGBA")
         size = max(base.size)
 
@@ -152,6 +161,7 @@ class ShortcutManager:
 
     def _load_icon_font(self, canvas_size: int):
         """Load the font for icon text overlay."""
+        assert ImageFont is not None
         font_size = max(28, canvas_size // 5 + 2)
         try:
             return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
@@ -168,6 +178,7 @@ class ShortcutManager:
     def _draw_version_banner(self, canvas, label: str, font):
         """Draw the version banner with text on the canvas."""
         size = canvas.size[0]
+        assert ImageDraw is not None
         draw = ImageDraw.Draw(canvas)
 
         # Calculate text dimensions
@@ -176,7 +187,11 @@ class ShortcutManager:
             text_w = bbox[2] - bbox[0]
             text_h = bbox[3] - bbox[1]
         else:
-            text_w, text_h = draw.textsize(label, font=font)
+            textsize = getattr(draw, "textsize", None)
+            if callable(textsize):
+                text_w, text_h = textsize(label, font=font)
+            else:
+                return None
 
         # Calculate banner dimensions
         padding = max(6, size // 30)
@@ -264,12 +279,15 @@ class ShortcutManager:
                 dest_icon = icon_dir / f"{icon_name}.png"
 
                 if Image:
+                    assert Image is not None
                     with Image.open(icon_source) as img:
                         img = img.convert("RGBA")
-                        resampling = getattr(
-                            getattr(Image, "Resampling", Image), "LANCZOS", Image.LANCZOS
-                        )
-                        img.thumbnail((size, size), resample=resampling)
+                        resampling_enum = getattr(Image, "Resampling", None)
+                        if resampling_enum is not None:
+                            resample_filter = getattr(resampling_enum, "LANCZOS", resampling_enum.BICUBIC)
+                        else:
+                            resample_filter = getattr(Image, "LANCZOS", Image.BICUBIC)
+                        img.thumbnail((size, size), resample=resample_filter)
                         img.save(dest_icon, format="PNG")
                         conversion_success = True
                 else:
@@ -497,7 +515,7 @@ wait $SERVER_PID
         if not launcher_script:
             return {"success": False, "error": "Failed to write launch script"}
 
-        results = {"menu": False, "desktop": False}
+        results: Dict[str, Any] = {"menu": False, "desktop": False}
 
         if create_menu:
             try:

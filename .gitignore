@@ -37,6 +37,7 @@ Thumbs.db
 *.bak
 *.backup
 temp/
+mockup-gui/
 
 # Generated scripts
 launcher

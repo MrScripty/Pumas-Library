@@ -22,7 +22,7 @@ This document outlines the development standards, practices, and workflows for c
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 14+
+- Node.js 22+ (LTS)
 - GTK/WebKit libraries (for PyWebView)
 
 ### Initial Setup
@@ -182,7 +182,7 @@ if not validate_url(download_url):
 **Security Considerations:**
 - Version tags: Alphanumeric + dash/dot only (`^[a-zA-Z0-9.-]+$`)
 - File paths: No `..` traversal, must be within base directory
-- URLs: `http://` and `https://` schemes only
+- URLs: `https://` schemes only
 - Package names: Standard Python package format
 
 ### Configuration
@@ -507,9 +507,6 @@ cd frontend && npm audit
 <type>: <short summary>
 
 <optional detailed description>
-
-🤖 Generated with Claude Code
-Co-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>
 ```
 
 **Types:**

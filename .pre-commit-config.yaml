@@ -21,23 +21,11 @@ repos:
         args: [--profile=black, --line-length=100]
         exclude: ^(venv/|\.venv/|env/|\.env/)
 
-  # flake8: Style enforcement (disabled for now - will be enabled incrementally)
-  # - repo: https://github.com/pycqa/flake8
-  #   rev: 7.0.0
-  #   hooks:
-  #     - id: flake8
-  #       exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
+  # flake8: Disabled - replaced by Ruff for faster, more granular linting
+  # Ruff provides better performance and fine-grained control
+  # Currently only checking for undefined names (see ruff-undefined hook below)
 
-  # mypy: Type checking (disabled for now - will be enabled in Task #13)
-  # - repo: https://github.com/pre-commit/mirrors-mypy
-  #   rev: v1.8.0
-  #   hooks:
-  #     - id: mypy
-  #       args: [--ignore-missing-imports, --allow-untyped-calls, --no-strict-optional, --explicit-package-bases, --namespace-packages]
-  #       exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
-  #       files: ^backend/
-
-  # Custom hooks: Enforce logging system usage
+  # Custom hooks: Enforce logging system usage and type checking
   - repo: local
     hooks:
       - id: check-print-statements
@@ -53,8 +41,14 @@ repos:
         types: [python]
         files: \.py$
       - id: pytest
-        name: pytest
+        name: pytest (full test suite)
         entry: ./venv/bin/python -m pytest
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: coverage-incremental
+        name: coverage (incremental - new files ≥80%)
+        entry: python3 .pre-commit-hooks/check_coverage_incremental.py
         language: system
         pass_filenames: false
         always_run: true
@@ -63,6 +57,14 @@ repos:
         entry: ./venv/bin/python -m ruff check --select F821,F822,F823
         language: system
         types: [python]
+      - id: mypy
+        name: mypy (type checking)
+        entry: ./venv/bin/python -m mypy
+        language: system
+        types: [python]
+        files: ^backend/
+        exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
+        pass_filenames: false
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import IO, Any, Dict, List, Optional, Protocol, TYPE_CHECKING
+from typing import IO, TYPE_CHECKING, Any, Dict, List, Optional, Protocol
 
 if TYPE_CHECKING:
     from backend.github_integration import GitHubReleasesFetcher

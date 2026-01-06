@@ -684,11 +684,7 @@ export default function App() {
       {/* Header */}
       <Header
         systemResources={systemResources}
-        diskSpacePercent={diskSpacePercent}
-        launcherVersion={launcherVersion}
         launcherUpdateAvailable={launcherUpdateAvailable}
-        isUpdatingLauncher={isUpdatingLauncher}
-        onUpdate={handleLauncherUpdate}
         onClose={closeWindow}
         cacheStatus={cacheStatus}
         installationProgress={installationProgress}

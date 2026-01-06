@@ -44,16 +44,26 @@ describe('Header Component', () => {
     expect(screen.getByText('AI Manager')).toBeInTheDocument();
   });
 
-  it('displays CPU and GPU usage percentages', () => {
-    render(<Header {...defaultProps} />);
-    expect(screen.getByText('45%')).toBeInTheDocument();
-    expect(screen.getByText('60%')).toBeInTheDocument();
+  it('displays resource icons with tooltips on hover', () => {
+    const { container } = render(<Header {...defaultProps} />);
+    // Verify CPU and GPU icons are present
+    const cpuIcon = container.querySelector('.lucide-cpu');
+    const gpuIcon = container.querySelector('.lucide-gpu');
+    const bicepsIcons = container.querySelectorAll('.lucide-biceps-flexed');
+
+    expect(cpuIcon).toBeInTheDocument();
+    expect(gpuIcon).toBeInTheDocument();
+    expect(bicepsIcons).toHaveLength(2); // One for CPU load, one for GPU load
   });
 
-  it('shows RAM and VRAM percentages', () => {
-    render(<Header {...defaultProps} />);
-    expect(screen.getByText(/RAM 50%/)).toBeInTheDocument();
-    expect(screen.getByText(/VRAM 56%/)).toBeInTheDocument(); // (4.5 / 8) * 100 = 56.25 -> 56
+  it('shows resource bars for RAM and VRAM', () => {
+    const { container } = render(<Header {...defaultProps} />);
+    // Verify progress bars are present (using background color classes)
+    const ramBar = container.querySelector('[class*="launcher-accent-ram"]');
+    const vramBar = container.querySelector('[class*="launcher-accent-gpu"]');
+
+    expect(ramBar).toBeInTheDocument();
+    expect(vramBar).toBeInTheDocument();
   });
 
   it('displays status message from cache', () => {
@@ -62,16 +72,23 @@ describe('Header Component', () => {
     expect(screen.getByText(/102 releases/)).toBeInTheDocument();
   });
 
-  it('shows launcher version in tooltip', () => {
-    render(<Header {...defaultProps} />);
-    const updateButton = screen.getByTitle('v1.0.0-abc1234');
-    expect(updateButton).toBeInTheDocument();
+  it('shows update button when update is available', () => {
+    const { container } = render(<Header {...defaultProps} launcherUpdateAvailable={true} />);
+    // Verify green up arrow is displayed
+    const updateIcon = container.querySelector('.lucide-arrow-up');
+    expect(updateIcon).toBeInTheDocument();
   });
 
-  it('highlights update button when update available', () => {
-    const { container } = render(<Header {...defaultProps} launcherUpdateAvailable={true} />);
-    const updateButton = container.querySelector('.bg-\\[hsl\\(var\\(--accent-warning\\)\\/0\\.2\\)\\]');
-    expect(updateButton).toBeInTheDocument();
+  it('shows check for updates button when no cache', () => {
+    const noCacheStatus = {
+      has_cache: false,
+      is_valid: false,
+      is_fetching: false,
+    };
+    const { container } = render(<Header {...defaultProps} cacheStatus={noCacheStatus} />);
+    // Verify refresh icon is displayed
+    const checkIcon = container.querySelector('.lucide-refresh-cw');
+    expect(checkIcon).toBeInTheDocument();
   });
 
   it('displays installation progress when installing', () => {

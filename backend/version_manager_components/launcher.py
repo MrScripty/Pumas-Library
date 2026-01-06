@@ -84,7 +84,9 @@ class LauncherMixin(MixinBase, LauncherContext):
                 )
             else:
                 subprocess.Popen(
-                    ["xdg-open", url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                    ["xdg-open", url],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
         except (OSError, subprocess.SubprocessError) as exc:
             logger.warning(f"Failed to open frontend: {exc}")
@@ -229,7 +231,13 @@ wait $SERVER_PID
             dep_status = self.check_dependencies(tag)
             if dep_status["missing"]:
                 logger.error(f"Dependencies still missing after install: {dep_status['missing']}")
-                return (False, None, None, "Dependencies still missing after install", None)
+                return (
+                    False,
+                    None,
+                    None,
+                    "Dependencies still missing after install",
+                    None,
+                )
 
         repair_report = self.resource_manager.validate_and_repair_symlinks(tag)
         if repair_report["broken"]:

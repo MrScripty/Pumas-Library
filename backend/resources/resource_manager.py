@@ -49,7 +49,10 @@ class ResourceManager:
         )
 
         self.symlink_mgr = SymlinkManager(
-            self.shared_models_dir, self.shared_user_dir, self.versions_dir, self.launcher_root
+            self.shared_models_dir,
+            self.shared_user_dir,
+            self.versions_dir,
+            self.launcher_root,
         )
 
         self.model_mgr = ModelManager(self.shared_models_dir, self.metadata_manager)

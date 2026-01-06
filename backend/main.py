@@ -4,6 +4,7 @@ ComfyUI Setup Launcher - Main Entry Point
 Desktop application using PyWebView with React frontend
 """
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -37,6 +38,10 @@ class JavaScriptAPI:
     def get_disk_space(self):
         """Get disk space information - called from JavaScript"""
         return self.api.get_disk_space()
+
+    def get_system_resources(self):
+        """Get current system resource usage (CPU, GPU, RAM, Disk) - called from JavaScript"""
+        return self.api.get_system_resources()
 
     # ==================== Action Methods ====================
 
@@ -485,7 +490,14 @@ class JavaScriptAPI:
 
             result = self.api.launcher_updater.check_for_updates(force_refresh)
             return {"success": True, **result}
-        except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+        except (
+            AttributeError,
+            ImportError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
             return {"success": False, "error": str(e), "hasUpdate": False}
 
     def apply_launcher_update(self):
@@ -498,7 +510,14 @@ class JavaScriptAPI:
 
             result = self.api.launcher_updater.apply_update()
             return {"success": result.get("success", False), **result}
-        except (AttributeError, ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+        except (
+            AttributeError,
+            ImportError,
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
             return {"success": False, "error": str(e)}
 
     def restart_launcher(self):
@@ -517,7 +536,8 @@ class JavaScriptAPI:
                 # Restart Python directly
                 python = sys.executable
                 subprocess.Popen(
-                    [python, str(launcher_root / "backend" / "main.py")], start_new_session=True
+                    [python, str(launcher_root / "backend" / "main.py")],
+                    start_new_session=True,
                 )
 
             # Exit current process after a brief delay
@@ -561,6 +581,18 @@ def get_entrypoint():
         return "http://127.0.0.1:3000"
 
 
+def signal_handler(signum, frame):
+    """Handle SIGINT (Ctrl+C) gracefully"""
+    logger.info("Received interrupt signal, shutting down gracefully...")
+    # Destroy all windows and exit cleanly
+    try:
+        for window in webview.windows:
+            window.destroy()
+    except (AttributeError, RuntimeError):
+        pass
+    sys.exit(0)
+
+
 def main():
     """Main application entry point"""
     try:
@@ -569,6 +601,9 @@ def main():
         setproctitle.setproctitle("Linux AI Launcher")
     except (AttributeError, ImportError, OSError):
         pass
+
+    # Register signal handler for keyboard interrupt
+    signal.signal(signal.SIGINT, signal_handler)
 
     # Parse command-line arguments for debug mode
     debug_mode = "--debug" in sys.argv or "--dev" in sys.argv
@@ -604,14 +639,19 @@ def main():
         height=UI.WINDOW_HEIGHT,
         resizable=False,
         frameless=True,
-        easy_drag=True,
+        easy_drag=False,  # Disabled - using .pywebview-drag-region class for specific draggable areas
         background_color="#000000",
     )
 
     # Start the webview application
     # Use 'gtk' backend on Linux for best compatibility with Debian/Mint
     # Enable debug console only if --debug or --dev flag is passed
-    webview.start(debug=debug_mode, gui="gtk")
+    try:
+        webview.start(debug=debug_mode, gui="gtk")
+    except KeyboardInterrupt:
+        # Handle keyboard interrupt during webview startup/running
+        logger.info("Application interrupted by user")
+        sys.exit(0)
 
 
 if __name__ == "__main__":

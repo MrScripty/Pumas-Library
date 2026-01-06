@@ -284,7 +284,9 @@ class ShortcutManager:
                         img = img.convert("RGBA")
                         resampling_enum = getattr(Image, "Resampling", None)
                         if resampling_enum is not None:
-                            resample_filter = getattr(resampling_enum, "LANCZOS", resampling_enum.BICUBIC)
+                            resample_filter = getattr(
+                                resampling_enum, "LANCZOS", resampling_enum.BICUBIC
+                            )
                         else:
                             resample_filter = getattr(Image, "LANCZOS", Image.BICUBIC)
                         img.thumbnail((size, size), resample=resample_filter)
@@ -292,7 +294,13 @@ class ShortcutManager:
                         conversion_success = True
                 else:
                     result = subprocess.run(
-                        ["convert", str(icon_source), "-resize", f"{size}x{size}", str(dest_icon)],
+                        [
+                            "convert",
+                            str(icon_source),
+                            "-resize",
+                            f"{size}x{size}",
+                            str(dest_icon),
+                        ],
                         capture_output=True,
                         timeout=10,
                     )
@@ -497,7 +505,10 @@ wait $SERVER_PID
         shortcut_paths = self._get_version_shortcut_paths(tag)
 
         if not paths:
-            return {"success": False, "error": f"Version {tag} is not installed or incomplete."}
+            return {
+                "success": False,
+                "error": f"Version {tag} is not installed or incomplete.",
+            }
 
         # Ensure base icon exists for menu entries (no version banner)
         base_icon_name = "comfyui"

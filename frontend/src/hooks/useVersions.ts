@@ -307,7 +307,7 @@ export function useVersions() {
         console.log('Set available versions:', result.versions?.length);
 
         // If backend flags an installing release, update local state
-        const installingRelease = (result.versions || []).find((r: any) => r.installing);
+        const installingRelease = (result.versions || []).find((r: VersionRelease) => r.installing);
         if (installingRelease?.tag_name) {
           setInstallingTag(installingRelease.tag_name);
         }
@@ -627,9 +627,12 @@ export function useVersions() {
 
   // Poll for background fetch completion and cache status
   useEffect(() => {
-    if (!window.pywebview?.api) return;
+    let interval: NodeJS.Timeout | null = null;
+    let waitTimeout: NodeJS.Timeout | null = null;
 
     const checkBackgroundFetch = async () => {
+      if (!window.pywebview?.api) return;
+
       try {
         // Update cache status for footer (do this first for immediate feedback)
         const statusResult = await window.pywebview.api.get_github_cache_status();
@@ -657,13 +660,31 @@ export function useVersions() {
       }
     };
 
-    // Initial check immediately
-    void checkBackgroundFetch();
+    // Wait for PyWebView API to be ready before starting polling
+    const waitAndStartPolling = () => {
+      if (window.pywebview?.api && typeof window.pywebview.api.get_github_cache_status === 'function') {
+        console.log('Starting cache status polling...');
+        // Initial check immediately
+        void checkBackgroundFetch();
 
-    // Poll every 2 seconds
-    const interval = setInterval(checkBackgroundFetch, 2000);
+        // Poll every 2 seconds
+        interval = setInterval(checkBackgroundFetch, 2000);
+      } else {
+        console.log('Waiting for PyWebView API to start cache status polling...');
+        waitTimeout = setTimeout(waitAndStartPolling, 100);
+      }
+    };
 
-    return () => clearInterval(interval);
+    waitAndStartPolling();
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+      if (waitTimeout) {
+        clearTimeout(waitTimeout);
+      }
+    };
   }, []); // Empty dependency array - run once on mount
 
   // Cleanup timers on unmount

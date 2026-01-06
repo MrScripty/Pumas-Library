@@ -111,7 +111,10 @@ class ValidationError(ComfyUILauncherError):
     """
 
     def __init__(
-        self, message: str, field_name: Optional[str] = None, invalid_value: Optional[str] = None
+        self,
+        message: str,
+        field_name: Optional[str] = None,
+        invalid_value: Optional[str] = None,
     ):
         self.field_name = field_name
         self.invalid_value = invalid_value
@@ -163,7 +166,12 @@ class ProcessError(ComfyUILauncherError):
         command: The command that failed (optional)
     """
 
-    def __init__(self, message: str, exit_code: Optional[int] = None, command: Optional[str] = None):
+    def __init__(
+        self,
+        message: str,
+        exit_code: Optional[int] = None,
+        command: Optional[str] = None,
+    ):
         self.exit_code = exit_code
         self.command = command
         error_parts = [message]

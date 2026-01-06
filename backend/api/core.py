@@ -160,14 +160,20 @@ class ComfyUISetupAPI:
             self.github_fetcher = GitHubReleasesFetcher(self.metadata_manager)
             self.resource_manager = ResourceManager(self.script_dir, self.metadata_manager)
             self.version_manager = VersionManager(
-                self.script_dir, self.metadata_manager, self.github_fetcher, self.resource_manager
+                self.script_dir,
+                self.metadata_manager,
+                self.github_fetcher,
+                self.resource_manager,
             )
 
             # Initialize size calculation components (Phase 6.2.5a)
             self.release_data_fetcher = ReleaseDataFetcher(cache_dir)
             self.package_size_resolver = PackageSizeResolver(cache_dir)
             self.release_size_calculator = ReleaseSizeCalculator(
-                cache_dir, self.release_data_fetcher, self.package_size_resolver, cache_dir / "pip"
+                cache_dir,
+                self.release_data_fetcher,
+                self.package_size_resolver,
+                cache_dir / "pip",
             )
 
             if self._enable_background_prefetch:
@@ -256,7 +262,8 @@ class ComfyUISetupAPI:
                         logger.info(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
                 except (KeyError, TypeError, ValueError) as e:
                     logger.warning(
-                        f"Error checking cache validity: {e} - prefetching", exc_info=True
+                        f"Error checking cache validity: {e} - prefetching",
+                        exc_info=True,
                     )
             else:
                 logger.info("No GitHub cache found - prefetching in background")
@@ -434,6 +441,10 @@ class ComfyUISetupAPI:
         """Get disk space information for the launcher directory"""
         return self.system_utils.get_disk_space()
 
+    def get_system_resources(self) -> Dict[str, Any]:
+        """Get current system resource usage (CPU, GPU, RAM, Disk)"""
+        return self.system_utils.get_system_resources()
+
     # ==================== Action Handlers ====================
 
     def toggle_patch(self) -> bool:
@@ -484,7 +495,8 @@ class ComfyUISetupAPI:
             releases_source = "remote" if force_refresh else "cache/remote"
         except (OSError, RuntimeError, TypeError, ValueError) as e:
             logger.error(
-                f"Error fetching releases (force_refresh={force_refresh}): {e}", exc_info=True
+                f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                exc_info=True,
             )
             releases = []
 
@@ -497,7 +509,8 @@ class ComfyUISetupAPI:
                     logger.info("Using cached releases due to fetch error/rate-limit.")
             except (OSError, TypeError, ValueError) as e:
                 logger.error(
-                    f"Error loading cached releases after fetch failure: {e}", exc_info=True
+                    f"Error loading cached releases after fetch failure: {e}",
+                    exc_info=True,
                 )
         if releases:
             releases = [release for release in releases if isinstance(release, dict)]
@@ -691,7 +704,12 @@ class ComfyUISetupAPI:
         success, process, log_path, error_msg, ready = self.version_manager.launch_version(
             tag, extra_args
         )
-        return {"success": success, "log_path": log_path, "ready": ready, "error": error_msg}
+        return {
+            "success": success,
+            "log_path": log_path,
+            "ready": ready,
+            "error": error_msg,
+        }
 
     # ==================== Size Calculation API ====================
 
@@ -792,5 +810,10 @@ class ComfyUISetupAPI:
     def scan_shared_storage(self) -> ScanResult:
         """Scan shared storage and get statistics"""
         if not self.resource_manager:
-            return {"modelsFound": 0, "workflowsFound": 0, "customNodesFound": 0, "totalSize": 0}
+            return {
+                "modelsFound": 0,
+                "workflowsFound": 0,
+                "customNodesFound": 0,
+                "totalSize": 0,
+            }
         return self.resource_manager.scan_shared_storage()

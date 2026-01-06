@@ -1,5 +1,5 @@
 import React from 'react';
-import { WifiOff, Wifi, RefreshCw, Clock, Database, Download, Package } from 'lucide-react';
+import { WifiOff, RefreshCw, Clock, Database, Download, Package } from 'lucide-react';
 import { formatSpeed } from '../utils/formatters';
 
 interface InstallationProgress {
@@ -40,6 +40,11 @@ interface StatusFooterProps {
 }
 
 export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, installationProgress }) => {
+  // Debug logging to trace cache status issues
+  React.useEffect(() => {
+    console.log('[StatusFooter] Cache status updated:', cacheStatus);
+  }, [cacheStatus]);
+
   const getStatusInfo = () => {
     // INSTALLATION IN PROGRESS STATE - Priority 1
     if (installationProgress && !installationProgress.completed_at) {
@@ -48,8 +53,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
         return {
           icon: Download,
           text: `Downloading at ${formatSpeed(installationProgress.download_speed)} · ${installationProgress.overall_progress}% complete`,
-          color: 'text-blue-400',
-          bgColor: 'bg-blue-500/10',
+          color: 'text-accent-info',
+          bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
           spinning: false
         };
       }
@@ -67,8 +72,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
         return {
           icon: Package,
           text: `Installing · ${packageInfo}${speedInfo}`,
-          color: 'text-blue-400',
-          bgColor: 'bg-blue-500/10',
+          color: 'text-accent-info',
+          bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
           spinning: false
         };
       }
@@ -85,8 +90,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
       return {
         icon: Download,
         text: `${stageName} · ${installationProgress.overall_progress}% complete`,
-        color: 'text-blue-400',
-        bgColor: 'bg-blue-500/10',
+        color: 'text-accent-info',
+        bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
         spinning: false
       };
     }
@@ -96,8 +101,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
       return {
         icon: RefreshCw,
         text: 'Fetching releases...',
-        color: 'text-blue-400',
-        bgColor: 'bg-blue-500/10',
+        color: 'text-accent-info',
+        bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
         spinning: true
       };
     }
@@ -107,8 +112,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
       return {
         icon: WifiOff,
         text: 'No cache available - offline mode',
-        color: 'text-orange-400',
-        bgColor: 'bg-orange-500/10',
+        color: 'text-accent-warning',
+        bgColor: 'bg-[hsl(var(--accent-warning)/0.1)]',
         spinning: false
       };
     }
@@ -122,8 +127,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
       return {
         icon: Database,
         text: `Cached data (${ageMinutes}m old) · ${cacheStatus.releases_count || 0} releases`,
-        color: 'text-green-400',
-        bgColor: 'bg-green-500/10',
+        color: 'text-accent-success',
+        bgColor: 'bg-[hsl(var(--accent-success)/0.1)]',
         spinning: false
       };
     }
@@ -136,8 +141,8 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
     return {
       icon: Clock,
       text: `Stale cache (${ageHours}h old) · offline mode`,
-      color: 'text-yellow-400',
-      bgColor: 'bg-yellow-500/10',
+      color: 'text-accent-warning',
+      bgColor: 'bg-[hsl(var(--accent-warning)/0.1)]',
       spinning: false
     };
   };
@@ -148,7 +153,7 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
   return (
     <div className={`
       fixed bottom-0 left-0 right-0
-      ${status.bgColor} border-t border-gray-700/50
+      ${status.bgColor} border-t border-[hsl(var(--border-default))]/50
       px-4 py-2 flex items-center gap-2
       text-xs font-medium ${status.color}
       z-50

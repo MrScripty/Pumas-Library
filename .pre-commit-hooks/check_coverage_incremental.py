@@ -32,21 +32,24 @@ def get_staged_python_files() -> list[str]:
         )
         files = result.stdout.strip().split("\n")
         # Filter for backend Python files only
-        backend_files = [f for f in files if f.startswith("backend/") and f.endswith(".py")]
+        backend_files = [
+            f
+            for f in files
+            if f.startswith("backend/") and f.endswith(".py") and not f.startswith("backend/tests/")
+        ]
         return backend_files
     except subprocess.CalledProcessError:
         return []
 
 
-def get_file_coverage(file_path: str) -> float | None:
+def get_coverage_report() -> dict[str, float] | None:
     """
-    Get test coverage percentage for a specific file.
+    Run pytest coverage once and parse per-file coverage.
 
     Returns:
-        Coverage percentage (0-100) or None if file not in coverage report
+        Mapping of file path -> coverage percentage, or None on failure.
     """
     try:
-        # Run pytest with coverage for the specific file
         result = subprocess.run(
             [
                 "./venv/bin/python",
@@ -61,19 +64,36 @@ def get_file_coverage(file_path: str) -> float | None:
             capture_output=True,
             text=True,
             cwd=Path(__file__).parent.parent,
+            timeout=600,
         )
+    except subprocess.TimeoutExpired:
+        print("❌ Coverage run timed out after 600s")  # noqa: print
+        return None
 
-        # Parse coverage output to find the specific file
-        for line in result.stdout.split("\n"):
-            if file_path in line:
-                # Line format: "backend/file.py    123    45  63.41%  line-numbers"
-                parts = line.split()
-                for part in parts:
-                    if "%" in part:
-                        return float(part.rstrip("%"))
+    if result.returncode != 0:
+        print("❌ Coverage run failed")  # noqa: print
+        if result.stdout:
+            print(result.stdout)  # noqa: print
+        if result.stderr:
+            print(result.stderr)  # noqa: print
         return None
-    except (subprocess.CalledProcessError, ValueError):
-        return None
+
+    coverage_map: dict[str, float] = {}
+    for line in result.stdout.split("\n"):
+        line = line.strip()
+        if not line.startswith("backend/") or "%" not in line:
+            continue
+        parts = line.split()
+        file_key = parts[0]
+        for part in parts:
+            if part.endswith("%"):
+                try:
+                    coverage_map[file_key] = float(part.rstrip("%"))
+                except ValueError:
+                    pass
+                break
+
+    return coverage_map
 
 
 def is_new_file(file_path: str) -> bool:
@@ -111,11 +131,15 @@ def check_incremental_coverage(min_coverage: float = 80.0) -> int:
     print(f"   Minimum required coverage: {min_coverage}%")  # noqa: print
     print()  # noqa: print
 
+    coverage_map = get_coverage_report()
+    if coverage_map is None:
+        return 1
+
     failures = []
 
     for file_path in staged_files:
         is_new = is_new_file(file_path)
-        coverage = get_file_coverage(file_path)
+        coverage = coverage_map.get(file_path)
 
         if coverage is None:
             # File not in coverage report (might be excluded or no tests run)

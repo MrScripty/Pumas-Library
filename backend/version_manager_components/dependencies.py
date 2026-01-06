@@ -67,7 +67,10 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         return env
 
     def _create_space_safe_requirements(
-        self, tag: str, requirements_file: Optional[Path], constraints_path: Optional[Path]
+        self,
+        tag: str,
+        requirements_file: Optional[Path],
+        constraints_path: Optional[Path],
     ) -> tuple[Optional[Path], Optional[Path]]:
         """Copy requirements/constraints to a cache dir without spaces."""
         if not requirements_file and not constraints_path:
@@ -125,7 +128,10 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         venv_python = venv_path / "bin" / "python"
         if venv_python.exists():
             run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
-            run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], env=pip_env)
+            run_command(
+                [str(venv_python), "-m", "pip", "install", "--upgrade", "pip"],
+                env=pip_env,
+            )
 
         logger.info("✓ Virtual environment created")
         return True
@@ -138,7 +144,8 @@ class DependenciesMixin(MixinBase, DependenciesContext):
             return "unknown"
 
         success, stdout, _stderr = run_command(
-            [str(venv_python), "--version"], timeout=INSTALLATION.SUBPROCESS_QUICK_TIMEOUT_SEC
+            [str(venv_python), "--version"],
+            timeout=INSTALLATION.SUBPROCESS_QUICK_TIMEOUT_SEC,
         )
 
         if success:
@@ -224,7 +231,10 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         )
         if not pip_ok:
             run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
-            run_command([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], env=pip_env)
+            run_command(
+                [str(venv_python), "-m", "pip", "install", "--upgrade", "pip"],
+                env=pip_env,
+            )
 
         installed: list[str] = []
         missing: list[str] = []
@@ -347,7 +357,9 @@ class DependenciesMixin(MixinBase, DependenciesContext):
 
         pip_env = self._build_pip_env()
         safe_req, safe_constraints = self._create_space_safe_requirements(
-            tag, requirements_file if requirements_file.exists() else None, constraints_path
+            tag,
+            requirements_file if requirements_file.exists() else None,
+            constraints_path,
         )
 
         run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
@@ -437,7 +449,9 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         logger.info("Starting dependency installation...")
         pip_env = self._build_pip_env()
         safe_req, safe_constraints = self._create_space_safe_requirements(
-            tag, requirements_file if requirements_file.exists() else None, constraints_path
+            tag,
+            requirements_file if requirements_file.exists() else None,
+            constraints_path,
         )
 
         run_command([str(venv_python), "-m", "ensurepip", "--upgrade"], env=pip_env)
@@ -487,7 +501,9 @@ class DependenciesMixin(MixinBase, DependenciesContext):
 
                             if "collecting" in line_lower:
                                 match = re.search(
-                                    r"collecting\s+([a-zA-Z0-9_-]+)", line, re.IGNORECASE
+                                    r"collecting\s+([a-zA-Z0-9_-]+)",
+                                    line,
+                                    re.IGNORECASE,
                                 )
                                 if match:
                                     current_package = match.group(1)
@@ -509,7 +525,9 @@ class DependenciesMixin(MixinBase, DependenciesContext):
 
                             elif "successfully installed" in line_lower:
                                 match = re.search(
-                                    r"successfully installed\s+(.+)", line, re.IGNORECASE
+                                    r"successfully installed\s+(.+)",
+                                    line,
+                                    re.IGNORECASE,
                                 )
                                 if match:
                                     packages_str = match.group(1).strip()

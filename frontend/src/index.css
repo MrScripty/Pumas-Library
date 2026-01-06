@@ -1,3 +1,339 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+:root {
+  --background: 0 0% 100%;
+  --foreground: 0 0% 3.9%;
+  --card: 0 0% 100%;
+  --card-foreground: 0 0% 3.9%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 0 0% 3.9%;
+  --primary: 0 0% 9%;
+  --primary-foreground: 0 0% 98%;
+  --secondary: 0 0% 96.1%;
+  --secondary-foreground: 0 0% 9%;
+  --muted: 0 0% 96.1%;
+  --muted-foreground: 0 0% 45.1%;
+  --accent: 0 0% 96.1%;
+  --accent-foreground: 0 0% 9%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 89.8%;
+  --input: 0 0% 89.8%;
+  --ring: 0 0% 3.9%;
+  --radius: 0.5rem;
+
+  /* Dark Grey Theme - Neutral greys matching InstallDialog */
+  /* Background hierarchy - neutral dark greys */
+  --launcher-bg-primary: 0 0% 8%;            /* #141414 - Main background (darker) */
+  --launcher-bg-secondary: 0 0% 12%;         /* #1f1f1f - Elevated panels/cards (darker) */
+  --launcher-bg-tertiary: 0 0% 15%;          /* #262626 - Tertiary background (darker) */
+  --launcher-bg-control: 0 0% 10%;           /* #1a1a1a - Controls/buttons (darker) */
+  --launcher-bg-control-hover: 0 0% 15%;     /* #262626 - Hover state (darker) */
+  --launcher-bg-elevated: 0 0% 10%;          /* #1a1a1a - Elevated elements (darker) */
+  --launcher-bg-overlay: 0 0% 12%;           /* #1f1f1f - Overlays/dropdowns (darker) */
+
+  /* Text colors - neutral greys with good contrast */
+  --launcher-text-primary: 0 0% 100%;        /* #ffffff - White for primary text */
+  --launcher-text-secondary: 0 0% 70%;       /* #b3b3b3 - gray-300 equivalent */
+  --launcher-text-muted: 0 0% 60%;           /* #999999 - gray-400 equivalent */
+
+  /* Borders - subtle neutral grey borders */
+  --launcher-border: 0 0% 27%;               /* #444444 - Default border */
+  --launcher-border-control: 0 0% 33%;       /* #555555 - Control borders */
+
+  /* Accents - Vibrant colors on neutral background */
+  /* Primary accent - bright green */
+  --launcher-accent-primary: 120 100% 66%;   /* #55ff55 - Bright green accent */
+  /* Error - bright red */
+  --launcher-accent-error: 0 100% 70%;       /* #ff6b6b - Bright red */
+  /* Success - same as primary for consistency */
+  --launcher-accent-success: 120 100% 66%;   /* #55ff55 - Bright green */
+  /* Info - bright cyan */
+  --launcher-accent-info: 180 100% 66%;      /* #55ffff - Bright cyan */
+  /* Links - bright green like success */
+  --launcher-accent-link: 120 100% 66%;      /* #55ff55 - Bright green link */
+  /* Warning - bright orange */
+  --launcher-accent-warning: 33 100% 70%;    /* #ffc266 - Bright orange */
+  /* CPU monitor - green */
+  --launcher-accent-cpu: 120 100% 66%;       /* #55ff55 - Green */
+  /* RAM monitor - cyan */
+  --launcher-accent-ram: 180 100% 66%;       /* #55ffff - Cyan */
+  /* GPU monitor - orange */
+  --launcher-accent-gpu: 33 100% 70%;        /* #ffc266 - Orange */
+
+  /* Semantic color aliases for easier theming */
+  --surface-lowest: var(--launcher-bg-primary);
+  --surface-low: var(--launcher-bg-secondary);
+  --surface-mid: var(--launcher-bg-tertiary);
+  --surface-high: var(--launcher-bg-control);
+  --surface-highest: var(--launcher-bg-elevated);
+  --surface-overlay: var(--launcher-bg-overlay);
+  --surface-interactive: var(--launcher-bg-control);
+  --surface-interactive-hover: var(--launcher-bg-control-hover);
+
+  --text-primary: var(--launcher-text-primary);
+  --text-secondary: var(--launcher-text-secondary);
+  --text-tertiary: var(--launcher-text-muted);
+
+  --border-default: var(--launcher-border);
+  --border-control: var(--launcher-border-control);
+
+  --accent-success: var(--launcher-accent-success);
+  --accent-error: var(--launcher-accent-error);
+  --accent-info: var(--launcher-accent-info);
+  --accent-link: var(--launcher-accent-link);
+  --accent-warning: var(--launcher-accent-warning);
+}
+
+.dark {
+  --background: 0 0% 3.9%;
+  --foreground: 0 0% 98%;
+  --card: 0 0% 3.9%;
+  --card-foreground: 0 0% 98%;
+  --popover: 0 0% 3.9%;
+  --popover-foreground: 0 0% 98%;
+  --primary: 0 0% 98%;
+  --primary-foreground: 0 0% 9%;
+  --secondary: 0 0% 14.9%;
+  --secondary-foreground: 0 0% 98%;
+  --muted: 0 0% 14.9%;
+  --muted-foreground: 0 0% 63.9%;
+  --accent: 0 0% 14.9%;
+  --accent-foreground: 0 0% 98%;
+  --destructive: 0 62.8% 30.6%;
+  --destructive-foreground: 0 0% 98%;
+  --border: 0 0% 14.9%;
+  --input: 0 0% 14.9%;
+  --ring: 0 0% 83.1%;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  /* Launcher theme tokens */
+  --color-launcher-bg-primary: var(--launcher-bg-primary);
+  --color-launcher-bg-secondary: var(--launcher-bg-secondary);
+  --color-launcher-bg-tertiary: var(--launcher-bg-tertiary);
+  --color-launcher-bg-control: var(--launcher-bg-control);
+  --color-launcher-bg-control-hover: var(--launcher-bg-control-hover);
+  --color-launcher-bg-elevated: var(--launcher-bg-elevated);
+  --color-launcher-bg-overlay: var(--launcher-bg-overlay);
+  --color-launcher-text-primary: var(--launcher-text-primary);
+  --color-launcher-text-secondary: var(--launcher-text-secondary);
+  --color-launcher-text-muted: var(--launcher-text-muted);
+  --color-launcher-border: var(--launcher-border);
+  --color-launcher-border-control: var(--launcher-border-control);
+  --color-launcher-accent-primary: var(--launcher-accent-primary);
+  --color-launcher-accent-error: var(--launcher-accent-error);
+  --color-launcher-accent-success: var(--launcher-accent-success);
+  --color-launcher-accent-info: var(--launcher-accent-info);
+  --color-launcher-accent-link: var(--launcher-accent-link);
+  --color-launcher-accent-cpu: var(--launcher-accent-cpu);
+  --color-launcher-accent-ram: var(--launcher-accent-ram);
+  --color-launcher-accent-gpu: var(--launcher-accent-gpu);
+  --color-launcher-accent-warning: var(--launcher-accent-warning);
+
+  /* Semantic color tokens for Tailwind */
+  --color-surface-lowest: var(--surface-lowest);
+  --color-surface-low: var(--surface-low);
+  --color-surface-mid: var(--surface-mid);
+  --color-surface-high: var(--surface-high);
+  --color-surface-highest: var(--surface-highest);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-interactive: var(--surface-interactive);
+  --color-surface-interactive-hover: var(--surface-interactive-hover);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+
+  --color-border-default: var(--border-default);
+  --color-border-control: var(--border-control);
+
+  --color-accent-success: var(--accent-success);
+  --color-accent-error: var(--accent-error);
+  --color-accent-info: var(--accent-info);
+  --color-accent-link: var(--accent-link);
+  --color-accent-warning: var(--accent-warning);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Gradient background with blob effect */
+  .gradient-bg-blobs {
+    background:
+      radial-gradient(circle at 95% 20%, rgba(100, 90, 180, 0.25) 0%, transparent 50%),
+      radial-gradient(circle at 88% 60%, rgba(50, 180, 180, 0.2) 0%, transparent 50%),
+      radial-gradient(circle at 98% 80%, rgba(180, 90, 150, 0.18) 0%, transparent 40%),
+      hsl(var(--launcher-bg-primary));
+    background-attachment: fixed;
+    position: relative;
+  }
+
+  .gradient-bg-blobs::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.2' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+    opacity: 0.03;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  /* Surface utility classes */
+  .surface-lowest {
+    background-color: hsl(var(--surface-lowest));
+  }
+
+  .surface-low {
+    background-color: hsl(var(--surface-low));
+  }
+
+  .surface-mid {
+    background-color: hsl(var(--surface-mid));
+  }
+
+  .surface-high {
+    background-color: hsl(var(--surface-high));
+  }
+
+  .surface-highest {
+    background-color: hsl(var(--surface-highest));
+  }
+
+  .surface-overlay {
+    background-color: hsl(var(--surface-overlay));
+  }
+
+  .surface-interactive {
+    background-color: hsl(var(--surface-interactive));
+    border: 1px solid hsl(var(--border-control));
+  }
+
+  .surface-interactive-hover:hover {
+    background-color: hsl(var(--surface-interactive-hover));
+  }
+
+  /* Text utility classes */
+  .text-primary {
+    color: hsl(var(--text-primary));
+  }
+
+  .text-secondary {
+    color: hsl(var(--text-secondary));
+  }
+
+  .text-tertiary {
+    color: hsl(var(--text-tertiary));
+  }
+
+  /* Border utility classes */
+  .border-default {
+    border-color: hsl(var(--border-default));
+  }
+
+  .border-control {
+    border-color: hsl(var(--border-control));
+  }
+
+  /* Accent utility classes */
+  .text-accent-success {
+    color: hsl(var(--accent-success));
+  }
+
+  .text-accent-error {
+    color: hsl(var(--accent-error));
+  }
+
+  .text-accent-info {
+    color: hsl(var(--accent-info));
+  }
+
+  .text-accent-link {
+    color: hsl(var(--accent-link));
+  }
+
+  .text-accent-warning {
+    color: hsl(var(--accent-warning));
+  }
+
+  .bg-accent-success {
+    background-color: hsl(var(--accent-success));
+  }
+
+  .bg-accent-error {
+    background-color: hsl(var(--accent-error));
+  }
+
+  .bg-accent-info {
+    background-color: hsl(var(--accent-info));
+  }
+
+  .bg-accent-link {
+    background-color: hsl(var(--accent-link));
+  }
+
+  .bg-accent-warning {
+    background-color: hsl(var(--accent-warning));
+  }
+
+  /* Shimmer animation for download icon */
+  @keyframes shimmer-scan {
+    0% {
+      mask-position: 0% 0%;
+    }
+    100% {
+      mask-position: 0% 200%;
+    }
+  }
+
+  .download-shimmer {
+    position: relative;
+    overflow: visible;
+    animation: shimmer-scan 1.5s ease-in-out infinite;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(255, 255, 255, 1) 25%,
+      rgba(255, 255, 255, 1) 50%,
+      transparent 100%
+    );
+    mask-size: 100% 50%;
+    mask-repeat: no-repeat;
+  }
+}

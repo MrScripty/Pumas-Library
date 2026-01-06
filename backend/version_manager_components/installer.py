@@ -136,7 +136,10 @@ class InstallationMixin(MixinBase, InstallationContext):
                     except ProcessLookupError:
                         logger.info("✓ Process already terminated")
                     except (OSError, PermissionError) as kill_error:
-                        logger.error(f"✗ Error killing process group: {kill_error}", exc_info=True)
+                        logger.error(
+                            f"✗ Error killing process group: {kill_error}",
+                            exc_info=True,
+                        )
                         # Fallback: try killing just the main process
                         try:
                             self._current_process.kill()
@@ -157,7 +160,9 @@ class InstallationMixin(MixinBase, InstallationContext):
         return False
 
     def install_version(
-        self, tag: str, progress_callback: Optional[Callable[[str, int, int], None]] = None
+        self,
+        tag: str,
+        progress_callback: Optional[Callable[[str, int, int], None]] = None,
     ) -> bool:
         """
         Install a ComfyUI version (Enhanced with Phase 6.2.5b progress tracking)

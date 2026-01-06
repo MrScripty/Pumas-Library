@@ -18,15 +18,20 @@ export const SpringyToggle: React.FC<SpringyToggleProps> = ({
 }) => {
   return (
     <div
-      className={`relative w-[220px] h-[36px] bg-[#2d2d2d] border border-[#3d3d3d] overflow-hidden cursor-pointer select-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      className={`relative w-[220px] h-[36px] bg-[hsl(var(--surface-interactive))] border border-[hsl(var(--border-control))] overflow-hidden cursor-pointer select-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       onClick={!disabled ? onToggle : undefined}
+      onKeyDown={!disabled ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-pressed={isOn}
+      aria-disabled={disabled}
     >
       {/* Background Labels */}
       <div className="absolute inset-0 flex items-center justify-between px-4 z-0">
-        <span className={`text-[9px] font-bold w-1/2 text-center transition-colors duration-300 ${!isOn ? 'text-[#aaaaaa]' : 'text-[#666666]'}`}>
+        <span className={`text-[9px] font-bold w-1/2 text-center transition-colors duration-300 ${!isOn ? 'text-[hsl(var(--text-secondary))]' : 'text-[hsl(var(--text-tertiary))]'}`}>
           {labelOff}
         </span>
-        <span className={`text-[9px] font-bold w-1/2 text-center transition-colors duration-300 ${isOn ? 'text-white' : 'text-[#888888]'}`}>
+        <span className={`text-[9px] font-bold w-1/2 text-center transition-colors duration-300 ${isOn ? 'text-[hsl(var(--text-primary))]' : 'text-[hsl(var(--text-tertiary))]'}`}>
           {labelOn}
         </span>
       </div>
@@ -37,7 +42,9 @@ export const SpringyToggle: React.FC<SpringyToggleProps> = ({
         initial={false}
         animate={{
           x: isOn ? 108 : 2, // 2px padding
-          backgroundColor: isOn ? '#55ff55' : '#444444',
+          backgroundColor: isOn
+            ? 'hsl(var(--accent-success))'
+            : 'hsl(var(--surface-interactive-hover))',
         }}
         transition={{
           type: "spring",

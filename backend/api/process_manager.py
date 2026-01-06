@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from backend.api.process_resource_tracker import ProcessResourceTracker
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -30,6 +31,7 @@ class ProcessManager:
         self.version_manager = version_manager
         self.last_launch_log: Optional[str] = None
         self.last_launch_error: Optional[str] = None
+        self.resource_tracker = ProcessResourceTracker(cache_ttl=2.0)
 
     def _get_known_version_paths(self) -> Dict[str, Path]:
         """Return a mapping of installed version tags to their paths"""
@@ -91,7 +93,12 @@ class ProcessManager:
                 os.kill(pid, 0)
                 if pid not in seen_pids:
                     processes.append(
-                        {"pid": pid, "source": "pid_file", "tag": tag, "pid_file": str(pid_file)}
+                        {
+                            "pid": pid,
+                            "source": "pid_file",
+                            "tag": tag,
+                            "pid_file": str(pid_file),
+                        }
                     )
                     seen_pids.add(pid)
             except (ValueError, ProcessLookupError, OSError):
@@ -139,9 +146,53 @@ class ProcessManager:
                     break
 
             processes.append(
-                {"pid": pid, "source": "process_scan", "tag": inferred_tag, "cmd": cmdline}
+                {
+                    "pid": pid,
+                    "source": "process_scan",
+                    "tag": inferred_tag,
+                    "cmd": cmdline,
+                }
             )
             seen_pids.add(pid)
+
+        return processes
+
+    def get_processes_with_resources(self) -> List[Dict[str, Any]]:
+        """
+        Get running ComfyUI processes with CPU, RAM, and GPU resource usage.
+
+        Returns:
+            List of dictionaries containing process information with resources:
+                - pid (int): Process ID
+                - source (str): Detection method ('pid_file' or 'process_scan')
+                - tag (str): Version tag if identified
+                - cmdline (str): Command line arguments (if available)
+                - cpu_usage (float): CPU usage percentage (0-100+)
+                - ram_memory (float): RAM memory usage in GB
+                - gpu_memory (float): GPU memory usage in GB
+        """
+        processes = self._detect_comfyui_processes()
+
+        # Enrich each process with resource usage
+        for proc in processes:
+            pid = proc.get("pid")
+            if isinstance(pid, int):
+                try:
+                    resources = self.resource_tracker.get_process_resources(
+                        pid, include_children=True
+                    )
+                    proc["cpu_usage"] = resources.get("cpu", 0.0)
+                    proc["ram_memory"] = resources.get("ram_memory", 0.0)
+                    proc["gpu_memory"] = resources.get("gpu_memory", 0.0)
+                except (OSError, RuntimeError, TypeError, ValueError) as e:
+                    logger.debug(f"Failed to get resources for PID {pid}: {e}")
+                    proc["cpu_usage"] = 0.0
+                    proc["ram_memory"] = 0.0
+                    proc["gpu_memory"] = 0.0
+            else:
+                proc["cpu_usage"] = 0.0
+                proc["ram_memory"] = 0.0
+                proc["gpu_memory"] = 0.0
 
         return processes
 
@@ -149,7 +200,13 @@ class ProcessManager:
         """Check if ComfyUI is currently running"""
         try:
             return bool(self._detect_comfyui_processes())
-        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError):
+        except (
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ):
             return False
 
     def stop_comfyui(self) -> bool:
@@ -216,7 +273,13 @@ class ProcessManager:
                 pass
 
             return False
-        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
+        except (
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as e:
             logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
             return False
 

@@ -181,7 +181,10 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
         try:
             lock = getattr(self, "_constraints_cache_lock", None)
             atomic_write_json(
-                self._constraints_cache_file, self._constraints_cache, lock=lock, keep_backup=True
+                self._constraints_cache_file,
+                self._constraints_cache,
+                lock=lock,
+                keep_backup=True,
             )
         except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
             logger.warning(f"Unable to write constraints cache: {exc}")

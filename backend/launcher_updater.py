@@ -73,7 +73,7 @@ class LauncherUpdater:
             commits_url = f"{self.api_url}/commits"
             params = {"sha": current_branch, "per_page": 10}
 
-            logger.info(f"Fetching commits from {commits_url}")
+            logger.debug(f"Fetching commits from {commits_url}")
             response = requests.get(commits_url, params=params, timeout=10)
             response.raise_for_status()
 
@@ -122,8 +122,17 @@ class LauncherUpdater:
             return result
 
         except requests.RequestException as e:
-            logger.error(f"Network error during update check: {e}")
-            return {"hasUpdate": False, "error": f"Network error: {str(e)}"}
+            # Network error - likely offline, don't spam with errors
+            logger.debug(f"Network unavailable during update check: {e}")
+            # Try to return cached data
+            cached_data = self._get_cached_update_info()
+            if cached_data and cached_data.get("result"):
+                logger.debug("Using cached update info (offline mode)")
+                result_data = cached_data["result"]
+                if isinstance(result_data, dict):
+                    return result_data
+            # No cache available - return offline error quietly
+            return {"hasUpdate": False, "error": f"Network unavailable"}
         except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
             logger.error(f"Update check failed: {e}")
             return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
@@ -163,13 +172,21 @@ class LauncherUpdater:
 
             if progress_callback:
                 progress_callback(
-                    {"stage": "backup", "message": "Recording current version...", "percent": 10}
+                    {
+                        "stage": "backup",
+                        "message": "Recording current version...",
+                        "percent": 10,
+                    }
                 )
 
             # Step 2: Pull latest changes
             if progress_callback:
                 progress_callback(
-                    {"stage": "pull", "message": "Fetching updates from GitHub...", "percent": 20}
+                    {
+                        "stage": "pull",
+                        "message": "Fetching updates from GitHub...",
+                        "percent": 20,
+                    }
                 )
 
             logger.info("Running git pull")
@@ -227,13 +244,21 @@ class LauncherUpdater:
             # Step 4: Update frontend dependencies
             if progress_callback:
                 progress_callback(
-                    {"stage": "npm", "message": "Updating frontend dependencies...", "percent": 60}
+                    {
+                        "stage": "npm",
+                        "message": "Updating frontend dependencies...",
+                        "percent": 60,
+                    }
                 )
 
             frontend_dir = self.launcher_root / "frontend"
             logger.info("Running npm install")
             npm_install = subprocess.run(
-                ["npm", "install"], cwd=frontend_dir, capture_output=True, text=True, timeout=300
+                ["npm", "install"],
+                cwd=frontend_dir,
+                capture_output=True,
+                text=True,
+                timeout=300,
             )
 
             if npm_install.returncode != 0:
@@ -242,7 +267,11 @@ class LauncherUpdater:
             # Step 5: Rebuild frontend
             if progress_callback:
                 progress_callback(
-                    {"stage": "build", "message": "Rebuilding frontend...", "percent": 80}
+                    {
+                        "stage": "build",
+                        "message": "Rebuilding frontend...",
+                        "percent": 80,
+                    }
                 )
 
             logger.info("Running npm build")
@@ -279,7 +308,13 @@ class LauncherUpdater:
         except subprocess.TimeoutExpired as e:
             logger.error(f"Update timed out: {e}")
             return {"success": False, "error": "Update timed out"}
-        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
+        except (
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as e:
             logger.error(f"Update failed: {e}")
             return {"success": False, "error": f"Update failed: {str(e)}"}
 

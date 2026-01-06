@@ -30,7 +30,9 @@ class GitHubReleasesFetcher:
     """Fetches and caches ComfyUI releases from GitHub"""
 
     def __init__(
-        self, metadata_manager: MetadataManager, ttl: int = NETWORK.GITHUB_RELEASES_TTL_SEC
+        self,
+        metadata_manager: MetadataManager,
+        ttl: int = NETWORK.GITHUB_RELEASES_TTL_SEC,
     ):
         """
         Initialize GitHub releases fetcher
@@ -95,7 +97,7 @@ class GitHubReleasesFetcher:
             # If not the last attempt, wait with exponential backoff
             if attempt < max_retries - 1:
                 delay = calculate_backoff_delay(attempt, base_delay=2.0, max_delay=30.0)
-                logger.warning(
+                logger.debug(
                     f"GitHub API fetch failed (attempt {attempt + 1}/{max_retries}). "
                     f"Retrying in {delay:.1f}s..."
                 )
@@ -144,7 +146,7 @@ class GitHubReleasesFetcher:
                 logger.error(f"GitHub API error: {e.code} {e.reason}")
                 raise
         except urllib.error.URLError as e:
-            logger.error(f"Network error fetching releases: {e}")
+            logger.debug(f"Network error fetching releases: {e}")
             raise
 
     def _is_cache_valid(self, cache: Optional[GitHubReleasesCache]) -> bool:
@@ -243,10 +245,10 @@ class GitHubReleasesFetcher:
             except urllib.error.URLError as e:
                 # Network error (offline, timeout, DNS failure)
                 if force_refresh:
-                    logger.warning(f"Cannot refresh: Network unavailable ({e})")
-                    logger.info("Returning cached data (if available)")
+                    logger.debug(f"Cannot refresh: Network unavailable ({e})")
+                    logger.debug("Returning cached data (if available)")
                 else:
-                    logger.warning(f"Network unavailable: {e}")
+                    logger.debug(f"Network unavailable: {e}")
 
                 # Return stale cache if available
                 disk_cache = self.metadata_manager.load_github_cache()
@@ -256,16 +258,16 @@ class GitHubReleasesFetcher:
                     self._memory_cache[self._CACHE_KEY] = parsed
 
                     if force_refresh:
-                        logger.info(f"Using stale cache ({len(stale_releases)} releases)")
+                        logger.debug(f"Using stale cache ({len(stale_releases)} releases)")
                     else:
-                        logger.info("Using stale disk cache (network unavailable)")
+                        logger.debug("Using stale disk cache (network unavailable)")
 
                     return parsed
 
                 if force_refresh:
-                    logger.error("No cache available - cannot refresh while offline")
+                    logger.debug("No cache available - cannot refresh while offline")
                 else:
-                    logger.warning("No cache available and network unavailable - returning empty")
+                    logger.debug("No cache available and network unavailable - returning empty")
 
                 return []
 
@@ -347,7 +349,10 @@ class GitHubReleasesFetcher:
                 status["age_seconds"] = int(age_seconds)
                 status["is_valid"] = age_seconds < disk_cache.get("ttl", self.ttl)
             except (KeyError, ValueError, TypeError) as e:
-                logger.error(f"Error validating disk cache in get_cache_status: {e}", exc_info=True)
+                logger.error(
+                    f"Error validating disk cache in get_cache_status: {e}",
+                    exc_info=True,
+                )
                 # If we can't parse the timestamp, assume it's invalid but exists
                 status["is_valid"] = False
 

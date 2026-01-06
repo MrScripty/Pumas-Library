@@ -1,474 +1,311 @@
-# Testing Guide for ComfyUI Setup Launcher
+# Testing Guide
 
-This document describes the testing infrastructure and how to write and run tests for the launcher.
-
-## Table of Contents
-
-- [Quick Start](#quick-start)
-- [Test Structure](#test-structure)
-- [Running Tests](#running-tests)
-- [Writing Tests](#writing-tests)
-- [Coverage Requirements](#coverage-requirements)
-- [Best Practices](#best-practices)
+Complete guide for running and writing tests for the ComfyUI Launcher.
 
 ---
 
 ## Quick Start
 
-### Installation
-
-Install development dependencies including pytest:
-
-```bash
-pip install -r requirements-dev.txt
-```
-
-### Running All Tests
-
-```bash
-# Run all tests with coverage
-pytest
-
-# Run with verbose output
-pytest -v
-
-# Run a specific test file
-pytest tests/unit/test_metadata_manager.py
-
-# Run a specific test function
-pytest tests/unit/test_metadata_manager.py::test_save_metadata
-```
-
-### Check Coverage
-
-```bash
-# Generate coverage report
-pytest --cov=backend --cov-report=term-missing
-
-# Generate HTML coverage report
-pytest --cov=backend --cov-report=html
-# Then open htmlcov/index.html in a browser
-```
-
----
-
-## Test Structure
-
-The test suite is organized as follows:
-
-```
-tests/
-├── conftest.py              # Shared fixtures and pytest configuration
-├── unit/                    # Fast, isolated unit tests
-│   ├── test_metadata_manager.py
-│   ├── test_github_integration.py
-│   └── test_utils.py
-├── integration/             # Integration tests with real resources
-│   ├── test_full_installation.py
-│   └── test_version_switching.py
-└── fixtures/                # Sample data files
-    └── sample_releases.json
-```
-
-### Unit Tests
-
-- Located in `tests/unit/`
-- Test individual functions/methods in isolation
-- Mock external dependencies (network, filesystem when appropriate)
-- Should run in milliseconds
-- Use the `@pytest.mark.unit` marker
-
-### Integration Tests
-
-- Located in `tests/integration/`
-- Test multiple components working together
-- Use real file I/O with temporary directories
-- May take longer to run
-- Use the `@pytest.mark.integration` marker
-
----
-
-## Running Tests
-
 ### Run All Tests
-
 ```bash
-pytest
+cd /media/jeremy/OrangeCream/Linux\ Software/ComfyUI-master/Linux-ComfyUI-Launcher
+source venv/bin/activate
+pytest backend/tests/ -v
 ```
 
-### Run Only Unit Tests
-
+### Run with Coverage
 ```bash
-pytest -m unit
+pytest backend/tests/ --cov=backend --cov-report=html
+open htmlcov/index.html
 ```
 
-### Run Only Integration Tests
-
+### Run Specific Tests
 ```bash
-pytest -m integration
+# Single file
+pytest backend/tests/test_process_manager.py -v
+
+# Single test
+pytest backend/tests/test_process_manager.py::test_init_creates_resource_tracker -v
+
+# Pattern match
+pytest backend/tests/ -k "github" -v
 ```
 
-### Run Tests in Parallel
+---
 
-```bash
-pytest -n auto  # Uses all available CPU cores
-```
+## Current Status
 
-### Run with Debugging
+**Tests:** 219 passing
+**Coverage:** 27.10% overall (Target: 80%+)
+**Last Updated:** 2025-12-30
 
-```bash
-# Show print() statements
-pytest -s
+### Module Coverage
 
-# Drop into debugger on failure
-pytest --pdb
+**Excellent (80%+):**
+- process_manager.py: 98.19%
+- system_utils.py: 92.91%
+- process_resource_tracker.py: 86.07%
+- patch_manager.py: 80.67%
 
-# Show local variables in traceback
-pytest --showlocals
-```
+**Complete (100%):**
+- dependency_manager.py: 100%
+- version_manager.py: 100%
+- models.py: 100%
 
-### Stop on First Failure
+**In Progress (20-40%):**
+- github_integration.py: 37.24%
+- metadata_manager.py: 28.85%
 
-```bash
-pytest -x
-```
-
-### Run Last Failed Tests
-
-```bash
-pytest --lf
-```
+**Needs Tests (0-20%):**
+- See [COMPREHENSIVE_UNIT_TEST_PLAN.md](COMPREHENSIVE_UNIT_TEST_PLAN.md) for details
 
 ---
 
 ## Writing Tests
 
-### Basic Test Structure
+### Test File Template
 
 ```python
+"""
+Unit tests for backend/module_name.py
+"""
+
 import pytest
-from backend.metadata_manager import MetadataManager
+from unittest.mock import Mock, patch
+from backend.module_name import ClassName
 
 
-@pytest.mark.unit
-def test_metadata_creation(temp_metadata_dir):
-    """Test that metadata manager creates required files."""
-    manager = MetadataManager(temp_metadata_dir)
+class TestClassName:
+    """Tests for ClassName"""
 
-    # Assertions
-    assert manager.metadata_file.exists()
-    assert manager.get_active_version() is None
+    def test_method_success(self):
+        """Test that method succeeds with valid input."""
+        # Arrange
+        instance = ClassName()
+
+        # Act
+        result = instance.method("valid_input")
+
+        # Assert
+        assert result == expected_value
+
+    def test_method_raises_on_invalid_input(self):
+        """Test that method raises ValueError on invalid input."""
+        instance = ClassName()
+
+        with pytest.raises(ValueError, match="Invalid input"):
+            instance.method("invalid_input")
+
+    def test_method_with_mock(self, mocker):
+        """Test that method correctly uses dependency."""
+        mock_dep = mocker.patch('backend.module_name.dependency')
+        instance = ClassName()
+
+        instance.method("input")
+
+        mock_dep.assert_called_once()
 ```
 
-### Using Fixtures
+### Common Patterns
 
-Fixtures are reusable test components defined in [conftest.py](tests/conftest.py:1). Use them by adding parameters to your test functions:
-
+**Parametrized Tests:**
 ```python
-@pytest.mark.unit
-def test_save_version(metadata_manager):
-    """Test saving version metadata."""
-    # metadata_manager fixture provides a ready-to-use MetadataManager
-    metadata_manager.set_active_version("v0.5.0")
-    assert metadata_manager.get_active_version() == "v0.5.0"
-```
-
-### Available Fixtures
-
-- `temp_launcher_root`: Temporary launcher root directory
-- `temp_metadata_dir`: Temporary metadata directory
-- `temp_versions_dir`: Temporary versions directory
-- `metadata_manager`: MetadataManager instance with temp storage
-- `github_fetcher`: GitHubReleasesFetcher instance
-- `sample_releases`: List of mock GitHub release data
-- `sample_version_metadata`: Sample version metadata dictionary
-
-See [conftest.py](tests/conftest.py:1) for full fixture documentation.
-
-### Mocking External Dependencies
-
-Use `pytest-mock` for mocking:
-
-```python
-@pytest.mark.unit
-def test_github_fetch_with_mock(github_fetcher, mocker):
-    """Test GitHub API fetch with mocked response."""
-    # Mock the HTTP request
-    mock_response = mocker.Mock()
-    mock_response.json.return_value = [
-        {"tag_name": "v0.5.0", "prerelease": False}
-    ]
-    mocker.patch('urllib.request.urlopen', return_value=mock_response)
-
-    releases = github_fetcher.fetch_releases()
-    assert len(releases) == 1
-```
-
-Use `responses` library for HTTP mocking:
-
-```python
-import responses
-
-@pytest.mark.unit
-@responses.activate
-def test_download_file(github_fetcher):
-    """Test file download with mocked HTTP."""
-    responses.add(
-        responses.GET,
-        'https://example.com/file.zip',
-        body=b'fake zip content',
-        status=200
-    )
-
-    result = github_fetcher.download_file('https://example.com/file.zip', '/tmp/test.zip')
-    assert result is True
-```
-
-### Testing Exceptions
-
-```python
-@pytest.mark.unit
-def test_invalid_version_tag():
-    """Test that invalid version tags raise ValidationError."""
-    from backend.validators import validate_version_tag
-
-    with pytest.raises(ValidationError, match="Invalid version tag"):
-        validate_version_tag("../etc/passwd")
-```
-
-### Parametrized Tests
-
-Test the same logic with multiple inputs:
-
-```python
-@pytest.mark.unit
-@pytest.mark.parametrize("tag,expected", [
-    ("v0.5.0", True),
-    ("v1.2.3-rc1", True),
-    ("invalid", False),
-    ("../etc/passwd", False),
+@pytest.mark.parametrize("input,expected", [
+    ("v0.1.0", "v0-1-0"),
+    ("v0.2.0-beta", "v0-2-0-beta"),
 ])
-def test_version_validation(tag, expected):
-    """Test version tag validation with various inputs."""
-    from backend.validators import validate_version_tag
-    assert validate_version_tag(tag) == expected
+def test_slugify(input, expected):
+    assert slugify(input) == expected
+```
+
+**Temporary Files:**
+```python
+def test_file_operation(tmp_path):
+    file = tmp_path / "test.txt"
+    write_function(file, "content")
+    assert file.read_text() == "content"
+```
+
+**Mocking:**
+```python
+def test_with_mock(mocker):
+    mock_subprocess = mocker.patch('subprocess.run')
+    mock_subprocess.return_value.returncode = 0
+
+    result = function_calling_subprocess()
+
+    mock_subprocess.assert_called_once()
+    assert result.success
 ```
 
 ---
 
-## Coverage Requirements
+## Test Organization
 
-### Target Coverage
-
-- **Overall**: 80% coverage across the backend
-- **Critical modules**: 90%+ coverage
-  - `metadata_manager.py`
-  - `version_manager.py`
-  - `validators.py`
-  - `file_utils.py`
-
-### Excluded from Coverage
-
-The following are automatically excluded (see [.coveragerc](.coveragerc:1)):
-
-- Test files themselves
-- Configuration files
-- Main entry points (tested via integration tests)
-- Virtual environments
-- Debug code (`def __repr__`, `def __str__`)
-- Abstract methods
-- Type checking blocks
-
-### Viewing Coverage Report
-
-```bash
-# Terminal report
-pytest --cov=backend --cov-report=term-missing
-
-# HTML report (open htmlcov/index.html)
-pytest --cov=backend --cov-report=html
-
-# Generate both
-pytest --cov=backend --cov-report=term-missing --cov-report=html
+### Directory Structure
+```
+backend/tests/
+├── conftest.py              # Shared fixtures
+├── test_process_manager.py  # Process management
+├── test_github_integration.py  # GitHub API
+├── test_version_manager.py  # Version management
+└── ...
 ```
 
-### Coverage Fails Below 80%
+### Naming Conventions
 
-The test suite is configured to fail if coverage drops below 80%:
+**Test Files:** `test_<module_name>.py`
+**Test Classes:** `Test<ClassName>`
+**Test Functions:** `test_<method>_<scenario>_<expected>()`
 
-```bash
-# This will exit with error code if coverage < 80%
-pytest
-```
+**Examples:**
+- `test_init_sets_launcher_root()`
+- `test_get_releases_force_refresh()`
+- `test_fetch_page_raises_after_max_retries()`
 
 ---
 
 ## Best Practices
 
-### 1. Test What You Touch
+### DO ✅
+- Test behavior, not implementation
+- Mock external dependencies (network, filesystem, subprocess)
+- Use fixtures for common setup
+- Write clear test names
+- Test error paths explicitly
+- Keep tests fast (< 1s each)
+- Use parametrize for variations
 
-When modifying code, write tests for:
-- New functions/methods you create
-- Functions you modify
-- Bug fixes (add regression test)
-
-### 2. Keep Tests Fast
-
-- Mock network calls
-- Use temporary directories for file I/O
-- Clean up resources in fixtures
-
-### 3. Use Descriptive Names
-
-```python
-# Good
-def test_metadata_manager_creates_missing_directory():
-    """Test that MetadataManager creates metadata dir if missing."""
-    pass
-
-# Bad
-def test_metadata():
-    pass
-```
-
-### 4. One Assertion Per Test (Guideline)
-
-While not a strict rule, prefer focused tests:
-
-```python
-# Good
-def test_save_metadata_creates_file(metadata_manager):
-    metadata_manager.save()
-    assert metadata_manager.metadata_file.exists()
-
-def test_save_metadata_writes_json(metadata_manager):
-    metadata_manager.set_active_version("v0.5.0")
-    metadata_manager.save()
-    data = json.loads(metadata_manager.metadata_file.read_text())
-    assert data["active_version"] == "v0.5.0"
-```
-
-### 5. Use Markers
-
-Tag tests appropriately:
-
-```python
-@pytest.mark.unit  # Fast, isolated test
-@pytest.mark.integration  # Integration test
-@pytest.mark.slow  # Takes >1 second
-@pytest.mark.network  # Requires network (should mock)
-```
-
-### 6. Clean Up Resources
-
-Use fixtures with `yield` for cleanup:
-
-```python
-@pytest.fixture
-def temp_database():
-    db = create_database()
-    yield db
-    db.close()  # Cleanup happens after test
-```
-
-### 7. Test Edge Cases
-
-Don't just test the happy path:
-
-```python
-def test_version_validation_edge_cases():
-    # Empty string
-    assert not validate_version_tag("")
-    # Very long string
-    assert not validate_version_tag("v" * 10000)
-    # Unicode characters
-    assert not validate_version_tag("v0.5.0\u0000")
-```
-
-### 8. Avoid Test Interdependence
-
-Each test should be independent and not rely on other tests:
-
-```python
-# Bad - tests depend on order
-def test_step1():
-    global data
-    data = setup()
-
-def test_step2():
-    assert data is not None  # Fails if test_step1 didn't run
-
-# Good - each test is self-contained
-def test_operation_a():
-    data = setup()
-    assert data is not None
-
-def test_operation_b():
-    data = setup()
-    assert data.process() == expected
-```
+### DON'T ❌
+- Test third-party libraries
+- Share state between tests
+- Ignore test failures
+- Skip coverage gaps without reason
+- Use real network/filesystem in unit tests
+- Test multiple things in one test
 
 ---
 
-## Continuous Integration
+## Common Fixtures
 
-Tests are run automatically on every commit (future: via GitHub Actions).
+Located in [backend/tests/conftest.py](../backend/tests/conftest.py):
 
-To ensure your changes pass CI:
+### Temporary Paths
+- `tmp_path` - Pytest built-in temporary directory
 
+### Mock Managers
+- `mock_metadata_manager` - MetadataManager mock
+- `mock_github_fetcher` - GitHubReleasesFetcher mock
+- `mock_version_manager` - VersionManager mock
+
+### Sample Data
+- `sample_github_release` - GitHub release dict
+- `sample_process_info` - Process info dict
+
+---
+
+## Coverage Analysis
+
+### Generate Detailed Report
 ```bash
-# Run the full test suite locally
-pytest
-
-# Check that coverage meets requirements
-pytest --cov=backend --cov-fail-under=80
-
-# Run all pre-commit checks
-pre-commit run --all-files
+pytest --cov=backend --cov-report=html --cov-report=term-missing backend/tests/
+open htmlcov/index.html
 ```
+
+### Check Specific Module
+```bash
+pytest --cov=backend.api.process_manager --cov-report=term-missing
+```
+
+### Common Uncovered Areas
+1. **Error handlers** - Exception paths not tested
+2. **Edge cases** - Empty inputs, None values, boundary conditions
+3. **Fallback logic** - Alternative code paths
+4. **Cleanup code** - Finally blocks, context managers
+5. **Conditional branches** - If/else not fully covered
 
 ---
 
 ## Troubleshooting
 
-### Tests Fail with Import Errors
-
-Make sure you've installed dev dependencies:
-
+### Tests Failing Locally
 ```bash
-pip install -r requirements-dev.txt
+# Clear pytest cache
+pytest --cache-clear
+
+# Run with verbose output
+pytest -vv -s
+
+# Run single failing test
+pytest backend/tests/test_file.py::test_name -vv
 ```
 
-### Coverage Report Shows Missing Files
-
-Ensure you're running pytest from the project root:
-
+### Import Errors
 ```bash
-cd /path/to/Linux-ComfyUI-Launcher
-pytest
+# Ensure backend is in Python path
+export PYTHONPATH="${PYTHONPATH}:$(pwd)"
+
+# Activate virtual environment
+source venv/bin/activate
 ```
 
-### Tests Hang or Run Slowly
+### Slow Tests
+```bash
+# Show slowest tests
+pytest --durations=10
 
-- Check for network calls that should be mocked
-- Use `pytest -v` to see which test is hanging
-- Set a timeout: `pytest --timeout=10`
-
-### Fixtures Not Found
-
-Ensure `conftest.py` is in the `tests/` directory and your test file is within the `tests/` tree.
+# Run in parallel (requires pytest-xdist)
+pytest -n auto
+```
 
 ---
 
-## Additional Resources
+## Implementation Plan
 
-- [pytest documentation](https://docs.pytest.org/)
-- [pytest-cov documentation](https://pytest-cov.readthedocs.io/)
-- [pytest-mock documentation](https://pytest-mock.readthedocs.io/)
-- [Python testing best practices](https://docs.python-guide.org/writing/tests/)
+For detailed test implementation plans, see:
+- **[COMPREHENSIVE_UNIT_TEST_PLAN.md](COMPREHENSIVE_UNIT_TEST_PLAN.md)** - Original module-by-module plan (450+ test specifications)
+- **[UNDER_COVERED_CODE_TEST_PLAN.md](UNDER_COVERED_CODE_TEST_PLAN.md)** - Focused plan for under-covered modules (273 tests, +52.9% coverage)
 
 ---
 
-## Questions?
+## Progress Tracking
 
-For questions or issues with the test suite, please open an issue on GitHub.
+Current implementation status and next steps:
+
+### Completed ✅
+- Phase 1: Critical Path Modules (171 tests, 91.6% avg coverage)
+  - process_manager.py: 98.19%
+  - dependency_manager.py: 100%
+  - system_utils.py: 92.91%
+  - version_manager.py: 100%
+
+### In Progress 🟡
+- Phase 2: Core Integration
+  - github_integration.py: 37.24% (29 tests, need +11)
+  - metadata_manager.py: 28.85% (need 25 tests)
+
+### Next Up 🔴
+- Phase 3: API Layer (need ~150 tests)
+  - core.py, main.py, shortcut_manager, metadata_manager
+
+### Goal 🎯
+**500+ tests, 80%+ coverage**
+
+---
+
+## Resources
+
+### Documentation
+- [pytest Documentation](https://docs.pytest.org/)
+- [pytest-cov Documentation](https://pytest-cov.readthedocs.io/)
+- [pytest-mock Documentation](https://pytest-mock.readthedocs.io/)
+
+### Test Dependencies
+```bash
+pip install pytest pytest-cov pytest-mock pytest-timeout freezegun
+```
+
+---
+
+**Last Updated:** 2025-12-30
+**Status:** 219 tests, 27.10% coverage, 🟢 On Track

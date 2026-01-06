@@ -123,7 +123,10 @@ class PatchManager:
 
             # Fallback: any ComfyUI Server setproctitle call (with or without version suffix)
             return bool(
-                re.search(r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)', content)
+                re.search(
+                    r'setproctitle\.setproctitle\(["\']ComfyUI Server[^"\']*["\']\)',
+                    content,
+                )
             )
         except (OSError, UnicodeDecodeError) as e:
             logger.error(f"Error reading {main_py} to check patch state: {e}", exc_info=True)
@@ -181,7 +184,9 @@ class PatchManager:
 
         if 'if __name__ == "__main__":' in content:
             content = content.replace(
-                'if __name__ == "__main__":', insert_code + 'if __name__ == "__main__":', 1
+                'if __name__ == "__main__":',
+                insert_code + 'if __name__ == "__main__":',
+                1,
             )
         else:
             content += insert_code

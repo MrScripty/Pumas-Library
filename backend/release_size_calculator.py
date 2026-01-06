@@ -242,7 +242,10 @@ class ReleaseSizeCalculator:
             )
 
         except (OSError, RuntimeError, TypeError, ValueError) as e:
-            logger.error(f"Error estimating dependency size via pip for {tag}: {e}", exc_info=True)
+            logger.error(
+                f"Error estimating dependency size via pip for {tag}: {e}",
+                exc_info=True,
+            )
             return None
         finally:
             # Clean up temp dir to avoid disk bloat
@@ -253,7 +256,12 @@ class ReleaseSizeCalculator:
                 pass
 
     def _estimate_dependencies_size_via_report(
-        self, tag: str, tool_name: str, cmd: List[str], temp_root: Path, report_file: Path
+        self,
+        tag: str,
+        tool_name: str,
+        cmd: List[str],
+        temp_root: Path,
+        report_file: Path,
     ) -> Optional[int]:
         """
         Shared helper to run a resolver command that produces a pip-compatible report.

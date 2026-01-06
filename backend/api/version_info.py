@@ -61,14 +61,21 @@ class VersionInfoManager:
         # Fallback to GitHub API
         try:
             with urllib.request.urlopen(
-                "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest", timeout=5
+                "https://api.github.com/repos/comfyanonymous/ComfyUI/releases/latest",
+                timeout=5,
             ) as resp:
                 data = json.loads(resp.read())
                 if isinstance(data, dict):
                     tag_name = data.get("tag_name")
                     if isinstance(tag_name, str):
                         return f"{tag_name} (latest)"
-        except (urllib.error.URLError, OSError, json.JSONDecodeError, KeyError, ValueError):
+        except (
+            urllib.error.URLError,
+            OSError,
+            json.JSONDecodeError,
+            KeyError,
+            ValueError,
+        ):
             pass
 
         return "Unknown"
@@ -86,7 +93,14 @@ class VersionInfoManager:
             try:
                 # Try to get the exact tag first
                 current_tag = subprocess.check_output(
-                    ["git", "-C", str(self.comfyui_dir), "describe", "--tags", "--exact-match"],
+                    [
+                        "git",
+                        "-C",
+                        str(self.comfyui_dir),
+                        "describe",
+                        "--tags",
+                        "--exact-match",
+                    ],
                     text=True,
                     stderr=subprocess.DEVNULL,
                 ).strip()
@@ -95,7 +109,14 @@ class VersionInfoManager:
                 # If not on an exact tag, get the description
                 try:
                     current_version = subprocess.check_output(
-                        ["git", "-C", str(self.comfyui_dir), "describe", "--tags", "--always"],
+                        [
+                            "git",
+                            "-C",
+                            str(self.comfyui_dir),
+                            "describe",
+                            "--tags",
+                            "--always",
+                        ],
                         text=True,
                         stderr=subprocess.DEVNULL,
                     ).strip()
@@ -130,7 +151,13 @@ class VersionInfoManager:
                     "latest_version": latest_tag,
                     "current_version": current_version,
                 }
-        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
+        except (
+            OSError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            subprocess.SubprocessError,
+        ) as e:
             logger.error(f"Error checking for new release: {e}")
             self._release_info_cache = {
                 "has_update": False,

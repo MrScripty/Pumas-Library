@@ -122,7 +122,10 @@ class InstallationProgressTracker:
             self._save_state()
 
     def update_stage(
-        self, stage: InstallationStage, progress: int = 0, current_item: Optional[str] = None
+        self,
+        stage: InstallationStage,
+        progress: int = 0,
+        current_item: Optional[str] = None,
     ):
         """
         Update current installation stage
@@ -416,7 +419,10 @@ class InstallationProgressTracker:
 
         try:
             atomic_write_json(
-                self.state_file, self._current_state, lock=self._file_lock, keep_backup=True
+                self.state_file,
+                self._current_state,
+                lock=self._file_lock,
+                keep_backup=True,
             )
         except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as e:
             logger.error(f"Error saving installation state: {e}", exc_info=True)

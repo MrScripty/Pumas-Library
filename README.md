@@ -104,6 +104,8 @@ Run the launcher with different modes:
 | `./launcher` | Launch the application in normal mode |
 | `./launcher dev` | Launch with developer console enabled for debugging |
 | `./launcher build` | Rebuild the frontend (useful after making UI changes) |
+| `./launcher test` | Run unit tests and code quality checks (pytest, ruff, black, isort, mypy) |
+| `./launcher sbom` | Generate Software Bill of Materials (SBOM) for dependencies |
 | `./launcher help` | Display usage information |
 
 ## More Details Later (WIP)

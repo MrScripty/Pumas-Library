@@ -62,7 +62,10 @@ class PackageSizeResolver:
     def _save_cache(self):
         """Save package sizes cache to disk"""
         try:
-            cache_data = {"packages": self._cache, "last_updated": self._get_iso_timestamp()}
+            cache_data = {
+                "packages": self._cache,
+                "last_updated": self._get_iso_timestamp(),
+            }
             with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
         except (OSError, TypeError, ValueError) as e:
@@ -126,7 +129,10 @@ class PackageSizeResolver:
         return f"{normalized_spec}|{self.platform}|{self.python_version}"
 
     def query_pypi_package_size(
-        self, package_name: str, version: Optional[str] = None, specifier: Optional[str] = None
+        self,
+        package_name: str,
+        version: Optional[str] = None,
+        specifier: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Query PyPI JSON API for package size
@@ -223,9 +229,7 @@ class PackageSizeResolver:
             logger.error(f"Error querying PyPI for {package_name}: {e}", exc_info=True)
             return None
 
-    def _find_best_wheel(
-        self, release_files: list, package_name: str
-    ) -> Optional[Dict[str, Any]]:
+    def _find_best_wheel(self, release_files: list, package_name: str) -> Optional[Dict[str, Any]]:
         """
         Find best matching wheel file for current platform
 
@@ -259,9 +263,7 @@ class PackageSizeResolver:
         # Fallback to any wheel
         return cast(Dict[str, Any], max(wheels, key=lambda w: w["size"]))
 
-    def _fetch_pypi_version_data(
-        self, package_name: str, version: str
-    ) -> Optional[Dict[str, Any]]:
+    def _fetch_pypi_version_data(self, package_name: str, version: str) -> Optional[Dict[str, Any]]:
         """
         Fetch PyPI JSON metadata for a specific version.
         """
@@ -332,7 +334,10 @@ class PackageSizeResolver:
         return None
 
     def get_package_total_size(
-        self, package_spec: str, seen: Optional[Set[str]] = None, force_refresh: bool = False
+        self,
+        package_spec: str,
+        seen: Optional[Set[str]] = None,
+        force_refresh: bool = False,
     ) -> Optional[int]:
         """
         Get total download size for a package including its transitive dependencies.

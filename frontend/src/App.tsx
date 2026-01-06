@@ -1,10 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, Play, Square, AlertTriangle, FileText, SquareArrowUp } from 'lucide-react';
+import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, ArrowUp, Box } from 'lucide-react';
 import { VersionSelector } from './components/VersionSelector';
 import { InstallDialog } from './components/InstallDialog';
 import { StatusFooter } from './components/StatusFooter';
+import { AppSidebar } from './components/AppSidebar';
+import { ResourceMonitor, DiskMonitor } from './components/ResourceMonitor';
+import { ModelManager } from './components/ModelManager';
 import { useVersions } from './hooks/useVersions';
+import { DEFAULT_APPS } from './config/apps';
+import type { AppConfig, ModelCategory, SystemResources } from './types/apps';
 
 // TypeScript definitions for PyWebView API
 declare global {
@@ -88,15 +93,27 @@ declare global {
           success: boolean;
           error?: string;
         }>;
+
+        // System Resource API
+        get_system_resources: () => Promise<{
+          success: boolean;
+          resources: SystemResources;
+          error?: string;
+        }>;
       };
     };
   }
 }
 
 export default function App() {
+  // --- Multi-App State ---
+  const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
+  const [selectedAppId, setSelectedAppId] = useState<string | null>('comfyui');
+  const [systemResources, setSystemResources] = useState<SystemResources | undefined>();
+
   // --- State ---
   const [version, setVersion] = useState("Loading...");
-  const [depsInstalled, setDepsInstalled] = useState<boolean | null>(null); // null means not checked yet
+  const [depsInstalled, setDepsInstalled] = useState<boolean | null>(null);
   const [isInstalling, setIsInstalling] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingDeps, setIsCheckingDeps] = useState(true);
@@ -111,17 +128,11 @@ export default function App() {
   const [launchLogPath, setLaunchLogPath] = useState<string | null>(null);
   const [launchErrorFlash, setLaunchErrorFlash] = useState(false);
 
-  // Release info
-  const [hasUpdate, setHasUpdate] = useState(false);
-  const [latestVersion, setLatestVersion] = useState<string | null>(null);
-
   // ComfyUI running state
   const [comfyUIRunning, setComfyUIRunning] = useState(false);
   const [showVersionManager, setShowVersionManager] = useState(false);
   const [isRefreshingVersions, setIsRefreshingVersions] = useState(false);
-  const [isLaunchHover, setIsLaunchHover] = useState(false);
   const [launcherVersion, setLauncherVersion] = useState<string | null>(null);
-  const [spinnerFrame, setSpinnerFrame] = useState(0);
   const isPolling = useRef(false);
 
   // Launcher update state
@@ -134,7 +145,26 @@ export default function App() {
   // Disk space tracking
   const [diskSpacePercent, setDiskSpacePercent] = useState(0);
 
+  // Model Manager State
+  const [modelGroups, setModelGroups] = useState<ModelCategory[]>([]);
+  const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
+  const [linkedModels, setLinkedModels] = useState<Set<string>>(new Set());
+
   // Version data (shared between selector and manager view)
+  // Compute if there's a new version available (latest in availableVersions not in installedVersions)
+  const computeHasNewVersion = React.useCallback((available: any[], installed: string[]) => {
+    if (!available || available.length === 0 || !installed) {
+      return false;
+    }
+    // Get the latest version (first in the list, as they're sorted newest first)
+    const latestAvailable = available[0]?.tag_name;
+    if (!latestAvailable) {
+      return false;
+    }
+    // Check if this latest version is not installed
+    return !installed.includes(latestAvailable);
+  }, []);
+
   const {
     installedVersions,
     activeVersion,
@@ -154,7 +184,35 @@ export default function App() {
     cacheStatus,
   } = useVersions();
 
+  // Release info (computed from available vs installed versions)
+  const hasUpdate = React.useMemo(() => {
+    const result = computeHasNewVersion(availableVersions, installedVersions);
+    console.log('[App] Computed hasUpdate:', result, 'availableVersions:', availableVersions.length, 'installedVersions:', installedVersions.length);
+    return result;
+  }, [availableVersions, installedVersions, computeHasNewVersion]);
+
+  const latestVersion = React.useMemo(() => {
+    const result = availableVersions && availableVersions.length > 0 ? availableVersions[0]?.tag_name : null;
+    console.log('[App] Computed latestVersion:', result);
+    return result;
+  }, [availableVersions]);
+
   // --- API Helpers ---
+  const fetchSystemResources = async () => {
+    try {
+      if (window.pywebview?.api?.get_system_resources) {
+        const result = await window.pywebview.api.get_system_resources();
+        if (result.success) {
+          setSystemResources(result.resources);
+          return result.resources;
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch system resources:", e);
+    }
+    return null;
+  };
+
   const fetchDiskSpace = async () => {
     try {
       if (window.pywebview?.api?.get_disk_space) {
@@ -171,18 +229,15 @@ export default function App() {
   const fetchStatus = async (isInitialLoad = false) => {
     const startTime = Date.now();
 
-    // Only show checking animation on initial load
     if (isInitialLoad) {
       setIsCheckingDeps(true);
     }
 
     try {
-      // Use PyWebView API if available, otherwise fall back to fetch (dev mode)
       let data;
       if (window.pywebview) {
         data = await window.pywebview.api.get_status();
       } else {
-        // Development mode fallback
         setStatusMessage("Running in development mode - PyWebView API not available");
         setIsLoading(false);
         setIsCheckingDeps(false);
@@ -203,16 +258,57 @@ export default function App() {
       setLaunchError(data.last_launch_error || null);
       setLaunchLogPath(data.last_launch_log || null);
 
-      // Handle release info
-      if (data.release_info) {
-        setHasUpdate(Boolean(data.release_info.has_update));
-        setLatestVersion(data.release_info.latest_version);
-      }
+      // Note: hasUpdate and latestVersion are now computed from availableVersions vs installedVersions
 
-      // Fetch disk space
       await fetchDiskSpace();
+      const freshSystemResources = await fetchSystemResources();
 
-      // Ensure loading indicator shows for at least 800ms for better UX on initial load
+      // Update app status based on ComfyUI state
+      setApps(prevApps => prevApps.map(app => {
+        if (app.id === 'comfyui') {
+          const resources = data.app_resources?.comfyui;
+
+          // Convert GPU memory (GB) to percentage of total GPU memory
+          let gpuUsagePercent: number | undefined = undefined;
+          const gpuTotal = freshSystemResources?.gpu?.memory_total || systemResources?.gpu?.memory_total;
+          if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
+            // GPU memory from backend is in GB, memory_total from systemResources is total GPU capacity in GB
+            gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
+          }
+
+          // Convert RAM memory (GB) to percentage of total RAM
+          let ramUsagePercent: number | undefined = undefined;
+          const ramTotal = freshSystemResources?.ram?.total || systemResources?.ram?.total;
+          if (resources?.ram_memory && ramTotal && ramTotal > 0) {
+            // RAM memory from backend is in GB, total from systemResources is total RAM capacity in GB
+            ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
+          }
+
+          // Update only resources and running state
+          // iconState is managed by the useEffect that watches installedVersions
+          const updates: Partial<AppConfig> = {
+            status: data.comfyui_running ? 'running' : (data.deps_ready ? 'idle' : 'idle'),
+            ramUsage: ramUsagePercent,
+            gpuUsage: gpuUsagePercent,
+          };
+
+          // ONLY update iconState for running/error states (these are immediate)
+          // Let useEffect handle offline/uninstalled transition based on installedVersions
+          if (data.comfyui_running) {
+            updates.iconState = 'running';
+          } else if (data.last_launch_error) {
+            updates.iconState = 'error';
+          }
+          // DON'T set offline/uninstalled here - useEffect handles it
+
+          return {
+            ...app,
+            ...updates,
+          };
+        }
+        return app;
+      }));
+
       if (isInitialLoad) {
         const elapsedTime = Date.now() - startTime;
         const remainingTime = Math.max(0, 800 - elapsedTime);
@@ -249,7 +345,6 @@ export default function App() {
         setStatusMessage("Operation failed.");
       }
 
-      // Refresh state after action
       await fetchStatus();
     } catch (e) {
       setStatusMessage("Operation failed.");
@@ -258,10 +353,7 @@ export default function App() {
   };
 
   // --- Effects ---
-
-  // Initial load effect - runs once on mount
   useEffect(() => {
-    // Wait for PyWebView API to be ready with actual methods
     const waitForPyWebView = () => {
       if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.get_status === 'function') {
         console.log('PyWebView API ready with methods, initializing...');
@@ -274,7 +366,6 @@ export default function App() {
           setVersion("Error");
         });
 
-        // Fetch launcher version and force-refresh update check on app start
         checkLauncherVersion(true);
       } else {
         console.log('Waiting for PyWebView API methods...');
@@ -283,20 +374,17 @@ export default function App() {
     };
 
     waitForPyWebView();
-  }, []); // Empty dependency array - runs only once on mount
+  }, []);
 
-  // Check launcher version and updates
   const checkLauncherVersion = async (forceRefresh = false) => {
     try {
       if (!window.pywebview?.api) return;
 
-      // Get current version
       const versionResult = await window.pywebview.api.get_launcher_version();
       if (versionResult.success) {
         setLauncherVersion(versionResult.version);
       }
 
-      // Check for updates (non-blocking)
       const updateResult = await window.pywebview.api.check_launcher_updates(forceRefresh);
       if (updateResult.success) {
         setLauncherUpdateAvailable(updateResult.hasUpdate);
@@ -313,7 +401,6 @@ export default function App() {
     }
   };
 
-  // Handle launcher update
   const handleLauncherUpdate = async () => {
     if (!window.pywebview?.api || isUpdatingLauncher) return;
 
@@ -355,7 +442,6 @@ export default function App() {
       if (result.success) {
         setStatusMessage('Update complete! Restarting...');
 
-        // Restart after 2 seconds
         setTimeout(async () => {
           await window.pywebview.api.restart_launcher();
         }, 2000);
@@ -372,7 +458,6 @@ export default function App() {
     }
   };
 
-  // Polling effect - keep UI state in sync with the actual server process
   useEffect(() => {
     const pollStatus = async () => {
       if (isPolling.current || !window.pywebview?.api?.get_status) {
@@ -389,32 +474,14 @@ export default function App() {
       }
     };
 
-    // Poll every 4 seconds regardless of launch source
     const interval = setInterval(() => {
       void pollStatus();
-    }, 4000);
+    }, 500);  // Poll every 0.5 seconds for smooth updates
 
     return () => clearInterval(interval);
-  }, []); // Runs continuously in the background
+  }, []);
 
-  // Spinner frame updater for running state
-  useEffect(() => {
-    if (comfyUIRunning) {
-      setSpinnerFrame(0);
-    }
 
-    if (!comfyUIRunning || isLaunchHover) {
-      return;
-    }
-
-    const interval = setInterval(() => {
-      setSpinnerFrame((prev) => (prev + 1) % spinnerFrames.length);
-    }, 180);
-
-    return () => clearInterval(interval);
-  }, [comfyUIRunning, isLaunchHover]);
-
-  // Flash the launch icon when a launch error is present
   useEffect(() => {
     if (!launchError) {
       setLaunchErrorFlash(false);
@@ -424,17 +491,42 @@ export default function App() {
     return () => clearInterval(interval);
   }, [launchError]);
 
-  // Keep shortcut + status state aligned with active version changes
   useEffect(() => {
     if (!activeVersion || !window.pywebview?.api) {
       return;
     }
     fetchStatus(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeVersion]);
 
-  // --- Handlers ---
+  // Manage iconState based on installedVersions, comfyUIRunning, and launchError
+  // This is the SINGLE source of truth for offline/uninstalled states
+  useEffect(() => {
+    setApps(prevApps => {
+      return prevApps.map(app => {
+        if (app.id === 'comfyui') {
+          // Determine correct iconState
+          let newState: 'running' | 'offline' | 'uninstalled' | 'error';
 
+          if (comfyUIRunning) {
+            newState = 'running';
+          } else if (launchError) {
+            newState = 'error';
+          } else if (installedVersions.length > 0) {
+            newState = 'offline';
+          } else {
+            newState = 'uninstalled';
+          }
+
+          if (newState !== app.iconState) {
+            return { ...app, iconState: newState };
+          }
+        }
+        return app;
+      });
+    });
+  }, [installedVersions, comfyUIRunning, launchError]);
+
+  // --- Handlers ---
   const handleInstallDeps = async () => {
     if (!window.pywebview) return;
 
@@ -460,7 +552,6 @@ export default function App() {
     if (window.pywebview) {
       window.pywebview.api.close_window();
     } else {
-      // Development mode fallback
       window.close();
     }
   };
@@ -492,276 +583,310 @@ export default function App() {
       setLaunchError(errMsg);
       console.error(`${action === 'launch' ? 'Launch' : 'Stop'} Error:`, e);
     } finally {
-      // Pull fresh state from backend instead of maintaining a local flag
       await fetchStatus(false);
       setTimeout(() => fetchStatus(false), 1200);
     }
   };
 
+  // Icon indicator handlers
+  const handleLaunchApp = async (appId: string) => {
+    if (appId === 'comfyui' && !comfyUIRunning) {
+      await handleLaunchComfyUI();
+    }
+    // Future: Add handlers for other apps here
+  };
+
+  const handleStopApp = async (appId: string) => {
+    if (appId === 'comfyui' && comfyUIRunning) {
+      await handleLaunchComfyUI();
+    }
+    // Future: Add handlers for other apps here
+  };
+
+  const handleOpenLog = async (appId: string) => {
+    if (appId === 'comfyui' && launchLogPath) {
+      await openLogPath(launchLogPath);
+    }
+    // Future: Add handlers for other apps here
+  };
+
+  // App management handlers
+  const handleDeleteApp = (appId: string) => {
+    // Prevent deleting ComfyUI (first app)
+    if (appId === 'comfyui') {
+      console.warn('Cannot delete ComfyUI app');
+      return;
+    }
+
+    setApps(prevApps => prevApps.filter(app => app.id !== appId));
+
+    // Deselect if deleting selected app
+    if (selectedAppId === appId) {
+      setSelectedAppId(null);
+    }
+  };
+
+  const handleReorderApps = (reorderedApps: AppConfig[]) => {
+    setApps(reorderedApps);
+  };
+
+  const handleAddApp = (insertAtIndex: number) => {
+    // Create a new app with default configuration
+    const newAppNumber = apps.length + 1;
+    const newApp: AppConfig = {
+      id: `app-${Date.now()}`,
+      name: `new-app-${newAppNumber}`,
+      displayName: `New App ${newAppNumber}`,
+      icon: Box,
+      status: 'idle',
+      iconState: 'uninstalled',
+      ramUsage: 0,
+      gpuUsage: 0,
+    };
+
+    setApps(prevApps => {
+      const newApps = [...prevApps];
+      newApps.splice(insertAtIndex, 0, newApp);
+      return newApps;
+    });
+  };
+
+  // Model Manager Handlers
+  const handleToggleStar = (modelId: string) => {
+    setStarredModels(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(modelId)) {
+        newSet.delete(modelId);
+      } else {
+        newSet.add(modelId);
+      }
+      return newSet;
+    });
+  };
+
+  const handleToggleLink = (modelId: string) => {
+    setLinkedModels(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(modelId)) {
+        newSet.delete(modelId);
+      } else {
+        newSet.add(modelId);
+      }
+      return newSet;
+    });
+  };
+
   const isSetupComplete = depsInstalled === true && isPatched && menuShortcut && desktopShortcut;
   const defaultReadyText = statusMessage?.trim().toLowerCase() === 'system ready. configure options below';
   const displayStatus = statusMessage === "Setup complete – everything is ready" || defaultReadyText ? "" : statusMessage;
-  const activeVersionLabel = activeVersion || 'No version';
-  const canLaunch = depsInstalled === true && installedVersions.length > 0;
-  const launchSubText = canLaunch ? activeVersionLabel : 'No version installed';
-  const idleIconGlow = !comfyUIRunning && canLaunch ? { filter: 'drop-shadow(0 0 6px #55ff55)' } : undefined;
-  const spinnerFrames = ['/', '-', '\\', '|'];
 
   return (
-    <div className="w-full h-full bg-[#1e1e1e] shadow-2xl overflow-auto flex flex-col relative font-sans selection:bg-gray-700 pb-8">
+    <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
+      {/* Header */}
+      <div className="border-b border-[hsl(var(--launcher-border))] px-8 py-4 flex justify-between bg-[hsl(var(--launcher-bg-secondary)/0.3)] backdrop-blur-sm relative z-10 items-start gap-4">
+        {/* Draggable region for window movement */}
+        <div className="pywebview-drag-region flex-1 flex justify-between items-start gap-4">
+          <ResourceMonitor resources={systemResources} />
 
-      {/* Title Bar */}
-      <div className="sticky top-0 z-20 h-14 bg-[#252525] flex items-center justify-between px-6 select-none border-b border-[#333] shadow-sm">
-        <div className="flex items-center gap-4 h-full">
-          <div className="flex flex-col justify-center h-full">
-            <h1 className="text-white text-base font-semibold leading-tight">ComfyUI Setup</h1>
-            <div className="flex items-center gap-2">
-              <span className="text-[#aaaaaa] text-[11px] flex items-center gap-1.5">
-                {launcherVersion || 'dev'}
-                {!updateCheckDone && isLoading && <Loader2 size={12} className="animate-spin" />}
-                {isCheckingLauncherUpdate && <Loader2 size={12} className="animate-spin" />}
-                {updateCheckDone && launcherUpdateAvailable && !isUpdatingLauncher ? (
-                  <motion.button
-                    onClick={handleLauncherUpdate}
-                    className="text-[#55ff55] hover:text-[#77ff77] transition-colors"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    title="Update launcher to latest version"
-                  >
-                    <SquareArrowUp size={14} />
-                  </motion.button>
-                ) : (
-                  <motion.button
-                    onClick={() => {
-                      if (isCheckingLauncherUpdate) return;
-                      setIsCheckingLauncherUpdate(true);
-                      checkLauncherVersion(true);
-                    }}
-                    className="text-[#aaaaaa] hover:text-white transition-colors"
-                    whileHover={{ scale: 1.1 }}
-                    whileTap={{ scale: 0.95 }}
-                    title="Check for launcher updates"
-                  >
-                    <RefreshCw size={12} />
-                  </motion.button>
-                )}
-                {isUpdatingLauncher && <Loader2 size={12} className="animate-spin text-[#55ff55]" />}
-              </span>
+          <div className="flex-1 flex justify-center">
+            <DiskMonitor diskFree={systemResources?.disk.free || diskSpacePercent} />
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1">
+              <span className="text-xs text-[hsl(var(--launcher-text-secondary))]">{launcherVersion || 'dev'}</span>
+              <ArrowUp className="w-3 h-3 text-[hsl(var(--launcher-text-muted))]" />
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <motion.button
-            onMouseEnter={() => setIsLaunchHover(true)}
-            onMouseLeave={() => setIsLaunchHover(false)}
-            onClick={handleLaunchComfyUI}
-            disabled={!canLaunch}
-            className={`flex items-center justify-center gap-3 w-[128px] h-[48px] rounded border text-xs font-semibold transition-colors ${
-              !canLaunch
-                ? 'bg-[#333]/50 border-[#444] text-[#666] cursor-not-allowed'
-                : comfyUIRunning
-                  ? 'bg-[#55ff55]/10 hover:bg-[#55ff55]/20 border-[#55ff55] text-[#dfffd3]'
-                  : 'bg-[#2c2c2c] hover:bg-[#333] border-[#555] text-[#e6e6e6]'
-            }`}
-            whileHover={{ scale: canLaunch ? 1.04 : 1 }}
-            whileTap={{ scale: canLaunch ? 0.98 : 1 }}
+
+        {/* Close button - NOT in drag region */}
+        <div className="h-14 w-14 flex items-center justify-center">
+          <div
+            onClick={closeWindow}
+            className="cursor-pointer group p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
           >
-            <div className="w-5 flex items-center justify-center">
-              {comfyUIRunning ? (
-                isLaunchHover ? (
-                  <Square
-                    size={18}
-                    className="flex-shrink-0 text-[#ff6666]"
-                    fill="currentColor"
-                    stroke="currentColor"
-                    strokeWidth={1}
-                  />
-                ) : (
-                  <span className="flex-shrink-0 w-4 text-center font-mono text-[15px]">
-                    {spinnerFrames[spinnerFrame]}
-                  </span>
-                )
-              ) : launchError ? (
-                launchErrorFlash ? (
-                  <AlertTriangle size={18} className="text-[#ff6b6b]" />
-                ) : (
-                  <Play size={20} className="flex-shrink-0 text-[#ff6b6b]" />
-                )
-              ) : (
-                <Play size={20} className="flex-shrink-0 text-[#55ff55]" style={idleIconGlow} />
-              )}
-            </div>
-            <div className="flex flex-col items-start leading-tight w-[80px]">
-              <span className="text-[13px] leading-tight font-semibold">
-                {comfyUIRunning ? (isLaunchHover ? 'Stop' : 'Running') : 'Launch'}
-              </span>
-              <span className="text-[10px] mt-0.5 truncate w-full">
-                {launchSubText}
-              </span>
-            </div>
-          </motion.button>
-          {launchLogPath && (
-            <motion.button
-              onClick={() => openLogPath(launchLogPath)}
-              className="p-2 rounded hover:bg-[#333] transition-colors"
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.96 }}
-              title="Open last launch log"
-            >
-              <FileText size={18} className={launchError ? 'text-[#ff6b6b]' : 'text-gray-300'} />
-            </motion.button>
-          )}
-          <div className="h-14 w-14 flex items-center justify-center">
-            <div
-              onClick={closeWindow}
-              className="cursor-pointer group p-2 rounded hover:bg-[#333] transition-colors"
-            >
-              <X className="text-[#cccccc] group-hover:text-[#ff4444] transition-colors" size={22} />
-            </div>
+            <X className="text-[hsl(var(--text-secondary))] group-hover:text-[hsl(var(--accent-error))] transition-colors" size={22} />
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 p-6 flex flex-col items-center">
-        {isCheckingDeps || depsInstalled === null ? (
-          <div className="w-full flex items-center justify-center gap-2 text-gray-400">
-            <Loader2 className="animate-spin" size={18} />
-            <span className="text-sm">Checking Dependencies...</span>
-          </div>
-        ) : showVersionManager ? (
-          <div className="w-full flex-1 flex flex-col gap-4">
-            <div className="w-full flex items-center justify-between">
-              <button
-                onClick={() => setShowVersionManager(false)}
-                className="flex items-center gap-2 px-3 py-2 rounded border border-[#333] bg-[#2a2a2a] hover:bg-[#333] text-white text-sm transition-colors"
-              >
-                <ArrowLeft size={14} />
-                <span>Back to setup</span>
-              </button>
-              <div className="flex items-center gap-3 text-xs text-gray-400">
-                <span>{installedVersions.length} installed</span>
-                <motion.button
-                  onClick={async () => {
-                    if (isRefreshingVersions) return;
-                    setIsRefreshingVersions(true);
-                    try {
-                      await refreshAll(true);
-                    } finally {
-                      setIsRefreshingVersions(false);
-                    }
-                  }}
-                  disabled={isRefreshingVersions || isVersionLoading}
-                  className="p-2 rounded hover:bg-[#333] transition-colors disabled:opacity-50"
-                  whileHover={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 1.05 }}
-                  whileTap={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 0.96 }}
-                  title="Refresh versions"
-                >
-                  <RefreshCw size={14} className={isRefreshingVersions ? 'animate-spin text-gray-500' : 'text-gray-300'} />
-                </motion.button>
-              </div>
-            </div>
-            <div className="w-full flex-1 min-h-0">
-              <InstallDialog
-                isOpen={showVersionManager}
-                onClose={() => setShowVersionManager(false)}
-                availableVersions={availableVersions}
-                installedVersions={installedVersions}
-                isLoading={isVersionLoading}
-                onInstallVersion={installVersion}
-                onRemoveVersion={removeVersion}
-                onRefreshAll={refreshAll}
-                installingTag={installingTag}
-                installationProgress={installationProgress}
-                installNetworkStatus={installNetworkStatus}
-                onRefreshProgress={fetchInstallationProgress}
-                displayMode="page"
-              />
-            </div>
-          </div>
-        ) : (
-          <>
-            {/* VERSION SELECTOR */}
-            <div className="w-full mb-4">
-              <VersionSelector
-                installedVersions={installedVersions}
-                activeVersion={activeVersion}
-                isLoading={isVersionLoading}
-                switchVersion={switchVersion}
-                openActiveInstall={openActiveInstall}
-                onOpenVersionManager={() => setShowVersionManager(true)}
-                installNetworkStatus={installNetworkStatus}
-                defaultVersion={defaultVersion}
-                onMakeDefault={setDefaultVersion}
-                installingVersion={installingTag}
-                activeShortcutState={{ menu: menuShortcut, desktop: desktopShortcut }}
-                diskSpacePercent={diskSpacePercent}
-              />
-            </div>
+      {/* Main Layout */}
+      <div className="flex flex-1 relative z-10 overflow-hidden">
+        <AppSidebar
+          apps={apps}
+          selectedAppId={selectedAppId}
+          onSelectApp={setSelectedAppId}
+          onLaunchApp={handleLaunchApp}
+          onStopApp={handleStopApp}
+          onOpenLog={handleOpenLog}
+          onDeleteApp={handleDeleteApp}
+          onReorderApps={handleReorderApps}
+          onAddApp={handleAddApp}
+        />
 
-            {/* DEPENDENCY SECTION */}
-            <div className="w-full mb-6 min-h-[50px] flex items-center justify-center">
-              <AnimatePresence mode="wait">
-                {depsInstalled === false ? (
-                  /* MISSING STATE: Big Wide Button */
-                  <motion.button
-                    key="install-btn"
-                    layout
-                    initial={{ opacity: 0, scale: 0.9 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
-                    onClick={handleInstallDeps}
-                    disabled={isInstalling || comfyUIRunning}
-                    className="w-full h-12 bg-[#333333] hover:bg-[#444444] text-[#aaaaaa] hover:text-white font-bold text-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98] rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {isInstalling ? (
-                      <>
-                        <Loader2 className="animate-spin" size={18} />
-                        <span>Installing (Check Terminal)...</span>
-                      </>
-                    ) : comfyUIRunning ? (
-                      <>
-                        <ArrowDownToLine size={18} />
-                        <span>Stop ComfyUI to Install</span>
-                      </>
-                    ) : (
-                      <>
-                        <ArrowDownToLine size={18} />
-                        <span>Install Missing Dependencies</span>
-                      </>
-                    )}
-                  </motion.button>
-                ) : null}
-              </AnimatePresence>
-            </div>
-
-            {/* CONTROL PANEL */}
-            <motion.div
-              className="w-full flex flex-col items-center gap-6"
-              animate={{
-                opacity: depsInstalled ? 1 : 0.3,
-                filter: depsInstalled ? "blur(0px)" : "blur(1px)",
-                pointerEvents: depsInstalled ? "auto" : "none"
-              }}
-              transition={{ duration: 0.4 }}
-            >
-
-            {/* Status Footer Text */}
-              {displayStatus && (
-                <div className="h-6 text-center w-full px-2">
-                  <span
-                    className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
-                      comfyUIRunning ? 'text-[#55ff55]' : (isSetupComplete ? 'text-[#55ff55]' : 'text-[#666666]')
-                    }`}
-                  >
-                    {displayStatus}
-                  </span>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {selectedAppId === 'comfyui' ? (
+            /* ComfyUI Content - Original Layout */
+            <div className="flex-1 p-6 flex flex-col items-center overflow-auto">
+              {isCheckingDeps || depsInstalled === null ? (
+                <div className="w-full flex items-center justify-center gap-2 text-[hsl(var(--text-secondary))]">
+                  <Loader2 className="animate-spin" size={18} />
+                  <span className="text-sm">Checking Dependencies...</span>
                 </div>
-              )}
+              ) : showVersionManager ? (
+                <div className="w-full flex-1 flex flex-col gap-4 min-h-0">
+                  <div className="w-full flex items-center justify-between flex-shrink-0">
+                    <button
+                      onClick={() => setShowVersionManager(false)}
+                      className="flex items-center gap-2 px-3 py-2 rounded border border-[hsl(var(--border-control))] bg-[hsl(var(--surface-interactive))] hover:bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--text-primary))] text-sm transition-colors"
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Back to setup</span>
+                    </button>
+                    <div className="flex items-center gap-3 text-xs text-[hsl(var(--text-secondary))]">
+                      <span>{installedVersions.length} installed</span>
+                      <motion.button
+                        onClick={async () => {
+                          if (isRefreshingVersions) return;
+                          setIsRefreshingVersions(true);
+                          try {
+                            await refreshAll(true);
+                          } finally {
+                            setIsRefreshingVersions(false);
+                          }
+                        }}
+                        disabled={isRefreshingVersions || isVersionLoading}
+                        className="p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors disabled:opacity-50"
+                        whileHover={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 1.05 }}
+                        whileTap={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 0.96 }}
+                        title="Refresh versions"
+                      >
+                        <RefreshCw size={14} className={isRefreshingVersions ? 'animate-spin text-[hsl(var(--text-tertiary))]' : 'text-[hsl(var(--text-secondary))]'} />
+                      </motion.button>
+                    </div>
+                  </div>
+                  <div className="w-full flex-1 min-h-0 overflow-hidden">
+                    <InstallDialog
+                      isOpen={showVersionManager}
+                      onClose={() => setShowVersionManager(false)}
+                      availableVersions={availableVersions}
+                      installedVersions={installedVersions}
+                      isLoading={isVersionLoading}
+                      onInstallVersion={installVersion}
+                      onRemoveVersion={removeVersion}
+                      onRefreshAll={refreshAll}
+                      installingTag={installingTag}
+                      installationProgress={installationProgress}
+                      installNetworkStatus={installNetworkStatus}
+                      onRefreshProgress={fetchInstallationProgress}
+                      displayMode="page"
+                    />
+                  </div>
+                </div>
+              ) : (
+                <>
+                  {/* VERSION SELECTOR */}
+                  <div className="w-full mb-4">
+                    <VersionSelector
+                      installedVersions={installedVersions}
+                      activeVersion={activeVersion}
+                      isLoading={isVersionLoading}
+                      switchVersion={switchVersion}
+                      openActiveInstall={openActiveInstall}
+                      onOpenVersionManager={() => setShowVersionManager(true)}
+                      installNetworkStatus={installNetworkStatus}
+                      defaultVersion={defaultVersion}
+                      onMakeDefault={setDefaultVersion}
+                      installingVersion={installingTag}
+                      activeShortcutState={{ menu: menuShortcut, desktop: desktopShortcut }}
+                      diskSpacePercent={diskSpacePercent}
+                      hasNewVersion={hasUpdate}
+                      latestVersion={latestVersion}
+                    />
+                  </div>
 
-          </motion.div>
-          </>
-        )}
+                  {/* DEPENDENCY SECTION */}
+                  <div className="w-full mb-6 min-h-[50px] flex items-center justify-center">
+                    <AnimatePresence mode="wait">
+                      {depsInstalled === false ? (
+                        <motion.button
+                          key="install-btn"
+                          layout
+                          initial={{ opacity: 0, scale: 0.9 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.5, transition: { duration: 0.2 } }}
+                          onClick={handleInstallDeps}
+                          disabled={isInstalling || comfyUIRunning}
+                          className="w-full h-12 bg-[hsl(var(--surface-interactive))] hover:bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--text-secondary))] hover:text-[hsl(var(--text-primary))] font-bold text-sm flex items-center justify-center gap-3 transition-colors active:scale-[0.98] rounded-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isInstalling ? (
+                            <>
+                              <Loader2 className="animate-spin" size={18} />
+                              <span>Installing (Check Terminal)...</span>
+                            </>
+                          ) : comfyUIRunning ? (
+                            <>
+                              <ArrowDownToLine size={18} />
+                              <span>Stop ComfyUI to Install</span>
+                            </>
+                          ) : (
+                            <>
+                              <ArrowDownToLine size={18} />
+                              <span>Install Missing Dependencies</span>
+                            </>
+                          )}
+                        </motion.button>
+                      ) : null}
+                    </AnimatePresence>
+                  </div>
+
+                  {/* CONTROL PANEL */}
+                  <motion.div
+                    className="w-full flex flex-col items-center gap-6"
+                    animate={{
+                      opacity: depsInstalled ? 1 : 0.3,
+                      filter: depsInstalled ? "blur(0px)" : "blur(1px)",
+                      pointerEvents: depsInstalled ? "auto" : "none"
+                    }}
+                    transition={{ duration: 0.4 }}
+                  >
+                    {displayStatus && (
+                      <div className="h-6 text-center w-full px-2">
+                        <span
+                          className={`text-sm italic font-medium transition-colors duration-300 block truncate ${
+                            comfyUIRunning ? 'text-[hsl(var(--accent-success))]' : (isSetupComplete ? 'text-[hsl(var(--accent-success))]' : 'text-[hsl(var(--text-tertiary))]')
+                          }`}
+                        >
+                          {displayStatus}
+                        </span>
+                      </div>
+                    )}
+                  </motion.div>
+                </>
+              )}
+            </div>
+          ) : (
+            /* Other Apps - Show Model Manager */
+            <div className="flex-1 flex flex-col gap-4 p-8 px-0 mx-2 py-1 overflow-hidden">
+              <div className="text-center py-4">
+                <p className="text-[hsl(var(--launcher-text-secondary))] text-sm">
+                  {selectedAppId ? `${apps.find(a => a.id === selectedAppId)?.displayName} - Coming Soon` : 'Select an app from the sidebar'}
+                </p>
+              </div>
+
+              {/* Model Manager for non-ComfyUI apps */}
+              <ModelManager
+                modelGroups={modelGroups}
+                starredModels={starredModels}
+                linkedModels={linkedModels}
+                onToggleStar={handleToggleStar}
+                onToggleLink={handleToggleLink}
+                selectedAppId={selectedAppId}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Status Footer */}

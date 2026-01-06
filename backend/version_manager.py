@@ -96,7 +96,10 @@ class VersionManager(
         self._initialize_active_version()
 
     def get_available_releases(
-        self, force_refresh: bool = False, collapse: bool = True, include_prerelease: bool = True
+        self,
+        force_refresh: bool = False,
+        collapse: bool = True,
+        include_prerelease: bool = True,
     ) -> List[GitHubRelease]:
         """
         Get available ComfyUI releases from GitHub

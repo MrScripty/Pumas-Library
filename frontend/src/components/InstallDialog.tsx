@@ -445,39 +445,39 @@ export function InstallDialog({
   const showProgressDetails = viewMode === 'details' && Boolean(installingVersion && progress);
 
   const containerClasses = isPageMode
-    ? 'bg-[#2a2a2a] border border-[#444] rounded-lg shadow-inner w-full h-full flex flex-col'
-    : 'bg-[#2a2a2a] border border-[#444] rounded-lg shadow-2xl w-full max-w-3xl max-h-[80vh] flex flex-col';
+    ? 'w-full h-full flex flex-col'
+    : 'w-full max-w-3xl max-h-[80vh] flex flex-col';
 
   const dialogContent = (
     <div className={containerClasses} onClick={(e) => !isPageMode && e.stopPropagation()}>
       {/* Header */}
       { !isPageMode && (
-        <div className="flex items-center justify-between p-4 border-b border-[#444]">
+        <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
           <div className="flex items-center gap-3">
-            <h2 className="text-xl font-semibold text-white">
+            <h2 className="text-xl font-semibold text-[hsl(var(--text-primary))]">
               {installingVersion ? `Installing ${installingVersion}` : 'Install ComfyUI Version'}
             </h2>
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={onClose}
-              className="p-1 rounded hover:bg-[#444] transition-colors"
+              className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
             >
-              <X size={20} className="text-gray-400" />
+              <X size={20} className="text-[hsl(var(--text-muted))]" />
             </button>
           </div>
         </div>
       )}
 
       {/* Version List or Installation Progress */}
-      <div className="flex-1 overflow-y-auto p-4 pt-0">
+      <div className="flex-1 overflow-y-auto py-4 px-0">
         <AnimatePresence>
           {cancellationNotice && (
             <motion.div
               initial={{ opacity: 0, y: -6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -6 }}
-              className="mb-3 rounded border border-yellow-500/30 bg-yellow-500/10 px-3 py-2 text-sm text-yellow-400"
+              className="mb-3 mx-4 rounded border border-[hsl(var(--accent-warning))]/30 bg-[hsl(var(--accent-warning))]/10 px-3 py-2 text-sm text-[hsl(var(--accent-warning))]"
             >
               <div className="flex items-center gap-2">
                 <AlertCircle size={14} />
@@ -489,16 +489,16 @@ export function InstallDialog({
 
         {showProgressDetails ? (
           /* Installation Progress View */
-          <div className="space-y-4">
+          <div className="space-y-4 px-4">
             <div className="flex items-center justify-between gap-3">
               <button
                 onClick={() => setViewMode('list')}
-                className="flex items-center gap-2 px-3 py-2 rounded border border-[#333] bg-[#2a2a2a] hover:bg-[#333] text-white text-sm transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded border border-[hsl(var(--surface-low))] bg-[hsl(var(--surface-lowest))] hover:bg-[hsl(var(--surface-low))] text-[hsl(var(--text-primary))] text-sm transition-colors"
               >
                 <ArrowLeft size={14} />
                 <span>Back to versions</span>
               </button>
-              <div className="text-sm text-gray-400 truncate">
+              <div className="text-sm text-[hsl(var(--text-muted))] truncate">
                 {installingVersion ? `Installing ${installingVersion}` : 'Installation details'}
               </div>
             </div>
@@ -506,12 +506,12 @@ export function InstallDialog({
             {/* Overall Progress */}
             <div>
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-gray-300">Overall Progress</span>
-                <span className="text-sm font-semibold text-white">{progress.overall_progress}%</span>
+                <span className="text-sm font-medium text-[hsl(var(--text-secondary))]">Overall Progress</span>
+                <span className="text-sm font-semibold text-[hsl(var(--text-primary))]">{progress.overall_progress}%</span>
               </div>
-              <div className="w-full h-2 bg-[#333] rounded-full overflow-hidden">
+              <div className="w-full h-2 bg-[hsl(var(--surface-low))] rounded-full overflow-hidden">
                 <motion.div
-                  className="h-full bg-[#55ff55] rounded-full"
+                  className="h-full bg-[hsl(var(--accent-success))] rounded-full"
                   initial={{ width: 0 }}
                   animate={{ width: `${progress.overall_progress}%` }}
                   transition={{ duration: 0.3 }}
@@ -520,28 +520,28 @@ export function InstallDialog({
             </div>
 
             {/* Current Stage */}
-            <div className="bg-[#333] rounded-lg p-4">
+            <div className="bg-[hsl(var(--surface-low))] rounded-lg p-4">
               <div className="flex items-start gap-3">
-                <div className="p-2 bg-[#55ff55]/10 rounded-lg">
-                  <CurrentStageIcon size={24} className="text-[#55ff55]" />
+                <div className="p-2 bg-[hsl(var(--accent-success))]/10 rounded-lg">
+                  <CurrentStageIcon size={24} className="text-[hsl(var(--accent-success))]" />
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-1">
-                    <h3 className="text-white font-medium">
+                    <h3 className="text-[hsl(var(--text-primary))] font-medium">
                       {STAGE_LABELS[progress.stage]}
                     </h3>
-                    <span className="text-sm text-gray-400">
+                    <span className="text-sm text-[hsl(var(--text-muted))]">
                       {progress.stage_progress}%
                     </span>
                   </div>
                   {progress.current_item && (
-                    <p className="text-sm text-gray-400 truncate">
+                    <p className="text-sm text-[hsl(var(--text-muted))] truncate">
                       {progress.current_item}
                     </p>
                   )}
-                  <div className="w-full h-1.5 bg-[#222] rounded-full overflow-hidden mt-2">
+                  <div className="w-full h-1.5 bg-[hsl(var(--surface-lowest))] rounded-full overflow-hidden mt-2">
                     <motion.div
-                      className="h-full bg-[#55ff55]/50 rounded-full"
+                      className="h-full bg-[hsl(var(--accent-success))]/50 rounded-full"
                       initial={{ width: 0 }}
                       animate={{ width: `${progress.stage_progress}%` }}
                       transition={{ duration: 0.3 }}
@@ -553,52 +553,52 @@ export function InstallDialog({
 
             {/* Stage-specific Stats */}
             {progress.download_speed !== null && (
-              <div className="bg-[#333] rounded-lg p-3">
+              <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <Download size={14} className="text-gray-400" />
-                  <span className="text-xs text-gray-400">Speed</span>
+                  <Download size={14} className="text-[hsl(var(--text-muted))]" />
+                  <span className="text-xs text-[hsl(var(--text-muted))]">Speed</span>
                 </div>
-                <span className="text-base font-semibold text-white">
+                <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
                   {formatSpeed(progress.download_speed)}
                 </span>
               </div>
             )}
 
             {progress.stage === 'dependencies' && progress.dependency_count !== null && (
-              <div className="bg-[#333] rounded-lg p-3">
+              <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
                 <div className="flex items-center gap-2 mb-1">
-                  <Package size={14} className="text-gray-400" />
-                  <span className="text-xs text-gray-400">Packages</span>
+                  <Package size={14} className="text-[hsl(var(--text-muted))]" />
+                  <span className="text-xs text-[hsl(var(--text-muted))]">Packages</span>
                 </div>
-                <span className="text-base font-semibold text-white">
+                <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
                   {progress.completed_dependencies} / {progress.dependency_count}
                 </span>
               </div>
             )}
 
             {/* Elapsed Time */}
-            <div className="flex items-center gap-2 text-sm text-gray-400">
+            <div className="flex items-center gap-2 text-sm text-[hsl(var(--text-muted))]">
               <Clock size={14} />
               <span>Elapsed: {formatElapsedTime(progress.started_at)}</span>
             </div>
 
             {/* Expandable Details */}
             {progress.completed_items.length > 0 && (
-              <div className="bg-[#333] rounded-lg overflow-hidden">
+              <div className="bg-[hsl(var(--surface-low))] rounded-lg overflow-hidden">
                 <button
                   onClick={() => setShowCompletedItems(!showCompletedItems)}
-                  className="w-full flex items-center justify-between p-3 hover:bg-[#3a3a3a] transition-colors"
+                  className="w-full flex items-center justify-between p-3 hover:bg-[hsl(var(--surface-tertiary))] transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    <CheckCircle2 size={14} className="text-[#55ff55]" />
-                    <span className="text-sm font-medium text-white">
+                    <CheckCircle2 size={14} className="text-[hsl(var(--accent-success))]" />
+                    <span className="text-sm font-medium text-[hsl(var(--text-primary))]">
                       Completed Items ({progress.completed_items.length})
                     </span>
                   </div>
                   {showCompletedItems ? (
-                    <ChevronUp size={14} className="text-gray-400" />
+                    <ChevronUp size={14} className="text-[hsl(var(--text-muted))]" />
                   ) : (
-                    <ChevronDown size={14} className="text-gray-400" />
+                    <ChevronDown size={14} className="text-[hsl(var(--text-muted))]" />
                   )}
                 </button>
                 <AnimatePresence>
@@ -613,13 +613,13 @@ export function InstallDialog({
                         {progress.completed_items.map((item, index) => (
                           <div
                             key={index}
-                            className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-[#2a2a2a]"
+                            className="flex items-center justify-between text-xs py-1 px-2 rounded hover:bg-[hsl(var(--surface-lowest))]"
                           >
-                            <span className="text-gray-300 truncate flex-1">
+                            <span className="text-[hsl(var(--text-secondary))] truncate flex-1">
                               {item.name}
                             </span>
                             {item.size !== null && (
-                              <span className="text-gray-500 text-xs ml-2">
+                              <span className="text-[hsl(var(--text-muted))] text-xs ml-2">
                                 {formatBytes(item.size)}
                               </span>
                             )}
@@ -637,26 +637,26 @@ export function InstallDialog({
               <>
                 {progress.error.toLowerCase().includes('cancel') ? (
                   /* Cancellation Message */
-                  <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 flex items-center gap-3">
-                    <AlertCircle size={20} className="text-yellow-400" />
+                  <div className="bg-[hsl(var(--accent-warning))]/10 border border-[hsl(var(--accent-warning))]/30 rounded-lg p-3 flex items-center gap-3">
+                    <AlertCircle size={20} className="text-[hsl(var(--accent-warning))]" />
                     <div>
-                      <p className="text-yellow-400 font-medium text-sm">Installation Cancelled</p>
-                      <p className="text-xs text-gray-400 mt-1">
+                      <p className="text-[hsl(var(--accent-warning))] font-medium text-sm">Installation Cancelled</p>
+                      <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
                         The installation was stopped and incomplete files have been removed
                       </p>
                     </div>
                   </div>
                 ) : (
                   /* Error Message */
-                  <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-3 flex items-center gap-3">
-                    <AlertCircle size={20} className="text-red-400" />
+                  <div className="bg-[hsl(var(--accent-error))]/10 border border-[hsl(var(--accent-error))]/30 rounded-lg p-3 flex items-center gap-3">
+                    <AlertCircle size={20} className="text-[hsl(var(--accent-error))]" />
                   <div>
-                    <p className="text-red-400 font-medium text-sm">Installation Failed</p>
-                    <p className="text-xs text-gray-400 mt-1">{progress.error}</p>
+                    <p className="text-[hsl(var(--accent-error))] font-medium text-sm">Installation Failed</p>
+                    <p className="text-xs text-[hsl(var(--text-muted))] mt-1">{progress.error}</p>
                     {progress.log_path && (
                       <button
                         onClick={() => openLogPath(progress.log_path)}
-                        className="mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border border-red-500/40 text-xs text-red-200 hover:bg-red-500/10"
+                        className="mt-2 inline-flex items-center gap-2 px-2 py-1 rounded border border-[hsl(var(--accent-error))]/40 text-xs text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error))]/10"
                       >
                         <FileText size={12} />
                         <span>Open log</span>
@@ -670,11 +670,11 @@ export function InstallDialog({
 
             {/* Success Message */}
             {progress.completed_at && progress.success && (
-              <div className="bg-[#55ff55]/10 border border-[#55ff55]/30 rounded-lg p-3 flex items-center gap-3">
-                <CheckCircle2 size={20} className="text-[#55ff55]" />
+              <div className="bg-[hsl(var(--accent-success))]/10 border border-[hsl(var(--accent-success))]/30 rounded-lg p-3 flex items-center gap-3">
+                <CheckCircle2 size={20} className="text-[hsl(var(--accent-success))]" />
                 <div>
-                  <p className="text-[#55ff55] font-medium text-sm">Installation Complete!</p>
-                  <p className="text-xs text-gray-400 mt-1">
+                  <p className="text-[hsl(var(--accent-success))] font-medium text-sm">Installation Complete!</p>
+                  <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
                     {installingVersion} has been successfully installed
                   </p>
                 </div>
@@ -683,12 +683,12 @@ export function InstallDialog({
           </div>
         ) : isLoading ? (
           /* Loading State */
-          <div className="flex items-center justify-center py-12">
-            <Loader2 size={32} className="text-gray-400 animate-spin" />
+          <div className="flex items-center justify-center py-12 px-4">
+            <Loader2 size={32} className="text-[hsl(var(--text-muted))] animate-spin" />
           </div>
         ) : filteredVersions.length === 0 ? (
           /* Empty State */
-          <div className="flex flex-col items-center justify-center py-12 text-gray-500">
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-[hsl(var(--text-muted))]">
             <AlertCircle size={48} className="mb-3" />
             <p>No versions available</p>
             <p className="text-sm mt-1">Try adjusting the filters above</p>
@@ -728,20 +728,20 @@ export function InstallDialog({
                 : currentProgress?.stage === 'dependencies'
                   ? 'Installing...'
                   : 'Downloading...';
-              const ringColor = currentProgress?.error ? '#ff6b6b' : '#55ff55';
+              const ringColor = currentProgress?.error ? 'hsl(var(--accent-error))' : 'hsl(var(--accent-success))';
               const isCancelHover = isCurrent && cancelHoverTag === release.tag_name;
               const downloadIconClass =
                 installNetworkStatus === 'stalled'
-                  ? 'animate-pulse text-[#ffc266]'
+                  ? 'animate-pulse text-[hsl(var(--accent-warning))]'
                   : installNetworkStatus === 'failed'
-                    ? 'animate-pulse text-[#ff6b6b]'
-                    : 'animate-pulse text-[#7dff7d]';
+                    ? 'animate-pulse text-[hsl(var(--accent-error))]'
+                    : 'animate-pulse text-[hsl(var(--accent-success))]';
               const downloadIconStyle =
                 installNetworkStatus === 'stalled'
-                  ? { filter: 'drop-shadow(0 0 6px #ffc266)' }
+                  ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-warning)))' }
                   : installNetworkStatus === 'failed'
-                    ? { filter: 'drop-shadow(0 0 6px #ff6b6b)' }
-                    : { filter: 'drop-shadow(0 0 6px #7dff7d)' };
+                    ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
+                    : { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' };
 
               return (
                 <motion.div
@@ -750,13 +750,7 @@ export function InstallDialog({
                   animate={{ opacity: 1, y: 0 }}
                   onMouseEnter={() => setHoveredTag(release.tag_name)}
                   onMouseLeave={() => setHoveredTag(null)}
-                  className={`bg-[#333] border rounded-lg p-3 transition-colors ${
-                    installed
-                      ? 'border-[#55ff55]/40'
-                      : hasError
-                      ? 'border-red-500/50'
-                      : 'border-[#444] hover:border-[#555]'
-                  }`}
+                  className="w-full p-3 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-3">
                     {/* Version Info */}
@@ -764,7 +758,7 @@ export function InstallDialog({
                       <div className="flex items-center gap-2">
                         <div className="flex flex-col min-w-0">
                           <div className="flex items-center gap-2 min-w-0">
-                            <h3 className="text-white font-medium truncate">
+                            <h3 className="text-[hsl(var(--text-primary))] font-medium truncate">
                               {displayTag}
                             </h3>
                           <button
@@ -772,10 +766,10 @@ export function InstallDialog({
                                 e.stopPropagation();
                                 openReleaseLink(releaseUrl);
                               }}
-                              className="p-1 rounded hover:bg-[#444] transition-colors flex-shrink-0"
+                              className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
                               title="Open release notes"
                             >
-                              <ExternalLink size={14} className="text-gray-300" />
+                              <ExternalLink size={14} className="text-[hsl(var(--text-secondary))]" />
                             </button>
                             {stickyFailedTag === release.tag_name && stickyFailedLogPath && (
                               <button
@@ -783,19 +777,19 @@ export function InstallDialog({
                                   e.stopPropagation();
                                   openLogPath(stickyFailedLogPath);
                                 }}
-                                className="p-1 rounded hover:bg-[#444] transition-colors flex-shrink-0"
+                                className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
                                 title="Open last install log"
                               >
-                                <FileText size={14} className="text-red-300" />
+                                <FileText size={14} className="text-[hsl(var(--accent-error))]" />
                               </button>
                             )}
                             {release.prerelease && (
-                              <span className="px-2 py-0.5 bg-yellow-500/20 text-yellow-400 text-[11px] rounded-full">
+                              <span className="px-2 py-0.5 bg-[hsl(var(--accent-warning))]/20 text-[hsl(var(--accent-warning))] text-[11px] rounded-full">
                                 Pre
                               </span>
                             )}
                           </div>
-                          <div className="flex items-center gap-1 text-xs text-gray-400">
+                          <div className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
                             <span>{formatDate(release.published_at)}</span>
                           </div>
                         </div>
@@ -803,7 +797,7 @@ export function InstallDialog({
 
                       {/* Error message */}
                       {hasError && errorMessage && (
-                        <div className="mt-1 flex items-start gap-2 text-sm text-red-400 bg-red-500/10 rounded p-2">
+                        <div className="mt-1 flex items-start gap-2 text-sm text-[hsl(var(--accent-error))] bg-[hsl(var(--accent-error))]/10 rounded p-2">
                           <AlertCircle size={16} className="flex-shrink-0 mt-0.5" />
                           <span>{errorMessage}</span>
                         </div>
@@ -836,47 +830,47 @@ export function InstallDialog({
                         }}
                         whileHover={!isCurrent ? { scale: 1.05 } : {}}
                         whileTap={!isCurrent ? { scale: 0.96 } : {}}
-                        className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[150px] min-w-[150px] overflow-hidden ${
+                        className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[120px] min-w-[120px] overflow-hidden ${
                           isCurrent
                             ? isCancelHover
-                              ? 'bg-[#2a1a1a] border-[#ff6666] text-[#ffcccc]'
-                              : 'bg-[#2f2f2f] border-[#555] text-white'
+                              ? 'bg-[hsl(var(--surface-lowest))] border-[hsl(var(--accent-error))] text-[hsl(var(--accent-error))]'
+                              : 'bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))]'
                             : showUninstall
-                              ? 'bg-[#2a1a1a] border-[#ff6666] text-[#ffcccc]'
+                              ? 'bg-[hsl(var(--surface-lowest))] border-[hsl(var(--accent-error))] text-[hsl(var(--accent-error))]'
                               : installed
-                                ? 'bg-[#55ff55]/20 border-[#55ff55]/60 text-[#0f2b0f]'
+                                ? 'bg-[hsl(var(--accent-success))]/20 border-[hsl(var(--accent-success))]/60 text-[hsl(var(--text-primary))]'
                                 : isComplete
-                                  ? 'bg-[#55ff55]/20 border-[#55ff55]/60 text-[#0f2b0f]'
-                                  : 'bg-[#2f2f2f] border-[#555] text-white hover:border-[#66ff66] hover:text-[#66ff66]'
+                                  ? 'bg-[hsl(var(--accent-success))]/20 border-[hsl(var(--accent-success))]/60 text-[hsl(var(--text-primary))]'
+                                  : 'bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--accent-success))] hover:text-[hsl(var(--accent-success))]'
                         }`}
                       >
                         {installed && !showUninstall ? (
                           <>
-                            <Check size={16} className="text-[#0f2b0f]" />
-                            <span className="text-xs font-semibold text-[#0f2b0f] truncate whitespace-nowrap flex-1 min-w-0">Ready</span>
+                            <Check size={16} className="text-[hsl(var(--text-primary))]" />
+                            <span className="text-xs font-semibold text-[hsl(var(--text-primary))] truncate whitespace-nowrap flex-1 min-w-0">Ready</span>
                           </>
                         ) : showUninstall ? (
                           <>
-                            <X size={16} className="text-[#ffcccc]" />
-                            <span className="text-xs font-semibold text-[#ffcccc] truncate whitespace-nowrap flex-1 min-w-0">Uninstall</span>
+                            <X size={16} className="text-[hsl(var(--accent-error))]" />
+                            <span className="text-xs font-semibold text-[hsl(var(--accent-error))] truncate whitespace-nowrap flex-1 min-w-0">Uninstall</span>
                           </>
                         ) : isCurrent ? (
                           <>
                             {isCancelHover ? (
-                              <XCircle size={16} className="text-[#ffcccc]" />
+                              <XCircle size={16} className="text-[hsl(var(--accent-error))]" />
                             ) : (
                               <ProgressRing
                                 progress={ringPercent ?? 0}
                                 size={18}
                                 strokeWidth={2}
-                                trackColor="#2f2f2f"
+                                trackColor="hsl(var(--surface-control))"
                                 indicatorColor={ringColor}
                               >
                                 <Download size={14} className={downloadIconClass} style={downloadIconStyle} />
                               </ProgressRing>
                             )}
                             {isCancelHover ? (
-                              <span className="text-xs font-semibold text-[#ffcccc] truncate whitespace-nowrap flex-1 min-w-0">Cancel</span>
+                              <span className="text-xs font-semibold text-[hsl(var(--accent-error))] truncate whitespace-nowrap flex-1 min-w-0">Cancel</span>
                             ) : (
                               <span className="text-xs font-semibold truncate whitespace-nowrap flex-1 min-w-0">{packageLabel}</span>
                             )}
@@ -890,7 +884,7 @@ export function InstallDialog({
                           </>
                         )}
                       </motion.button>
-                      <Gear size={16} className="text-gray-400" />
+                      <Gear size={16} className="text-[hsl(var(--text-muted))]" />
                     </div>
                   </div>
 

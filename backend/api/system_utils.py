@@ -10,6 +10,11 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
+try:
+    import psutil
+except ImportError:
+    psutil = None  # type: ignore
+
 from backend.exceptions import ValidationError
 from backend.file_opener import open_in_file_manager
 from backend.logging_config import get_logger
@@ -66,8 +71,29 @@ class SystemUtils:
             menu = False
             desktop = False
 
-        running_processes = self.process_manager._detect_comfyui_processes()
+        running_processes = self.process_manager.get_processes_with_resources()
         running = bool(running_processes)
+
+        # Aggregate per-app resources
+        app_resources: Dict[str, Dict[str, float]] = {}
+
+        # Map ComfyUI processes to app resources
+        if running_processes:
+            total_cpu = 0.0
+            total_ram_memory = 0.0
+            total_gpu_memory = 0.0
+
+            for proc in running_processes:
+                total_cpu += proc.get("cpu_usage", 0.0)
+                total_ram_memory += proc.get("ram_memory", 0.0)
+                total_gpu_memory += proc.get("gpu_memory", 0.0)
+
+            # All ComfyUI processes are aggregated under "comfyui" app
+            app_resources["comfyui"] = {
+                "cpu": round(total_cpu, 1),
+                "ram_memory": round(total_ram_memory, 2),
+                "gpu_memory": round(total_gpu_memory, 2),
+            }
 
         # Check for new releases
         release_info = self.version_info_manager.check_for_new_release()
@@ -92,6 +118,7 @@ class SystemUtils:
             "shortcut_version": active_version,
             "comfyui_running": running,
             "running_processes": running_processes,
+            "app_resources": app_resources,
             "message": message,
             "release_info": release_info,
             "last_launch_log": self.process_manager.last_launch_log,
@@ -197,7 +224,10 @@ class SystemUtils:
                 if opener:
                     result = subprocess.run([opener, url], capture_output=True)
                     if result.returncode != 0:
-                        return {"success": False, "error": f"xdg-open returned {result.returncode}"}
+                        return {
+                            "success": False,
+                            "error": f"xdg-open returned {result.returncode}",
+                        }
                     return {"success": True}
                 return {"success": False, "error": "Unable to open browser"}
             return {"success": True}
@@ -216,6 +246,108 @@ class SystemUtils:
 
         active_path = self.version_manager.get_active_version_path()
         if not active_path:
-            return {"success": False, "error": "No active version or installation incomplete"}
+            return {
+                "success": False,
+                "error": "No active version or installation incomplete",
+            }
 
         return self.open_path(str(active_path))
+
+    def get_system_resources(self) -> Dict[str, Any]:
+        """
+        Get current system resource usage (CPU, GPU, RAM, Disk)
+
+        Returns:
+            Dictionary with system resource information
+        """
+        if not psutil:
+            return {
+                "success": False,
+                "error": "psutil not available",
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }
+
+        try:
+            # Get CPU usage
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+
+            # Get RAM usage
+            ram = psutil.virtual_memory()
+            ram_usage_gb = (ram.total - ram.available) / (1024**3)
+            ram_total_gb = ram.total / (1024**3)
+
+            # Get disk usage
+            disk = shutil.disk_usage(self.script_dir)
+            disk_usage_gb = disk.used / (1024**3)
+            disk_total_gb = disk.total / (1024**3)
+            disk_free_gb = disk.free / (1024**3)
+
+            # Try to get GPU usage (NVIDIA only for now)
+            gpu_usage = 0.0
+            gpu_memory = 0.0
+            gpu_memory_total = 0.0
+            gpu_temp = None
+
+            try:
+                # Check if nvidia-smi is available - get utilization, used memory, and total memory
+                result = subprocess.run(
+                    [
+                        "nvidia-smi",
+                        "--query-gpu=utilization.gpu,memory.used,memory.total",
+                        "--format=csv,noheader,nounits",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=2,
+                )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split("\n")
+                    if lines:
+                        # Get first GPU
+                        parts = lines[0].split(",")
+                        if len(parts) >= 3:
+                            gpu_usage = float(parts[0].strip())
+                            gpu_memory = float(parts[1].strip()) / 1024  # Convert MB to GB
+                            gpu_memory_total = float(parts[2].strip()) / 1024  # Convert MB to GB
+            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
+                # nvidia-smi not available or failed
+                pass
+
+            return {
+                "success": True,
+                "resources": {
+                    "cpu": {"usage": round(cpu_percent, 1), "temp": None},
+                    "gpu": {
+                        "usage": round(gpu_usage, 1),
+                        "memory": round(gpu_memory, 1),
+                        "memory_total": round(gpu_memory_total, 1),
+                        "temp": gpu_temp,
+                    },
+                    "ram": {
+                        "usage": round(ram_usage_gb, 1),
+                        "total": round(ram_total_gb, 1),
+                    },
+                    "disk": {
+                        "usage": round(disk_usage_gb, 1),
+                        "total": round(disk_total_gb, 1),
+                        "free": round(disk_free_gb, 1),
+                    },
+                },
+            }
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
+            logger.error(f"Failed to get system resources: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }

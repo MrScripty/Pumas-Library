@@ -1,6 +1,146 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, Download, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
+import { useHover } from '@react-aria/interactions';
+
+// Component for individual version dropdown items to handle hover state
+interface VersionDropdownItemProps {
+  version: string;
+  isActive: boolean;
+  isInstalling: boolean;
+  isSwitching: boolean;
+  isLoading: boolean;
+  isDefault: boolean;
+  isEnabled: boolean;
+  onMakeDefault?: (tag: string | null) => Promise<boolean>;
+  onSwitchVersion: (tag: string) => void;
+  onToggleShortcuts: (version: string, enabled: boolean) => Promise<void>;
+}
+
+const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
+  version,
+  isActive,
+  isInstalling,
+  isSwitching,
+  isLoading,
+  isDefault,
+  isEnabled,
+  onMakeDefault,
+  onSwitchVersion,
+  onToggleShortcuts,
+}) => {
+  // Hover states for the row and anchor button
+  const { hoverProps: rowHoverProps, isHovered: isRowHovered } = useHover({});
+  const { hoverProps: anchorHoverProps, isHovered: isAnchorHovered } = useHover({});
+  const [anchorHoverStartedAsDefault, setAnchorHoverStartedAsDefault] = useState(false);
+
+  // Track when hover starts on the anchor button
+  useEffect(() => {
+    if (isAnchorHovered) {
+      setAnchorHoverStartedAsDefault(isDefault);
+    }
+  }, [isAnchorHovered, isDefault]);
+
+  return (
+    <div
+      {...rowHoverProps}
+      role="button"
+      tabIndex={0}
+      onClick={() => {
+        if (isInstalling) return;
+        onSwitchVersion(version);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          if (isInstalling) return;
+          onSwitchVersion(version);
+        }
+      }}
+      className={`relative w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
+        isActive
+          ? 'bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--accent-success))]'
+          : isInstalling
+            ? 'text-[hsl(var(--text-tertiary))] bg-[hsl(var(--surface-interactive))]'
+            : 'text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-interactive-hover))] hover:text-[hsl(var(--text-primary))]'
+      } ${isSwitching || isInstalling ? 'opacity-50 cursor-not-allowed' : ''}`}
+    >
+      <div className="flex items-center gap-2 min-w-0">
+        {/* Anchor on the left of version */}
+        <div className="w-4 flex items-center justify-center flex-shrink-0">
+          {onMakeDefault ? (
+            <button
+              {...anchorHoverProps}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!onMakeDefault) return;
+                if (isDefault) {
+                  onMakeDefault(null).catch((err) => console.error('Failed to clear default', err));
+                } else {
+                  onMakeDefault(version).catch((err) => console.error('Failed to set default', err));
+                }
+              }}
+              className="flex items-center justify-center"
+              title={
+                isDefault
+                  ? 'Click to unset as default'
+                  : 'Click to set as default'
+              }
+              disabled={isSwitching || isLoading}
+            >
+              {isDefault && isAnchorHovered && anchorHoverStartedAsDefault ? (
+                <CircleX size={14} className="text-[hsl(var(--text-tertiary))]" />
+              ) : isDefault ? (
+                <Anchor
+                  size={14}
+                  className="text-[hsl(var(--accent-success))]"
+                />
+              ) : isRowHovered ? (
+                <Anchor size={14} className="text-[hsl(var(--text-tertiary))]" />
+              ) : (
+                <Anchor size={14} className="text-transparent" />
+              )}
+            </button>
+          ) : (
+            <div className="w-4" />
+          )}
+        </div>
+        <span className="font-medium truncate">{version}</span>
+        {isInstalling && (
+          <span className="px-1.5 py-[2px] text-[10px] rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-200">
+            Installing
+          </span>
+        )}
+      </div>
+      <div className="flex items-center gap-2 pr-12">
+        {!isInstalling && (isRowHovered || isEnabled) && (
+          <button
+            onClick={async (e) => {
+              e.stopPropagation();
+              const next = !isEnabled;
+              await onToggleShortcuts(version, next);
+            }}
+            disabled={isSwitching || isLoading}
+            className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center justify-center transition-colors"
+            title={isEnabled ? 'Shortcuts enabled (click to disable)' : 'Shortcuts disabled (click to enable)'}
+          >
+            <Link2
+              size={14}
+              className={isEnabled ? 'text-[hsl(var(--accent-link))]' : 'text-[hsl(var(--text-tertiary))]'}
+              style={{ opacity: 1 }}
+              aria-hidden
+            />
+          </button>
+        )}
+        {isActive && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2">
+            <Check size={14} className="text-[hsl(var(--accent-success))]" />
+          </span>
+        )}
+      </div>
+    </div>
+  );
+};
 
 interface VersionSelectorProps {
   installedVersions: string[];
@@ -15,6 +155,8 @@ interface VersionSelectorProps {
   defaultVersion?: string | null;
   onMakeDefault?: (tag: string | null) => Promise<boolean>;
   diskSpacePercent?: number;
+  hasNewVersion?: boolean;
+  latestVersion?: string | null;
 }
 
 export function VersionSelector({
@@ -30,18 +172,19 @@ export function VersionSelector({
   defaultVersion,
   onMakeDefault,
   diskSpacePercent = 0,
+  hasNewVersion = false,
+  latestVersion = null,
 }: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
   const [isOpeningPath, setIsOpeningPath] = useState(false);
   const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
   const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [hoveredVersion, setHoveredVersion] = useState<string | null>(null);
-  const [hoveredAnchor, setHoveredAnchor] = useState<string | null>(null);
-  const [hoveredSelectorAnchor, setHoveredSelectorAnchor] = useState(false);
   const [shortcutState, setShortcutState] = useState<Record<string, { menu: boolean; desktop: boolean }>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const hoverDefaultWasActive = useRef<boolean>(false);
+
+  // React Aria hover hook for the selector anchor button
+  const { hoverProps: selectorAnchorHoverProps, isHovered: isSelectorAnchorHovered } = useHover({});
 
   const refreshShortcutStates = useCallback(async () => {
     if (!window.pywebview?.api?.get_all_shortcut_states) {
@@ -54,9 +197,10 @@ export function VersionSelector({
       if (result.success && states) {
         const mapped: Record<string, { menu: boolean; desktop: boolean }> = {};
         Object.entries(states).forEach(([tag, state]) => {
+          const typedState = state as { menu: boolean; desktop: boolean; tag?: string };
           mapped[tag] = {
-            menu: Boolean((state as any).menu),
-            desktop: Boolean((state as any).desktop),
+            menu: Boolean(typedState.menu),
+            desktop: Boolean(typedState.desktop),
           };
         });
         setShortcutState(mapped);
@@ -80,6 +224,41 @@ export function VersionSelector({
       console.error('Failed to switch version:', e);
     } finally {
       setIsSwitching(false);
+    }
+  };
+
+  const handleToggleShortcuts = async (version: string, next: boolean) => {
+    if (!window.pywebview?.api?.set_version_shortcuts) {
+      console.warn('Shortcut API not available');
+      return;
+    }
+
+    setShortcutState((prev) => ({
+      ...prev,
+      [version]: { menu: next, desktop: next },
+    }));
+
+    try {
+      if (window.pywebview?.api?.set_version_shortcuts) {
+        const result = await window.pywebview.api.set_version_shortcuts(version, next);
+        if (result?.state) {
+          setShortcutState((prev) => ({
+            ...prev,
+            [version]: {
+              menu: Boolean(result.state.menu),
+              desktop: Boolean(result.state.desktop),
+            },
+          }));
+        }
+      }
+    } catch (err) {
+      console.error('Failed to toggle shortcuts', err);
+      // revert on failure
+      const isEnabled = !next;
+      setShortcutState((prev) => ({
+        ...prev,
+        [version]: { menu: isEnabled, desktop: isEnabled },
+      }));
     }
   };
 
@@ -120,11 +299,18 @@ export function VersionSelector({
   const hasVersionsToShow = combinedVersions.length > 0;
   const emphasizeInstall = !hasInstalledVersions && !isLoading;
 
+  // Debug logging for new version detection
+  React.useEffect(() => {
+    console.log('[VersionSelector] hasNewVersion:', hasNewVersion, 'latestVersion:', latestVersion, 'activeVersion:', activeVersion, 'installNetworkStatus:', installNetworkStatus);
+    console.log('[VersionSelector] emphasizeInstall:', emphasizeInstall, 'isLoading:', isLoading);
+    console.log('[VersionSelector] Should pulse:', (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle');
+  }, [hasNewVersion, latestVersion, activeVersion, installNetworkStatus, emphasizeInstall, isLoading]);
+
   // Determine folder icon color based on disk space
   const getFolderIconColor = () => {
-    if (diskSpacePercent >= 95) return 'text-red-500';
-    if (diskSpacePercent >= 85) return 'text-orange-500';
-    return 'text-gray-400';
+    if (diskSpacePercent >= 95) return 'text-accent-error';
+    if (diskSpacePercent >= 85) return 'text-accent-warning';
+    return 'text-tertiary';
   };
 
   const folderIconColor = getFolderIconColor();
@@ -181,7 +367,7 @@ export function VersionSelector({
     <div className="relative w-full" ref={containerRef}>
       {/* Version Selector Container - Changed from button to div to allow nested buttons */}
       <div
-        className={`w-full h-10 bg-[#2a2a2a] border border-[#444] rounded flex items-center justify-center transition-colors ${
+        className={`w-full h-10 bg-[hsl(var(--surface-interactive))] border border-[hsl(var(--border-control))] rounded flex items-center justify-center transition-colors ${
           !hasVersionsToShow || isLoading || isSwitching ? 'opacity-50' : ''
         }`}
       >
@@ -193,15 +379,15 @@ export function VersionSelector({
               onOpenVersionManager();
             }}
             disabled={isLoading}
-            className="p-2 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+            className="p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors disabled:opacity-50"
             whileHover={{ scale: 1.2 }}
             whileTap={{ scale: 0.9 }}
             title="Install your first version"
           >
             <Download
               size={20}
-              className="text-[#55ff55] animate-pulse"
-              style={{ filter: 'drop-shadow(0 0 8px #55ff55)' }}
+              className="text-[hsl(var(--accent-success))] animate-pulse"
+              style={{ filter: 'drop-shadow(0 0 8px hsl(var(--accent-success)))' }}
             />
           </motion.button>
         ) : (
@@ -220,9 +406,10 @@ export function VersionSelector({
             >
               <span className="inline-flex items-center justify-center w-4">
                 {isSwitching ? (
-                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                  <Loader2 size={14} className="text-[hsl(var(--text-tertiary))] animate-spin" />
                 ) : (
                   <button
+                    {...selectorAnchorHoverProps}
                     onClick={(e) => {
                       e.stopPropagation();
                       if (!onMakeDefault || !activeVersion) return;
@@ -230,8 +417,6 @@ export function VersionSelector({
                       const target = isDefault ? null : activeVersion;
                       onMakeDefault(target).catch((err) => console.error('Failed to toggle default', err));
                     }}
-                    onMouseEnter={() => setHoveredSelectorAnchor(true)}
-                    onMouseLeave={() => setHoveredSelectorAnchor(false)}
                     className="flex items-center justify-center w-4 h-4"
                     title={
                       defaultVersion === activeVersion
@@ -241,21 +426,21 @@ export function VersionSelector({
                     disabled={!onMakeDefault || isLoading}
                   >
                     {defaultVersion === activeVersion ? (
-                      hoveredSelectorAnchor ? (
-                        <CircleX size={14} className="text-gray-500" />
+                      isSelectorAnchorHovered ? (
+                        <CircleX size={14} className="text-[hsl(var(--text-tertiary))]" />
                       ) : (
                         <Anchor
                           size={14}
-                          className="text-[#55ff55]"
+                          className="text-[hsl(var(--accent-success))]"
                         />
                       )
                     ) : (
-                      <div className="w-2 h-2 rounded-full bg-[#55ff55]" />
+                      <div className="w-2 h-2 rounded-full bg-[hsl(var(--accent-success))]" />
                     )}
                   </button>
                 )}
               </span>
-              <span className="text-sm text-white font-medium">
+              <span className="text-sm text-[hsl(var(--text-primary))] font-medium">
                 {displayVersion}
               </span>
             </button>
@@ -266,15 +451,15 @@ export function VersionSelector({
               <motion.button
                 onClick={handleOpenActiveInstall}
                 disabled={!activeVersion || isOpeningPath || isLoading}
-                className="p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50"
+                className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors disabled:opacity-50"
                 whileHover={{ scale: activeVersion ? 1.1 : 1 }}
                 whileTap={{ scale: activeVersion ? 0.9 : 1 }}
                 title={activeVersion ? 'Open active version in file manager' : 'No active version to open'}
               >
                 {showOpenedIndicator ? (
-                  <CheckCircle2 size={14} className="text-[#55ff55]" />
+                  <CheckCircle2 size={14} className="text-[hsl(var(--accent-success))]" />
                 ) : isOpeningPath ? (
-                  <Loader2 size={14} className="text-gray-400 animate-spin" />
+                  <Loader2 size={14} className="text-[hsl(var(--text-tertiary))] animate-spin" />
                 ) : (
                   <FolderOpen size={14} className={folderIconColor} />
                 )}
@@ -289,32 +474,44 @@ export function VersionSelector({
                   console.log('Switching to version manager view');
                 }}
                 disabled={isLoading}
-                className={`p-1 rounded hover:bg-[#444] transition-colors disabled:opacity-50 ${
-                  emphasizeInstall ? 'animate-pulse ring-1 ring-[#55ff55]/60' : ''
+                className={`p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50 ${
+                  (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle' ? 'ring-1 ring-[hsl(var(--accent-success))]/60' : ''
                 }`}
+                animate={{
+                  opacity: (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle' ? [1, 0.7, 1] : 1,
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle' ? Infinity : 0,
+                  ease: "easeInOut"
+                }}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
-                title="Install new version"
+                title={hasNewVersion ? `New version available: ${latestVersion}` : "Install new version"}
               >
                 <Download
                   size={14}
-                  className={`text-gray-400 ${
+                  className={`${
                     installNetworkStatus === 'downloading'
-                      ? 'animate-pulse text-[#7dff7d]'
+                      ? 'download-shimmer text-[hsl(var(--accent-success))]'
                       : installNetworkStatus === 'stalled'
-                        ? 'animate-pulse text-[#ffc266]'
+                        ? 'animate-pulse text-accent-warning'
                         : installNetworkStatus === 'failed'
-                          ? 'animate-pulse text-[#ff6b6b]'
-                          : ''
+                          ? 'animate-pulse text-[hsl(var(--accent-error))]'
+                          : hasNewVersion
+                            ? 'text-[hsl(var(--accent-success))]'
+                            : 'text-[hsl(var(--text-tertiary))]'
                   }`}
                   style={
                     installNetworkStatus === 'downloading'
-                      ? { filter: 'drop-shadow(0 0 6px #7dff7d)' }
+                      ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' }
                       : installNetworkStatus === 'stalled'
-                        ? { filter: 'drop-shadow(0 0 6px #ffc266)' }
+                        ? { filter: 'drop-shadow(0 0 6px rgb(251 146 60))' }
                         : installNetworkStatus === 'failed'
-                          ? { filter: 'drop-shadow(0 0 6px #ff6b6b)' }
-                          : undefined
+                          ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
+                          : hasNewVersion
+                            ? { filter: 'drop-shadow(0 0 8px hsl(var(--accent-success)))' }
+                            : undefined
                   }
                 />
               </motion.button>
@@ -333,159 +530,35 @@ export function VersionSelector({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
             transition={{ duration: 0.2 }}
-            className="absolute top-full left-0 right-0 mt-1 bg-[#2a2a2a] border border-[#444] rounded shadow-lg overflow-hidden z-50"
+            className="absolute top-full left-0 right-0 mt-1 bg-[hsl(var(--surface-overlay))]/80 backdrop-blur-sm rounded overflow-hidden z-50"
           >
             <div className="max-h-64 overflow-y-auto">
               {combinedVersions.map((version) => {
                 const isActive = version === activeVersion;
                 const toggles = shortcutState[version] || { menu: false, desktop: false };
                 const isEnabled = toggles.menu && toggles.desktop;
-                const isPartial = toggles.menu !== toggles.desktop;
-                const showHover = hoveredVersion === version;
                 const isInstalling = installingVersion === version && !installedVersions.includes(version);
                 const isDefault = defaultVersion === version;
-                const showAnchorHover = hoveredAnchor === version && !!onMakeDefault;
                 return (
-                  <div
+                  <VersionDropdownItem
                     key={version}
-                    onClick={() => {
-                      if (isInstalling) return;
-                      handleVersionSwitch(version);
-                    }}
-                    onMouseEnter={() => {
-                      setHoveredVersion(version);
-                    }}
-                    onMouseLeave={() => {
-                      setHoveredVersion((prev) => (prev === version ? null : prev));
-                      if (hoveredAnchor === version) {
-                        setHoveredAnchor(null);
-                        hoverDefaultWasActive.current = false;
-                      }
-                    }}
-                className={`relative w-full px-3 py-2 text-left text-sm flex items-center justify-between transition-colors ${
-                  isActive
-                    ? 'bg-[#333333] text-[#55ff55]'
-                    : isInstalling
-                      ? 'text-gray-500 bg-[#2a2a2a]'
-                      : 'text-gray-300 hover:bg-[#333333] hover:text-white'
-                } ${isSwitching || isInstalling ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {/* Anchor on the left of version */}
-                      <div className="w-4 flex items-center justify-center flex-shrink-0">
-                        {onMakeDefault ? (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (!onMakeDefault) return;
-                              if (isDefault) {
-                                onMakeDefault(null).catch((err) => console.error('Failed to clear default', err));
-                              } else {
-                                onMakeDefault(version).catch((err) => console.error('Failed to set default', err));
-                              }
-                            }}
-                            onMouseEnter={() => {
-                              hoverDefaultWasActive.current = isDefault;
-                              setHoveredAnchor(version);
-                            }}
-                            onMouseLeave={() => {
-                              setHoveredAnchor((prev) => (prev === version ? null : prev));
-                            }}
-                            className="flex items-center justify-center"
-                            title={
-                              isDefault
-                                ? 'Click to unset as default'
-                                : 'Click to set as default'
-                            }
-                            disabled={isSwitching || isLoading}
-                          >
-                            {isDefault && showAnchorHover && hoverDefaultWasActive.current ? (
-                              <CircleX size={14} className="text-gray-500" />
-                            ) : isDefault ? (
-                              <Anchor
-                                size={14}
-                                className="text-[#55ff55]"
-                              />
-                            ) : showHover ? (
-                              <Anchor size={14} className="text-gray-500" />
-                            ) : (
-                              <Anchor size={14} className="text-transparent" />
-                            )}
-                          </button>
-                        ) : (
-                          <div className="w-4" />
-                        )}
-                      </div>
-                      <span className="font-medium truncate">{version}</span>
-                      {isInstalling && (
-                        <span className="px-1.5 py-[2px] text-[10px] rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-200">
-                          Installing
-                        </span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 pr-12">
-                      {!isInstalling && (showHover || isEnabled) && (
-                        <button
-                          onClick={async (e) => {
-                            e.stopPropagation();
-                            if (!window.pywebview?.api?.set_version_shortcuts) {
-                              console.warn('Shortcut API not available');
-                              return;
-                            }
-
-                            const next = !isEnabled;
-                            setShortcutState((prev) => ({
-                              ...prev,
-                              [version]: { menu: next, desktop: next },
-                            }));
-
-                            try {
-                              if (window.pywebview?.api?.set_version_shortcuts) {
-                                const result = await window.pywebview.api.set_version_shortcuts(version, next);
-                                if (result?.state) {
-                                  setShortcutState((prev) => ({
-                                    ...prev,
-                                    [version]: {
-                                      menu: Boolean(result.state.menu),
-                                      desktop: Boolean(result.state.desktop),
-                                    },
-                                  }));
-                                }
-                              }
-                            } catch (err) {
-                              console.error('Failed to toggle shortcuts', err);
-                              // revert on failure
-                              setShortcutState((prev) => ({
-                                ...prev,
-                                [version]: { menu: isEnabled, desktop: isEnabled },
-                              }));
-                            }
-                          }}
-                          disabled={isSwitching || isLoading}
-                          className="absolute right-8 top-1/2 -translate-y-1/2 flex items-center justify-center transition-colors"
-                          title={isEnabled ? 'Shortcuts enabled (click to disable)' : 'Shortcuts disabled (click to enable)'}
-                        >
-                          <Link2
-                            size={14}
-                            className={isEnabled ? 'text-[#0080ff]' : 'text-gray-500'}
-                            style={{ opacity: 1 }}
-                            aria-hidden
-                          />
-                        </button>
-                      )}
-                      {isActive && (
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2">
-                          <Check size={14} className="text-[#55ff55]" />
-                        </span>
-                      )}
-                    </div>
-                  </div>
+                    version={version}
+                    isActive={isActive}
+                    isInstalling={isInstalling}
+                    isSwitching={isSwitching}
+                    isLoading={isLoading}
+                    isDefault={isDefault}
+                    isEnabled={isEnabled}
+                    onMakeDefault={onMakeDefault}
+                    onSwitchVersion={handleVersionSwitch}
+                    onToggleShortcuts={handleToggleShortcuts}
+                  />
                 );
               })}
             </div>
 
             {installedVersions.length === 0 && (
-              <div className="px-3 py-4 text-sm text-gray-500 text-center">
+              <div className="px-3 py-4 text-sm text-[hsl(var(--text-tertiary))] text-center">
                 No versions installed
               </div>
             )}

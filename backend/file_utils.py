@@ -18,7 +18,10 @@ def _with_suffix(path: Path, suffix: str) -> Path:
 
 
 def atomic_write_json(
-    path: Path, data: Any, lock: Optional[threading.Lock] = None, keep_backup: bool = True
+    path: Path,
+    data: Any,
+    lock: Optional[threading.Lock] = None,
+    keep_backup: bool = True,
 ) -> None:
     """Write JSON atomically, validating the payload and keeping an optional backup."""
     temp_path = _with_suffix(path, ".tmp")

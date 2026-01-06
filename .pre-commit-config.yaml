@@ -28,6 +28,12 @@ repos:
   # Custom hooks: Enforce logging system usage and type checking
   - repo: local
     hooks:
+      - id: check-hardcoded-colors
+        name: Check for hardcoded colors in frontend files
+        entry: python3 .pre-commit-hooks/check_hardcoded_colors.py
+        language: system
+        types_or: [ts, tsx, javascript, jsx]
+        files: ^frontend/src/
       - id: check-print-statements
         name: Check for print statements in Python files
         entry: python3 .pre-commit-hooks/check_print_statements.py
@@ -60,6 +66,7 @@ repos:
       - id: mypy
         name: mypy (type checking)
         entry: ./venv/bin/python -m mypy
+        args: [backend]
         language: system
         types: [python]
         files: ^backend/

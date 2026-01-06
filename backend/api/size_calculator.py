@@ -42,7 +42,10 @@ class SizeCalculator:
         self.version_manager = version_manager
 
     def _refresh_release_sizes_async(
-        self, releases: List[GitHubRelease], installed_tags: set[str], force_refresh: bool = False
+        self,
+        releases: List[GitHubRelease],
+        installed_tags: set[str],
+        force_refresh: bool = False,
     ):
         """
         Calculate release sizes in the background, prioritizing non-installed releases.

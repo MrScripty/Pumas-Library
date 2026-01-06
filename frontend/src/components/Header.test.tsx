@@ -1,95 +1,120 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
+import { Header } from './Header';
+import type { SystemResources } from '../types/apps';
 
 /**
- * Header Drag Region Tests
+ * Compact Header Component Tests
  *
- * These tests verify the PyWebView drag region implementation.
- * When easy_drag=False in PyWebView, only elements with the .pywebview-drag-region
- * class will trigger window dragging. This prevents icons from dragging the window.
+ * Tests the new compact header design with:
+ * - Resource monitors (CPU/GPU with load indicators, RAM/VRAM bars)
+ * - Status display area
+ * - Launcher version and update functionality
  */
-describe('Header Drag Region Structure', () => {
-  // Create a minimal Header component for testing
-  const Header = () => (
-    <div className="header-container">
-      <div className="pywebview-drag-region flex-1 flex justify-between items-start gap-4">
-        <div data-testid="resource-monitor">Resource Monitor</div>
-        <div data-testid="disk-monitor">Disk Monitor</div>
-        <div data-testid="version-info">Version Info</div>
-      </div>
-      <div data-testid="close-button">
-        <button>Close</button>
-      </div>
-    </div>
-  );
+describe('Header Component', () => {
+  const mockSystemResources: SystemResources = {
+    cpu: { usage: 45 },
+    gpu: { usage: 60, memory_total: 8, memory: 4.5 },
+    ram: { total: 16, usage: 50 },
+    disk: { total: 500, free: 100, usage: 80 },
+  };
 
-  it('applies pywebview-drag-region class to draggable area', () => {
-    const { container } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    expect(dragRegion).toBeInTheDocument();
+  const mockCacheStatus = {
+    has_cache: true,
+    is_valid: true,
+    is_fetching: false,
+    age_seconds: 120,
+    releases_count: 102,
+  };
+
+  const defaultProps = {
+    systemResources: mockSystemResources,
+    diskSpacePercent: 80,
+    launcherVersion: 'v1.0.0-abc1234',
+    launcherUpdateAvailable: false,
+    isUpdatingLauncher: false,
+    onUpdate: vi.fn(),
+    onClose: vi.fn(),
+    cacheStatus: mockCacheStatus,
+    installationProgress: null,
+  };
+
+  it('renders AI Manager title', () => {
+    render(<Header {...defaultProps} />);
+    expect(screen.getByText('AI Manager')).toBeInTheDocument();
   });
 
-  it('includes resource monitor in drag region', () => {
-    const { container, getByTestId } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    const resourceMonitor = getByTestId('resource-monitor');
-    expect(dragRegion).toContainElement(resourceMonitor);
+  it('displays CPU and GPU usage percentages', () => {
+    render(<Header {...defaultProps} />);
+    expect(screen.getByText('45%')).toBeInTheDocument();
+    expect(screen.getByText('60%')).toBeInTheDocument();
   });
 
-  it('includes disk monitor in drag region', () => {
-    const { container, getByTestId } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    const diskMonitor = getByTestId('disk-monitor');
-    expect(dragRegion).toContainElement(diskMonitor);
+  it('shows RAM and VRAM percentages', () => {
+    render(<Header {...defaultProps} />);
+    expect(screen.getByText(/RAM 50%/)).toBeInTheDocument();
+    expect(screen.getByText(/VRAM 56%/)).toBeInTheDocument(); // (4.5 / 8) * 100 = 56.25 -> 56
   });
 
-  it('includes version info in drag region', () => {
-    const { container, getByTestId } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    const versionInfo = getByTestId('version-info');
-    expect(dragRegion).toContainElement(versionInfo);
+  it('displays status message from cache', () => {
+    render(<Header {...defaultProps} />);
+    expect(screen.getByText(/Cached data/)).toBeInTheDocument();
+    expect(screen.getByText(/102 releases/)).toBeInTheDocument();
   });
 
-  it('excludes close button from drag region', () => {
-    const { container, getByTestId } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    const closeButton = getByTestId('close-button');
-    expect(dragRegion).not.toContainElement(closeButton);
+  it('shows launcher version in tooltip', () => {
+    render(<Header {...defaultProps} />);
+    const updateButton = screen.getByTitle('v1.0.0-abc1234');
+    expect(updateButton).toBeInTheDocument();
   });
 
-  it('close button is outside drag region hierarchy', () => {
-    const { container, getByTestId } = render(<Header />);
-    const headerContainer = container.querySelector('.header-container');
-    const closeButton = getByTestId('close-button');
-
-    // Close button should be a direct child of header container
-    expect(headerContainer).toContainElement(closeButton);
-
-    // But NOT a descendant of the drag region
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    expect(dragRegion).not.toContainElement(closeButton);
+  it('highlights update button when update available', () => {
+    const { container } = render(<Header {...defaultProps} launcherUpdateAvailable={true} />);
+    const updateButton = container.querySelector('.bg-\\[hsl\\(var\\(--accent-warning\\)\\/0\\.2\\)\\]');
+    expect(updateButton).toBeInTheDocument();
   });
 
-  it('drag region has flex layout classes', () => {
-    const { container } = render(<Header />);
-    const dragRegion = container.querySelector('.pywebview-drag-region');
-    expect(dragRegion?.className).toContain('flex-1');
-    expect(dragRegion?.className).toContain('flex');
+  it('displays installation progress when installing', () => {
+    const installationProgress = {
+      tag: 'v0.6.0',
+      started_at: new Date().toISOString(),
+      stage: 'download' as const,
+      stage_progress: 50,
+      overall_progress: 25,
+      current_item: 'archive.zip',
+      download_speed: 1024000, // 1 MB/s
+      eta_seconds: 60,
+      total_size: 10240000,
+      downloaded_bytes: 2560000,
+      dependency_count: null,
+      completed_dependencies: 0,
+      completed_items: [],
+      error: null,
+    };
+
+    render(<Header {...defaultProps} installationProgress={installationProgress} />);
+    expect(screen.getByText(/Downloading at/)).toBeInTheDocument();
+    expect(screen.getByText(/25% complete/)).toBeInTheDocument();
+  });
+
+  it('shows fetching state when cache is being updated', () => {
+    const fetchingCacheStatus = {
+      ...mockCacheStatus,
+      is_fetching: true,
+    };
+
+    render(<Header {...defaultProps} cacheStatus={fetchingCacheStatus} />);
+    expect(screen.getByText(/Fetching releases/)).toBeInTheDocument();
+  });
+
+  it('shows offline mode when no cache available', () => {
+    const noCacheStatus = {
+      has_cache: false,
+      is_valid: false,
+      is_fetching: false,
+    };
+
+    render(<Header {...defaultProps} cacheStatus={noCacheStatus} />);
+    expect(screen.getByText(/No cache available - offline mode/)).toBeInTheDocument();
   });
 });
-
-/**
- * PyWebView Drag Behavior Documentation
- *
- * How it works:
- * 1. Backend has easy_drag=False in main.py
- * 2. Only elements with .pywebview-drag-region class trigger window drag
- * 3. Sidebar icons do NOT have this class, so they won't drag the window
- * 4. Header content HAS this class, so users can drag the window from the header
- * 5. Close button is outside .pywebview-drag-region, so it remains clickable
- *
- * Previous approaches that FAILED:
- * - JavaScript preventDefault() - PyWebView intercepts at OS level
- * - CSS -webkit-app-region: no-drag - PyWebView doesn't use Electron's webkit properties
- * - easy_drag=True with exclusions - No way to exclude elements when easy_drag is True
- */

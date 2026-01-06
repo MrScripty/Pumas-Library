@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, ArrowUp, Box } from 'lucide-react';
+import { ArrowDownToLine, Loader2, ArrowLeft, RefreshCw, Box } from 'lucide-react';
 import { VersionSelector } from './components/VersionSelector';
 import { InstallDialog } from './components/InstallDialog';
-import { StatusFooter } from './components/StatusFooter';
+import { Header } from './components/Header';
 import { AppSidebar } from './components/AppSidebar';
-import { ResourceMonitor, DiskMonitor } from './components/ResourceMonitor';
 import { ModelManager } from './components/ModelManager';
 import { useVersions } from './hooks/useVersions';
 import { DEFAULT_APPS } from './config/apps';
@@ -683,33 +682,17 @@ export default function App() {
   return (
     <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
       {/* Header */}
-      <div className="border-b border-[hsl(var(--launcher-border))] px-8 py-4 flex justify-between bg-[hsl(var(--launcher-bg-secondary)/0.3)] backdrop-blur-sm relative z-10 items-start gap-4">
-        {/* Draggable region for window movement */}
-        <div className="pywebview-drag-region flex-1 flex justify-between items-start gap-4">
-          <ResourceMonitor resources={systemResources} />
-
-          <div className="flex-1 flex justify-center">
-            <DiskMonitor diskFree={systemResources?.disk.free || diskSpacePercent} />
-          </div>
-
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1">
-              <span className="text-xs text-[hsl(var(--launcher-text-secondary))]">{launcherVersion || 'dev'}</span>
-              <ArrowUp className="w-3 h-3 text-[hsl(var(--launcher-text-muted))]" />
-            </div>
-          </div>
-        </div>
-
-        {/* Close button - NOT in drag region */}
-        <div className="h-14 w-14 flex items-center justify-center">
-          <div
-            onClick={closeWindow}
-            className="cursor-pointer group p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
-          >
-            <X className="text-[hsl(var(--text-secondary))] group-hover:text-[hsl(var(--accent-error))] transition-colors" size={22} />
-          </div>
-        </div>
-      </div>
+      <Header
+        systemResources={systemResources}
+        diskSpacePercent={diskSpacePercent}
+        launcherVersion={launcherVersion}
+        launcherUpdateAvailable={launcherUpdateAvailable}
+        isUpdatingLauncher={isUpdatingLauncher}
+        onUpdate={handleLauncherUpdate}
+        onClose={closeWindow}
+        cacheStatus={cacheStatus}
+        installationProgress={installationProgress}
+      />
 
       {/* Main Layout */}
       <div className="flex flex-1 relative z-10 overflow-hidden">
@@ -888,12 +871,6 @@ export default function App() {
           )}
         </div>
       </div>
-
-      {/* Status Footer */}
-      <StatusFooter
-        cacheStatus={cacheStatus}
-        installationProgress={installationProgress}
-      />
     </div>
   );
 }

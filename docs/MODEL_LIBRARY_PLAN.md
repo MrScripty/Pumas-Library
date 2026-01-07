@@ -7,10 +7,13 @@ Plan only. No code changes in this phase.
 - Canonical model library root is `shared-resources/models/`.
 - No separate "model views" directory. Models are linked directly into each app's expected models path.
 - App translation configs live in `launcher-data/config/model-library-translation/<app>_<appversion>_<modelconfig>.json`.
+  - `<app>`: app name (e.g., `ComfyUI`), `<appversion>`: semantic version (e.g., `0.6.0`), `<modelconfig>`: freeform descriptor.
 - Canonical metadata lives with each model directory as `metadata.json`.
 - User overrides live alongside each model as a separate JSON file (e.g., `overrides.json`).
+  - Overrides only control whether a model is mapped for a given app version range (do not alter target paths).
 - SQLite index (`models.db`) lives at `shared-resources/models/models.db` and is derived from canonical metadata.
 - Version ranges in overrides are semver-aware.
+- Models are mapped to all installed versions by default; overrides restrict mapping to a semver range.
 - Naming rules: max length 128; strip invalid chars; no spaces or symbols. Preserve official name in metadata alongside cleaned name. Enforce at import and mapping time; downloads are cleaned after completion.
 - ComfyUI uses symlinks; config-based mapping is future work for apps that do not support symlinks.
 - Use existing logging + typing systems; no duplicate code paths.
@@ -35,7 +38,7 @@ shared-resources/models/
         <files...>
 
 Metadata must include both official and cleaned names.
-Overrides should include app version ranges and any link overrides.
+Overrides should include app version ranges that control whether a model is linked.
 
 ## Phase 1: Consolidate ResourceManager
 Goal: use a single ResourceManager implementation.
@@ -62,14 +65,15 @@ Goal: map library models into app-specific structures via config.
 - Implement mapping engine that:
   - Loads metadata + overrides (semver ranges)
   - Applies naming normalization and collision handling
+  - Resolves name collisions by suffixing with an incremented number
   - Resolves target paths based on mapping config
   - Creates symlinks into the app's models directory
-- Auto-mapping is default; user overrides restrict via version ranges.
+- Auto-mapping is default; user overrides restrict via version ranges; mapping applies to all installed versions.
 
 ## Phase 4: Import + Download Services
 Goal: integrate mockup features with existing logging/progress systems.
-- Importer: move/copy local files into library with hash computation and naming rules.
-- Downloader: download into a temp location, then clean/rename; update metadata + hashes.
+- Importer: move local files into library with hash computation and naming rules.
+- Downloader: download into a temp location, then clean/rename; update metadata + hashes; store original filename in metadata.
 - Reuse existing retry/progress helpers where possible.
 - Consistent logging via `backend/logging_config.py`.
 

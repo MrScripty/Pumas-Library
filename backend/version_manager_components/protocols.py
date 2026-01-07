@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from backend.installation_progress_tracker import InstallationProgressTracker
     from backend.metadata_manager import MetadataManager
     from backend.models import GitHubRelease
-    from backend.resource_manager import ResourceManager
+    from backend.resources.resource_manager import ResourceManager
 
 
 class MixinBase:

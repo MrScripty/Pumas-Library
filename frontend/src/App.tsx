@@ -365,10 +365,11 @@ export default function App() {
           Object.entries(result.models).forEach(([path, modelData]: [string, any]) => {
             const category = modelData.modelType || 'uncategorized';
             const fileName = path.split('/').pop() || path;
+            const displayName = modelData.officialName || modelData.cleanedName || fileName;
 
             const modelInfo: ModelInfo = {
               id: path,
-              name: fileName,
+              name: displayName,
               category: category,
               path: path,
               size: modelData.size,

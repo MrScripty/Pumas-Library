@@ -2,13 +2,13 @@
 Unit tests for DependencyManager.
 
 Tests cover:
-- Dependency checking (setproctitle, git, brave)
+- Dependency checking (python packages, git, brave)
 - Missing dependency detection
 - Dependency installation
 """
 
 import subprocess
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
@@ -112,7 +112,7 @@ def test_get_missing_dependencies_all_installed(mocker):
     """Test get_missing_dependencies when all deps are installed."""
     manager = DependencyManager(script_dir="/fake/path")
 
-    mocker.patch.object(manager, "check_setproctitle", return_value=True)
+    mocker.patch.object(manager, "check_python_package", return_value=True)
     mocker.patch.object(manager, "check_git", return_value=True)
     mocker.patch.object(manager, "check_brave", return_value=True)
 
@@ -125,7 +125,10 @@ def test_get_missing_dependencies_some_missing(mocker):
     """Test get_missing_dependencies when some deps are missing."""
     manager = DependencyManager(script_dir="/fake/path")
 
-    mocker.patch.object(manager, "check_setproctitle", return_value=False)
+    def _check(module_name):
+        return module_name != "setproctitle"
+
+    mocker.patch.object(manager, "check_python_package", side_effect=_check)
     mocker.patch.object(manager, "check_git", return_value=True)
     mocker.patch.object(manager, "check_brave", return_value=False)
 
@@ -140,14 +143,18 @@ def test_get_missing_dependencies_all_missing(mocker):
     """Test get_missing_dependencies when all deps are missing."""
     manager = DependencyManager(script_dir="/fake/path")
 
-    mocker.patch.object(manager, "check_setproctitle", return_value=False)
+    mocker.patch.object(manager, "check_python_package", return_value=False)
     mocker.patch.object(manager, "check_git", return_value=False)
     mocker.patch.object(manager, "check_brave", return_value=False)
 
     result = manager.get_missing_dependencies()
 
-    assert len(result) == 3
+    assert len(result) == 7
     assert "setproctitle" in result
+    assert "huggingface_hub" in result
+    assert "pydantic" in result
+    assert "tenacity" in result
+    assert "blake3" in result
     assert "git" in result
     assert "brave-browser" in result
 

@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 Symlink Manager
-Handles symlink creation and validation for version installations
+Handles user data symlinks for version installations
 """
 
 from pathlib import Path
-from typing import Dict
 
 from backend.logging_config import get_logger
 from backend.models import RepairReport
@@ -15,116 +14,56 @@ logger = get_logger(__name__)
 
 
 class SymlinkManager:
-    """Manages symlinks between version directories and shared storage"""
+    """Manages symlinks between version directories and shared user data."""
 
-    def __init__(
-        self,
-        shared_models_dir: Path,
-        shared_user_dir: Path,
-        versions_dir: Path,
-        launcher_root: Path,
-    ):
-        """
-        Initialize symlink manager
-
-        Args:
-            shared_models_dir: Path to shared models directory
-            shared_user_dir: Path to shared user directory
-            versions_dir: Path to comfyui-versions directory
-            launcher_root: Path to launcher root directory
-        """
-        self.shared_models_dir = Path(shared_models_dir)
+    def __init__(self, shared_user_dir: Path, versions_dir: Path, launcher_root: Path):
         self.shared_user_dir = Path(shared_user_dir)
         self.versions_dir = Path(versions_dir)
         self.launcher_root = Path(launcher_root)
 
     def setup_version_symlinks(self, version_tag: str) -> bool:
-        """
-        Setup all symlinks for a version
-        - Symlinks models directory
-        - Symlinks user data (workflows, settings)
-        - Does NOT symlink custom_nodes (real files per version)
-
-        Args:
-            version_tag: Version tag (e.g., "v0.2.0")
-
-        Returns:
-            True if successful
-        """
+        """Symlink shared user directory into the version."""
         version_path = self.versions_dir / version_tag
-
         if not version_path.exists():
-            logger.error(f"Error: Version directory not found: {version_path}")
+            logger.error("Error: Version directory not found: %s", version_path)
             return False
 
-        success = True
-
-        # 1. Symlink models directory
-        models_link = version_path / "models"
-        if not make_relative_symlink(self.shared_models_dir, models_link):
-            logger.error(f"Failed to create models symlink for {version_tag}")
-            success = False
-        else:
-            logger.info(f"Created models symlink: {version_tag}/models -> shared-resources/models")
-
-        # 2. Symlink user directory
         user_link = version_path / "user"
         if not make_relative_symlink(self.shared_user_dir, user_link):
-            logger.error(f"Failed to create user symlink for {version_tag}")
-            success = False
-        else:
-            logger.info(f"Created user symlink: {version_tag}/user -> shared-resources/user")
+            logger.error("Failed to create user symlink for %s", version_tag)
+            return False
 
-        return success
+        logger.info("Created user symlink: %s/user -> shared-resources/user", version_tag)
+        return True
 
     def validate_and_repair_symlinks(self, version_tag: str) -> RepairReport:
-        """
-        Check for broken symlinks and attempt repair
-
-        Args:
-            version_tag: Version tag to check
-
-        Returns:
-            RepairReport with broken, repaired, and removed symlinks
-        """
+        """Check for broken user symlinks and attempt repair."""
         version_path = self.versions_dir / version_tag
-
         report: RepairReport = {"broken": [], "repaired": [], "removed": []}
 
         if not version_path.exists():
-            logger.error(f"Error: Version directory not found: {version_path}")
+            logger.error("Error: Version directory not found: %s", version_path)
             return report
 
-        # Check key symlinks
-        symlinks_to_check = {
-            "models": self.shared_models_dir,
-            "user": self.shared_user_dir,
-        }
+        link_path = version_path / "user"
+        expected_target = self.shared_user_dir
 
-        for link_name, expected_target in symlinks_to_check.items():
-            link_path = version_path / link_name
-
-            if is_broken_symlink(link_path):
-                report["broken"].append(str(link_path.relative_to(self.launcher_root)))
-
-                # Try to repair
-                if expected_target.exists():
-                    if make_relative_symlink(expected_target, link_path):
-                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        logger.info(f"Repaired symlink: {link_name}")
-                    else:
-                        logger.error(f"Failed to repair symlink: {link_name}")
+        if is_broken_symlink(link_path):
+            report["broken"].append(str(link_path.relative_to(self.launcher_root)))
+            if expected_target.exists():
+                if make_relative_symlink(expected_target, link_path):
+                    report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
+                    logger.info("Repaired symlink: user")
                 else:
-                    # Target doesn't exist, remove broken symlink
-                    link_path.unlink()
-                    report["removed"].append(str(link_path.relative_to(self.launcher_root)))
-                    logger.info(f"Removed broken symlink: {link_name}")
-
-            elif not link_path.exists():
-                # Symlink doesn't exist, create it
-                if expected_target.exists():
-                    if make_relative_symlink(expected_target, link_path):
-                        report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
-                        logger.info(f"Created missing symlink: {link_name}")
+                    logger.error("Failed to repair symlink: user")
+            else:
+                link_path.unlink()
+                report["removed"].append(str(link_path.relative_to(self.launcher_root)))
+                logger.info("Removed broken symlink: user")
+        elif not link_path.exists():
+            if expected_target.exists():
+                if make_relative_symlink(expected_target, link_path):
+                    report["repaired"].append(str(link_path.relative_to(self.launcher_root)))
+                    logger.info("Created missing symlink: user")
 
         return report

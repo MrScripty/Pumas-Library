@@ -18,7 +18,7 @@ from backend.installation_progress_tracker import InstallationProgressTracker
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import GitHubRelease
-from backend.resource_manager import ResourceManager
+from backend.resources.resource_manager import ResourceManager
 from backend.utils import ensure_directory
 from backend.version_manager_components.constraints import ConstraintsMixin
 from backend.version_manager_components.dependencies import DependenciesMixin

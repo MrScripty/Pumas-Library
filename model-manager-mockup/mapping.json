@@ -8,7 +8,7 @@
       "exclude_extensions": [],
       "tags": ["gguf-compatible"]
     },
-    "method": "symlink",  // or "config" for apps that support it
+    "method": "symlink",
     "rename_rules": []
   },
   "comfyui": {
@@ -20,7 +20,7 @@
         "subtypes": ["sd1.5", "sdxl", "flux"],
         "tags": ["stable-diffusion"]
       },
-      "method": "config",  // e.g., edit extra_model_paths.yaml
+      "method": "config",
       "rename_rules": []
     },
     "loras": {
@@ -120,6 +120,6 @@
       "model_type": ["llm", "multimodal"],
       "tags": ["ollama-compatible"]
     },
-    "method": "symlink"  // or custom for ollama manifests
+    "method": "symlink"
   }
 }

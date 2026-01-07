@@ -5,9 +5,14 @@ Pre-commit hook to detect generic exception handlers in backend code.
 This enforces the use of specific exception types for clearer error handling.
 """
 
+import logging
 import re
 import sys
 from pathlib import Path
+
+logger = logging.getLogger("check_generic_exceptions")
+if not logger.handlers:
+    logging.basicConfig(level=logging.ERROR)
 
 GENERIC_EXCEPTION_PATTERNS = [
     re.compile(r"^\s*except\s+Exception\b"),
@@ -42,8 +47,8 @@ def check_file(file_path: Path) -> list[tuple[int, str]]:
                     if pattern.search(line):
                         violations.append((line_num, line.rstrip()))
                         break
-    except OSError as e:
-        print(f"Error reading {file_path}: {e}", file=sys.stderr)
+    except OSError as exc:
+        logger.error("Error reading %s: %s", file_path, exc)
         return []
 
     return violations
@@ -57,7 +62,7 @@ def main() -> int:
         0 if no violations found, 1 otherwise
     """
     if len(sys.argv) < 2:
-        print("Usage: check_generic_exceptions.py <file1> [file2] ...", file=sys.stderr)
+        logger.error("Usage: check_generic_exceptions.py <file1> [file2] ...")
         return 1
 
     files_to_check = [Path(f) for f in sys.argv[1:]]
@@ -69,20 +74,23 @@ def main() -> int:
 
         violations = check_file(file_path)
         if violations:
-            print(f"\n❌ {file_path}:", file=sys.stderr)
+            logger.error("")
+            logger.error("❌ %s:", file_path)
             for line_num, line_content in violations:
-                print(f"  Line {line_num}: {line_content}", file=sys.stderr)
+                logger.error("  Line %s: %s", line_num, line_content)
                 total_violations += 1
 
     if total_violations > 0:
-        print(
-            f"\n{'='*70}\n"
-            f"❌ Found {total_violations} generic exception handler(s) in backend code.\n"
-            f"\n"
-            f"Please use specific exception types (IOError, OSError, ValueError, etc.).\n"
-            f"If absolutely necessary, add '# noqa: generic-exception'.\n"
-            f"{'='*70}\n",
-            file=sys.stderr,
+        logger.error(
+            "\n%s\n"
+            "❌ Found %s generic exception handler(s) in backend code.\n"
+            "\n"
+            "Please use specific exception types (IOError, OSError, ValueError, etc.).\n"
+            "If absolutely necessary, add '# noqa: generic-exception'.\n"
+            "%s\n",
+            "=" * 70,
+            total_violations,
+            "=" * 70,
         )
         return 1
 

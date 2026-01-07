@@ -13,8 +13,8 @@ export function ProgressRing({
   progress,
   size = 48,
   strokeWidth = 6,
-  trackColor = '#2f2f2f',
-  indicatorColor = '#55ff55',
+  trackColor = 'hsl(var(--surface-mid))',
+  indicatorColor = 'hsl(var(--accent-success))',
   children,
 }: ProgressRingProps) {
   const clamped = Math.max(0, Math.min(100, progress || 0));

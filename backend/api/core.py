@@ -19,7 +19,7 @@ from backend.api.size_calculator import SizeCalculator
 from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
-from backend.models import DependencyStatus, GitHubRelease, ScanResult, VersionInfo
+from backend.models import DependencyStatus, GitHubRelease, ModelOverrides, ScanResult, VersionInfo
 from backend.rate_limiter import RateLimiter
 from backend.validators import validate_package_name, validate_url, validate_version_tag
 
@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from backend.github_integration import GitHubReleasesFetcher
     from backend.metadata_manager import MetadataManager
     from backend.release_size_calculator import ReleaseSizeCalculator
-    from backend.resource_manager import ResourceManager
+    from backend.resources.resource_manager import ResourceManager
     from backend.version_manager import VersionManager
 
 logger = get_logger(__name__)
@@ -150,7 +150,7 @@ class ComfyUISetupAPI:
             from backend.package_size_resolver import PackageSizeResolver
             from backend.release_data_fetcher import ReleaseDataFetcher
             from backend.release_size_calculator import ReleaseSizeCalculator
-            from backend.resource_manager import ResourceManager
+            from backend.resources.resource_manager import ResourceManager
             from backend.version_manager import VersionManager
 
             launcher_data_dir = self.script_dir / "launcher-data"
@@ -756,6 +756,70 @@ class ComfyUISetupAPI:
         if not self.resource_manager:
             return {}
         return self.resource_manager.get_models()
+
+    def refresh_model_index(self) -> bool:
+        """Rebuild the model library index."""
+        if not self.resource_manager:
+            return False
+        self.resource_manager.refresh_model_index()
+        return True
+
+    def refresh_model_mappings(self, app_id: str = "comfyui") -> Dict[str, int]:
+        """Refresh model mappings for all installed versions."""
+        if not self.resource_manager:
+            return {}
+        return self.resource_manager.refresh_model_mappings(app_id)
+
+    def import_model(
+        self, local_path: str, family: str, official_name: str, repo_id: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Import a local model into the library."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+        try:
+            model_dir = self.resource_manager.import_model(
+                Path(local_path), family, official_name, repo_id
+            )
+            return {"success": True, "model_path": str(model_dir)}
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Model import failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def download_model_from_hf(
+        self,
+        repo_id: str,
+        family: str,
+        official_name: str,
+        model_type: Optional[str] = None,
+        subtype: str = "",
+    ) -> Dict[str, Any]:
+        """Download a model from Hugging Face into the library."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+        try:
+            model_dir = self.resource_manager.download_model_from_hf(
+                repo_id=repo_id,
+                family=family,
+                official_name=official_name,
+                model_type=model_type,
+                subtype=subtype,
+            )
+            return {"success": True, "model_path": str(model_dir)}
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Model download failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def get_model_overrides(self, rel_path: str) -> ModelOverrides:
+        """Fetch overrides for a model by relative path."""
+        if not self.resource_manager:
+            return {}
+        return self.resource_manager.get_model_overrides(rel_path)
+
+    def update_model_overrides(self, rel_path: str, overrides: ModelOverrides) -> bool:
+        """Update overrides for a model by relative path."""
+        if not self.resource_manager:
+            return False
+        return self.resource_manager.update_model_overrides(rel_path, overrides)
 
     def get_custom_nodes(self, version_tag: str) -> List[str]:
         """Get list of custom nodes for a specific version"""

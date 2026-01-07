@@ -51,25 +51,25 @@ This system addresses these issues with:
 
 ## How It Works
 
-1. **Set Up Central Collection**  
+1. **Set Up Central Collection**
    Place models under `~/AI_Models/` (configurable via `AI_MODELS_ROOT`). Organize by type/family/model.
 
-2. **Add Metadata**  
+2. **Add Metadata**
    Run `generate_metadata.py` to create a richly-structured `metadata.json` in any model directory.
 
-3. **Download Models** (Optional)  
+3. **Download Models** (Optional)
    Use `model_downloader.py` to fetch from Hugging Face with resume support, hash verification, metadata enrichment, and thumbnail download.
 
-4. **Import Local Models**  
+4. **Import Local Models**
    Use `model_importer.py` to copy existing files/directories into the central structure, detect type, compute hashes, and optionally enrich from HF.
 
-5. **Configure Sharing**  
+5. **Configure Sharing**
    Edit `mapping.json` to define per-app rules (patterns, filters, method, special handlers).
 
-6. **Run Mapper**  
+6. **Run Mapper**
    Execute `model_mapper.py` to walk the collection, apply filters, and create/update symlinks (or placeholder config entries).
 
-7. **Maintenance**  
+7. **Maintenance**
    Re-run the mapper after changes. Future automation via file watcher possible.
 
 The parent application can integrate the importer/downloader directly (e.g., for drag-and-drop) and consume logs/progress as needed.

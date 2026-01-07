@@ -371,6 +371,54 @@ class JavaScriptAPI:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e), "models": {}}
 
+    def refresh_model_index(self):
+        """Rebuild the model library index"""
+        try:
+            success = self.api.refresh_model_index()
+            return {"success": success}
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def refresh_model_mappings(self, app_id="comfyui"):
+        """Refresh model mappings for all installed versions"""
+        try:
+            results = self.api.refresh_model_mappings(app_id)
+            return {"success": True, "results": results}
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e), "results": {}}
+
+    def import_model(self, local_path, family, official_name, repo_id=None):
+        """Import a local model into the library"""
+        try:
+            return self.api.import_model(local_path, family, official_name, repo_id)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def download_model_from_hf(self, repo_id, family, official_name, model_type=None, subtype=""):
+        """Download a model from Hugging Face into the library"""
+        try:
+            return self.api.download_model_from_hf(
+                repo_id, family, official_name, model_type, subtype
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def get_model_overrides(self, rel_path):
+        """Get overrides for a model by relative path"""
+        try:
+            overrides = self.api.get_model_overrides(rel_path)
+            return {"success": True, "overrides": overrides}
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e), "overrides": {}}
+
+    def update_model_overrides(self, rel_path, overrides):
+        """Update overrides for a model by relative path"""
+        try:
+            success = self.api.update_model_overrides(rel_path, overrides)
+            return {"success": success}
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
     def get_custom_nodes(self, version_tag):
         """Get list of custom nodes for a specific version"""
         try:

@@ -14,6 +14,14 @@ from typing import List
 class DependencyManager:
     """Manages system dependencies for ComfyUI"""
 
+    _python_packages = [
+        "setproctitle",
+        "huggingface_hub",
+        "pydantic",
+        "tenacity",
+        "blake3",
+    ]
+
     def __init__(self, script_dir: Path):
         """
         Initialize dependency manager
@@ -25,9 +33,12 @@ class DependencyManager:
 
     def check_setproctitle(self) -> bool:
         """Check if setproctitle module is installed"""
-        try:
-            import setproctitle
+        return self.check_python_package("setproctitle")
 
+    def check_python_package(self, module_name: str) -> bool:
+        """Check if a Python module can be imported."""
+        try:
+            __import__(module_name)
             return True
         except ImportError:
             return False
@@ -43,8 +54,9 @@ class DependencyManager:
     def get_missing_dependencies(self) -> List[str]:
         """Get list of missing dependencies"""
         missing = []
-        if not self.check_setproctitle():
-            missing.append("setproctitle")
+        for module_name in self._python_packages:
+            if not self.check_python_package(module_name):
+                missing.append(module_name)
         if not self.check_git():
             missing.append("git")
         if not self.check_brave():
@@ -60,14 +72,15 @@ class DependencyManager:
         success = True
 
         # Install Python packages
-        if "setproctitle" in missing:
+        python_packages = [pkg for pkg in missing if pkg in self._python_packages]
+        if python_packages:
             try:
                 pip_cache_dir = self.script_dir / "launcher-data" / "cache" / "pip"
                 pip_cache_dir.mkdir(parents=True, exist_ok=True)
                 pip_env = os.environ.copy()
                 pip_env["PIP_CACHE_DIR"] = str(pip_cache_dir)
                 subprocess.run(
-                    ["pip3", "install", "--user", "setproctitle"],
+                    ["pip3", "install", "--user"] + python_packages,
                     check=True,
                     stdout=subprocess.DEVNULL,
                     env=pip_env,

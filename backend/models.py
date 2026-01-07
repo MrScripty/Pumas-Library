@@ -5,7 +5,7 @@ Defines TypedDict classes for all metadata structures
 """
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional, TypedDict
+from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 # ==================== Version Metadata ====================
 
@@ -112,6 +112,54 @@ class ModelInfo(TypedDict, total=False):
 
 ModelsMetadata = Dict[str, ModelInfo]
 """Root metadata structure for models.json."""
+
+
+class ModelHashes(TypedDict, total=False):
+    """Hashes for a model's primary file."""
+
+    sha256: str
+    blake3: str
+
+
+class ModelFileInfo(TypedDict, total=False):
+    """Metadata about an individual file in a model directory."""
+
+    name: str
+    original_name: str
+    size: int  # bytes
+    sha256: str
+    blake3: str
+
+
+class ModelMetadata(TypedDict, total=False):
+    """Canonical metadata stored with each model directory."""
+
+    model_id: str
+    family: str
+    model_type: str  # llm, diffusion
+    subtype: str  # checkpoints, loras, vae, etc.
+    official_name: str
+    cleaned_name: str
+    tags: List[str]
+    base_model: str
+    preview_image: str
+    release_date: str
+    download_url: str
+    model_card: Dict[str, Any]
+    inference_settings: Dict[str, Any]
+    compatible_apps: List[str]
+    hashes: ModelHashes
+    notes: str
+    added_date: str  # ISO 8601
+    updated_date: str  # ISO 8601
+    size_bytes: int
+    files: List[ModelFileInfo]
+
+
+class ModelOverrides(TypedDict, total=False):
+    """User overrides for model mapping."""
+
+    version_ranges: Dict[str, str]
 
 
 # ==================== Workflow Metadata ====================

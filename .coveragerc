@@ -1,9 +1,7 @@
 [run]
 # Coverage.py configuration
-
 # Source directory
 source = backend
-
 # Omit files from coverage
 omit =
     # Virtual environments
@@ -20,41 +18,35 @@ omit =
     # Main entry points (tested via integration tests)
     */main.py
     */launcher.py
+    # Package init exports (no executable logic)
+    backend/model_library/__init__.py
 
 [report]
 # Reporting options
 precision = 2
 show_missing = True
 skip_covered = False
-
 # Exclude lines from coverage
 exclude_lines =
     # Standard pragma
     pragma: no cover
-
     # Debug-only code
     def __repr__
     def __str__
-
     # Abstract methods
     @abstractmethod
     @abc.abstractmethod
-
     # Type checking blocks
     if TYPE_CHECKING:
     if typing.TYPE_CHECKING:
-
     # Non-runnable code
     if __name__ == .__main__.:
     if __name__ == "__main__":
-
     # Defensive assertions
     raise AssertionError
     raise NotImplementedError
-
     # Pass statements
     pass
-
     # Ellipsis
     \.\.\.
 

@@ -1,34 +1,30 @@
 #!/usr/bin/env python3
 """
 Resource Manager for ComfyUI Version Manager
-Main coordinator for shared storage, symlinks, custom nodes, and resource management
+Main coordinator for shared storage, custom nodes, and model library management
 """
 
+from __future__ import annotations
+
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
-from backend.models import ModelsMetadata, RepairReport, ScanResult
+from backend.model_library import ModelDownloader, ModelImporter, ModelLibrary, ModelMapper
+from backend.models import ModelOverrides, RepairReport, ScanResult
 from backend.resources.custom_nodes_manager import CustomNodesManager
-from backend.resources.model_manager import ModelManager
 from backend.resources.shared_storage import SharedStorageManager
 from backend.resources.symlink_manager import SymlinkManager
+from backend.utils import ensure_directory, get_directory_size
 
 logger = get_logger(__name__)
 
 
 class ResourceManager:
-    """Manages shared resources, symlinks, and custom nodes"""
+    """Manages shared resources, model library, symlinks, and custom nodes"""
 
     def __init__(self, launcher_root: Path, metadata_manager: MetadataManager):
-        """
-        Initialize resource manager
-
-        Args:
-            launcher_root: Path to launcher root directory
-            metadata_manager: MetadataManager instance for persistence
-        """
         self.launcher_root = Path(launcher_root)
         self.metadata_manager = metadata_manager
 
@@ -43,19 +39,25 @@ class ResourceManager:
         self.shared_workflows_dir = self.shared_user_dir / "workflows"
         self.shared_settings_dir = self.shared_user_dir / "settings"
 
+        # Model translation configs
+        self.translation_config_dir = self.metadata_manager.config_dir / "model-library-translation"
+        self.translation_config_dir.mkdir(parents=True, exist_ok=True)
+
         # Initialize specialized managers
         self.storage_mgr = SharedStorageManager(
             self.shared_dir, self.versions_dir, self.launcher_root
         )
 
         self.symlink_mgr = SymlinkManager(
-            self.shared_models_dir,
             self.shared_user_dir,
             self.versions_dir,
             self.launcher_root,
         )
 
-        self.model_mgr = ModelManager(self.shared_models_dir, self.metadata_manager)
+        self.model_library = ModelLibrary(self.shared_models_dir)
+        self.model_mapper = ModelMapper(self.model_library, self.translation_config_dir)
+        self.model_importer = ModelImporter(self.model_library)
+        self.model_downloader = ModelDownloader(self.model_library)
 
         self.custom_nodes_mgr = CustomNodesManager(
             self.shared_custom_nodes_cache_dir, self.versions_dir
@@ -64,262 +66,161 @@ class ResourceManager:
     # ==================== Shared Storage Operations ====================
 
     def initialize_shared_storage(self) -> bool:
-        """
-        Create shared-resources directory structure
-
-        Returns:
-            True if successful
-        """
+        """Create shared-resources directory structure."""
         return self.storage_mgr.initialize_shared_storage()
 
-    def discover_model_directories(self, comfyui_path: Path) -> List[str]:
-        """
-        Discover model directories from ComfyUI installation
-        Parses folder_paths.py to find model directory names
-
-        Args:
-            comfyui_path: Path to ComfyUI installation
-
-        Returns:
-            List of model directory names (e.g., ['checkpoints', 'loras', 'vae'])
-        """
-        return self.storage_mgr.discover_model_directories(comfyui_path)
-
-    def sync_shared_model_structure(self, comfyui_version_path: Path) -> bool:
-        """
-        Ensure shared models has all directories from this ComfyUI version
-        NEVER removes directories (preserve models for other versions)
-
-        Args:
-            comfyui_version_path: Path to ComfyUI version installation
-
-        Returns:
-            True if successful
-        """
-        return self.storage_mgr.sync_shared_model_structure(comfyui_version_path)
-
-    def migrate_existing_files(
-        self, version_path: Path, auto_merge: bool = False
-    ) -> Tuple[int, int, List[str]]:
-        """
-        Scan version directory for real files and move to shared storage
-
-        Args:
-            version_path: Path to version directory
-            auto_merge: If True, automatically merge files (skip conflicts)
-
-        Returns:
-            Tuple of (files_moved, conflicts, conflict_paths)
-        """
-        return self.storage_mgr.migrate_existing_files(version_path, auto_merge)
-
     def scan_shared_storage(self) -> ScanResult:
-        """
-        Scan shared storage and update metadata
+        """Scan shared storage and update model index."""
+        self.model_library.rebuild_index()
+        models = self.model_library.list_models()
+        models_found = len(models)
+        models_size = sum(int(model.get("size_bytes", 0)) for model in models)
 
-        Returns:
-            ScanResult with counts and total size
-        """
-        return self.storage_mgr.scan_shared_storage()
+        workflows_found = 0
+        workflows_size = 0
+        if self.shared_workflows_dir.exists():
+            workflows_found = len([p for p in self.shared_workflows_dir.iterdir() if p.is_file()])
+            workflows_size = get_directory_size(self.shared_workflows_dir)
+
+        return {
+            "modelsFound": models_found,
+            "workflowsFound": workflows_found,
+            "customNodesFound": 0,
+            "totalSize": models_size + workflows_size,
+        }
 
     # ==================== Symlink Operations ====================
 
     def setup_version_symlinks(self, version_tag: str) -> bool:
-        """
-        Setup all symlinks for a version
-        - Symlinks models directory
-        - Symlinks user data (workflows, settings)
-        - Does NOT symlink custom_nodes (real files per version)
+        """Setup symlinks for a version and apply model mapping."""
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            logger.error("Error: Version directory not found: %s", version_path)
+            return False
 
-        Args:
-            version_tag: Version tag (e.g., "v0.2.0")
+        success = self.symlink_mgr.setup_version_symlinks(version_tag)
+        self.model_library.rebuild_index()
 
-        Returns:
-            True if successful
-        """
-        return self.symlink_mgr.setup_version_symlinks(version_tag)
+        models_dir = version_path / "models"
+        if models_dir.is_symlink():
+            models_dir.unlink()
+        ensure_directory(models_dir)
+
+        app_version = version_tag.lstrip("vV")
+        try:
+            links_created = self.model_mapper.apply_for_app("comfyui", app_version, models_dir)
+            logger.info("Mapped %s model links for ComfyUI %s", links_created, app_version)
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Error mapping models for %s: %s", version_tag, exc, exc_info=True)
+            success = False
+
+        return success
 
     def validate_and_repair_symlinks(self, version_tag: str) -> RepairReport:
-        """
-        Check for broken symlinks and attempt repair
-
-        Args:
-            version_tag: Version tag to check
-
-        Returns:
-            RepairReport with broken, repaired, and removed symlinks
-        """
+        """Check for broken user symlinks and attempt repair."""
         return self.symlink_mgr.validate_and_repair_symlinks(version_tag)
 
-    # ==================== Model Operations ====================
+    # ==================== Model Library Operations ====================
 
-    def get_models(self) -> ModelsMetadata:
-        """
-        Get all models from shared storage
+    def get_models(self) -> Dict[str, Dict[str, object]]:
+        """Return models indexed in the library."""
+        self.model_library.rebuild_index()
+        models: Dict[str, Dict[str, object]] = {}
+        for metadata in self.model_library.list_models():
+            rel_path = metadata.get("library_path")
+            if not rel_path:
+                continue
+            model_type = metadata.get("subtype") or metadata.get("model_type") or "unknown"
+            models[rel_path] = {
+                "path": rel_path,
+                "size": metadata.get("size_bytes"),
+                "addedDate": metadata.get("added_date"),
+                "modelType": model_type,
+                "officialName": metadata.get("official_name"),
+                "cleanedName": metadata.get("cleaned_name"),
+            }
+        return models
 
-        Returns:
-            Dict mapping model paths to model info
-        """
-        return self.model_mgr.get_models()
+    def refresh_model_index(self) -> None:
+        """Rebuild the SQLite index from metadata.json files."""
+        self.model_library.rebuild_index()
 
-    def add_model(self, source_path: Path, category: str, update_metadata: bool = True) -> bool:
-        """
-        Add a model to shared storage
+    def refresh_model_mappings(self, app_id: str = "comfyui") -> Dict[str, int]:
+        """Apply model mappings for all installed versions."""
+        results: Dict[str, int] = {}
+        self.model_library.rebuild_index()
+        for version_path in sorted(self.versions_dir.iterdir()):
+            if not version_path.is_dir() or version_path.name.startswith("."):
+                continue
 
-        Args:
-            source_path: Path to model file
-            category: Model category (e.g., "checkpoints", "loras")
-            update_metadata: Whether to update models.json
+            models_dir = version_path / "models"
+            if models_dir.is_symlink():
+                models_dir.unlink()
+            ensure_directory(models_dir)
 
-        Returns:
-            True if successful
-        """
-        return self.model_mgr.add_model(source_path, category, update_metadata)
+            app_version = version_path.name.lstrip("vV")
+            links_created = self.model_mapper.apply_for_app(app_id, app_version, models_dir)
+            results[version_path.name] = links_created
+        return results
 
-    def remove_model(self, model_path: str) -> bool:
-        """
-        Remove a model from shared storage
+    def get_model_overrides(self, rel_path: str) -> ModelOverrides:
+        """Load overrides for a model by relative path."""
+        model_dir = self.shared_models_dir / rel_path
+        if not model_dir.exists():
+            return {}
+        return self.model_library.load_overrides(model_dir)
 
-        Args:
-            model_path: Relative path to model (e.g., "checkpoints/model.safetensors")
+    def update_model_overrides(self, rel_path: str, overrides: ModelOverrides) -> bool:
+        """Persist overrides for a model by relative path."""
+        model_dir = self.shared_models_dir / rel_path
+        if not model_dir.exists():
+            logger.error("Overrides update failed; model not found: %s", rel_path)
+            return False
+        self.model_library.save_overrides(model_dir, overrides)
+        return True
 
-        Returns:
-            True if successful
-        """
-        return self.model_mgr.remove_model(model_path)
+    def import_model(
+        self,
+        local_path: Path,
+        family: str,
+        official_name: str,
+        repo_id: Optional[str] = None,
+    ) -> Path:
+        """Import a local model into the library."""
+        return self.model_importer.import_path(local_path, family, official_name, repo_id)
+
+    def download_model_from_hf(
+        self,
+        repo_id: str,
+        family: str,
+        official_name: str,
+        model_type: Optional[str] = None,
+        subtype: str = "",
+    ) -> Path:
+        """Download a model from Hugging Face into the library."""
+        return self.model_downloader.download_from_hf(
+            repo_id=repo_id,
+            family=family,
+            official_name=official_name,
+            model_type=model_type,
+            subtype=subtype,
+        )
 
     # ==================== Custom Nodes Operations ====================
 
     def get_version_custom_nodes_dir(self, version_tag: str) -> Path:
-        """
-        Get the custom_nodes directory for a specific version
-
-        Args:
-            version_tag: Version tag
-
-        Returns:
-            Path to version's custom_nodes directory
-        """
         return self.custom_nodes_mgr.get_version_custom_nodes_dir(version_tag)
 
     def list_version_custom_nodes(self, version_tag: str) -> List[str]:
-        """
-        List custom nodes installed for a specific version
-
-        Args:
-            version_tag: Version tag
-
-        Returns:
-            List of custom node directory names
-        """
         return self.custom_nodes_mgr.list_version_custom_nodes(version_tag)
 
     def install_custom_node(
         self, git_url: str, version_tag: str, node_name: Optional[str] = None
     ) -> bool:
-        """
-        Install a custom node for a specific ComfyUI version
-        Creates a real copy (not symlink) in the version's custom_nodes directory
-
-        Args:
-            git_url: Git repository URL
-            version_tag: ComfyUI version tag
-            node_name: Optional custom node name (extracted from URL if not provided)
-
-        Returns:
-            True if successful
-        """
         return self.custom_nodes_mgr.install_custom_node(git_url, version_tag, node_name)
 
     def update_custom_node(self, node_name: str, version_tag: str) -> bool:
-        """
-        Update a custom node to latest version
-
-        Args:
-            node_name: Custom node directory name
-            version_tag: ComfyUI version tag
-
-        Returns:
-            True if successful
-        """
         return self.custom_nodes_mgr.update_custom_node(node_name, version_tag)
 
     def remove_custom_node(self, node_name: str, version_tag: str) -> bool:
-        """
-        Remove a custom node from a specific ComfyUI version
-
-        Args:
-            node_name: Custom node directory name
-            version_tag: ComfyUI version tag
-
-        Returns:
-            True if successful
-        """
         return self.custom_nodes_mgr.remove_custom_node(node_name, version_tag)
-
-    def cache_custom_node_repo(self, git_url: str) -> Optional[Path]:
-        """
-        Clone or update a custom node repository in the cache
-        Creates a bare git repo for efficient storage
-
-        Args:
-            git_url: Git repository URL
-
-        Returns:
-            Path to cached repo or None on failure
-        """
-        return self.custom_nodes_mgr.cache_custom_node_repo(git_url)
-
-
-if __name__ == "__main__":
-    # For testing - demonstrate resource manager
-    from backend.utils import get_launcher_root
-
-    launcher_root = get_launcher_root()
-    launcher_data_dir = launcher_root / "launcher-data"
-
-    # Initialize metadata manager
-    metadata_mgr = MetadataManager(launcher_data_dir)
-
-    # Initialize resource manager
-    resource_mgr = ResourceManager(launcher_root, metadata_mgr)
-
-    logger.info("=== Resource Manager Test ===\n")
-
-    # Initialize shared storage
-    logger.info("Initializing shared storage...")
-    if resource_mgr.initialize_shared_storage():
-        logger.info("✓ Shared storage initialized\n")
-    else:
-        logger.error("✗ Failed to initialize shared storage\n")
-
-    # Scan shared storage
-    logger.info("Scanning shared storage...")
-    scan_result = resource_mgr.scan_shared_storage()
-    logger.info(f"✓ Scan complete:")
-    logger.info(f"  Models: {scan_result['modelsFound']}")
-    logger.info(f"  Workflows: {scan_result['workflowsFound']}")
-    logger.info(f"  Total size: {scan_result['totalSize']:,} bytes\n")
-
-    # Check if we have any installed versions
-    versions = metadata_mgr.load_versions()
-    if versions.get("installed"):
-        logger.info("Testing symlink setup for installed versions:")
-        for version_tag in versions["installed"].keys():
-            logger.info(f"\nVersion: {version_tag}")
-
-            # Setup symlinks
-            if resource_mgr.setup_version_symlinks(version_tag):
-                logger.info(f"  ✓ Symlinks created")
-            else:
-                logger.error(f"  ✗ Failed to create symlinks")
-
-            # Validate symlinks
-            repair_report = resource_mgr.validate_and_repair_symlinks(version_tag)
-            logger.info(
-                f"  Validation: {len(repair_report['broken'])} broken, "
-                f"{len(repair_report['repaired'])} repaired, "
-                f"{len(repair_report['removed'])} removed"
-            )
-    else:
-        logger.info("No versions installed yet")

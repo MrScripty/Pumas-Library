@@ -31,11 +31,15 @@ def get_staged_python_files() -> list[str]:
             check=True,
         )
         files = result.stdout.strip().split("\n")
+        excluded = {"backend/model_library/__init__.py"}
         # Filter for backend Python files only
         backend_files = [
             f
             for f in files
-            if f.startswith("backend/") and f.endswith(".py") and not f.startswith("backend/tests/")
+            if f.startswith("backend/")
+            and f.endswith(".py")
+            and not f.startswith("backend/tests/")
+            and f not in excluded
         ]
         return backend_files
     except subprocess.CalledProcessError:

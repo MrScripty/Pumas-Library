@@ -11,7 +11,7 @@ repos:
       - id: black
         language_version: python3.12
         args: [--line-length=100]
-        exclude: ^(venv/|\.venv/|env/|\.env/)
+        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
 
   # isort: Import sorting
   - repo: https://github.com/pycqa/isort
@@ -19,7 +19,7 @@ repos:
     hooks:
       - id: isort
         args: [--profile=black, --line-length=100]
-        exclude: ^(venv/|\.venv/|env/|\.env/)
+        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
 
   # flake8: Disabled - replaced by Ruff for faster, more granular linting
   # Ruff provides better performance and fine-grained control
@@ -40,12 +40,14 @@ repos:
         language: system
         types: [python]
         files: \.py$
+        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
       - id: check-generic-exceptions
         name: Check for generic exception handlers in Python files
         entry: python3 .pre-commit-hooks/check_generic_exceptions.py
         language: system
         types: [python]
         files: \.py$
+        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
       - id: pytest
         name: pytest (full test suite)
         entry: ./venv/bin/python -m pytest
@@ -63,6 +65,7 @@ repos:
         entry: ./venv/bin/python -m ruff check --select F821,F822,F823
         language: system
         types: [python]
+        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
       - id: mypy
         name: mypy (type checking)
         entry: ./venv/bin/python -m mypy

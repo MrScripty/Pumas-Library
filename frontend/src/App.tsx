@@ -8,7 +8,7 @@ import { AppSidebar } from './components/AppSidebar';
 import { ModelManager } from './components/ModelManager';
 import { useVersions } from './hooks/useVersions';
 import { DEFAULT_APPS } from './config/apps';
-import type { AppConfig, ModelCategory, SystemResources } from './types/apps';
+import type { AppConfig, ModelCategory, ModelInfo, SystemResources } from './types/apps';
 
 // TypeScript definitions for PyWebView API
 declare global {
@@ -351,6 +351,49 @@ export default function App() {
     }
   };
 
+  // Fetch models from backend
+  const fetchModels = async () => {
+    try {
+      if (window.pywebview?.api?.get_models) {
+        const result = await window.pywebview.api.get_models();
+        if (result.success && result.models) {
+          // Transform backend models to frontend ModelCategory structure
+          const categorizedModels: ModelCategory[] = [];
+          const categoryMap = new Map<string, ModelInfo[]>();
+
+          // Group models by category
+          Object.entries(result.models).forEach(([path, modelData]: [string, any]) => {
+            const category = modelData.modelType || 'uncategorized';
+            const fileName = path.split('/').pop() || path;
+
+            const modelInfo: ModelInfo = {
+              id: path,
+              name: fileName,
+              category: category,
+              path: path,
+              size: modelData.size,
+              date: modelData.addedDate,
+            };
+
+            if (!categoryMap.has(category)) {
+              categoryMap.set(category, []);
+            }
+            categoryMap.get(category)!.push(modelInfo);
+          });
+
+          // Convert map to array format
+          categoryMap.forEach((models, category) => {
+            categorizedModels.push({ category, models });
+          });
+
+          setModelGroups(categorizedModels);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to fetch models:", e);
+    }
+  };
+
   // --- Effects ---
   useEffect(() => {
     const waitForPyWebView = () => {
@@ -366,6 +409,7 @@ export default function App() {
         });
 
         checkLauncherVersion(true);
+        fetchModels();
       } else {
         console.log('Waiting for PyWebView API methods...');
         setTimeout(waitForPyWebView, 100);
@@ -547,6 +591,15 @@ export default function App() {
     }
   };
 
+  const openModelsRoot = async () => {
+    if (!window.pywebview?.api?.open_path) return;
+    try {
+      await window.pywebview.api.open_path('shared-resources/models');
+    } catch (err) {
+      console.error("Failed to open models folder", err);
+    }
+  };
+
   const closeWindow = () => {
     if (window.pywebview) {
       window.pywebview.api.close_window();
@@ -673,6 +726,30 @@ export default function App() {
       }
       return newSet;
     });
+  };
+
+  const handleScanModels = async () => {
+    try {
+      if (window.pywebview?.api?.scan_shared_storage) {
+        const result = await window.pywebview.api.scan_shared_storage();
+        if (result.success) {
+          // Refresh models after scan
+          await fetchModels();
+          setStatusMessage("Model scan completed");
+        } else {
+          setStatusMessage(`Scan failed: ${result.error || 'Unknown error'}`);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to scan models:", e);
+      setStatusMessage("Failed to scan models");
+    }
+  };
+
+  const handleAddModels = async () => {
+    // TODO: Implement folder picker dialog
+    // For now, just trigger a scan
+    await handleScanModels();
   };
 
   const isSetupComplete = depsInstalled === true && isPatched && menuShortcut && desktopShortcut;
@@ -862,6 +939,9 @@ export default function App() {
                 onToggleStar={handleToggleStar}
                 onToggleLink={handleToggleLink}
                 selectedAppId={selectedAppId}
+                onScanModels={handleScanModels}
+                onAddModels={handleAddModels}
+                onOpenModelsRoot={openModelsRoot}
               />
             </div>
           )}

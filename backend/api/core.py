@@ -809,6 +809,22 @@ class ComfyUISetupAPI:
             logger.error("Model download failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
+    def search_hf_models(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        limit: int = 25,
+    ) -> Dict[str, Any]:
+        """Search Hugging Face models for the download UI."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable", "models": []}
+        try:
+            results = self.resource_manager.search_hf_models(query=query, kind=kind, limit=limit)
+            return {"success": True, "models": results}
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Hugging Face search failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+
     def get_model_overrides(self, rel_path: str) -> ModelOverrides:
         """Fetch overrides for a model by relative path."""
         if not self.resource_manager:

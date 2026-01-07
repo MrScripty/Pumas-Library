@@ -63,6 +63,11 @@ declare global {
         update_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         remove_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         scan_shared_storage: () => Promise<{ success: boolean; result: any; error?: string }>;
+        search_hf_models: (query: string, kind?: string | null, limit?: number) => Promise<{
+          success: boolean;
+          models: any[];
+          error?: string;
+        }>;
 
         // Launcher Update API
         get_launcher_version: () => Promise<{ success: boolean; version: string; branch: string; isGitRepo: boolean; error?: string }>;
@@ -133,6 +138,8 @@ export default function App() {
   const [isRefreshingVersions, setIsRefreshingVersions] = useState(false);
   const [launcherVersion, setLauncherVersion] = useState<string | null>(null);
   const isPolling = useRef(false);
+  const modelCountRef = useRef<number | null>(null);
+  const isModelCountPolling = useRef(false);
 
   // Launcher update state
   const [launcherUpdateAvailable, setLauncherUpdateAvailable] = useState(false);
@@ -362,7 +369,8 @@ export default function App() {
           const categoryMap = new Map<string, ModelInfo[]>();
 
           // Group models by category
-          Object.entries(result.models).forEach(([path, modelData]: [string, any]) => {
+          const modelEntries = Object.entries(result.models);
+          modelEntries.forEach(([path, modelData]: [string, any]) => {
             const category = modelData.modelType || 'uncategorized';
             const fileName = path.split('/').pop() || path;
             const displayName = modelData.officialName || modelData.cleanedName || fileName;
@@ -388,6 +396,7 @@ export default function App() {
           });
 
           setModelGroups(categorizedModels);
+          modelCountRef.current = modelEntries.length;
         }
       }
     } catch (e) {
@@ -418,6 +427,40 @@ export default function App() {
     };
 
     waitForPyWebView();
+  }, []);
+
+  useEffect(() => {
+    const pollModelLibrary = async () => {
+      if (isModelCountPolling.current || !window.pywebview?.api?.scan_shared_storage) {
+        return;
+      }
+
+      isModelCountPolling.current = true;
+      try {
+        const result = await window.pywebview.api.scan_shared_storage();
+        if (result.success) {
+          const modelsFound = result.result?.modelsFound;
+          if (typeof modelsFound === 'number') {
+            if (modelCountRef.current === null) {
+              modelCountRef.current = modelsFound;
+            } else if (modelsFound !== modelCountRef.current) {
+              modelCountRef.current = modelsFound;
+              await fetchModels();
+            }
+          }
+        }
+      } catch (err) {
+        console.error('Failed to poll model library count:', err);
+      } finally {
+        isModelCountPolling.current = false;
+      }
+    };
+
+    const interval = setInterval(() => {
+      void pollModelLibrary();
+    }, 10000);
+
+    return () => clearInterval(interval);
   }, []);
 
   const checkLauncherVersion = async (forceRefresh = false) => {
@@ -926,11 +969,13 @@ export default function App() {
           ) : (
             /* Other Apps - Show Model Manager */
             <div className="flex-1 flex flex-col gap-4 p-8 px-0 mx-2 py-1 overflow-hidden">
-              <div className="text-center py-4">
-                <p className="text-[hsl(var(--launcher-text-secondary))] text-sm">
-                  {selectedAppId ? `${apps.find(a => a.id === selectedAppId)?.displayName} - Coming Soon` : 'Select an app from the sidebar'}
-                </p>
-              </div>
+              {selectedAppId && (
+                <div className="text-center py-4">
+                  <p className="text-[hsl(var(--launcher-text-secondary))] text-sm">
+                    {`${apps.find(a => a.id === selectedAppId)?.displayName} - Coming Soon`}
+                  </p>
+                </div>
+              )}
 
               {/* Model Manager for non-ComfyUI apps */}
               <ModelManager
@@ -940,7 +985,6 @@ export default function App() {
                 onToggleStar={handleToggleStar}
                 onToggleLink={handleToggleLink}
                 selectedAppId={selectedAppId}
-                onScanModels={handleScanModels}
                 onAddModels={handleAddModels}
                 onOpenModelsRoot={openModelsRoot}
               />

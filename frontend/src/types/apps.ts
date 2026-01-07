@@ -35,6 +35,16 @@ export interface ModelCategory {
   models: ModelInfo[];
 }
 
+export interface RemoteModelInfo {
+  repoId: string;
+  name: string;
+  developer: string;
+  kind: string;
+  formats: string[];
+  quants: string[];
+  url: string;
+}
+
 export interface SystemResources {
   cpu: {
     usage: number;

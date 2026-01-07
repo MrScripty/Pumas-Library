@@ -403,6 +403,13 @@ class JavaScriptAPI:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
+    def search_hf_models(self, query, kind=None, limit=25):
+        """Search Hugging Face models for the download UI"""
+        try:
+            return self.api.search_hf_models(query, kind, limit)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e), "models": []}
+
     def get_model_overrides(self, rel_path):
         """Get overrides for a model by relative path"""
         try:

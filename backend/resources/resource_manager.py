@@ -206,6 +206,15 @@ class ResourceManager:
             subtype=subtype,
         )
 
+    def search_hf_models(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        limit: int = 25,
+    ) -> List[Dict[str, object]]:
+        """Search Hugging Face models for download UI."""
+        return self.model_downloader.search_models(query=query, kind=kind, limit=limit)
+
     # ==================== Custom Nodes Operations ====================
 
     def get_version_custom_nodes_dir(self, version_tag: str) -> Path:

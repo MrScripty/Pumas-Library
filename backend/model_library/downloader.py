@@ -6,7 +6,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional
 
 from backend.logging_config import get_logger
 from backend.model_library.library import ModelLibrary
@@ -37,6 +37,105 @@ class ModelDownloader:
             login(self.hf_token)
         self._api = HfApi()
         return self._api
+
+    def _extract_formats(self, siblings: Iterable[object]) -> list[str]:
+        formats = set()
+        known_formats = {
+            ".safetensors",
+            ".gguf",
+            ".ckpt",
+            ".pt",
+            ".pth",
+            ".bin",
+            ".onnx",
+        }
+        for sibling in siblings:
+            filename = getattr(sibling, "rfilename", "") or ""
+            lower = filename.lower()
+            for ext in known_formats:
+                if lower.endswith(ext):
+                    formats.add(ext.lstrip("."))
+        return sorted(formats)
+
+    def _extract_quants(self, siblings: Iterable[object], tags: Iterable[str]) -> list[str]:
+        quants = set()
+        quant_tokens = [
+            "q2",
+            "q3",
+            "q4",
+            "q5",
+            "q6",
+            "q8",
+            "q4_k_m",
+            "q4_k_s",
+            "q5_k_m",
+            "q5_k_s",
+            "q6_k",
+            "q8_0",
+            "int4",
+            "int8",
+            "fp16",
+            "fp32",
+            "bf16",
+            "f16",
+            "f32",
+        ]
+        for sibling in siblings:
+            filename = (getattr(sibling, "rfilename", "") or "").lower()
+            for token in quant_tokens:
+                if token in filename:
+                    quants.add(token)
+        for tag in tags:
+            lower = tag.lower()
+            for token in quant_tokens:
+                if token in lower:
+                    quants.add(token)
+        return sorted(quants)
+
+    def search_models(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        limit: int = 25,
+    ) -> list[dict[str, object]]:
+        api = self._get_api()
+        filter_arg = None
+        if kind:
+            try:
+                from huggingface_hub import ModelFilter
+            except ImportError:
+                filter_arg = kind
+            else:
+                filter_arg = ModelFilter(task=kind)
+
+        results = api.list_models(
+            search=query or None,
+            filter=filter_arg,
+            full=True,
+            limit=limit,
+        )
+
+        models: list[dict[str, object]] = []
+        for info in results:
+            repo_id = getattr(info, "modelId", None) or getattr(info, "id", None)
+            if not repo_id:
+                continue
+            tags = list(getattr(info, "tags", []) or [])
+            siblings = getattr(info, "siblings", []) or []
+            developer = getattr(info, "author", None) or repo_id.split("/")[0]
+            kind_value = getattr(info, "pipeline_tag", None) or "unknown"
+            models.append(
+                {
+                    "repoId": repo_id,
+                    "name": repo_id.split("/")[-1],
+                    "developer": developer,
+                    "kind": kind_value,
+                    "formats": self._extract_formats(siblings),
+                    "quants": self._extract_quants(siblings, tags),
+                    "url": f"https://huggingface.co/{repo_id}",
+                }
+            )
+        return models
 
     def _compute_blake3(self, file_path: Path) -> str:
         try:

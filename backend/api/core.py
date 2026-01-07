@@ -792,6 +792,7 @@ class ComfyUISetupAPI:
         official_name: str,
         model_type: Optional[str] = None,
         subtype: str = "",
+        quant: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Download a model from Hugging Face into the library."""
         if not self.resource_manager:
@@ -803,11 +804,56 @@ class ComfyUISetupAPI:
                 official_name=official_name,
                 model_type=model_type,
                 subtype=subtype,
+                quant=quant,
             )
             return {"success": True, "model_path": str(model_dir)}
         except (OSError, RuntimeError, ValueError) as exc:
             logger.error("Model download failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
+
+    def start_model_download_from_hf(
+        self,
+        repo_id: str,
+        family: str,
+        official_name: str,
+        model_type: Optional[str] = None,
+        subtype: str = "",
+        quant: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Start a Hugging Face model download with progress tracking."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+        try:
+            result = self.resource_manager.start_model_download_from_hf(
+                repo_id=repo_id,
+                family=family,
+                official_name=official_name,
+                model_type=model_type,
+                subtype=subtype,
+                quant=quant,
+            )
+            return {"success": True, **result}
+        except (OSError, RuntimeError, ValueError) as exc:
+            logger.error("Model download start failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def get_model_download_status(self, download_id: str) -> Dict[str, Any]:
+        """Fetch status for a model download."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+        status = self.resource_manager.get_model_download_status(download_id)
+        if not status:
+            return {"success": False, "error": "Download not found"}
+        return {"success": True, **status}
+
+    def cancel_model_download(self, download_id: str) -> Dict[str, Any]:
+        """Cancel an active model download."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+        cancelled = self.resource_manager.cancel_model_download(download_id)
+        if not cancelled:
+            return {"success": False, "error": "Download not active"}
+        return {"success": True}
 
     def search_hf_models(
         self,

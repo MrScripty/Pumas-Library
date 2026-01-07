@@ -42,7 +42,15 @@ export interface RemoteModelInfo {
   kind: string;
   formats: string[];
   quants: string[];
+  downloadOptions?: Array<{
+    quant: string;
+    sizeBytes?: number | null;
+  }>;
   url: string;
+  releaseDate?: string;
+  downloads?: number | null;
+  totalSizeBytes?: number | null;
+  quantSizes?: Record<string, number>;
 }
 
 export interface SystemResources {

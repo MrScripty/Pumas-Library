@@ -394,12 +394,51 @@ class JavaScriptAPI:
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 
-    def download_model_from_hf(self, repo_id, family, official_name, model_type=None, subtype=""):
+    def download_model_from_hf(
+        self,
+        repo_id,
+        family,
+        official_name,
+        model_type=None,
+        subtype="",
+        quant=None,
+    ):
         """Download a model from Hugging Face into the library"""
         try:
             return self.api.download_model_from_hf(
-                repo_id, family, official_name, model_type, subtype
+                repo_id, family, official_name, model_type, subtype, quant
             )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def start_model_download_from_hf(
+        self,
+        repo_id,
+        family,
+        official_name,
+        model_type=None,
+        subtype="",
+        quant=None,
+    ):
+        """Start a Hugging Face download with progress tracking"""
+        try:
+            return self.api.start_model_download_from_hf(
+                repo_id, family, official_name, model_type, subtype, quant
+            )
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def get_model_download_status(self, download_id):
+        """Get status for a model download"""
+        try:
+            return self.api.get_model_download_status(download_id)
+        except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+    def cancel_model_download(self, download_id):
+        """Cancel an active model download"""
+        try:
+            return self.api.cancel_model_download(download_id)
         except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
             return {"success": False, "error": str(e)}
 

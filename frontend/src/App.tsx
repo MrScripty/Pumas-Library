@@ -63,6 +63,33 @@ declare global {
         update_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         remove_custom_node: (node_name: string, version_tag: string) => Promise<{ success: boolean; error?: string }>;
         scan_shared_storage: () => Promise<{ success: boolean; result: any; error?: string }>;
+        download_model_from_hf: (
+          repo_id: string,
+          family: string,
+          official_name: string,
+          model_type?: string | null,
+          subtype?: string | null,
+          quant?: string | null
+        ) => Promise<{ success: boolean; model_path?: string; error?: string }>;
+        start_model_download_from_hf: (
+          repo_id: string,
+          family: string,
+          official_name: string,
+          model_type?: string | null,
+          subtype?: string | null,
+          quant?: string | null
+        ) => Promise<{ success: boolean; download_id?: string; total_bytes?: number; error?: string }>;
+        get_model_download_status: (download_id: string) => Promise<{
+          success: boolean;
+          download_id?: string;
+          repo_id?: string;
+          status?: string;
+          progress?: number;
+          downloaded_bytes?: number;
+          total_bytes?: number;
+          error?: string;
+        }>;
+        cancel_model_download: (download_id: string) => Promise<{ success: boolean; error?: string }>;
         search_hf_models: (query: string, kind?: string | null, limit?: number) => Promise<{
           success: boolean;
           models: any[];

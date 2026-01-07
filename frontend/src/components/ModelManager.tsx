@@ -1,5 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Star, ExternalLink, Search, Folder, Download, Filter, HardDrive, Calendar, Tag } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  ArrowRight,
+  AudioWaveform,
+  Box,
+  Blocks,
+  Calendar,
+  CalendarCheck,
+  CalendarFold,
+  Calendars,
+  ChartSpline,
+  ChartPie,
+  Download,
+  ExternalLink,
+  Filter,
+  Folder,
+  HardDrive,
+  Image,
+  Languages,
+  Search,
+  Shapes,
+  Star,
+  Tag,
+  TvMinimalPlay,
+  UserRound,
+  UserRoundSearch,
+  X,
+} from 'lucide-react';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 
 interface ModelManagerProps {
@@ -31,6 +58,18 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [remoteResults, setRemoteResults] = useState<RemoteModelInfo[]>([]);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [isRemoteLoading, setIsRemoteLoading] = useState(false);
+  const [remoteDownloadError, setRemoteDownloadError] = useState<string | null>(null);
+  const [remoteDownloadRepoId, setRemoteDownloadRepoId] = useState<string | null>(null);
+  const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
+  const [downloadStatusByRepo, setDownloadStatusByRepo] = useState<Record<string, {
+    downloadId: string;
+    status: 'queued' | 'downloading' | 'cancelling' | 'completed' | 'cancelled' | 'error';
+    progress: number;
+    downloadedBytes?: number;
+    totalBytes?: number;
+  }>>({});
+  const downloadStatusRef = React.useRef(downloadStatusByRepo);
+  const downloadPollingRef = React.useRef<number | null>(null);
 
   // Get all unique categories
   const categories = useMemo(() => {
@@ -79,10 +118,20 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   }, [remoteResults]);
 
   const filteredRemoteResults = useMemo(() => {
-    if (selectedKind === 'all') {
-      return remoteResults;
-    }
-    return remoteResults.filter((model) => model.kind === selectedKind);
+    const getReleaseTimestamp = (date?: string) => {
+      if (!date) return 0;
+      const parsed = new Date(date);
+      const time = parsed.getTime();
+      return Number.isNaN(time) ? 0 : time;
+    };
+
+    const filtered = selectedKind === 'all'
+      ? remoteResults
+      : remoteResults.filter((model) => model.kind === selectedKind);
+
+    return [...filtered].sort(
+      (a, b) => getReleaseTimestamp(b.releaseDate) - getReleaseTimestamp(a.releaseDate)
+    );
   }, [remoteResults, selectedKind]);
 
   useEffect(() => {
@@ -142,6 +191,96 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     };
   }, [isDownloadMode, searchQuery]);
 
+  useEffect(() => {
+    downloadStatusRef.current = downloadStatusByRepo;
+  }, [downloadStatusByRepo, remoteDownloadRepoId]);
+
+  useEffect(() => {
+    const hasActiveDownloads = Object.values(downloadStatusByRepo).some((status) =>
+      ['queued', 'downloading', 'cancelling'].includes(status.status)
+    );
+
+    if (!hasActiveDownloads) {
+      if (downloadPollingRef.current) {
+        window.clearInterval(downloadPollingRef.current);
+        downloadPollingRef.current = null;
+      }
+      return;
+    }
+
+    if (downloadPollingRef.current) {
+      return;
+    }
+
+    downloadPollingRef.current = window.setInterval(async () => {
+      const entries = Object.entries(downloadStatusRef.current).filter(([, status]) =>
+        ['queued', 'downloading', 'cancelling'].includes(status.status)
+      );
+      if (!window.pywebview?.api?.get_model_download_status || entries.length === 0) {
+        return;
+      }
+
+      const updates = await Promise.all(
+        entries.map(async ([repoId, status]) => {
+          const result = await window.pywebview.api.get_model_download_status(status.downloadId);
+          if (!result.success) {
+            return { repoId, status: 'error' as const, error: result.error || 'Download failed.' };
+          }
+          return {
+            repoId,
+            status: (result.status || 'downloading') as
+              | 'queued'
+              | 'downloading'
+              | 'cancelling'
+              | 'completed'
+              | 'cancelled'
+              | 'error',
+            progress: typeof result.progress === 'number' ? result.progress : 0,
+            downloadedBytes: typeof result.downloaded_bytes === 'number' ? result.downloaded_bytes : undefined,
+            totalBytes: typeof result.total_bytes === 'number' ? result.total_bytes : undefined,
+            error: result.error,
+          };
+        })
+      );
+
+      setDownloadStatusByRepo((prev) => {
+        const next = { ...prev };
+        updates.forEach((update) => {
+          if (!update) {
+            return;
+          }
+          const previous = prev[update.repoId];
+          if (!previous) {
+            return;
+          }
+          next[update.repoId] = {
+            ...previous,
+            status: update.status,
+            progress: update.progress ?? previous.progress,
+            downloadedBytes: update.downloadedBytes ?? previous.downloadedBytes,
+            totalBytes: update.totalBytes ?? previous.totalBytes,
+          };
+          if (update.status === 'error') {
+            setRemoteDownloadRepoId(update.repoId);
+            setRemoteDownloadError(update.error || 'Download failed.');
+          } else if (update.status === 'completed' || update.status === 'cancelled') {
+            if (remoteDownloadRepoId === update.repoId) {
+              setRemoteDownloadError(null);
+            }
+          }
+        });
+        return next;
+      });
+    }, 800);
+
+    return () => {
+      if (downloadPollingRef.current) {
+        window.clearInterval(downloadPollingRef.current);
+        downloadPollingRef.current = null;
+      }
+    };
+  }, [downloadStatusByRepo, remoteDownloadRepoId]);
+
   // Format file size
   const formatSize = (bytes?: number): string => {
     if (!bytes) return 'Unknown';
@@ -159,6 +298,241 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     } catch {
       return 'Unknown';
     }
+  };
+
+  const resolveReleaseIcon = (dateStr?: string) => {
+    if (!dateStr) return Calendar;
+    const parsed = new Date(dateStr);
+    if (Number.isNaN(parsed.getTime())) {
+      return Calendar;
+    }
+    const now = new Date();
+    const diffMs = now.getTime() - parsed.getTime();
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
+    if (diffDays <= 60) {
+      return CalendarCheck;
+    }
+    if (diffDays <= 240) {
+      return CalendarFold;
+    }
+    return Calendars;
+  };
+
+  const formatReleaseDate = (dateStr?: string): string => {
+    if (!dateStr) return 'Unknown';
+    const parsed = new Date(dateStr);
+    if (Number.isNaN(parsed.getTime())) {
+      return 'Unknown';
+    }
+    return parsed.toLocaleDateString();
+  };
+
+  const formatDownloads = (downloads?: number | null): string => {
+    if (typeof downloads !== 'number') {
+      return 'Unknown';
+    }
+    return downloads.toLocaleString();
+  };
+
+  const formatDownloadSize = (bytes?: number | null): string => {
+    if (typeof bytes !== 'number' || bytes <= 0) {
+      return 'Unknown';
+    }
+    const gb = bytes / (1024 ** 3);
+    const rounded = gb >= 10 ? gb.toFixed(1) : gb.toFixed(2);
+    return `${rounded} GB`;
+  };
+
+  const formatDownloadSizeValue = (bytes?: number | null): string => {
+    if (typeof bytes !== 'number' || bytes <= 0) {
+      return 'Unknown';
+    }
+    const gb = bytes / (1024 ** 3);
+    return gb >= 10 ? gb.toFixed(1) : gb.toFixed(2);
+  };
+
+  const formatDownloadSizeRange = (model: RemoteModelInfo): string => {
+    const optionSizes = model.downloadOptions?.map((option) => option.sizeBytes) ?? [];
+    const validSizes = optionSizes.filter((size) => typeof size === 'number' && size > 0);
+    if (validSizes.length > 1) {
+      const min = Math.min(...validSizes);
+      const max = Math.max(...validSizes);
+      return `${formatDownloadSizeValue(min)}-${formatDownloadSizeValue(max)} GB`;
+    }
+    if (validSizes.length === 1) {
+      return formatDownloadSize(validSizes[0]);
+    }
+    const fallbackSizes = model.quantSizes ? Object.values(model.quantSizes) : [];
+    const fallbackValidSizes = fallbackSizes.filter((size) => typeof size === 'number' && size > 0);
+    if (fallbackValidSizes.length > 1) {
+      const min = Math.min(...fallbackValidSizes);
+      const max = Math.max(...fallbackValidSizes);
+      return `${formatDownloadSizeValue(min)}-${formatDownloadSizeValue(max)} GB`;
+    }
+    if (fallbackValidSizes.length === 1) {
+      return formatDownloadSize(fallbackValidSizes[0]);
+    }
+    return formatDownloadSize(model.totalSizeBytes ?? null);
+  };
+
+  const resolveDownloadModelType = (kind: string) => {
+    const normalized = kind.toLowerCase();
+    if (normalized.includes('image') || normalized.includes('video') || normalized.includes('3d')) {
+      return 'diffusion';
+    }
+    return 'llm';
+  };
+
+  const startRemoteDownload = async (model: RemoteModelInfo, quant?: string | null) => {
+    if (!window.pywebview?.api?.start_model_download_from_hf) {
+      setRemoteDownloadError('Download is unavailable.');
+      return;
+    }
+
+    const repoId = model.repoId;
+    const developer = model.developer || repoId.split('/')[0] || 'huggingface';
+    const officialName = model.name || repoId;
+    const modelType = resolveDownloadModelType(model.kind || '');
+
+    setRemoteDownloadError(null);
+    setRemoteDownloadRepoId(repoId);
+    try {
+      const result = await window.pywebview.api.start_model_download_from_hf(
+        repoId,
+        developer,
+        officialName,
+        modelType,
+        model.kind || '',
+        quant || null
+      );
+      if (!result.success || !result.download_id) {
+        setRemoteDownloadError(result.error || 'Download failed.');
+        return;
+      }
+      setDownloadStatusByRepo((prev) => ({
+        ...prev,
+        [repoId]: {
+          downloadId: result.download_id,
+          status: 'queued',
+          progress: 0,
+          totalBytes: result.total_bytes,
+        },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Download failed.';
+      setRemoteDownloadError(message);
+    }
+  };
+
+  const cancelRemoteDownload = async (repoId: string) => {
+    const status = downloadStatusByRepo[repoId];
+    if (!status?.downloadId || !window.pywebview?.api?.cancel_model_download) {
+      return;
+    }
+
+    try {
+      await window.pywebview.api.cancel_model_download(status.downloadId);
+      setRemoteDownloadError(null);
+      setDownloadStatusByRepo((prev) => ({
+        ...prev,
+        [repoId]: {
+          ...status,
+          status: 'cancelling',
+        },
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Cancel failed.';
+      setRemoteDownloadError(message);
+      setRemoteDownloadRepoId(repoId);
+    }
+  };
+
+  const resolveKindIcon = (token: string) => {
+    const normalized = token.toLowerCase();
+    if (normalized.includes('classification')) return Shapes;
+    if (normalized.includes('text')) return Languages;
+    if (normalized.includes('image')) return Image;
+    if (normalized.includes('audio')) return AudioWaveform;
+    if (normalized.includes('video')) return TvMinimalPlay;
+    if (normalized.includes('3d')) return Box;
+    return Tag;
+  };
+
+  const resolveKindLabel = (token: string) => {
+    const normalized = token.toLowerCase();
+    if (normalized.includes('classification')) return 'Classification';
+    if (normalized.includes('text')) return 'Text';
+    if (normalized.includes('image')) return 'Image';
+    if (normalized.includes('audio')) return 'Audio';
+    if (normalized.includes('video')) return 'Video';
+    if (normalized.includes('3d')) return '3D';
+    return 'Unknown';
+  };
+
+  const renderKindToken = (token: string) => {
+    const Icon = resolveKindIcon(token);
+    const label = resolveKindLabel(token);
+    return (
+      <span title={label} aria-label={label} className="inline-flex">
+        <Icon className="w-3.5 h-3.5" />
+      </span>
+    );
+  };
+
+  const renderKindIcons = (kind: string) => {
+    if (!kind || kind === 'unknown') {
+      return (
+        <span title="Unknown" aria-label="Unknown" className="inline-flex">
+          <Tag className="w-3.5 h-3.5" />
+        </span>
+      );
+    }
+
+    const normalized = kind.toLowerCase();
+    if (!normalized.includes('-to-')) {
+      const tokens = normalized.split('-').filter(Boolean);
+      if (tokens.length <= 1) {
+        return renderKindToken(normalized);
+      }
+      return (
+        <>
+          {tokens.map((token) => (
+            <React.Fragment key={token}>{renderKindToken(token)}</React.Fragment>
+          ))}
+        </>
+      );
+    }
+
+    const [fromRaw, toRaw] = normalized.split('-to-');
+    const fromTokens = fromRaw.split('-').filter(Boolean);
+    const toTokens = toRaw.split('-').filter(Boolean);
+    const isBidirectional =
+      fromTokens.length === toTokens.length &&
+      fromTokens.every((token) => toTokens.includes(token));
+    const ArrowIcon = isBidirectional ? ArrowLeftRight : ArrowRight;
+    const arrowLabel = isBidirectional ? 'Bidirectional' : 'To';
+
+    return (
+      <>
+        {fromTokens.length > 0
+          ? fromTokens.map((token, index) => (
+              <React.Fragment key={`from-${token}-${index}`}>
+                {renderKindToken(token)}
+              </React.Fragment>
+            ))
+          : renderKindToken(fromRaw)}
+        <span title={arrowLabel} aria-label={arrowLabel} className="inline-flex">
+          <ArrowIcon className="w-3.5 h-3.5 opacity-70" />
+        </span>
+        {toTokens.length > 0
+          ? toTokens.map((token, index) => (
+              <React.Fragment key={`to-${token}-${index}`}>
+                {renderKindToken(token)}
+              </React.Fragment>
+            ))
+          : renderKindToken(toRaw)}
+      </>
+    );
   };
 
   const openRemoteUrl = (url: string) => {
@@ -304,43 +678,201 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
             ) : (
               !isRemoteLoading &&
               !remoteError &&
-              filteredRemoteResults.map((model) => (
-                <div
-                  key={model.repoId}
-                  className="rounded transition-colors bg-[hsl(var(--launcher-bg-tertiary)/0.2)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.35)]"
-                >
-                  <div className="flex items-start justify-between gap-3 p-3">
-                    <div className="min-w-0">
+              filteredRemoteResults.map((model) => {
+                const downloadStatus = downloadStatusByRepo[model.repoId];
+                const isDownloading = downloadStatus
+                  ? ['queued', 'downloading', 'cancelling'].includes(downloadStatus.status)
+                  : false;
+                const progressValue = downloadStatus?.progress ?? 0;
+                const downloadOptions = model.downloadOptions?.length
+                  ? model.downloadOptions
+                  : model.quants.map((quant) => ({
+                      quant,
+                      sizeBytes: model.quantSizes?.[quant] ?? null,
+                    }));
+                const quantLabels = downloadOptions.map((option) => option.quant);
+
+                return (
+                  <div
+                    key={model.repoId}
+                    className="rounded transition-colors bg-[hsl(var(--launcher-bg-tertiary)/0.2)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.35)]"
+                  >
+                    <div className="flex items-start justify-between gap-3 p-3">
+                      <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-semibold text-[hsl(var(--launcher-text-primary))] truncate">
                           {model.name}
                         </span>
-                        <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
-                          {model.kind}
-                        </span>
                       </div>
-                      <p className="text-xs text-[hsl(var(--launcher-text-muted))] mt-0.5 truncate">
-                        {model.repoId}
-                      </p>
+                      <div className="mt-1 flex items-start justify-between gap-4 text-xs text-[hsl(var(--launcher-text-muted))]">
+                        <div className="flex flex-col gap-1 min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (!model.developer) {
+                                return;
+                              }
+                              setIsDownloadMode(true);
+                              setSearchQuery(model.developer);
+                              setSelectedKind('all');
+                              setShowCategoryMenu(false);
+                            }}
+                            className="group inline-flex items-center gap-1 text-left"
+                            title={model.developer ? 'Search by developer' : 'Developer unknown'}
+                          >
+                            <span className="inline-flex">
+                              <UserRound className="w-3.5 h-3.5 group-hover:hidden" />
+                              <UserRoundSearch className="w-3.5 h-3.5 hidden group-hover:inline-flex" />
+                            </span>
+                            {model.developer || 'Unknown'}
+                          </button>
+                          <span
+                            className="inline-flex items-center gap-1"
+                            title={model.kind}
+                            aria-label={model.kind}
+                          >
+                            {renderKindIcons(model.kind)}
+                          </span>
+                        </div>
+                        <div className="flex flex-col gap-1 items-end text-[hsl(var(--launcher-text-muted))]">
+                          <span className="inline-flex items-center gap-1">
+                            <span title="Release date" aria-label="Release date" className="inline-flex">
+                              {(() => {
+                                const ReleaseIcon = resolveReleaseIcon(model.releaseDate);
+                                return <ReleaseIcon className="w-3.5 h-3.5" />;
+                              })()}
+                            </span>
+                            {formatReleaseDate(model.releaseDate)}
+                          </span>
+                          <span className="inline-flex items-center gap-1">
+                            <span title="Downloads" aria-label="Downloads" className="inline-flex">
+                              <ChartSpline className="w-3.5 h-3.5" />
+                            </span>
+                            {formatDownloads(model.downloads)}
+                          </span>
+                        </div>
+                      </div>
                       <div className="flex flex-wrap gap-3 mt-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-                        <span>Developer: {model.developer || 'Unknown'}</span>
-                        <span>
-                          Format: {model.formats.length ? model.formats.join(', ') : 'Unknown'}
+                        <span className="inline-flex items-center gap-1">
+                          <span title="Format" aria-label="Format" className="inline-flex">
+                            <Blocks className="w-3.5 h-3.5" />
+                          </span>
+                          {model.formats.length ? model.formats.join(', ') : 'Unknown'}
                         </span>
-                        <span>Quant: {model.quants.length ? model.quants.join(', ') : 'Unknown'}</span>
+                        <span className="inline-flex items-center gap-1">
+                          <span title="Quantization" aria-label="Quantization" className="inline-flex">
+                            <ChartPie className="w-3.5 h-3.5" />
+                          </span>
+                          {quantLabels.length ? quantLabels.join(', ') : 'Unknown'}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                          <span title="Download size" aria-label="Download size" className="inline-flex">
+                            <Download className="w-3.5 h-3.5" />
+                          </span>
+                          {formatDownloadSizeRange(model)}
+                        </span>
                       </div>
+                      {remoteDownloadError && remoteDownloadRepoId === model.repoId && (
+                        <div className="mt-2 text-xs text-[hsl(var(--launcher-accent-error))]">
+                          {remoteDownloadError}
+                        </div>
+                      )}
                     </div>
-                    <button
-                      onClick={() => openRemoteUrl(model.url)}
-                      className="flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))] transition-colors"
-                      title={`Open ${model.url}`}
-                      aria-label={`Open ${model.url}`}
-                    >
-                      <ExternalLink className="w-4 h-4" />
-                    </button>
+                    <div className="relative flex flex-col items-center gap-2">
+                      <button
+                        onClick={() => openRemoteUrl(model.url)}
+                        className="flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))] transition-colors"
+                        title={`Open ${model.url}`}
+                        aria-label={`Open ${model.url}`}
+                      >
+                        <ExternalLink className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (isDownloading) {
+                            setOpenQuantMenuRepoId(null);
+                            void cancelRemoteDownload(model.repoId);
+                            return;
+                          }
+                          if (downloadOptions.length > 0) {
+                            setOpenQuantMenuRepoId((prev) =>
+                              prev === model.repoId ? null : model.repoId
+                            );
+                          } else {
+                            void startRemoteDownload(model, null);
+                          }
+                          setRemoteDownloadError(null);
+                          setRemoteDownloadRepoId(model.repoId);
+                        }}
+                        className={`group flex-shrink-0 transition-colors ${
+                          openQuantMenuRepoId === model.repoId
+                            ? 'text-[hsl(var(--launcher-accent-primary))]'
+                            : 'text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
+                        }`}
+                        title={isDownloading ? 'Cancel download' : 'Download options'}
+                        aria-label={isDownloading ? 'Cancel download' : 'Download options'}
+                        aria-pressed={openQuantMenuRepoId === model.repoId}
+                      >
+                        <span className="relative flex h-4 w-4 items-center justify-center">
+                          {isDownloading && (
+                            <>
+                              <span
+                                className="download-progress-ring"
+                                style={
+                                  {
+                                    '--progress': `${Math.min(360, Math.max(0, Math.round(progressValue * 360)))}deg`,
+                                  } as React.CSSProperties
+                                }
+                              />
+                              <span className="download-scan-ring" />
+                            </>
+                          )}
+                          <Download
+                            className={`h-4 w-4 transition-opacity ${
+                              isDownloading ? 'group-hover:opacity-30' : ''
+                            }`}
+                          />
+                          {isDownloading && (
+                            <X className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                          )}
+                        </span>
+                      </button>
+                      {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && !isDownloading && (
+                        <div className="absolute right-0 top-full mt-2 min-w-[160px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
+                          {downloadOptions.map((option) => (
+                            <button
+                              key={option.quant}
+                              type="button"
+                              onClick={() => {
+                                setOpenQuantMenuRepoId(null);
+                                void startRemoteDownload(model, option.quant);
+                              }}
+                              className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                            >
+                              {option.quant}
+                              {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
+                                ? ` (${formatDownloadSize(option.sizeBytes)})`
+                                : ' (Unknown)'}
+                            </button>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenQuantMenuRepoId(null);
+                              void startRemoteDownload(model, null);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                          >
+                            All files
+                            {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
-              ))
+              );
+            })
             )}
           </div>
         ) : (

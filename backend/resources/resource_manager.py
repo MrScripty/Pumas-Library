@@ -196,6 +196,7 @@ class ResourceManager:
         official_name: str,
         model_type: Optional[str] = None,
         subtype: str = "",
+        quant: Optional[str] = None,
     ) -> Path:
         """Download a model from Hugging Face into the library."""
         return self.model_downloader.download_from_hf(
@@ -204,7 +205,35 @@ class ResourceManager:
             official_name=official_name,
             model_type=model_type,
             subtype=subtype,
+            quant=quant,
         )
+
+    def start_model_download_from_hf(
+        self,
+        repo_id: str,
+        family: str,
+        official_name: str,
+        model_type: Optional[str] = None,
+        subtype: str = "",
+        quant: Optional[str] = None,
+    ) -> Dict[str, object]:
+        """Start a Hugging Face download and return progress metadata."""
+        return self.model_downloader.start_model_download(
+            repo_id=repo_id,
+            family=family,
+            official_name=official_name,
+            model_type=model_type,
+            subtype=subtype,
+            quant=quant,
+        )
+
+    def get_model_download_status(self, download_id: str) -> Optional[Dict[str, object]]:
+        """Get status for a model download by id."""
+        return self.model_downloader.get_model_download_status(download_id)
+
+    def cancel_model_download(self, download_id: str) -> bool:
+        """Cancel an active model download."""
+        return self.model_downloader.cancel_model_download(download_id)
 
     def search_hf_models(
         self,

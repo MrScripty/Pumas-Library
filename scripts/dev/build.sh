@@ -28,7 +28,15 @@ echo ""
 # Check if Node.js is installed
 if ! command -v node &> /dev/null; then
     echo -e "${RED}Error: Node.js is not installed${NC}"
-    echo "Please install Node.js to build the frontend"
+    echo "Please install Node.js 24 LTS to build the frontend"
+    exit 1
+fi
+
+NODE_VERSION=$(node --version 2>&1)
+NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+
+if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 24 ]; then
+    echo -e "${RED}Error: Node.js 24 LTS required (found $NODE_VERSION)${NC}"
     exit 1
 fi
 

@@ -22,7 +22,7 @@ This document outlines the development standards, practices, and workflows for c
 ### Prerequisites
 
 - Python 3.12+
-- Node.js 22+ (LTS)
+- Node.js 24 LTS
 - GTK/WebKit libraries (for PyWebView)
 
 ### Initial Setup
@@ -38,11 +38,12 @@ cd Linux-ComfyUI-Launcher
 # Activate virtual environment
 source venv/bin/activate
 
-# Install development dependencies
+# Install development dependencies and pre-commit hooks
 pip install -r requirements-dev.txt
-
-# Install pre-commit hooks
 pre-commit install
+
+# Or do both via launcher
+./launcher dev-install
 ```
 
 ### Running the Application

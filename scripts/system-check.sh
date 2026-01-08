@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 # Track missing dependencies
 MISSING_DEPS=()
 MISSING_APT_PACKAGES=()
+NEEDS_NODE_LTS=0
 
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}System Dependency Check${NC}"
@@ -71,6 +72,43 @@ check_python_version() {
     fi
 }
 
+# Function to check Node.js version
+check_node_version() {
+    echo -e "${BLUE}Checking Node.js 24 LTS...${NC}"
+
+    if ! command -v node &> /dev/null; then
+        echo -e "${RED}✗${NC} Node.js not found"
+        MISSING_DEPS+=("Node.js 24 LTS")
+        MISSING_APT_PACKAGES+=("nodejs")
+        NEEDS_NODE_LTS=1
+        return 1
+    fi
+
+    local version
+    version=$(node --version 2>&1 | sed 's/^v//')
+    local major
+    major=$(echo "$version" | cut -d. -f1)
+
+    if [ -z "$major" ]; then
+        echo -e "${RED}✗${NC} Node.js version not detected"
+        MISSING_DEPS+=("Node.js 24 LTS")
+        MISSING_APT_PACKAGES+=("nodejs")
+        NEEDS_NODE_LTS=1
+        return 1
+    fi
+
+    if [ "$major" -lt 24 ]; then
+        echo -e "${RED}✗${NC} Node.js $version found (< 24 required)"
+        MISSING_DEPS+=("Node.js 24 LTS")
+        MISSING_APT_PACKAGES+=("nodejs")
+        NEEDS_NODE_LTS=1
+        return 1
+    fi
+
+    echo -e "${GREEN}✓${NC} Node.js $version found (>= 24)"
+    return 0
+}
+
 # Function to check for dpkg package
 check_dpkg_package() {
     local package=$1
@@ -98,13 +136,8 @@ fi
 
 echo ""
 echo -e "${BLUE}[2/4] Checking Node.js and npm...${NC}"
-check_command "node" "Node.js" "nodejs"
+check_node_version
 check_command "npm" "npm" "npm"
-
-if command -v node &> /dev/null; then
-    local node_version=$(node --version)
-    echo -e "  Node.js version: $node_version"
-fi
 
 echo ""
 echo -e "${BLUE}[3/4] Checking GTK3 and WebKitGTK...${NC}"
@@ -142,6 +175,11 @@ else
     if [ ${#MISSING_APT_PACKAGES[@]} -gt 0 ]; then
         echo -e "${BLUE}To install missing dependencies, run:${NC}"
         echo -e "${YELLOW}sudo apt update && sudo apt install -y ${MISSING_APT_PACKAGES[*]}${NC}"
+    fi
+
+    if [ "$NEEDS_NODE_LTS" -eq 1 ]; then
+        echo ""
+        echo -e "${BLUE}Note:${NC} If your distro packages are older, install Node.js 24 LTS via nvm or NodeSource."
     fi
 
     echo -e "${BLUE}========================================${NC}"

@@ -73,7 +73,20 @@ if [ -f "$SCRIPT_DIR/scripts/system-check.sh" ]; then
         fi
 
         # Node.js and npm
-        if ! command -v node &> /dev/null; then
+        NODE_TOO_OLD=0
+        NODE_VERSION=""
+        NODE_MAJOR=""
+
+        if command -v node &> /dev/null; then
+            NODE_VERSION=$(node --version 2>&1)
+            NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+            if [ -n "$NODE_MAJOR" ] && [ "$NODE_MAJOR" -lt 24 ]; then
+                NODE_TOO_OLD=1
+                echo -e "${YELLOW}Node.js $NODE_VERSION found (< 24 required)${NC}"
+            fi
+        fi
+
+        if ! command -v node &> /dev/null || [ "$NODE_TOO_OLD" -eq 1 ]; then
             PACKAGES_TO_INSTALL+=("nodejs")
         fi
 
@@ -114,6 +127,25 @@ if [ -f "$SCRIPT_DIR/scripts/system-check.sh" ]; then
 else
     echo -e "${YELLOW}Warning: system-check.sh not found, skipping dependency check${NC}"
 fi
+
+# Verify Node.js version (24 LTS required)
+if ! command -v node &> /dev/null; then
+    echo -e "${RED}Error: Node.js 24 LTS not found${NC}"
+    echo -e "${YELLOW}Install Node.js 24 LTS via nvm or NodeSource, then re-run ./install.sh${NC}"
+    exit 1
+fi
+
+NODE_VERSION=$(node --version 2>&1)
+NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+
+if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 24 ]; then
+    echo -e "${RED}Error: Node.js 24 LTS required (found $NODE_VERSION)${NC}"
+    echo -e "${YELLOW}Install Node.js 24 LTS via nvm or NodeSource, then re-run ./install.sh${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}✓ Using Node.js: $NODE_VERSION${NC}"
+echo ""
 
 # Determine Python command
 if command -v python3.12 &> /dev/null; then
@@ -233,12 +265,33 @@ cat > "$LAUNCHER_SCRIPT" << 'EOF'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV_ACTIVATE="$SCRIPT_DIR/venv/bin/activate"
 FRONTEND_DIR="$SCRIPT_DIR/frontend"
+VENV_PRE_COMMIT="$SCRIPT_DIR/venv/bin/pre-commit"
+VENV_CYCLONEDX="$SCRIPT_DIR/venv/bin/cyclonedx-py"
 
 # Color codes for output
+RED='\033[0;31m'
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
+
+install_dev_tools() {
+    if [ ! -f "$SCRIPT_DIR/requirements-dev.txt" ]; then
+        echo "Error: requirements-dev.txt not found at $SCRIPT_DIR"
+        exit 1
+    fi
+
+    source "$VENV_ACTIVATE"
+    cd "$SCRIPT_DIR"
+    echo -e "${BLUE}Installing dev tooling...${NC}"
+    pip install -r "$SCRIPT_DIR/requirements-dev.txt"
+
+    if command -v pre-commit >/dev/null 2>&1 && [ -d "$SCRIPT_DIR/.git" ]; then
+        pre-commit install
+    fi
+
+    echo -e "${GREEN}✓ Dev tooling installed${NC}"
+}
 
 if [ ! -f "$VENV_ACTIVATE" ]; then
     echo "Error: Virtual environment not found at $SCRIPT_DIR/venv"
@@ -270,13 +323,73 @@ case "$1" in
         python "$SCRIPT_DIR/backend/main.py" --dev
         ;;
 
+    dev-install)
+        install_dev_tools
+        ;;
+
+    test)
+        if [ ! -x "$VENV_PRE_COMMIT" ]; then
+            echo -e "${YELLOW}Dev tooling not installed.${NC}"
+            echo "Run './launcher dev-install' to install requirements-dev.txt and pre-commit hooks."
+            exit 1
+        fi
+        echo -e "${BLUE}Running all git hook checks via pre-commit...${NC}"
+        source "$VENV_ACTIVATE"
+        cd "$SCRIPT_DIR"
+
+        # Run pre-commit hooks on all files (single source of truth)
+        pre-commit run --all-files
+
+        if [ $? -eq 0 ]; then
+            echo ""
+            echo -e "${GREEN}✓ All checks passed${NC}"
+        else
+            echo ""
+            echo -e "${RED}✗ Some checks failed${NC}"
+            echo ""
+            echo "To auto-fix formatting issues, run:"
+            echo "  pre-commit run --all-files"
+            echo ""
+            echo "Or fix specific issues:"
+            echo "  python -m black ."
+            echo "  python -m isort ."
+            exit 1
+        fi
+        ;;
+
+    sbom)
+        if [ ! -x "$VENV_CYCLONEDX" ]; then
+            echo -e "${YELLOW}Dev tooling not installed.${NC}"
+            echo "Run './launcher dev-install' to install requirements-dev.txt."
+            exit 1
+        fi
+        echo -e "${BLUE}Generating Software Bill of Materials (SBOM)...${NC}"
+        source "$VENV_ACTIVATE"
+        cd "$SCRIPT_DIR"
+
+        # Run the SBOM generation script
+        bash "$SCRIPT_DIR/scripts/dev/generate-sbom.sh"
+
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ SBOM generated successfully${NC}"
+            echo "  - Python SBOM: docs/sbom/sbom-python.json"
+            echo "  - Frontend SBOM: docs/sbom/sbom-frontend.json"
+        else
+            echo "Error: SBOM generation failed"
+            exit 1
+        fi
+        ;;
+
     help|--help|-h)
         echo "Linux ComfyUI Launcher"
         echo ""
         echo "Usage:"
         echo "  ./launcher          Run the application"
         echo "  ./launcher dev      Run with developer console enabled"
+        echo "  ./launcher dev-install  Install dev tooling (requirements-dev.txt)"
         echo "  ./launcher build    Build the frontend (npm run build)"
+        echo "  ./launcher test     Run all pre-commit hooks (formatting, linting, tests, type checking)"
+        echo "  ./launcher sbom     Generate Software Bill of Materials"
         echo "  ./launcher help     Show this help message"
         ;;
 
@@ -311,7 +424,10 @@ echo ""
 echo -e "${BLUE}Usage:${NC}"
 echo -e "  ${YELLOW}./launcher${NC}          - Run the application"
 echo -e "  ${YELLOW}./launcher dev${NC}      - Run with developer console (F12)"
+echo -e "  ${YELLOW}./launcher dev-install${NC}  - Install dev tooling"
 echo -e "  ${YELLOW}./launcher build${NC}    - Build the frontend"
+echo -e "  ${YELLOW}./launcher test${NC}     - Run pre-commit hooks"
+echo -e "  ${YELLOW}./launcher sbom${NC}     - Generate SBOMs"
 echo -e "  ${YELLOW}./launcher help${NC}     - Show help"
 echo ""
 echo -e "${BLUE}Optional: Add to your PATH${NC}"

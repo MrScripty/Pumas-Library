@@ -48,11 +48,19 @@ fi
 # Check Node.js
 if ! command -v node &> /dev/null; then
     echo -e "${RED}Error: Node.js not found${NC}"
-    echo "Please install Node.js (v18 or higher recommended)"
+    echo "Please install Node.js 24 LTS"
     exit 1
 fi
 
-NODE_VERSION=$(node --version)
+NODE_VERSION=$(node --version 2>&1)
+NODE_MAJOR=$(echo "$NODE_VERSION" | sed 's/^v//' | cut -d. -f1)
+
+if [ -z "$NODE_MAJOR" ] || [ "$NODE_MAJOR" -lt 24 ]; then
+    echo -e "${RED}Error: Node.js 24 LTS required (found $NODE_VERSION)${NC}"
+    echo "Install Node.js 24 LTS via nvm or NodeSource"
+    exit 1
+fi
+
 echo -e "${GREEN}Found Node.js $NODE_VERSION${NC}"
 echo ""
 

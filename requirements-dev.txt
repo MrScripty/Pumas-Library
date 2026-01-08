@@ -25,3 +25,4 @@ ruff>=0.4,<0.6                # Undefined name checks (F821/F822/F823)
 
 # Security Tools
 pip-audit>=2.6,<3.0           # Vulnerability scanning for Python packages
+cyclonedx-bom>=4.6,<5.0       # SBOM generation for Python dependencies

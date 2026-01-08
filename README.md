@@ -8,13 +8,14 @@ A comprehensive yet easy to use launcher that opens ComfyUI as a standalone app,
 
 ## Features
 
-- You get system shortcuts that run ComfyUI ASAP without starting the launcher
-- No more wasting time with terminal commands or URLs to start using ComfyUI
-- Be free from redownloading or copying files thanks to a smart automated managment system
-- Install and run different versions of ComfyUI with ease
-- Ghost buster the ComfyUI server when closing the app
+- A single portable model library with rich metadata
+- Links your apps to your library, no manual setup required
+- System and per-app resource monitoring
+- Search and download new models into your library
+- Install and run different app versions with ease
+- Smart system shortcuts that dont require the launcher to work
+- Ghost buster the backgorund servers when closing apps
 - And other technical mubo-jumbo
-- We have cookies
 
 ## Installation
 

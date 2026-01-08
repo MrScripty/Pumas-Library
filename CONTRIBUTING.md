@@ -30,7 +30,7 @@ This document outlines the development standards, practices, and workflows for c
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd Linux-ComfyUI-Launcher
+cd <repo-root>
 
 # Run installation script
 ./install.sh

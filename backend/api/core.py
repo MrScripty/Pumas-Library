@@ -51,15 +51,20 @@ class ComfyUISetupAPI:
             # Launcher directory is where run.sh and icon should be
             # Try common locations
             launcher_candidates = [
-                self.comfyui_dir / "Linux-ComfyUI-Launcher",
+                *self._find_launcher_candidates(self.comfyui_dir),
                 Path(sys.executable).parent.parent,  # dist/ parent
                 Path(sys.executable).parent,  # same dir as executable
             ]
             script_dir: Optional[Path] = None
             for candidate in launcher_candidates:
-                if candidate.exists():
+                if self._looks_like_launcher_root(candidate):
                     script_dir = candidate
                     break
+            if script_dir is None:
+                for candidate in launcher_candidates:
+                    if candidate.exists():
+                        script_dir = candidate
+                        break
             if script_dir is None:
                 # Fallback to executable directory
                 script_dir = Path(sys.executable).parent
@@ -143,6 +148,19 @@ class ComfyUISetupAPI:
 
         # Fallback: return the parent of start_path
         return start_path.parent
+
+    def _looks_like_launcher_root(self, candidate: Path) -> bool:
+        return candidate.is_dir() and (candidate / "launcher-data").exists()
+
+    def _find_launcher_candidates(self, comfyui_root: Path) -> List[Path]:
+        parent = comfyui_root.parent
+        if not parent.exists():
+            return []
+        candidates: List[Path] = []
+        for entry in parent.iterdir():
+            if self._looks_like_launcher_root(entry):
+                candidates.append(entry)
+        return candidates
 
     def _init_version_management(self) -> None:
         """Initialize version management components"""

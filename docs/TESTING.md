@@ -8,7 +8,7 @@ Complete guide for running and writing tests for the ComfyUI Launcher.
 
 ### Run All Tests
 ```bash
-cd /media/jeremy/OrangeCream/Linux\ Software/ComfyUI-master/Linux-ComfyUI-Launcher
+cd <repo-root>
 source venv/bin/activate
 pytest backend/tests/ -v
 ```

@@ -356,7 +356,7 @@
 ### Complete Directory Layout
 
 ```
-/path/to/Linux-ComfyUI-Launcher/          # Launcher root
+/path/to/<launcher-root>/                  # Launcher root
 ├── backend/
 │   ├── main.py                            # PyWebView entry point
 │   ├── api.py                             # Main API class (existing)

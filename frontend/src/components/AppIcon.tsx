@@ -18,7 +18,7 @@ interface AppIconProps {
   onOpenLog?: () => void;
   dragOpacity?: number;
   shakeStyle?: React.CSSProperties;
-  disableShake?: boolean;
+  _disableShake?: boolean;
   isGhost?: boolean;
 }
 
@@ -202,7 +202,7 @@ export const AppIcon: React.FC<AppIconProps> = ({
   onOpenLog,
   dragOpacity = 1.0,
   shakeStyle = {},
-  disableShake = false,
+  _disableShake = false,
   isGhost = false,
 }) => {
   return (

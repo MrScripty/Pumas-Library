@@ -149,6 +149,7 @@ class ModelDownloader:
             try:
                 return int(value)
             except ValueError:
+                logger.debug("Failed to coerce int from %r", value)
                 return 0
         return 0
 
@@ -207,7 +208,11 @@ class ModelDownloader:
                     size = lfs.get("size")
             try:
                 size_value = int(size) if size is not None else 0
-            except (TypeError, ValueError):
+            except TypeError as exc:
+                logger.debug("Invalid size value %r: %s", size, exc)
+                size_value = 0
+            except ValueError as exc:
+                logger.debug("Invalid size value %r: %s", size, exc)
                 size_value = 0
             if size_value > 0:
                 results.append((path, size_value))
@@ -216,7 +221,14 @@ class ModelDownloader:
     def _list_repo_tree_paths(self, api, repo_id: str) -> list[tuple[str, int]]:
         try:
             items = api.list_repo_tree(repo_id=repo_id, repo_type="model", recursive=True)
-        except (OSError, RuntimeError, ValueError):
+        except OSError as exc:
+            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
+            return []
+        except RuntimeError as exc:
+            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
+            return []
+        except ValueError as exc:
+            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
             return []
 
         results: list[tuple[str, int]] = []
@@ -227,7 +239,11 @@ class ModelDownloader:
             size = getattr(item, "size", None)
             try:
                 size_value = int(size) if size is not None else 0
-            except (TypeError, ValueError):
+            except TypeError as exc:
+                logger.debug("Invalid size value %r: %s", size, exc)
+                size_value = 0
+            except ValueError as exc:
+                logger.debug("Invalid size value %r: %s", size, exc)
                 size_value = 0
             if size_value > 0:
                 results.append((path, size_value))
@@ -348,7 +364,8 @@ class ModelDownloader:
         if kind:
             try:
                 from huggingface_hub import ModelFilter
-            except ImportError:
+            except ImportError as exc:
+                logger.debug("huggingface_hub ModelFilter unavailable: %s", exc)
                 filter_arg = kind
             else:
                 filter_arg = ModelFilter(task=kind)
@@ -376,13 +393,18 @@ class ModelDownloader:
             if last_modified:
                 try:
                     release_date = last_modified.isoformat()
-                except AttributeError:
+                except AttributeError as exc:
+                    logger.debug("Failed to format last_modified %r: %s", last_modified, exc)
                     release_date = str(last_modified)
             downloads = getattr(info, "downloads", None)
             if downloads is not None:
                 try:
                     downloads = int(downloads)
-                except (TypeError, ValueError):
+                except TypeError as exc:
+                    logger.debug("Invalid downloads value %r: %s", downloads, exc)
+                    downloads = None
+                except ValueError as exc:
+                    logger.debug("Invalid downloads value %r: %s", downloads, exc)
                     downloads = None
             formats = self._extract_formats(siblings, tags)
             quants = self._extract_quants(siblings, tags)
@@ -393,7 +415,14 @@ class ModelDownloader:
             if not formats or not quants or total_size_bytes == 0:
                 try:
                     repo_files = api.list_repo_files(repo_id=repo_id, repo_type="model")
-                except (OSError, RuntimeError, ValueError):
+                except OSError as exc:
+                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
+                    repo_files = []
+                except RuntimeError as exc:
+                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
+                    repo_files = []
+                except ValueError as exc:
+                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
                     repo_files = []
                 if repo_files:
                     if not formats:
@@ -651,7 +680,11 @@ class ModelDownloader:
                     if self._DOWNLOAD_CACHE_DIRNAME in path.parts:
                         continue
                     total += path.stat().st_size
-        except (OSError, RuntimeError):
+        except OSError as exc:
+            logger.debug("Failed to calculate downloaded bytes: %s", exc)
+            return 0
+        except RuntimeError as exc:
+            logger.debug("Failed to calculate downloaded bytes: %s", exc)
             return 0
         return total
 
@@ -738,7 +771,11 @@ class ModelDownloader:
         api = self._get_api()
         try:
             items = api.list_repo_tree(repo_id=repo_id, repo_type="model", recursive=True)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            raise RuntimeError("Failed to list model files.") from exc
+        except RuntimeError as exc:
+            raise RuntimeError("Failed to list model files.") from exc
+        except ValueError as exc:
             raise RuntimeError("Failed to list model files.") from exc
 
         file_paths: list[str] = []
@@ -809,16 +846,7 @@ class ModelDownloader:
                 state["completed_at"] = time.time()
             return
 
-        try:
-            quant_value = state.get("quant")
-            quant = quant_value if isinstance(quant_value, str) else None
-            self._download_files_with_cancel(
-                repo_id=repo_id,
-                temp_dir=temp_dir,
-                quant=quant,
-                cancel_event=cancel_event,
-            )
-        except (OSError, RuntimeError, ValueError) as exc:
+        def _set_error_state(exc: Exception) -> None:
             if cancel_event.is_set():
                 status = "cancelled"
                 error_msg = ""
@@ -830,6 +858,27 @@ class ModelDownloader:
                 state["error"] = error_msg
                 state["completed_at"] = time.time()
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+        try:
+            quant_value = state.get("quant")
+            quant = quant_value if isinstance(quant_value, str) else None
+            self._download_files_with_cancel(
+                repo_id=repo_id,
+                temp_dir=temp_dir,
+                quant=quant,
+                cancel_event=cancel_event,
+            )
+        except OSError as exc:
+            logger.error("Download failed for %s: %s", repo_id, exc)
+            _set_error_state(exc)
+            return
+        except RuntimeError as exc:
+            logger.error("Download failed for %s: %s", repo_id, exc)
+            _set_error_state(exc)
+            return
+        except ValueError as exc:
+            logger.error("Download failed for %s: %s", repo_id, exc)
+            _set_error_state(exc)
             return
 
         if cancel_event.is_set():
@@ -858,7 +907,22 @@ class ModelDownloader:
                 state["model_dir"] = model_dir
                 state["downloaded_bytes"] = state.get("total_bytes") or 0
             shutil.rmtree(temp_dir, ignore_errors=True)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Finalize download failed for %s: %s", repo_id, exc)
+            with self._download_lock:
+                state["status"] = "error"
+                state["error"] = str(exc)
+                state["completed_at"] = time.time()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except RuntimeError as exc:
+            logger.error("Finalize download failed for %s: %s", repo_id, exc)
+            with self._download_lock:
+                state["status"] = "error"
+                state["error"] = str(exc)
+                state["completed_at"] = time.time()
+            shutil.rmtree(temp_dir, ignore_errors=True)
+        except ValueError as exc:
+            logger.error("Finalize download failed for %s: %s", repo_id, exc)
             with self._download_lock:
                 state["status"] = "error"
                 state["error"] = str(exc)
@@ -908,7 +972,8 @@ class ModelDownloader:
                 if sibling.rfilename.lower().endswith((".png", ".jpg", ".jpeg")):
                     try:
                         from huggingface_hub import hf_hub_download
-                    except ImportError:
+                    except ImportError as exc:
+                        logger.debug("huggingface_hub download unavailable: %s", exc)
                         break
                     hf_hub_download(
                         repo_id=repo_id, filename=sibling.rfilename, local_dir=model_dir
@@ -918,10 +983,14 @@ class ModelDownloader:
                     try:
                         preview_path.rename(target_preview)
                         metadata["preview_image"] = "preview.png"
-                    except OSError:
-                        pass
+                    except OSError as exc:
+                        logger.debug("Failed to set preview image for %s: %s", repo_id, exc)
                     break
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.warning("Failed to enrich metadata for %s: %s", repo_id, exc)
+        except RuntimeError as exc:
+            logger.warning("Failed to enrich metadata for %s: %s", repo_id, exc)
+        except ValueError as exc:
             logger.warning("Failed to enrich metadata for %s: %s", repo_id, exc)
 
         return metadata

@@ -11,9 +11,12 @@ Exceptions:
 - Test files that need to verify print behavior
 """
 
+import logging
 import re
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def check_file(file_path: Path) -> list[tuple[int, str]]:
@@ -48,6 +51,7 @@ def check_file(file_path: Path) -> list[tuple[int, str]]:
                     violations.append((line_num, line.rstrip()))
 
     except OSError as e:
+        logger.warning("Failed to read %s: %s", file_path, e, exc_info=True)
         sys.stderr.write(f"Error reading {file_path}: {e}\n")
         return []
 

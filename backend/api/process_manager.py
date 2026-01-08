@@ -44,7 +44,13 @@ class ProcessManager:
                 version_path = self.version_manager.get_version_path(tag)
                 if version_path:
                     tag_paths[tag] = version_path
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error collecting version paths: {e}", exc_info=True)
+        except RuntimeError as e:
+            logger.error(f"Error collecting version paths: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error collecting version paths: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Error collecting version paths: {e}", exc_info=True)
 
         return tag_paths
@@ -101,7 +107,14 @@ class ProcessManager:
                         }
                     )
                     seen_pids.add(pid)
-            except (ValueError, ProcessLookupError, OSError):
+            except ValueError as exc:
+                logger.debug("Invalid PID in %s: %s", pid_file, exc)
+                continue
+            except ProcessLookupError as exc:
+                logger.debug("Stale PID file %s: %s", pid_file, exc)
+                continue
+            except OSError as exc:
+                logger.debug("Failed to read PID file %s: %s", pid_file, exc)
                 continue
 
         # 2) Process table scan (helps when PID files are missing/stale)
@@ -110,7 +123,10 @@ class ProcessManager:
                 ["ps", "-eo", "pid=,args="], capture_output=True, text=True, timeout=3
             )
             ps_output = ps.stdout.splitlines()
-        except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
+        except subprocess.SubprocessError as e:
+            logger.error(f"Error scanning process table: {e}", exc_info=True)
+            ps_output = []
+        except OSError as e:
             logger.error(f"Error scanning process table: {e}", exc_info=True)
             ps_output = []
 
@@ -126,7 +142,8 @@ class ProcessManager:
             pid_str, cmdline = parts
             try:
                 pid = int(pid_str)
-            except ValueError:
+            except ValueError as exc:
+                logger.debug("Invalid PID from process scan %r: %s", pid_str, exc)
                 continue
 
             if pid in seen_pids:
@@ -184,7 +201,22 @@ class ProcessManager:
                     proc["cpu_usage"] = resources.get("cpu", 0.0)
                     proc["ram_memory"] = resources.get("ram_memory", 0.0)
                     proc["gpu_memory"] = resources.get("gpu_memory", 0.0)
-                except (OSError, RuntimeError, TypeError, ValueError) as e:
+                except OSError as e:
+                    logger.debug(f"Failed to get resources for PID {pid}: {e}")
+                    proc["cpu_usage"] = 0.0
+                    proc["ram_memory"] = 0.0
+                    proc["gpu_memory"] = 0.0
+                except RuntimeError as e:
+                    logger.debug(f"Failed to get resources for PID {pid}: {e}")
+                    proc["cpu_usage"] = 0.0
+                    proc["ram_memory"] = 0.0
+                    proc["gpu_memory"] = 0.0
+                except TypeError as e:
+                    logger.debug(f"Failed to get resources for PID {pid}: {e}")
+                    proc["cpu_usage"] = 0.0
+                    proc["ram_memory"] = 0.0
+                    proc["gpu_memory"] = 0.0
+                except ValueError as e:
                     logger.debug(f"Failed to get resources for PID {pid}: {e}")
                     proc["cpu_usage"] = 0.0
                     proc["ram_memory"] = 0.0
@@ -200,13 +232,20 @@ class ProcessManager:
         """Check if ComfyUI is currently running"""
         try:
             return bool(self._detect_comfyui_processes())
-        except (
-            OSError,
-            RuntimeError,
-            TypeError,
-            ValueError,
-            subprocess.SubprocessError,
-        ):
+        except OSError as exc:
+            logger.debug("Failed to detect processes: %s", exc)
+            return False
+        except RuntimeError as exc:
+            logger.debug("Failed to detect processes: %s", exc)
+            return False
+        except TypeError as exc:
+            logger.debug("Failed to detect processes: %s", exc)
+            return False
+        except ValueError as exc:
+            logger.debug("Failed to detect processes: %s", exc)
+            return False
+        except subprocess.SubprocessError as exc:
+            logger.debug("Failed to detect processes: %s", exc)
             return False
 
     def stop_comfyui(self) -> bool:
@@ -228,10 +267,14 @@ class ProcessManager:
                     for pid_str in pids:
                         try:
                             os.kill(int(pid_str), 9)  # SIGKILL - force kill immediately
-                        except (ValueError, ProcessLookupError):
-                            pass
-            except (subprocess.SubprocessError, OSError, FileNotFoundError):
-                pass  # Continue even if this fails
+                        except ValueError as exc:
+                            logger.debug("Invalid PID in pgrep output %s: %s", pid_str, exc)
+                        except ProcessLookupError as exc:
+                            logger.debug("Brave process already exited %s: %s", pid_str, exc)
+            except subprocess.SubprocessError as exc:
+                logger.debug("Failed to detect Brave process: %s", exc)
+            except OSError as exc:
+                logger.debug("Failed to detect Brave process: %s", exc)
 
             # Stop the ComfyUI server (all detected processes)
             processes = self._detect_comfyui_processes()
@@ -247,20 +290,26 @@ class ProcessManager:
                     time.sleep(0.5)
                     try:
                         os.kill(pid, 9)  # SIGKILL as fallback
-                    except ProcessLookupError:
-                        pass
+                    except ProcessLookupError as exc:
+                        logger.debug("Process already exited %s: %s", pid, exc)
                     killed = True
-                except (ProcessLookupError, OSError):
-                    pass
-                except (OSError, TypeError, ValueError) as e:
+                except ProcessLookupError as exc:
+                    logger.debug("Process already exited %s: %s", pid, exc)
+                except OSError as e:
+                    logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
+                except TypeError as e:
+                    logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
+                except ValueError as e:
                     logger.error(f"Error stopping PID {pid}: {e}", exc_info=True)
 
                 pid_file = proc.get("pid_file")
                 if isinstance(pid_file, str) and pid_file:
                     try:
                         Path(pid_file).unlink(missing_ok=True)
-                    except (OSError, TypeError):
-                        pass
+                    except OSError as exc:
+                        logger.debug("Failed to remove PID file %s: %s", pid_file, exc)
+                    except TypeError as exc:
+                        logger.debug("Failed to remove PID file %s: %s", pid_file, exc)
 
             if killed:
                 return True
@@ -269,17 +318,25 @@ class ProcessManager:
             try:
                 subprocess.run(["pkill", "-9", "-f", "ComfyUI Server"], check=False)
                 return True
-            except (subprocess.SubprocessError, OSError, FileNotFoundError):
-                pass
+            except subprocess.SubprocessError as exc:
+                logger.debug("pkill failed: %s", exc)
+            except OSError as exc:
+                logger.debug("pkill failed: %s", exc)
 
             return False
-        except (
-            OSError,
-            RuntimeError,
-            TypeError,
-            ValueError,
-            subprocess.SubprocessError,
-        ) as e:
+        except OSError as e:
+            logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
+            return False
+        except RuntimeError as e:
+            logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
+            return False
+        except TypeError as e:
+            logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
+            return False
+        except ValueError as e:
+            logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
+            return False
+        except subprocess.SubprocessError as e:
             logger.error(f"Error stopping ComfyUI: {e}", exc_info=True)
             return False
 
@@ -311,7 +368,19 @@ class ProcessManager:
             self.last_launch_error = "No active version selected"
             self.last_launch_log = None
             return {"success": False, "error": "No active version selected"}
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
+            self.last_launch_error = str(e)
+            return {"success": False, "error": str(e)}
+        except RuntimeError as e:
+            logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
+            self.last_launch_error = str(e)
+            return {"success": False, "error": str(e)}
+        except TypeError as e:
+            logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
+            self.last_launch_error = str(e)
+            return {"success": False, "error": str(e)}
+        except ValueError as e:
             logger.error(f"Error launching ComfyUI: {e}", exc_info=True)
             self.last_launch_error = str(e)
             return {"success": False, "error": str(e)}

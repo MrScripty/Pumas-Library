@@ -2,6 +2,10 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, Download, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
 import { useHover } from '@react-aria/interactions';
+import { getLogger } from '../utils/logger';
+import { APIError } from '../errors';
+
+const logger = getLogger('VersionSelector');
 
 // Component for individual version dropdown items to handle hover state
 interface VersionDropdownItemProps {
@@ -75,9 +79,25 @@ const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
                 e.stopPropagation();
                 if (!onMakeDefault) return;
                 if (isDefault) {
-                  onMakeDefault(null).catch((err) => console.error('Failed to clear default', err));
+                  onMakeDefault(null).catch((error) => {
+                    if (error instanceof APIError) {
+                      logger.error('API error clearing default version', { error: error.message, endpoint: error.endpoint, version });
+                    } else if (error instanceof Error) {
+                      logger.error('Failed to clear default version', { error: error.message, version });
+                    } else {
+                      logger.error('Unknown error clearing default version', { error, version });
+                    }
+                  });
                 } else {
-                  onMakeDefault(version).catch((err) => console.error('Failed to set default', err));
+                  onMakeDefault(version).catch((error) => {
+                    if (error instanceof APIError) {
+                      logger.error('API error setting default version', { error: error.message, endpoint: error.endpoint, version });
+                    } else if (error instanceof Error) {
+                      logger.error('Failed to set default version', { error: error.message, version });
+                    } else {
+                      logger.error('Unknown error setting default version', { error, version });
+                    }
+                  });
                 }
               }}
               className="flex items-center justify-center"
@@ -204,9 +224,16 @@ export function VersionSelector({
           };
         });
         setShortcutState(mapped);
+        logger.debug('Shortcut states refreshed', { stateCount: Object.keys(mapped).length });
       }
-    } catch (err) {
-      console.error('Failed to fetch shortcut states', err);
+    } catch (error) {
+      if (error instanceof APIError) {
+        logger.error('API error fetching shortcut states', { error: error.message, endpoint: error.endpoint });
+      } else if (error instanceof Error) {
+        logger.error('Failed to fetch shortcut states', { error: error.message });
+      } else {
+        logger.error('Unknown error fetching shortcut states', { error });
+      }
     }
   }, []);
 
@@ -216,12 +243,20 @@ export function VersionSelector({
       return;
     }
 
+    logger.info('Switching version', { from: activeVersion, to: tag });
     setIsSwitching(true);
     try {
       await switchVersion(tag);
+      logger.info('Version switched successfully', { version: tag });
       setIsOpen(false);
-    } catch (e) {
-      console.error('Failed to switch version:', e);
+    } catch (error) {
+      if (error instanceof APIError) {
+        logger.error('API error switching version', { error: error.message, endpoint: error.endpoint, tag });
+      } else if (error instanceof Error) {
+        logger.error('Failed to switch version', { error: error.message, tag });
+      } else {
+        logger.error('Unknown error switching version', { error, tag });
+      }
     } finally {
       setIsSwitching(false);
     }
@@ -229,10 +264,11 @@ export function VersionSelector({
 
   const handleToggleShortcuts = async (version: string, next: boolean) => {
     if (!window.pywebview?.api?.set_version_shortcuts) {
-      console.warn('Shortcut API not available');
+      logger.warn('Shortcut API not available');
       return;
     }
 
+    logger.info('Toggling shortcuts', { version, enabled: next });
     setShortcutState((prev) => ({
       ...prev,
       [version]: { menu: next, desktop: next },
@@ -249,10 +285,17 @@ export function VersionSelector({
               desktop: Boolean(result.state.desktop),
             },
           }));
+          logger.info('Shortcuts toggled successfully', { version, state: result.state });
         }
       }
-    } catch (err) {
-      console.error('Failed to toggle shortcuts', err);
+    } catch (error) {
+      if (error instanceof APIError) {
+        logger.error('API error toggling shortcuts', { error: error.message, endpoint: error.endpoint, version });
+      } else if (error instanceof Error) {
+        logger.error('Failed to toggle shortcuts', { error: error.message, version });
+      } else {
+        logger.error('Unknown error toggling shortcuts', { error, version });
+      }
       // revert on failure
       const isEnabled = !next;
       setShortcutState((prev) => ({
@@ -268,17 +311,25 @@ export function VersionSelector({
       return;
     }
 
+    logger.info('Opening active installation path', { version: activeVersion });
     setIsOpeningPath(true);
     setShowOpenedIndicator(false);
     try {
       await openActiveInstall();
+      logger.info('Active installation path opened successfully', { version: activeVersion });
       setShowOpenedIndicator(true);
       if (openedIndicatorTimeout.current) {
         clearTimeout(openedIndicatorTimeout.current);
       }
       openedIndicatorTimeout.current = setTimeout(() => setShowOpenedIndicator(false), 2000);
-    } catch (err) {
-      console.error('Failed to open active installation path:', err);
+    } catch (error) {
+      if (error instanceof APIError) {
+        logger.error('API error opening installation path', { error: error.message, endpoint: error.endpoint, version: activeVersion });
+      } else if (error instanceof Error) {
+        logger.error('Failed to open installation path', { error: error.message, version: activeVersion });
+      } else {
+        logger.error('Unknown error opening installation path', { error, version: activeVersion });
+      }
     } finally {
       setIsOpeningPath(false);
     }
@@ -301,9 +352,15 @@ export function VersionSelector({
 
   // Debug logging for new version detection
   React.useEffect(() => {
-    console.log('[VersionSelector] hasNewVersion:', hasNewVersion, 'latestVersion:', latestVersion, 'activeVersion:', activeVersion, 'installNetworkStatus:', installNetworkStatus);
-    console.log('[VersionSelector] emphasizeInstall:', emphasizeInstall, 'isLoading:', isLoading);
-    console.log('[VersionSelector] Should pulse:', (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle');
+    logger.debug('Version state updated', {
+      hasNewVersion,
+      latestVersion,
+      activeVersion,
+      installNetworkStatus,
+      emphasizeInstall,
+      isLoading,
+      shouldPulse: (emphasizeInstall || hasNewVersion) && installNetworkStatus === 'idle'
+    });
   }, [hasNewVersion, latestVersion, activeVersion, installNetworkStatus, emphasizeInstall, isLoading]);
 
   // Determine folder icon color based on disk space
@@ -395,10 +452,10 @@ export function VersionSelector({
             {/* Left side - clickable area for version selector */}
             <button
               onClick={() => {
-                console.log('Version selector clicked, hasVersionsToShow:', hasVersionsToShow, 'isOpen:', isOpen);
+                logger.debug('Version selector clicked', { hasVersionsToShow, isOpen });
                 if (hasVersionsToShow) {
                   setIsOpen(!isOpen);
-                  console.log('Set isOpen to:', !isOpen);
+                  logger.debug('Dropdown toggled', { newState: !isOpen });
                 }
               }}
               disabled={!hasVersionsToShow || isLoading || isSwitching}
@@ -415,7 +472,15 @@ export function VersionSelector({
                       if (!onMakeDefault || !activeVersion) return;
                       const isDefault = defaultVersion === activeVersion;
                       const target = isDefault ? null : activeVersion;
-                      onMakeDefault(target).catch((err) => console.error('Failed to toggle default', err));
+                      onMakeDefault(target).catch((error) => {
+                        if (error instanceof APIError) {
+                          logger.error('API error toggling default version', { error: error.message, endpoint: error.endpoint, version: activeVersion });
+                        } else if (error instanceof Error) {
+                          logger.error('Failed to toggle default version', { error: error.message, version: activeVersion });
+                        } else {
+                          logger.error('Unknown error toggling default version', { error, version: activeVersion });
+                        }
+                      });
                     }}
                     className="flex items-center justify-center w-4 h-4"
                     title={
@@ -468,10 +533,9 @@ export function VersionSelector({
               {/* Download Button */}
               <motion.button
                 onClick={(e) => {
-                  console.log('Download button clicked!');
+                  logger.info('Opening version manager');
                   e.stopPropagation();
                   onOpenVersionManager();
-                  console.log('Switching to version manager view');
                 }}
                 disabled={isLoading}
                 className={`p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] disabled:opacity-50 ${

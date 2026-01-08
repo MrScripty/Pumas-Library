@@ -22,7 +22,8 @@ ImageFont: Optional[ModuleType]
 
 try:
     from PIL import Image, ImageDraw, ImageFont
-except ImportError:
+except ImportError as exc:
+    logger.debug("Pillow not available; version icon overlays disabled: %s", exc)
     Image = None
     ImageDraw = None
     ImageFont = None
@@ -113,8 +114,8 @@ class ShortcutManager:
             try:
                 if icon_path.exists():
                     icon_path.unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove icon %s: %s", icon_path, exc)
 
         scalable_dir = icon_base_dir / "scalable" / "apps"
         for ext in ("png", "webp"):
@@ -122,15 +123,15 @@ class ShortcutManager:
                 icon_path = scalable_dir / f"{icon_name}.{ext}"
                 if icon_path.exists():
                     icon_path.unlink()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove icon %s: %s", icon_path, exc)
 
         generated_icon = self.generated_icons_dir / f"{icon_name}.png"
         try:
             if generated_icon.exists():
                 generated_icon.unlink()
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.debug("Failed to remove generated icon %s: %s", generated_icon, exc)
 
     def _validate_icon_prerequisites(self) -> bool:
         """Validate that icon generation prerequisites are met."""
@@ -165,7 +166,8 @@ class ShortcutManager:
         font_size = max(28, canvas_size // 5 + 2)
         try:
             return ImageFont.truetype("DejaVuSans-Bold.ttf", font_size)
-        except OSError:
+        except OSError as exc:
+            logger.debug("Font load failed, falling back to default: %s", exc)
             return ImageFont.load_default()
 
     def _prepare_version_label(self, tag: str) -> str:
@@ -207,7 +209,14 @@ class ShortcutManager:
         # Draw background banner
         try:
             draw.rounded_rectangle(background, radius=padding, fill=(0, 0, 0, 190))
-        except (AttributeError, TypeError, ValueError):
+        except AttributeError as exc:
+            logger.debug("Rounded rectangle unavailable: %s", exc)
+            draw.rectangle(background, fill=(0, 0, 0, 190))
+        except TypeError as exc:
+            logger.debug("Rounded rectangle failed: %s", exc)
+            draw.rectangle(background, fill=(0, 0, 0, 190))
+        except ValueError as exc:
+            logger.debug("Rounded rectangle failed: %s", exc)
             draw.rectangle(background, fill=(0, 0, 0, 190))
 
         # Draw text
@@ -251,7 +260,13 @@ class ShortcutManager:
             label = self._prepare_version_label(tag)
             self._draw_version_banner(canvas, label, font)
             return self._save_generated_icon(tag, canvas)
-        except (OSError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error generating icon for {tag}: {e}", exc_info=True)
+            return None
+        except TypeError as e:
+            logger.error(f"Error generating icon for {tag}: {e}", exc_info=True)
+            return None
+        except ValueError as e:
             logger.error(f"Error generating icon for {tag}: {e}", exc_info=True)
             return None
 
@@ -306,13 +321,15 @@ class ShortcutManager:
                     )
                     if result.returncode == 0:
                         conversion_success = True
-            except (
-                FileNotFoundError,
-                OSError,
-                TypeError,
-                ValueError,
-                subprocess.SubprocessError,
-            ) as e:
+            except FileNotFoundError as e:
+                logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
+            except OSError as e:
+                logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
+            except TypeError as e:
+                logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
+            except ValueError as e:
+                logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
+            except subprocess.SubprocessError as e:
                 logger.error(f"Error installing icon size {size} for {tag}: {e}", exc_info=True)
 
         if not conversion_success:
@@ -327,8 +344,8 @@ class ShortcutManager:
                     if png_link.exists():
                         png_link.unlink()
                     png_link.symlink_to(dest_icon)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("Failed to update PNG link %s: %s", png_link, exc)
             except OSError as e:
                 logger.error(f"Error installing fallback icon for {tag}: {e}", exc_info=True)
 
@@ -339,8 +356,12 @@ class ShortcutManager:
                 capture_output=True,
                 timeout=5,
             )
-        except (FileNotFoundError, OSError, subprocess.SubprocessError):
-            pass
+        except FileNotFoundError as exc:
+            logger.debug("gtk-update-icon-cache not available: %s", exc)
+        except OSError as exc:
+            logger.debug("gtk-update-icon-cache failed: %s", exc)
+        except subprocess.SubprocessError as exc:
+            logger.debug("gtk-update-icon-cache failed: %s", exc)
 
         try:
             subprocess.run(
@@ -356,8 +377,12 @@ class ShortcutManager:
                 capture_output=True,
                 timeout=5,
             )
-        except (FileNotFoundError, OSError, subprocess.SubprocessError):
-            pass
+        except FileNotFoundError as exc:
+            logger.debug("xdg-icon-resource not available: %s", exc)
+        except OSError as exc:
+            logger.debug("xdg-icon-resource failed: %s", exc)
+        except subprocess.SubprocessError as exc:
+            logger.debug("xdg-icon-resource failed: %s", exc)
 
         return icon_name
 
@@ -580,22 +605,22 @@ Categories=Graphics;ArtificialIntelligence;
         if remove_menu:
             try:
                 paths["menu"].unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove menu shortcut %s: %s", paths["menu"], exc)
 
         if remove_desktop:
             try:
                 paths["desktop"].unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove desktop shortcut %s: %s", paths["desktop"], exc)
 
         # Remove launcher script if no shortcuts remain
         state_after = self.get_version_shortcut_state(tag)
         if not state_after["menu"] and not state_after["desktop"]:
             try:
                 paths["launcher"].unlink(missing_ok=True)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove launcher script %s: %s", paths["launcher"], exc)
             self._remove_installed_icon(paths["icon_name"])
 
         return {"success": True, "state": state_after}
@@ -664,8 +689,12 @@ Categories=Graphics;ArtificialIntelligence;
                     )
                     if result.returncode == 0:
                         conversion_success = True
-                except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                    pass
+                except FileNotFoundError as exc:
+                    logger.debug("ImageMagick convert not available: %s", exc)
+                except OSError as exc:
+                    logger.debug("Icon conversion failed: %s", exc)
+                except subprocess.SubprocessError as exc:
+                    logger.debug("Icon conversion failed: %s", exc)
 
             # If conversion failed, try copying webp as fallback
             if not conversion_success:
@@ -681,8 +710,8 @@ Categories=Graphics;ArtificialIntelligence;
                     if png_link.exists():
                         png_link.unlink()
                     png_link.symlink_to(dest_icon)
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.debug("Failed to update icon symlink %s: %s", png_link, exc)
 
             # Update icon cache if available
             try:
@@ -691,8 +720,12 @@ Categories=Graphics;ArtificialIntelligence;
                     capture_output=True,
                     timeout=5,
                 )
-            except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                pass
+            except FileNotFoundError as exc:
+                logger.debug("gtk-update-icon-cache not available: %s", exc)
+            except OSError as exc:
+                logger.debug("gtk-update-icon-cache failed: %s", exc)
+            except subprocess.SubprocessError as exc:
+                logger.debug("gtk-update-icon-cache failed: %s", exc)
 
             # Also try xdg-icon-resource as alternative installation method
             try:
@@ -709,8 +742,12 @@ Categories=Graphics;ArtificialIntelligence;
                     capture_output=True,
                     timeout=5,
                 )
-            except (FileNotFoundError, OSError, subprocess.SubprocessError):
-                pass
+            except FileNotFoundError as exc:
+                logger.debug("xdg-icon-resource not available: %s", exc)
+            except OSError as exc:
+                logger.debug("xdg-icon-resource failed: %s", exc)
+            except subprocess.SubprocessError as exc:
+                logger.debug("xdg-icon-resource failed: %s", exc)
 
             return True
         except OSError as e:

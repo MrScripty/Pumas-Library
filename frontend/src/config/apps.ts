@@ -63,5 +63,5 @@ export function getAppById(id: string): AppConfig | undefined {
  * Get default app (ComfyUI for now)
  */
 export function getDefaultApp(): AppConfig {
-  return DEFAULT_APPS[0];
+  return DEFAULT_APPS[0]!;
 }

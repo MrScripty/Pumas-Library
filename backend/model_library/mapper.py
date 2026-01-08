@@ -46,7 +46,9 @@ class ModelMapper:
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     configs.append(json.load(f))
-            except (OSError, json.JSONDecodeError) as exc:
+            except OSError as exc:
+                logger.error("Failed to read mapping config %s: %s", config_path, exc)
+            except json.JSONDecodeError as exc:
                 logger.error("Failed to read mapping config %s: %s", config_path, exc)
 
         return configs
@@ -73,7 +75,10 @@ class ModelMapper:
             spec = SpecifierSet(str(target_range))
             version = Version(app_version)
             return version in spec
-        except (InvalidSpecifier, InvalidVersion) as exc:
+        except InvalidSpecifier as exc:
+            logger.warning("Invalid version range %s for %s: %s", target_range, app_id, exc)
+            return True
+        except InvalidVersion as exc:
             logger.warning("Invalid version range %s for %s: %s", target_range, app_id, exc)
             return True
 

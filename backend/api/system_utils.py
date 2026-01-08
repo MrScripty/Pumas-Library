@@ -10,17 +10,18 @@ import webbrowser
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-try:
-    import psutil
-except ImportError:
-    psutil = None  # type: ignore
-
 from backend.exceptions import ValidationError
 from backend.file_opener import open_in_file_manager
 from backend.logging_config import get_logger
 from backend.validators import sanitize_path, validate_url
 
 logger = get_logger(__name__)
+
+try:
+    import psutil
+except ImportError as exc:
+    logger.debug("psutil not available; system resource info will be limited: %s", exc)
+    psutil = None  # type: ignore
 
 
 class SystemUtils:
@@ -143,7 +144,8 @@ class SystemUtils:
                 "free": stat.free,
                 "percent": round(usage_percent, 1),
             }
-        except (OSError, PermissionError) as e:
+        except OSError as e:
+            logger.error("Failed to read disk space: %s", e, exc_info=True)
             return {
                 "success": False,
                 "error": str(e),
@@ -231,7 +233,11 @@ class SystemUtils:
                     return {"success": True}
                 return {"success": False, "error": "Unable to open browser"}
             return {"success": True}
-        except (OSError, subprocess.SubprocessError) as e:
+        except subprocess.SubprocessError as e:
+            logger.error("Failed to open browser via subprocess: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+        except OSError as e:
+            logger.error("Failed to open browser: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
     def open_active_install(self) -> Dict[str, Any]:
@@ -314,9 +320,12 @@ class SystemUtils:
                             gpu_usage = float(parts[0].strip())
                             gpu_memory = float(parts[1].strip()) / 1024  # Convert MB to GB
                             gpu_memory_total = float(parts[2].strip()) / 1024  # Convert MB to GB
-            except (subprocess.SubprocessError, FileNotFoundError, ValueError):
-                # nvidia-smi not available or failed
-                pass
+            except subprocess.SubprocessError as exc:
+                logger.debug("nvidia-smi failed: %s", exc)
+            except OSError as exc:
+                logger.debug("nvidia-smi failed: %s", exc)
+            except ValueError as exc:
+                logger.debug("nvidia-smi output invalid: %s", exc)
 
             return {
                 "success": True,
@@ -339,8 +348,56 @@ class SystemUtils:
                     },
                 },
             }
-        except (OSError, RuntimeError, TypeError, ValueError, subprocess.SubprocessError) as e:
-            logger.error(f"Failed to get system resources: {e}")
+        except OSError as e:
+            logger.error(f"Failed to get system resources: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }
+        except RuntimeError as e:
+            logger.error(f"Failed to get system resources: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }
+        except TypeError as e:
+            logger.error(f"Failed to get system resources: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }
+        except ValueError as e:
+            logger.error(f"Failed to get system resources: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "resources": {
+                    "cpu": {"usage": 0, "temp": None},
+                    "gpu": {"usage": 0, "memory": 0, "memory_total": 0, "temp": None},
+                    "ram": {"usage": 0, "total": 0},
+                    "disk": {"usage": 0, "total": 0, "free": 0},
+                },
+            }
+        except subprocess.SubprocessError as e:
+            logger.error(f"Failed to get system resources: {e}", exc_info=True)
             return {
                 "success": False,
                 "error": str(e),

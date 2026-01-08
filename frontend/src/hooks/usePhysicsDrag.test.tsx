@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, render, waitFor, screen } from '@testing-library/react';
 import { useRef, useEffect, type PointerEvent as ReactPointerEvent } from 'react';
 import type { AppConfig } from '../types/apps';
+import { Box } from 'lucide-react';
 import {
   usePhysicsDrag,
   LIST_TOP_PADDING,
@@ -13,21 +14,30 @@ import {
 const mockApps: AppConfig[] = [
   {
     id: 'comfyui',
+    name: 'comfyui',
     displayName: 'ComfyUI',
+    icon: Box,
+    status: 'running',
     iconState: 'running',
     ramUsage: 60,
     gpuUsage: 40,
   },
   {
     id: 'openwebui',
+    name: 'openwebui',
     displayName: 'OpenWebUI',
+    icon: Box,
+    status: 'idle',
     iconState: 'offline',
     ramUsage: 0,
     gpuUsage: 0,
   },
   {
     id: 'invoke',
+    name: 'invoke',
     displayName: 'Invoke',
+    icon: Box,
+    status: 'idle',
     iconState: 'uninstalled',
     ramUsage: 0,
     gpuUsage: 0,
@@ -158,8 +168,8 @@ describe('usePhysicsDrag', () => {
     });
 
     expect(onReorderApps).toHaveBeenCalled();
-    const reordered = onReorderApps.mock.calls[0][0] as AppConfig[];
-    expect(reordered[2].id).toBe('comfyui');
+    const reordered = onReorderApps.mock.calls[0]?.[0] as AppConfig[];
+    expect(reordered[2]?.id).toBe('comfyui');
   });
 
   it('deletes when released beyond delete distance', async () => {

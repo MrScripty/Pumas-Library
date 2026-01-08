@@ -4,25 +4,35 @@ import userEvent from '@testing-library/user-event';
 import { AppSidebar } from './AppSidebar';
 import type { AppConfig } from '../types/apps';
 import { LIST_TOP_PADDING, TOTAL_HEIGHT } from '../hooks/usePhysicsDrag';
+import { Box } from 'lucide-react';
 
 const mockApps: AppConfig[] = [
   {
     id: 'comfyui',
+    name: 'comfyui',
     displayName: 'ComfyUI',
+    icon: Box,
+    status: 'running',
     iconState: 'running',
     ramUsage: 60,
     gpuUsage: 40,
   },
   {
     id: 'openwebui',
+    name: 'openwebui',
     displayName: 'OpenWebUI',
+    icon: Box,
+    status: 'idle',
     iconState: 'offline',
     ramUsage: 0,
     gpuUsage: 0,
   },
   {
     id: 'invoke',
+    name: 'invoke',
     displayName: 'Invoke',
+    icon: Box,
+    status: 'idle',
     iconState: 'uninstalled',
     ramUsage: 0,
     gpuUsage: 0,
@@ -52,7 +62,7 @@ describe('AppSidebar', () => {
     render(<AppSidebar {...defaultProps} onSelectApp={onSelectApp} />);
 
     const buttons = screen.getAllByRole('button');
-    await user.click(buttons[0]);
+    await user.click(buttons[0]!);
 
     expect(onSelectApp).toHaveBeenCalled();
   });
@@ -62,8 +72,10 @@ describe('AppSidebar', () => {
     const onSelectApp = vi.fn();
     const { container } = render(<AppSidebar {...defaultProps} onSelectApp={onSelectApp} />);
 
-    const sidebar = container.firstChild as HTMLElement;
-    await user.click(sidebar);
+    const sidebar = container.firstChild;
+    if (sidebar) {
+      await user.click(sidebar as HTMLElement);
+    }
 
     expect(onSelectApp).toHaveBeenCalledWith(null);
   });

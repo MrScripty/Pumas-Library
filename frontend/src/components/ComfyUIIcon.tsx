@@ -16,7 +16,7 @@ interface ComfyUIIconProps {
   onOpenLog?: () => void;
   dragOpacity?: number;
   shakeStyle?: React.CSSProperties;
-  disableShake?: boolean;
+  _disableShake?: boolean;
   isGhost?: boolean;
 }
 
@@ -189,7 +189,7 @@ export const ComfyUIIcon: React.FC<ComfyUIIconProps> = ({
   onOpenLog,
   dragOpacity = 1.0,
   shakeStyle = {},
-  disableShake = false,
+  _disableShake = false,
   isGhost = false,
 }) => {
   return (

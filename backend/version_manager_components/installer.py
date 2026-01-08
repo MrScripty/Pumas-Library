@@ -48,7 +48,7 @@ class InstallationMixin(MixinBase, InstallationContext):
             )
             self._install_log_handle.write(header)
             self._install_log_handle.flush()
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Unable to open install log at {log_path}: {exc}")
             self._install_log_handle = None
             self._current_install_log_path = log_path
@@ -62,7 +62,7 @@ class InstallationMixin(MixinBase, InstallationContext):
             try:
                 self._install_log_handle.write(message.rstrip() + "\n")
                 self._install_log_handle.flush()
-            except (IOError, OSError) as exc:
+            except OSError as exc:
                 logger.warning(f"Failed to write to install log: {exc}")
 
     def get_installation_progress(self) -> Optional[Dict]:
@@ -95,7 +95,10 @@ class InstallationMixin(MixinBase, InstallationContext):
                     logger.info("→ Cancelling active download...")
                     self._current_downloader.cancel()
                     logger.info("✓ Download cancelled")
-                except (AttributeError, RuntimeError) as e:
+                except AttributeError as e:
+                    # Downloader may not support cancellation or already finished
+                    logger.error(f"✗ Error cancelling download: {e}", exc_info=True)
+                except RuntimeError as e:
                     # Downloader may not support cancellation or already finished
                     logger.error(f"✗ Error cancelling download: {e}", exc_info=True)
 
@@ -115,8 +118,13 @@ class InstallationMixin(MixinBase, InstallationContext):
                             # Check if still alive - need to check if process object is still valid
                             try:
                                 still_alive = self._current_process.poll() is None
-                            except (OSError, ValueError):
+                            except OSError as exc:
                                 # Process object might be invalid, assume it's dead
+                                logger.debug("Failed to poll process %s: %s", pid, exc)
+                                still_alive = False
+                            except ValueError as exc:
+                                # Process object might be invalid, assume it's dead
+                                logger.debug("Failed to poll process %s: %s", pid, exc)
                                 still_alive = False
 
                             if still_alive:
@@ -130,12 +138,14 @@ class InstallationMixin(MixinBase, InstallationContext):
                             self._current_process.wait(
                                 timeout=INSTALLATION.SUBPROCESS_STOP_TIMEOUT_SEC
                             )
-                        except (subprocess.TimeoutExpired, OSError):
-                            pass  # Process might already be gone or timeout
+                        except subprocess.TimeoutExpired as exc:
+                            logger.debug("Process wait timed out for PID %s: %s", pid, exc)
+                        except OSError as exc:
+                            logger.debug("Process wait failed for PID %s: %s", pid, exc)
                         logger.info("✓ All processes terminated")
                     except ProcessLookupError:
                         logger.info("✓ Process already terminated")
-                    except (OSError, PermissionError) as kill_error:
+                    except OSError as kill_error:
                         logger.error(
                             f"✗ Error killing process group: {kill_error}",
                             exc_info=True,
@@ -147,9 +157,11 @@ class InstallationMixin(MixinBase, InstallationContext):
                                 timeout=INSTALLATION.SUBPROCESS_KILL_TIMEOUT_SEC
                             )
                             logger.info("✓ Main process killed")
-                        except (subprocess.TimeoutExpired, OSError):
-                            pass
-                except (OSError, PermissionError) as e:
+                        except subprocess.TimeoutExpired as exc:
+                            logger.debug("Process kill timeout for PID %s: %s", pid, exc)
+                        except OSError as exc:
+                            logger.debug("Process kill failed for PID %s: %s", pid, exc)
+                except OSError as e:
                     logger.error(f"✗ Error terminating subprocess: {e}", exc_info=True)
 
             self.progress_tracker.set_error("Installation cancelled by user")
@@ -198,6 +210,21 @@ class InstallationMixin(MixinBase, InstallationContext):
 
         install_log_path = self._open_install_log(f"install-{safe_filename(tag)}")
         self._log_install(f"Starting install for {tag}")
+
+        def _handle_install_failure(error_msg: str) -> bool:
+            self._log_install(error_msg)
+            self.progress_tracker.set_error(error_msg)
+            self.progress_tracker.complete_installation(False)
+
+            # Clean up on failure/cancel
+            if version_path.exists():
+                logger.info(f"Cleaning up failed installation: {version_path}")
+                try:
+                    shutil.rmtree(version_path)
+                    logger.info("✓ Removed incomplete installation directory")
+                except OSError as cleanup_error:
+                    logger.warning(f"Failed to clean up directory: {cleanup_error}")
+            return False
 
         try:
             # Reset cancellation flag and set installing tag
@@ -364,7 +391,7 @@ class InstallationMixin(MixinBase, InstallationContext):
                     try:
                         shutil.rmtree(version_path)
                         logger.info("✓ Removed incomplete installation directory")
-                    except (OSError, PermissionError) as cleanup_error:
+                    except OSError as cleanup_error:
                         logger.warning(f"Failed to clean up directory: {cleanup_error}")
                 self.progress_tracker.complete_installation(False)
                 return False
@@ -409,42 +436,31 @@ class InstallationMixin(MixinBase, InstallationContext):
             # Installation was cancelled by user
             error_msg = str(e)
             logger.info(f"✓ {error_msg}")
-            self._log_install(error_msg)
-            self.progress_tracker.set_error(error_msg)
-            self.progress_tracker.complete_installation(False)
-
-            # Clean up cancelled installation
-            if version_path.exists():
-                logger.info(f"Cleaning up cancelled installation: {version_path}")
-                try:
-                    shutil.rmtree(version_path)
-                    logger.info("✓ Removed incomplete installation directory")
-                except (OSError, PermissionError) as cleanup_error:
-                    logger.warning(f"Failed to clean up directory: {cleanup_error}")
-            return False
-        except (
-            InstallationError,
-            DependencyError,
-            NetworkError,
-            ResourceError,
-            tarfile.TarError,
-            zipfile.BadZipFile,
-        ) as e:
+            return _handle_install_failure(error_msg)
+        except InstallationError as e:
             error_msg = f"Error installing version {tag}: {e}"
             logger.error(error_msg, exc_info=True)
-            self._log_install(error_msg)
-            self.progress_tracker.set_error(error_msg)
-            self.progress_tracker.complete_installation(False)
-
-            # Clean up on failure
-            if version_path.exists():
-                logger.info(f"Cleaning up failed installation: {version_path}")
-                try:
-                    shutil.rmtree(version_path)
-                    logger.info("✓ Removed incomplete installation directory")
-                except (OSError, PermissionError) as cleanup_error:
-                    logger.warning(f"Failed to clean up directory: {cleanup_error}")
-            return False
+            return _handle_install_failure(error_msg)
+        except DependencyError as e:
+            error_msg = f"Error installing version {tag}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return _handle_install_failure(error_msg)
+        except NetworkError as e:
+            error_msg = f"Error installing version {tag}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return _handle_install_failure(error_msg)
+        except ResourceError as e:
+            error_msg = f"Error installing version {tag}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return _handle_install_failure(error_msg)
+        except tarfile.TarError as e:
+            error_msg = f"Error installing version {tag}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return _handle_install_failure(error_msg)
+        except zipfile.BadZipFile as e:
+            error_msg = f"Error installing version {tag}: {e}"
+            logger.error(error_msg, exc_info=True)
+            return _handle_install_failure(error_msg)
         finally:
             # Reset installation state
             self._installing_tag = None
@@ -453,8 +469,8 @@ class InstallationMixin(MixinBase, InstallationContext):
                 try:
                     self._install_log_handle.write(f"{'='*30} INSTALL END {tag} {'='*30}\n")
                     self._install_log_handle.close()
-                except (IOError, OSError):
-                    pass
+                except OSError as exc:
+                    logger.debug("Failed to close install log: %s", exc)
                 self._install_log_handle = None
             # Preserve progress state so UI can read failure logs; it will be overwritten by the next install
 
@@ -503,6 +519,6 @@ class InstallationMixin(MixinBase, InstallationContext):
             logger.info(f"✓ Removed version {tag}")
             return True
 
-        except (OSError, PermissionError) as e:
+        except OSError as e:
             logger.error(f"Error removing version {tag}: {e}", exc_info=True)
             return False

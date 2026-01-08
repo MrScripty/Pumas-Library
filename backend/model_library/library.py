@@ -44,7 +44,10 @@ class ModelLibrary:
         try:
             with open(meta_path, "r", encoding="utf-8") as f:
                 return cast(ModelMetadata, json.load(f))
-        except (OSError, json.JSONDecodeError) as exc:
+        except OSError as exc:
+            logger.error("Failed to read metadata at %s: %s", meta_path, exc)
+            return None
+        except json.JSONDecodeError as exc:
             logger.error("Failed to read metadata at %s: %s", meta_path, exc)
             return None
 
@@ -59,7 +62,10 @@ class ModelLibrary:
         try:
             with open(overrides_path, "r", encoding="utf-8") as f:
                 return cast(ModelOverrides, json.load(f))
-        except (OSError, json.JSONDecodeError) as exc:
+        except OSError as exc:
+            logger.error("Failed to read overrides at %s: %s", overrides_path, exc)
+            return {}
+        except json.JSONDecodeError as exc:
             logger.error("Failed to read overrides at %s: %s", overrides_path, exc)
             return {}
 

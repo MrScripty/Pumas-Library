@@ -19,7 +19,6 @@ interface AppIndicatorProps {
 export const AppIndicator: React.FC<AppIndicatorProps> = ({
   appId,
   state,
-  isSelected,
   hasInstall,
   launchError,
   onLaunch,
@@ -36,8 +35,6 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   const spinnerFrames = ['/', '-', '\\', '|'];
   const iconSize = 60;
   const indicatorRadius = iconSize / 3; // Larger indicator (1/3 icon radius)
-  const indicatorX = iconSize; // Right edge
-  const indicatorY = iconSize / 2; // Center vertically
 
   // Spinner animation for running state
   useEffect(() => {
@@ -51,6 +48,7 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
         clearInterval(interval);
       };
     }
+    return undefined;
   }, [state, appId]);
 
   // Error flash animation
@@ -64,7 +62,10 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
         logger.debug(`Stopping error flash animation for app: ${appId}`);
         clearInterval(interval);
       };
+    } else {
+      setErrorFlash(false);
     }
+    return undefined;
   }, [launchError, appId]);
 
 

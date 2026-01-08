@@ -45,7 +45,11 @@ class LauncherMixin(MixinBase, LauncherContext):
                 ) as resp:
                     if resp.status == 200:
                         return True, None
-            except (url_error.URLError, OSError) as exc:
+            except url_error.URLError as exc:
+                logger.debug("Server readiness check failed: %s", exc)
+                last_error = str(exc)
+            except OSError as exc:
+                logger.debug("Server readiness check failed: %s", exc)
                 last_error = str(exc)
 
             if time.time() - start > timeout:
@@ -62,7 +66,11 @@ class LauncherMixin(MixinBase, LauncherContext):
         try:
             content = log_file.read_text().splitlines()
             return content[-lines:]
-        except (IOError, OSError, UnicodeDecodeError):
+        except OSError as exc:
+            logger.debug("Failed to read log file %s: %s", log_file, exc)
+            return []
+        except UnicodeDecodeError as exc:
+            logger.debug("Failed to decode log file %s: %s", log_file, exc)
             return []
 
     def _open_frontend(self, url: str, slug: str) -> None:
@@ -88,7 +96,9 @@ class LauncherMixin(MixinBase, LauncherContext):
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
+            logger.warning(f"Failed to open frontend: {exc}")
+        except subprocess.SubprocessError as exc:
             logger.warning(f"Failed to open frontend: {exc}")
 
     def _slugify_tag(self, tag: str) -> str:
@@ -202,7 +212,7 @@ wait $SERVER_PID
         try:
             script_path.write_text(content)
             script_path.chmod(0o755)
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Could not write run.sh for {tag}: {exc}")
         return script_path
 
@@ -264,7 +274,7 @@ wait $SERVER_PID
         log_handle = None
         try:
             log_handle = open(log_file, "a", encoding="utf-8")
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Could not open log file {log_file} for {tag}: {exc}")
 
         cmd = ["bash", str(run_script)]
@@ -308,12 +318,15 @@ wait $SERVER_PID
                 False,
             )
 
-        except (subprocess.SubprocessError, OSError) as exc:
+        except subprocess.SubprocessError as exc:
+            logger.error(f"Error launching ComfyUI: {exc}", exc_info=True)
+            return (False, None, str(log_file), str(exc), None)
+        except OSError as exc:
             logger.error(f"Error launching ComfyUI: {exc}", exc_info=True)
             return (False, None, str(log_file), str(exc), None)
         finally:
             if log_handle:
                 try:
                     log_handle.close()
-                except (IOError, OSError):
-                    pass
+                except OSError as exc:
+                    logger.debug("Failed to close log file %s: %s", log_file, exc)

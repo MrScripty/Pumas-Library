@@ -9,6 +9,10 @@
  * className={`bg-[${themeColors.surfaces.interactive}]`}
  */
 
+import { getLogger } from '../utils/logger';
+
+const logger = getLogger('theme');
+
 export const themeColors = {
   /**
    * Surface colors - Used for backgrounds at different elevation levels
@@ -158,7 +162,7 @@ export function getThemeColor(path: string): string {
     if (value && typeof value === 'object' && part in value) {
       value = value[part];
     } else {
-      console.warn(`Theme color path "${path}" not found`);
+      logger.warn('Theme color path not found', { path });
       return 'hsl(0 0% 50%)'; // Fallback gray
     }
   }

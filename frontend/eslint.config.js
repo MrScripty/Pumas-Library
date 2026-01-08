@@ -5,7 +5,7 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   js.configs.recommended,
-  ...tseslint.configs.recommended,
+  ...tseslint.configs.strictTypeChecked,
   react.configs.flat.recommended,
   jsxA11y.flatConfigs.recommended,
   {
@@ -20,6 +20,7 @@ export default tseslint.config(
         ecmaFeatures: {
           jsx: true,
         },
+        project: './tsconfig.json',
       },
     },
     settings: {
@@ -28,9 +29,60 @@ export default tseslint.config(
       },
     },
     rules: {
-      // Enforce React Aria hooks over raw mouse events
+      // Prevent console usage (must use logger)
+      'no-console': 'error',
+
+      // Enforce proper error handling
+      '@typescript-eslint/no-floating-promises': 'error',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/explicit-function-return-type': [
+        'warn',
+        {
+          allowExpressions: true,
+          allowTypedFunctionExpressions: true,
+        },
+      ],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        {
+          argsIgnorePattern: '^_',
+          varsIgnorePattern: '^_',
+        },
+      ],
+
+      // File size and complexity limits
+      'max-lines': [
+        'warn',
+        {
+          max: 300,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+      'max-lines-per-function': [
+        'warn',
+        {
+          max: 50,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+      complexity: ['warn', 15],
+
+      // Prevent generic Error usage and enforce type guards
       'no-restricted-syntax': [
         'error',
+        {
+          selector: 'ThrowStatement > NewExpression[callee.name="Error"]',
+          message:
+            'Use specific error types from @/errors instead of generic Error',
+        },
+        {
+          selector: 'CatchClause > Identifier[name="error"]:not([typeAnnotation])',
+          message:
+            'Catch clauses should use type guards (if (error instanceof ...))',
+        },
+        // Existing React Aria rules
         {
           selector: 'JSXAttribute[name.name="onMouseEnter"]',
           message:
@@ -52,6 +104,7 @@ export default tseslint.config(
             'Avoid using onMouseOut. Use React Aria\'s useHover hook from @react-aria/interactions for robust, accessible hover interactions.',
         },
       ],
+
       // Accessibility rules from jsx-a11y
       'jsx-a11y/mouse-events-have-key-events': 'error',
       'jsx-a11y/no-static-element-interactions': 'warn',

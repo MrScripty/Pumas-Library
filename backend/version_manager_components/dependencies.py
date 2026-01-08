@@ -10,22 +10,24 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 try:
     import psutil
-except ImportError:  # pragma: no cover - optional dependency
+except ImportError as exc:  # pragma: no cover - optional dependency
+    logger.debug("psutil not available: %s", exc)
     psutil = None
 
 from packaging.utils import canonicalize_name
 
 from backend.config import INSTALLATION
-from backend.logging_config import get_logger
 from backend.models import DependencyStatus
 from backend.process_io_tracker import ProcessIOTracker
 from backend.utils import ensure_directory, parse_requirements_file, run_command, safe_filename
 from backend.validators import validate_version_tag
 from backend.version_manager_components.protocols import DependenciesContext, MixinBase
-
-logger = get_logger(__name__)
 
 
 class DependenciesMixin(MixinBase, DependenciesContext):
@@ -48,10 +50,18 @@ class DependenciesMixin(MixinBase, DependenciesContext):
                 try:
                     io = proc_item.io_counters()
                     total += io.read_bytes + io.write_bytes
-                except (AttributeError, OSError):
+                except AttributeError as exc:
+                    logger.debug("Failed to read IO counters for PID %s: %s", pid, exc)
+                    continue
+                except OSError as exc:
+                    logger.debug("Failed to read IO counters for PID %s: %s", pid, exc)
                     continue
             return total
-        except (AttributeError, OSError):
+        except AttributeError as exc:
+            logger.debug("Failed to read process IO for PID %s: %s", pid, exc)
+            return None
+        except OSError as exc:
+            logger.debug("Failed to read process IO for PID %s: %s", pid, exc)
             return None
 
     def _build_pip_env(self) -> dict[str, str]:
@@ -79,7 +89,7 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         safe_dir = self.metadata_manager.cache_dir / "requirements-safe"
         try:
             safe_dir.mkdir(parents=True, exist_ok=True)
-        except (OSError, PermissionError) as exc:
+        except OSError as exc:
             logger.warning(f"Could not create safe requirements dir: {exc}")
             return requirements_file, constraints_path
 
@@ -91,7 +101,7 @@ class DependenciesMixin(MixinBase, DependenciesContext):
             if requirements_file and requirements_file.exists():
                 safe_req = safe_dir / f"{safe_tag}-requirements.txt"
                 shutil.copyfile(requirements_file, safe_req)
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Could not copy requirements.txt to safe path: {exc}")
             safe_req = requirements_file
 
@@ -99,7 +109,7 @@ class DependenciesMixin(MixinBase, DependenciesContext):
             if constraints_path and constraints_path.exists():
                 safe_constraints = safe_dir / f"{safe_tag}-constraints.txt"
                 shutil.copyfile(constraints_path, safe_constraints)
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Could not copy constraints to safe path: {exc}")
             safe_constraints = constraints_path
 
@@ -201,7 +211,15 @@ class DependenciesMixin(MixinBase, DependenciesContext):
                             )
                             if pkg:
                                 optional_requirements.add(canonicalize_name(pkg))
-            except (IOError, OSError, KeyError, ValueError) as exc:
+            except OSError as exc:
+                logger.warning(
+                    f"Could not parse optional dependencies in {requirements_file}: {exc}"
+                )
+            except KeyError as exc:
+                logger.warning(
+                    f"Could not parse optional dependencies in {requirements_file}: {exc}"
+                )
+            except ValueError as exc:
                 logger.warning(
                     f"Could not parse optional dependencies in {requirements_file}: {exc}"
                 )
@@ -280,7 +298,13 @@ class DependenciesMixin(MixinBase, DependenciesContext):
                     canonicalize_name(pkg.get("name", "")) for pkg in parsed if pkg.get("name")
                 }
                 return installed_names
-            except (json.JSONDecodeError, KeyError, ValueError) as exc:
+            except json.JSONDecodeError as exc:
+                errors.append(f"pip json parse: {exc}")
+                logger.error(f"Error parsing pip list JSON for {tag}: {exc}", exc_info=True)
+            except KeyError as exc:
+                errors.append(f"pip json parse: {exc}")
+                logger.error(f"Error parsing pip list JSON for {tag}: {exc}", exc_info=True)
+            except ValueError as exc:
                 errors.append(f"pip json parse: {exc}")
                 logger.error(f"Error parsing pip list JSON for {tag}: {exc}", exc_info=True)
         else:
@@ -347,7 +371,14 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         constraints_path = None
         try:
             release = self.github_fetcher.get_release_by_tag(tag)
-        except (KeyError, ValueError, TypeError):
+        except KeyError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
+            release = None
+        except ValueError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
+            release = None
+        except TypeError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
             release = None
         if requirements_file.exists():
             constraints_path = self._build_constraints_for_tag(tag, requirements_file, release)
@@ -418,7 +449,14 @@ class DependenciesMixin(MixinBase, DependenciesContext):
         constraints_path = None
         try:
             release = self.github_fetcher.get_release_by_tag(tag)
-        except (KeyError, ValueError, TypeError):
+        except KeyError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
+            release = None
+        except ValueError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
+            release = None
+        except TypeError as exc:
+            logger.warning("Failed to load release metadata for %s: %s", tag, exc)
             release = None
         if requirements_file.exists():
             constraints_path = self._build_constraints_for_tag(tag, requirements_file, release)
@@ -562,7 +600,7 @@ class DependenciesMixin(MixinBase, DependenciesContext):
 
         except InterruptedError:
             raise
-        except (subprocess.SubprocessError, OSError) as exc:
+        except subprocess.SubprocessError as exc:
             logger.error(f"Error during dependency installation: {exc}", exc_info=True)
             if self._current_process:
                 try:
@@ -570,8 +608,19 @@ class DependenciesMixin(MixinBase, DependenciesContext):
                         os.killpg(os.getpgid(self._current_process.pid), 9)
                     else:
                         self._current_process.kill()
-                except (OSError, PermissionError):
-                    pass
+                except OSError as kill_exc:
+                    logger.debug("Failed to kill pip process: %s", kill_exc)
+            return False
+        except OSError as exc:
+            logger.error(f"Error during dependency installation: {exc}", exc_info=True)
+            if self._current_process:
+                try:
+                    if hasattr(os, "killpg"):
+                        os.killpg(os.getpgid(self._current_process.pid), 9)
+                    else:
+                        self._current_process.kill()
+                except OSError as kill_exc:
+                    logger.debug("Failed to kill pip process: %s", kill_exc)
             return False
         finally:
             self._current_process = None

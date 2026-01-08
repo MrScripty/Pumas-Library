@@ -37,7 +37,9 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
             if isinstance(published_at, str):
                 ts = published_at.replace("Z", "+00:00")
                 return datetime.fromisoformat(ts).astimezone(timezone.utc)
-        except (ValueError, TypeError) as exc:
+        except ValueError as exc:
+            logger.warning(f"Could not parse release date for {tag}: {exc}")
+        except TypeError as exc:
             logger.warning(f"Could not parse release date for {tag}: {exc}")
         return None
 
@@ -56,7 +58,13 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
         try:
             with url_request.urlopen(url, timeout=INSTALLATION.URL_FETCH_TIMEOUT_SEC) as resp:
                 data = json.load(resp)
-        except (url_error.URLError, json.JSONDecodeError, KeyError) as exc:
+        except url_error.URLError as exc:
+            logger.warning(f"Failed to fetch PyPI data for {package}: {exc}")
+            return {}
+        except json.JSONDecodeError as exc:
+            logger.warning(f"Failed to fetch PyPI data for {package}: {exc}")
+            return {}
+        except KeyError as exc:
             logger.warning(f"Failed to fetch PyPI data for {package}: {exc}")
             return {}
 
@@ -76,7 +84,11 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
                                 timezone.utc
                             )
                         )
-                    except (ValueError, TypeError):
+                    except ValueError as exc:
+                        logger.debug("Invalid upload_time %s: %s", upload_time, exc)
+                        continue
+                    except TypeError as exc:
+                        logger.debug("Invalid upload_time %s: %s", upload_time, exc)
                         continue
             if upload_times:
                 result[version_str] = max(upload_times)
@@ -94,7 +106,10 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
 
         try:
             spec_set = SpecifierSet(spec) if spec else SpecifierSet()
-        except (ValueError, TypeError) as exc:
+        except ValueError as exc:
+            logger.warning(f"Invalid specifier for {package} ({spec}): {exc}")
+            spec_set = SpecifierSet()
+        except TypeError as exc:
             logger.warning(f"Invalid specifier for {package} ({spec}): {exc}")
             spec_set = SpecifierSet()
 
@@ -102,7 +117,11 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
         for ver_str, uploaded_at in releases.items():
             try:
                 ver = Version(ver_str)
-            except (ValueError, TypeError):
+            except ValueError as exc:
+                logger.debug("Skipping invalid version %s: %s", ver_str, exc)
+                continue
+            except TypeError as exc:
+                logger.debug("Skipping invalid version %s: %s", ver_str, exc)
                 continue
             if spec_set and ver not in spec_set:
                 continue
@@ -156,7 +175,7 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
                         f.write(f"{pkg}{spec}\n")
                     else:
                         f.write(f"{pkg}\n")
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.warning(f"Failed to write constraints file for {tag}: {exc}")
             return None
 
@@ -172,7 +191,9 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
                 with open(self._constraints_cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                     return data if isinstance(data, dict) else {}
-        except (json.JSONDecodeError, IOError, OSError) as exc:
+        except json.JSONDecodeError as exc:
+            logger.warning(f"Unable to read constraints cache: {exc}")
+        except OSError as exc:
             logger.warning(f"Unable to read constraints cache: {exc}")
         return {}
 
@@ -186,5 +207,11 @@ class ConstraintsMixin(MixinBase, ConstraintsContext):
                 lock=lock,
                 keep_backup=True,
             )
-        except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        except OSError as exc:
+            logger.warning(f"Unable to write constraints cache: {exc}")
+        except TypeError as exc:
+            logger.warning(f"Unable to write constraints cache: {exc}")
+        except ValueError as exc:
+            logger.warning(f"Unable to write constraints cache: {exc}")
+        except json.JSONDecodeError as exc:
             logger.warning(f"Unable to write constraints cache: {exc}")

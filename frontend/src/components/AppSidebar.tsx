@@ -87,7 +87,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
   useEffect(() => {
     if (typeof document === 'undefined') return;
     const portal = document.createElement('div');
-    portal.dataset.sidebarDragLayer = 'true';
+    portal.dataset['sidebarDragLayer'] = 'true';
     portal.style.position = 'fixed';
     portal.style.inset = '0';
     portal.style.pointerEvents = 'none';
@@ -245,7 +245,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
         ...motionStyle,
         touchAction: 'none',
         pointerEvents: hideInList ? 'none' : undefined,
-      },
+      } as any,
       animate: isFloating
         ? (isDeleting ? { scale: 0, rotate: -35, opacity: 0 } : undefined)
         : { y: offsetY, opacity: hideInList ? 0 : 1 },
@@ -258,6 +258,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     };
 
     return (
+      // @ts-ignore - Framer Motion transition type incompatibility
       <motion.div key={app.id} {...motionProps}>
         <div className="relative">
           {app.id === 'comfyui' ? (
@@ -275,7 +276,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               onOpenLog={() => onOpenLog?.(app.id)}
               dragOpacity={1.0}
               shakeStyle={shakeStyle}
-              disableShake={isOtherDragging}
+              _disableShake={isOtherDragging}
             />
           ) : (
             <AppIcon
@@ -293,7 +294,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
               onOpenLog={() => onOpenLog?.(app.id)}
               dragOpacity={1.0}
               shakeStyle={shakeStyle}
-              disableShake={isOtherDragging}
+              _disableShake={isOtherDragging}
             />
           )}
 

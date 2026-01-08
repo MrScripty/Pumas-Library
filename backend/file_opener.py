@@ -11,6 +11,10 @@ from typing import Optional, Union
 
 import click
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def resolve_target_path(
     path: Union[str, Path],
@@ -45,7 +49,11 @@ def open_in_file_manager(
 
     try:
         target_path = resolve_target_path(path, base_dir=base_dir)
-    except (OSError, ValueError, RuntimeError) as exc:
+    except TypeError as exc:
+        logger.warning("Invalid path type: %s", exc)
+        return {"success": False, "error": "Invalid path"}
+    except OSError as exc:
+        logger.warning("Invalid path: %s", exc)
         return {"success": False, "error": f"Invalid path: {exc}"}
 
     if not target_path.exists():
@@ -57,5 +65,12 @@ def open_in_file_manager(
         if not launched:
             return {"success": False, "error": "Unable to open file manager"}
         return {"success": True, "path": str(target_path)}
-    except (OSError, subprocess.SubprocessError, RuntimeError) as exc:
+    except subprocess.SubprocessError as exc:
+        logger.error("Failed to open file manager via subprocess: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+    except OSError as exc:
+        logger.error("Failed to open file manager: %s", exc, exc_info=True)
+        return {"success": False, "error": str(exc)}
+    except RuntimeError as exc:
+        logger.error("Unsupported file manager operation: %s", exc, exc_info=True)
         return {"success": False, "error": str(exc)}

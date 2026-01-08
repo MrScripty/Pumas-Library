@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from huggingface_hub import HfApi, hf_hub_download, login, snapshot_download
+from huggingface_hub.utils import HfHubHTTPError
 from pydantic import BaseModel, validator
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -143,57 +144,92 @@ class ModelDownloader:
         if not self._verify_hashes(category_path, manifest):
             raise ValueError(f"Hash verification failed for {manifest.id}")
 
-        self.fetch_metadata(repo_id, category_path)
+        self.fetch_metadata(repo_id, category_path, manifest)
         logger.info(f"Successfully downloaded and verified {manifest.id}")
         return category_path
 
-    def fetch_metadata(self, repo_id: str, model_dir: Path):
+    def _write_minimal_metadata(
+        self, meta_path: Path, model_dir: Path, manifest: Optional[ModelManifest]
+    ) -> None:
+        minimal = {
+            "family": manifest.family if manifest else "",
+            "model_id": model_dir.name,
+            "model_type": "llm",
+            "tags": list(manifest.tags) if manifest else [],
+            "hashes": {"sha256": "", "blake3": ""},
+        }
+        try:
+            with open(meta_path, "w") as f:
+                json.dump(minimal, f, indent=4)
+        except OSError as exc:
+            logger.warning("Failed to write minimal metadata for %s: %s", model_dir, exc)
+
+    def fetch_metadata(
+        self, repo_id: str, model_dir: Path, manifest: Optional[ModelManifest] = None
+    ):
         meta_path = model_dir / "metadata.json"
         try:
             info = self.api.model_info(repo_id)
-            metadata = {
-                "family": repo_id.split("/")[-1].split("-")[0].lower(),
-                "model_id": model_dir.name,
-                "release_date": info.last_modified.isoformat() if info.last_modified else "",
-                "download_url": f"https://huggingface.co/{repo_id}",
-                "model_card": info.card_data.to_dict() if info.card_data else {},
-                "tags": info.tags or [],
-                "model_type": (
-                    "llm" if "text-generation" in (info.pipeline_tag or "") else "diffusion"
-                ),
-                "subtype": "",
-                "base_model": info.card_data.get("base_model", "") if info.card_data else "",
-                "preview_image": "",
-                "hashes": {"sha256": "", "blake3": ""},
-            }
+        except HfHubHTTPError as exc:
+            logger.warning("Failed to fetch metadata for %s: %s. Using defaults.", repo_id, exc)
+            self._write_minimal_metadata(meta_path, model_dir, manifest)
+            return
+        except OSError as exc:
+            logger.warning("Failed to fetch metadata for %s: %s. Using defaults.", repo_id, exc)
+            self._write_minimal_metadata(meta_path, model_dir, manifest)
+            return
 
-            for sibling in info.siblings:
-                if sibling.rfilename.lower().endswith((".png", ".jpg", ".jpeg")):
-                    preview_path = model_dir / "preview.png"
+        metadata = {
+            "family": repo_id.split("/")[-1].split("-")[0].lower(),
+            "model_id": model_dir.name,
+            "release_date": info.last_modified.isoformat() if info.last_modified else "",
+            "download_url": f"https://huggingface.co/{repo_id}",
+            "model_card": info.card_data.to_dict() if info.card_data else {},
+            "tags": info.tags or [],
+            "model_type": (
+                "llm" if "text-generation" in (info.pipeline_tag or "") else "diffusion"
+            ),
+            "subtype": "",
+            "base_model": info.card_data.get("base_model", "") if info.card_data else "",
+            "preview_image": "",
+            "hashes": {"sha256": "", "blake3": ""},
+        }
+
+        for sibling in info.siblings:
+            if sibling.rfilename.lower().endswith((".png", ".jpg", ".jpeg")):
+                preview_path = model_dir / "preview.png"
+                try:
                     hf_hub_download(
                         repo_id=repo_id, filename=sibling.rfilename, local_dir=model_dir
                     )
-                    preview_path.rename(model_dir / "preview.png")
-                    metadata["preview_image"] = "preview.png"
+                except HfHubHTTPError as exc:
+                    logger.warning("Failed to download preview for %s: %s", repo_id, exc)
                     break
+                except OSError as exc:
+                    logger.warning("Failed to download preview for %s: %s", repo_id, exc)
+                    break
+                try:
+                    preview_path.rename(model_dir / "preview.png")
+                except OSError as exc:
+                    logger.warning("Failed to set preview image for %s: %s", repo_id, exc)
+                else:
+                    metadata["preview_image"] = "preview.png"
+                break
 
+        try:
             hf_hub_download(repo_id=repo_id, filename="README.md", local_dir=model_dir)
+        except HfHubHTTPError as exc:
+            logger.warning("Failed to download README for %s: %s", repo_id, exc)
+        except OSError as exc:
+            logger.warning("Failed to download README for %s: %s", repo_id, exc)
 
+        try:
             with open(meta_path, "w") as f:
                 json.dump(metadata, f, indent=4)
             logger.info(f"Fetched and saved metadata for {repo_id}")
-        except Exception as e:
-            logger.warning(f"Failed to fetch metadata for {repo_id}: {e}. Using defaults.")
-            # fallback to minimal metadata
-            minimal = {
-                "family": manifest.family if "manifest" in locals() else "",
-                "model_id": model_dir.name,
-                "model_type": "llm",
-                "tags": manifest.tags if "manifest" in locals() else [],
-                "hashes": {"sha256": "", "blake3": ""},
-            }
-            with open(meta_path, "w") as f:
-                json.dump(minimal, f, indent=4)
+        except OSError as exc:
+            logger.warning("Failed to write metadata for %s: %s", repo_id, exc)
+            self._write_minimal_metadata(meta_path, model_dir, manifest)
 
 
 if __name__ == "__main__":

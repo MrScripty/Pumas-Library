@@ -1,0 +1,306 @@
+/**
+ * Remote Models List Component
+ *
+ * Displays HuggingFace search results with download functionality.
+ * Extracted from ModelManager.tsx
+ */
+
+import React, { useState } from 'react';
+import {
+  Search,
+  Download,
+  X,
+  ExternalLink,
+  UserRound,
+  UserRoundSearch,
+  ChartSpline,
+  Blocks,
+  ChartPie,
+} from 'lucide-react';
+import type { RemoteModelInfo } from '../types/apps';
+import type { DownloadStatus } from '../hooks/useModelDownloads';
+import { ModelKindIcon } from './ModelKindIcon';
+import {
+  formatDownloadSize,
+  formatReleaseDate,
+  formatDownloads,
+  resolveReleaseIcon,
+} from '../utils/modelFormatters';
+
+interface RemoteModelsListProps {
+  models: RemoteModelInfo[];
+  isLoading: boolean;
+  error: string | null;
+  searchQuery: string;
+  downloadStatusByRepo: Record<string, DownloadStatus>;
+  downloadError: string | null;
+  downloadRepoId: string | null;
+  onStartDownload: (model: RemoteModelInfo, quant?: string | null) => Promise<void>;
+  onCancelDownload: (repoId: string) => Promise<void>;
+  onOpenUrl: (url: string) => void;
+  onSearchDeveloper?: (developer: string) => void;
+  onClearFilters?: () => void;
+  selectedKind: string;
+}
+
+export function RemoteModelsList({
+  models,
+  isLoading,
+  error,
+  searchQuery,
+  downloadStatusByRepo,
+  downloadError,
+  downloadRepoId,
+  onStartDownload,
+  onCancelDownload,
+  onOpenUrl,
+  onSearchDeveloper,
+  onClearFilters,
+  selectedKind,
+}: RemoteModelsListProps) {
+  const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-[hsl(var(--launcher-text-muted))]">
+        <Search className="w-3.5 h-3.5" />
+        <span>Searching Hugging Face...</span>
+      </div>
+    );
+  }
+
+  if (error) {
+    return <div className="text-xs text-[hsl(var(--launcher-accent-error))]">{error}</div>;
+  }
+
+  if (models.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-64 text-[hsl(var(--launcher-text-muted))]">
+        <Search className="w-10 h-10 mb-3 opacity-50" />
+        <p className="text-sm text-center">
+          {searchQuery.trim()
+            ? 'No Hugging Face models match your search.'
+            : 'Type to search Hugging Face models.'}
+        </p>
+        {(searchQuery.trim() || selectedKind !== 'all') && onClearFilters && (
+          <button
+            onClick={onClearFilters}
+            className="mt-2 text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
+          >
+            Clear filters
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  const formatDownloadSizeRange = (model: RemoteModelInfo): string => {
+    const optionSizes = model.downloadOptions?.map((option) => option.sizeBytes) ?? [];
+    const validSizes = optionSizes.filter((size): size is number => typeof size === 'number' && size > 0);
+    if (validSizes.length > 1) {
+      const min = Math.min(...validSizes);
+      const max = Math.max(...validSizes);
+      const formatValue = (bytes: number) => {
+        const gb = bytes / (1024 ** 3);
+        return gb >= 10 ? gb.toFixed(1) : gb.toFixed(2);
+      };
+      return `${formatValue(min)}-${formatValue(max)} GB`;
+    }
+    if (validSizes.length === 1) {
+      return formatDownloadSize(validSizes[0]);
+    }
+    return formatDownloadSize(model.totalSizeBytes ?? null);
+  };
+
+  return (
+    <>
+      {models.map((model) => {
+        const downloadStatus = downloadStatusByRepo[model.repoId];
+        const isDownloading = downloadStatus
+          ? ['queued', 'downloading', 'cancelling'].includes(downloadStatus.status)
+          : false;
+        const progressValue = downloadStatus?.progress ?? 0;
+        const downloadOptions = model.downloadOptions?.length
+          ? model.downloadOptions
+          : model.quants.map((quant) => ({
+              quant,
+              sizeBytes: model.quantSizes?.[quant] ?? null,
+            }));
+        const quantLabels = downloadOptions.map((option) => option.quant);
+
+        return (
+          <div
+            key={model.repoId}
+            className="rounded transition-colors bg-[hsl(var(--launcher-bg-tertiary)/0.2)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.35)]"
+          >
+            <div className="flex items-start justify-between gap-3 p-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold text-[hsl(var(--launcher-text-primary))] truncate">
+                    {model.name}
+                  </span>
+                </div>
+                <div className="mt-1 flex items-start justify-between gap-4 text-xs text-[hsl(var(--launcher-text-muted))]">
+                  <div className="flex flex-col gap-1 min-w-0">
+                    {model.developer && onSearchDeveloper && (
+                      <button
+                        type="button"
+                        onClick={() => onSearchDeveloper(model.developer)}
+                        className="group inline-flex items-center gap-1 text-left"
+                        title="Search by developer"
+                      >
+                        <span className="inline-flex">
+                          <UserRound className="w-3.5 h-3.5 group-hover:hidden" />
+                          <UserRoundSearch className="w-3.5 h-3.5 hidden group-hover:inline-flex" />
+                        </span>
+                        {model.developer}
+                      </button>
+                    )}
+                    <span
+                      className="inline-flex items-center gap-1"
+                      title={model.kind}
+                      aria-label={model.kind}
+                    >
+                      <ModelKindIcon kind={model.kind} />
+                    </span>
+                  </div>
+                  <div className="flex flex-col gap-1 items-end text-[hsl(var(--launcher-text-muted))]">
+                    <span className="inline-flex items-center gap-1">
+                      <span title="Release date" aria-label="Release date" className="inline-flex">
+                        {(() => {
+                          const ReleaseIcon = resolveReleaseIcon(model.releaseDate);
+                          return <ReleaseIcon className="w-3.5 h-3.5" />;
+                        })()}
+                      </span>
+                      {formatReleaseDate(model.releaseDate)}
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span title="Downloads" aria-label="Downloads" className="inline-flex">
+                        <ChartSpline className="w-3.5 h-3.5" />
+                      </span>
+                      {formatDownloads(model.downloads)}
+                    </span>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-3 mt-2 text-xs text-[hsl(var(--launcher-text-muted))]">
+                  <span className="inline-flex items-center gap-1">
+                    <span title="Format" aria-label="Format" className="inline-flex">
+                      <Blocks className="w-3.5 h-3.5" />
+                    </span>
+                    {model.formats.length ? model.formats.join(', ') : 'Unknown'}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span title="Quantization" aria-label="Quantization" className="inline-flex">
+                      <ChartPie className="w-3.5 h-3.5" />
+                    </span>
+                    {quantLabels.length ? quantLabels.join(', ') : 'Unknown'}
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span title="Download size" aria-label="Download size" className="inline-flex">
+                      <Download className="w-3.5 h-3.5" />
+                    </span>
+                    {formatDownloadSizeRange(model)}
+                  </span>
+                </div>
+                {downloadError && downloadRepoId === model.repoId && (
+                  <div className="mt-2 text-xs text-[hsl(var(--launcher-accent-error))]">
+                    {downloadError}
+                  </div>
+                )}
+              </div>
+              <div className="relative flex flex-col items-center gap-2">
+                <button
+                  onClick={() => onOpenUrl(model.url)}
+                  className="flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))] transition-colors"
+                  title={`Open ${model.url}`}
+                  aria-label={`Open ${model.url}`}
+                >
+                  <ExternalLink className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => {
+                    if (isDownloading) {
+                      setOpenQuantMenuRepoId(null);
+                      void onCancelDownload(model.repoId);
+                      return;
+                    }
+                    if (downloadOptions.length > 0) {
+                      setOpenQuantMenuRepoId((prev) =>
+                        prev === model.repoId ? null : model.repoId
+                      );
+                    } else {
+                      void onStartDownload(model, null);
+                    }
+                  }}
+                  className={`group flex-shrink-0 transition-colors ${
+                    openQuantMenuRepoId === model.repoId
+                      ? 'text-[hsl(var(--launcher-accent-primary))]'
+                      : 'text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
+                  }`}
+                  title={isDownloading ? 'Cancel download' : 'Download options'}
+                  aria-label={isDownloading ? 'Cancel download' : 'Download options'}
+                  aria-pressed={openQuantMenuRepoId === model.repoId}
+                >
+                  <span className="relative flex h-4 w-4 items-center justify-center">
+                    {isDownloading && (
+                      <>
+                        <span
+                          className="download-progress-ring"
+                          style={
+                            {
+                              '--progress': `${Math.min(360, Math.max(0, Math.round(progressValue * 360)))}deg`,
+                            } as React.CSSProperties
+                          }
+                        />
+                        <span className="download-scan-ring" />
+                      </>
+                    )}
+                    <Download
+                      className={`h-4 w-4 transition-opacity ${
+                        isDownloading ? 'group-hover:opacity-30' : ''
+                      }`}
+                    />
+                    {isDownloading && (
+                      <X className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                    )}
+                  </span>
+                </button>
+                {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && !isDownloading && (
+                  <div className="absolute right-0 top-full mt-2 min-w-[160px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
+                    {downloadOptions.map((option) => (
+                      <button
+                        key={option.quant}
+                        type="button"
+                        onClick={() => {
+                          setOpenQuantMenuRepoId(null);
+                          void onStartDownload(model, option.quant);
+                        }}
+                        className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                      >
+                        {option.quant}
+                        {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
+                          ? ` (${formatDownloadSize(option.sizeBytes)})`
+                          : ' (Unknown)'}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOpenQuantMenuRepoId(null);
+                        void onStartDownload(model, null);
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                    >
+                      All files
+                      {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </>
+  );
+}

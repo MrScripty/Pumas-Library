@@ -108,13 +108,19 @@ class MetadataManager:
         try:
             atomic_write_json(file_path, data, lock=self._write_lock, keep_backup=True)
             return True
-        except (TypeError, ValueError) as e:
+        except TypeError as e:
             # JSON serialization errors
             logger.error(f"Error serializing data for {file_path}: {e}", exc_info=True)
             raise MetadataError(
                 f"Failed to serialize metadata to JSON: {e}", file_path=str(file_path)
             ) from e
-        except (IOError, OSError) as e:
+        except ValueError as e:
+            # JSON serialization errors
+            logger.error(f"Error serializing data for {file_path}: {e}", exc_info=True)
+            raise MetadataError(
+                f"Failed to serialize metadata to JSON: {e}", file_path=str(file_path)
+            ) from e
+        except OSError as e:
             # File I/O errors
             logger.error(f"Error writing {file_path}: {e}", exc_info=True)
             raise ResourceError(f"Failed to write metadata file: {e}", resource_type="file") from e

@@ -26,7 +26,7 @@ class StateMixin(MixinBase, StateContext):
                 if self.active_version_file.exists():
                     self.active_version_file.unlink()
             return True
-        except (IOError, OSError) as exc:
+        except OSError as exc:
             logger.error(f"Error writing active version file: {exc}", exc_info=True)
             return False
 
@@ -161,7 +161,7 @@ class StateMixin(MixinBase, StateContext):
                         try:
                             shutil.rmtree(version_dir)
                             logger.info(f"✓ Removed incomplete installation directory: {tag}")
-                        except (OSError, PermissionError) as e:
+                        except OSError as e:
                             logger.error(f"Error removing {tag}: {e}", exc_info=True)
 
         # Clean up metadata if we found incomplete versions in metadata

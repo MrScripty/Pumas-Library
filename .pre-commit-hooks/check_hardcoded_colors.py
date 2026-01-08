@@ -4,10 +4,13 @@ Pre-commit hook to prevent hardcoded colors in frontend code.
 Enforces the use of CSS theme variables instead of hardcoded hex/rgb values.
 """
 
+import logging
 import re
 import sys
 from pathlib import Path
 from typing import List, Tuple
+
+logger = logging.getLogger(__name__)
 
 # ANSI color codes
 RED = "\033[0;31m"
@@ -79,7 +82,12 @@ def check_file(file_path: Path) -> List[Tuple[int, str, str]]:
     try:
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
-    except (OSError, UnicodeError) as e:
+    except OSError as e:
+        logger.warning("Failed to read %s: %s", file_path, e, exc_info=True)
+        sys.stderr.write(f"Error reading {file_path}: {e}\n")
+        return []
+    except UnicodeError as e:
+        logger.warning("Failed to decode %s: %s", file_path, e, exc_info=True)
         sys.stderr.write(f"Error reading {file_path}: {e}\n")
         return []
 

@@ -61,7 +61,7 @@ def calculate_file_hash(file_path: Path, algorithm: str = "sha256") -> Optional[
             for chunk in iter(lambda: f.read(65536), b""):
                 hasher.update(chunk)
         return hasher.hexdigest()
-    except (IOError, OSError) as e:
+    except OSError as e:
         logger.error(f"Error calculating hash for {file_path}: {e}", exc_info=True)
         return None
 
@@ -97,7 +97,7 @@ def get_directory_size(path: Path) -> int:
         for item in path.rglob("*"):
             if item.is_file():
                 total += item.stat().st_size
-    except (OSError, PermissionError) as e:
+    except OSError as e:
         logger.error(f"Error calculating directory size for {path}: {e}", exc_info=True)
     return total
 
@@ -153,7 +153,7 @@ def make_relative_symlink(target: Path, link: Path) -> bool:
         # Create symlink
         link.symlink_to(relative_target)
         return True
-    except (OSError, ValueError) as e:
+    except OSError as e:
         logger.error(f"Error creating symlink {link} -> {target}: {e}", exc_info=True)
         return False
 
@@ -177,7 +177,8 @@ def relative_path(from_path: Path, to_path: Path) -> str:
         # Calculate relative path
         rel = Path(to_abs).relative_to(from_abs.parent)
         return str(rel)
-    except ValueError:
+    except ValueError as exc:
+        logger.debug("Paths do not share a base: %s", exc)
         # If paths don't share a common base, find common ancestor
         from_parts = list(from_abs.parts)
         to_parts = list(to_abs.parts)
@@ -225,9 +226,14 @@ def run_command(
             env=env,
         )
         return (result.returncode == 0, result.stdout, result.stderr)
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        logger.warning("Command timed out: %s", exc)
         return (False, "", "Command timed out")
-    except (subprocess.SubprocessError, OSError) as e:
+    except subprocess.SubprocessError as e:
+        logger.error("Command failed: %s", e, exc_info=True)
+        return (False, "", str(e))
+    except OSError as e:
+        logger.error("Command failed to start: %s", e, exc_info=True)
         return (False, "", str(e))
 
 
@@ -244,7 +250,11 @@ def check_command_exists(command: str) -> bool:
     try:
         result = subprocess.run(["which", command], capture_output=True, text=True)
         return result.returncode == 0
-    except (subprocess.SubprocessError, OSError, FileNotFoundError):
+    except subprocess.SubprocessError as exc:
+        logger.debug("Command lookup failed for %s: %s", command, exc)
+        return False
+    except OSError as exc:
+        logger.debug("Command lookup failed for %s: %s", command, exc)
         return False
 
 
@@ -308,7 +318,8 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                     package_name = req.name
                     version_spec = str(req.specifier) if req.specifier else ""
                     requirements[package_name] = version_spec
-                except (ValueError, TypeError):
+                except ValueError as exc:
+                    logger.debug("Invalid requirement line %r: %s", line, exc)
                     # If parsing fails, try simple split
                     if "==" in line:
                         package, version = line.split("==", 1)
@@ -320,7 +331,12 @@ def parse_requirements_file(requirements_path: Path) -> dict[str, str]:
                     else:
                         # No version specifier
                         requirements[line.strip()] = ""
-    except (IOError, OSError, UnicodeDecodeError) as e:
+                except TypeError as exc:
+                    logger.debug("Invalid requirement line %r: %s", line, exc)
+                    requirements[line.strip()] = ""
+    except OSError as e:
+        logger.error(f"Error parsing requirements file {requirements_path}: {e}", exc_info=True)
+    except UnicodeDecodeError as e:
         logger.error(f"Error parsing requirements file {requirements_path}: {e}", exc_info=True)
 
     return requirements
@@ -342,6 +358,6 @@ def find_files_by_extension(directory: Path, extension: str) -> List[Path]:
 
     try:
         return list(directory.rglob(f"*{extension}"))
-    except (OSError, PermissionError) as e:
+    except OSError as e:
         logger.error(f"Error searching for {extension} files in {directory}: {e}", exc_info=True)
         return []

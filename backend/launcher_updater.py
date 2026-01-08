@@ -133,8 +133,17 @@ class LauncherUpdater:
                     return result_data
             # No cache available - return offline error quietly
             return {"hasUpdate": False, "error": f"Network unavailable"}
-        except (json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
-            logger.error(f"Update check failed: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Update check failed: {e}", exc_info=True)
+            return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
+        except KeyError as e:
+            logger.error(f"Update check failed: {e}", exc_info=True)
+            return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
+        except TypeError as e:
+            logger.error(f"Update check failed: {e}", exc_info=True)
+            return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
+        except ValueError as e:
+            logger.error(f"Update check failed: {e}", exc_info=True)
             return {"hasUpdate": False, "error": f"Update check failed: {str(e)}"}
 
     def apply_update(self, progress_callback: Optional[Callable] = None) -> Dict[str, Any]:
@@ -308,14 +317,20 @@ class LauncherUpdater:
         except subprocess.TimeoutExpired as e:
             logger.error(f"Update timed out: {e}")
             return {"success": False, "error": "Update timed out"}
-        except (
-            OSError,
-            RuntimeError,
-            TypeError,
-            ValueError,
-            subprocess.SubprocessError,
-        ) as e:
-            logger.error(f"Update failed: {e}")
+        except OSError as e:
+            logger.error(f"Update failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Update failed: {str(e)}"}
+        except RuntimeError as e:
+            logger.error(f"Update failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Update failed: {str(e)}"}
+        except TypeError as e:
+            logger.error(f"Update failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Update failed: {str(e)}"}
+        except ValueError as e:
+            logger.error(f"Update failed: {e}", exc_info=True)
+            return {"success": False, "error": f"Update failed: {str(e)}"}
+        except subprocess.SubprocessError as e:
+            logger.error(f"Update failed: {e}", exc_info=True)
             return {"success": False, "error": f"Update failed: {str(e)}"}
 
     def _rollback(self, commit_sha: str):
@@ -329,13 +344,10 @@ class LauncherUpdater:
                 check=True,
             )
             logger.info("Rollback successful")
-        except (
-            subprocess.CalledProcessError,
-            FileNotFoundError,
-            OSError,
-            subprocess.SubprocessError,
-        ) as e:
-            logger.error(f"Rollback failed: {e}")
+        except subprocess.SubprocessError as e:
+            logger.error(f"Rollback failed: {e}", exc_info=True)
+        except OSError as e:
+            logger.error(f"Rollback failed: {e}", exc_info=True)
 
     def _get_current_commit(self) -> Optional[str]:
         """Get current git commit SHA (short)"""
@@ -349,8 +361,10 @@ class LauncherUpdater:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
-            logger.error(f"Failed to get current commit: {e}")
+        except subprocess.SubprocessError as e:
+            logger.error(f"Failed to get current commit: {e}", exc_info=True)
+        except OSError as e:
+            logger.error(f"Failed to get current commit: {e}", exc_info=True)
         return None
 
     def _get_current_branch(self) -> str:
@@ -365,8 +379,10 @@ class LauncherUpdater:
             )
             if result.returncode == 0:
                 return result.stdout.strip()
-        except (subprocess.SubprocessError, FileNotFoundError, OSError):
-            pass
+        except subprocess.SubprocessError as exc:
+            logger.debug("Failed to get current branch: %s", exc)
+        except OSError as exc:
+            logger.debug("Failed to get current branch: %s", exc)
         return "main"
 
     def _get_cached_update_info(self) -> Optional[Dict[str, Any]]:
@@ -380,7 +396,11 @@ class LauncherUpdater:
                         result = data.get("result")
                         if isinstance(last_checked, str) and isinstance(result, dict):
                             return {"lastChecked": last_checked, "result": result}
-            except (json.JSONDecodeError, OSError, ValueError) as e:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Failed to read cache: {e}")
+            except OSError as e:
+                logger.warning(f"Failed to read cache: {e}")
+            except ValueError as e:
                 logger.warning(f"Failed to read cache: {e}")
         return None
 
@@ -393,7 +413,11 @@ class LauncherUpdater:
         try:
             with open(self.cache_file, "w") as f:
                 json.dump(cache_data, f, indent=2)
-        except (OSError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.warning(f"Failed to write cache: {e}")
+        except TypeError as e:
+            logger.warning(f"Failed to write cache: {e}")
+        except ValueError as e:
             logger.warning(f"Failed to write cache: {e}")
 
     def is_git_repo(self) -> bool:
@@ -415,6 +439,9 @@ class LauncherUpdater:
             if has_changes:
                 logger.warning("Uncommitted changes detected")
             return has_changes
-        except (subprocess.SubprocessError, FileNotFoundError, OSError) as e:
-            logger.error(f"Failed to check git status: {e}")
+        except subprocess.SubprocessError as e:
+            logger.error(f"Failed to check git status: {e}", exc_info=True)
+            return False
+        except OSError as e:
+            logger.error(f"Failed to check git status: {e}", exc_info=True)
             return False

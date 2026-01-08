@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 from huggingface_hub import HfApi, hf_hub_download, login
+from huggingface_hub.utils import HfHubHTTPError
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,7 +49,8 @@ class ModelImporter:
                 for chunk in iter(lambda: f.read(8192 * 1024), b""):
                     h.update(chunk)
             return h.hexdigest().lower()
-        except ImportError:
+        except ImportError as exc:
+            logger.warning("blake3 not installed; skipping BLAKE3 hash: %s", exc)
             return ""
 
     def detect_type(self, file_path: Path) -> tuple[str, str]:
@@ -113,6 +115,9 @@ class ModelImporter:
         if repo_id:
             try:
                 info = self.api.model_info(repo_id)
+            except HfHubHTTPError as exc:
+                logger.warning("Failed to fetch metadata from HF %s: %s", repo_id, exc)
+            else:
                 metadata.update(
                     {
                         "release_date": (
@@ -129,15 +134,25 @@ class ModelImporter:
                 for sibling in info.siblings:
                     if sibling.rfilename.lower().endswith((".png", ".jpg", ".jpeg")):
                         preview_path = category_path / "preview.png"
-                        hf_hub_download(
-                            repo_id=repo_id, filename=sibling.rfilename, local_dir=category_path
-                        )
-                        preview_path.rename(category_path / "preview.png")
-                        metadata["preview_image"] = "preview.png"
+                        try:
+                            hf_hub_download(
+                                repo_id=repo_id,
+                                filename=sibling.rfilename,
+                                local_dir=category_path,
+                            )
+                        except HfHubHTTPError as exc:
+                            logger.warning(
+                                "Failed to download preview for %s: %s", repo_id, exc
+                            )
+                            break
+                        try:
+                            preview_path.rename(category_path / "preview.png")
+                        except OSError as exc:
+                            logger.warning("Failed to set preview image for %s: %s", repo_id, exc)
+                        else:
+                            metadata["preview_image"] = "preview.png"
                         break
                 logger.info(f"Fetched metadata from Hugging Face repo {repo_id}")
-            except Exception as e:
-                logger.warning(f"Failed to fetch metadata from HF: {e}")
 
         with open(meta_path, "w") as f:
             json.dump(metadata, f, indent=4)

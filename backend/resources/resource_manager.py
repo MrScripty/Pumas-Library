@@ -110,7 +110,13 @@ class ResourceManager:
         try:
             links_created = self.model_mapper.apply_for_app("comfyui", app_version, models_dir)
             logger.info("Mapped %s model links for ComfyUI %s", links_created, app_version)
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Error mapping models for %s: %s", version_tag, exc, exc_info=True)
+            success = False
+        except RuntimeError as exc:
+            logger.error("Error mapping models for %s: %s", version_tag, exc, exc_info=True)
+            success = False
+        except ValueError as exc:
             logger.error("Error mapping models for %s: %s", version_tag, exc, exc_info=True)
             success = False
 

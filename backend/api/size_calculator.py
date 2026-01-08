@@ -70,7 +70,13 @@ class SizeCalculator:
                     continue
                 try:
                     self.calculate_release_size(tag, force_refresh=force_refresh)
-                except (urllib.error.URLError, OSError, ValueError, KeyError) as exc:
+                except urllib.error.URLError as exc:
+                    logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
+                except OSError as exc:
+                    logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
+                except ValueError as exc:
+                    logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
+                except KeyError as exc:
                     logger.error(f"Size refresh failed for {tag}: {exc}", exc_info=True)
 
         threading.Thread(target=_worker, daemon=True).start()
@@ -112,7 +118,16 @@ class SizeCalculator:
             )
 
             return result
-        except (urllib.error.URLError, OSError, ValueError, KeyError) as e:
+        except urllib.error.URLError as e:
+            logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
+            return None
+        except OSError as e:
+            logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
+            return None
+        except ValueError as e:
+            logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
+            return None
+        except KeyError as e:
             logger.error(f"Error calculating release size for {tag}: {e}", exc_info=True)
             return None
 
@@ -157,7 +172,11 @@ class SizeCalculator:
                 length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
-        except (urllib.error.URLError, OSError, ValueError) as e:
+        except urllib.error.URLError as e:
+            logger.warning(f"Warning: Failed to fetch Content-Length for {url}: {e}")
+        except OSError as e:
+            logger.warning(f"Warning: Failed to fetch Content-Length for {url}: {e}")
+        except ValueError as e:
             logger.warning(f"Warning: Failed to fetch Content-Length for {url}: {e}")
         return None
 
@@ -179,7 +198,13 @@ class SizeCalculator:
             # Calculate release size (uses cache if available)
             result = self.release_size_calculator.calculate_release_size(tag, archive_size)
             return result
-        except (ValueError, KeyError, TypeError) as e:
+        except ValueError as e:
+            logger.error(f"Error calculating release size: {e}", exc_info=True)
+            return None
+        except KeyError as e:
+            logger.error(f"Error calculating release size: {e}", exc_info=True)
+            return None
+        except TypeError as e:
             logger.error(f"Error calculating release size: {e}", exc_info=True)
             return None
 
@@ -198,7 +223,13 @@ class SizeCalculator:
 
         try:
             return self.release_size_calculator.get_size_breakdown(tag)
-        except (ValueError, KeyError, TypeError) as e:
+        except ValueError as e:
+            logger.error(f"Error getting size breakdown: {e}", exc_info=True)
+            return None
+        except KeyError as e:
+            logger.error(f"Error getting size breakdown: {e}", exc_info=True)
+            return None
+        except TypeError as e:
             logger.error(f"Error getting size breakdown: {e}", exc_info=True)
             return None
 
@@ -220,6 +251,12 @@ class SizeCalculator:
 
         try:
             return self.release_size_calculator.get_sorted_dependencies(tag, top_n)
-        except (ValueError, KeyError, TypeError) as e:
+        except ValueError as e:
+            logger.error(f"Error getting dependencies: {e}", exc_info=True)
+            return []
+        except KeyError as e:
+            logger.error(f"Error getting dependencies: {e}", exc_info=True)
+            return []
+        except TypeError as e:
             logger.error(f"Error getting dependencies: {e}", exc_info=True)
             return []

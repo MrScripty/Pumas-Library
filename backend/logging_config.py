@@ -74,8 +74,10 @@ def setup_logging(
     # File handler - detailed logs for troubleshooting
     if log_file is None:
         # Default log location: launcher-data/logs/launcher.log
-        # Note: This assumes the current working directory is the launcher root
-        launcher_root = Path.cwd()
+        # Determine launcher root using __file__ to ensure correct path regardless of CWD
+        # This matches the logic in backend.utils.get_launcher_root()
+        # We inline it here to avoid circular import (utils imports get_logger)
+        launcher_root = Path(__file__).parent.parent.resolve()
         log_dir = launcher_root / "launcher-data" / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / "launcher.log"

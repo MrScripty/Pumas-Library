@@ -424,7 +424,13 @@ class InstallationProgressTracker:
                 lock=self._file_lock,
                 keep_backup=True,
             )
-        except (IOError, OSError, TypeError, ValueError, json.JSONDecodeError) as e:
+        except OSError as e:
+            logger.error(f"Error saving installation state: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error saving installation state: {e}", exc_info=True)
+        except ValueError as e:
+            logger.error(f"Error saving installation state: {e}", exc_info=True)
+        except json.JSONDecodeError as e:
             logger.error(f"Error saving installation state: {e}", exc_info=True)
 
     def _load_state(self) -> Optional[Dict[str, Any]]:
@@ -436,7 +442,10 @@ class InstallationProgressTracker:
             with open(self.state_file, "r") as f:
                 data = json.load(f)
                 return data if isinstance(data, dict) else None
-        except (IOError, OSError, json.JSONDecodeError) as e:
+        except OSError as e:
+            logger.error(f"Error loading installation state: {e}", exc_info=True)
+            return None
+        except json.JSONDecodeError as e:
             logger.error(f"Error loading installation state: {e}", exc_info=True)
             return None
 

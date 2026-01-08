@@ -16,9 +16,12 @@ Exit codes:
 
 from __future__ import annotations
 
+import logging
 import subprocess
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def get_staged_python_files() -> list[str]:
@@ -42,7 +45,8 @@ def get_staged_python_files() -> list[str]:
             and f not in excluded
         ]
         return backend_files
-    except subprocess.CalledProcessError:
+    except subprocess.CalledProcessError as exc:
+        logger.warning("Failed to get staged files: %s", exc, exc_info=True)
         return []
 
 
@@ -70,7 +74,8 @@ def get_coverage_report() -> dict[str, float] | None:
             cwd=Path(__file__).parent.parent,
             timeout=600,
         )
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as exc:
+        logger.error("Coverage run timed out: %s", exc, exc_info=True)
         print("❌ Coverage run timed out after 600s")  # noqa: print
         return None
 
@@ -93,8 +98,8 @@ def get_coverage_report() -> dict[str, float] | None:
             if part.endswith("%"):
                 try:
                     coverage_map[file_key] = float(part.rstrip("%"))
-                except ValueError:
-                    pass
+                except ValueError as exc:
+                    logger.debug("Failed to parse coverage for %s: %s", file_key, exc)
                 break
 
     return coverage_map
@@ -111,7 +116,11 @@ def is_new_file(file_path: str) -> bool:
         )
         status = result.stdout.strip().split()[0]
         return status == "A"  # A = Added
-    except (subprocess.CalledProcessError, IndexError):
+    except subprocess.CalledProcessError as exc:
+        logger.warning("Failed to check staged status for %s: %s", file_path, exc, exc_info=True)
+        return False
+    except IndexError as exc:
+        logger.warning("Unexpected git status output for %s: %s", file_path, exc, exc_info=True)
         return False
 
 

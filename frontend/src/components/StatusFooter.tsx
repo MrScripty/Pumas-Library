@@ -1,6 +1,9 @@
 import React from 'react';
 import { WifiOff, RefreshCw, Clock, Database, Download, Package } from 'lucide-react';
 import { formatSpeed } from '../utils/formatters';
+import { getLogger } from '../utils/logger';
+
+const logger = getLogger('StatusFooter');
 
 interface InstallationProgress {
   tag: string;
@@ -42,7 +45,7 @@ interface StatusFooterProps {
 export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, installationProgress }) => {
   // Debug logging to trace cache status issues
   React.useEffect(() => {
-    console.log('[StatusFooter] Cache status updated:', cacheStatus);
+    logger.debug('Cache status updated', { cacheStatus });
   }, [cacheStatus]);
 
   const getStatusInfo = () => {

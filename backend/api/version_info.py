@@ -43,8 +43,10 @@ class VersionInfoManager:
                     version = data.get("project", {}).get("version")
                     if isinstance(version, str) and version:
                         return version
-            except (OSError, tomllib.TOMLDecodeError):
-                pass
+            except OSError as exc:
+                logger.debug("Failed to read %s: %s", pyproject_path, exc)
+            except tomllib.TOMLDecodeError as exc:
+                logger.debug("Failed to parse %s: %s", pyproject_path, exc)
 
         # Try git describe
         try:
@@ -55,8 +57,10 @@ class VersionInfoManager:
             ).strip()
             if version:
                 return version
-        except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-            pass
+        except subprocess.CalledProcessError as exc:
+            logger.debug("Git describe failed: %s", exc)
+        except OSError as exc:
+            logger.debug("Git describe failed: %s", exc)
 
         # Fallback to GitHub API
         try:
@@ -69,14 +73,16 @@ class VersionInfoManager:
                     tag_name = data.get("tag_name")
                     if isinstance(tag_name, str):
                         return f"{tag_name} (latest)"
-        except (
-            urllib.error.URLError,
-            OSError,
-            json.JSONDecodeError,
-            KeyError,
-            ValueError,
-        ):
-            pass
+        except urllib.error.URLError as exc:
+            logger.debug("Failed to fetch GitHub release info: %s", exc)
+        except OSError as exc:
+            logger.debug("Failed to fetch GitHub release info: %s", exc)
+        except json.JSONDecodeError as exc:
+            logger.debug("Failed to parse GitHub release info: %s", exc)
+        except KeyError as exc:
+            logger.debug("Failed to parse GitHub release info: %s", exc)
+        except ValueError as exc:
+            logger.debug("Failed to parse GitHub release info: %s", exc)
 
         return "Unknown"
 
@@ -105,7 +111,10 @@ class VersionInfoManager:
                     stderr=subprocess.DEVNULL,
                 ).strip()
                 current_version = current_tag
-            except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+            except subprocess.CalledProcessError as exc:
+                logger.debug("Git exact tag check failed: %s", exc)
+            except OSError as exc:
+                logger.debug("Git exact tag check failed: %s", exc)
                 # If not on an exact tag, get the description
                 try:
                     current_version = subprocess.check_output(
@@ -125,8 +134,10 @@ class VersionInfoManager:
                         current_tag = current_version.split("-")[0]
                     else:
                         current_tag = current_version
-                except (subprocess.CalledProcessError, FileNotFoundError, OSError):
-                    pass
+                except subprocess.CalledProcessError as exc:
+                    logger.debug("Git tag description failed: %s", exc)
+                except OSError as exc:
+                    logger.debug("Git tag description failed: %s", exc)
 
             # Use cached GitHub releases (TTL handled by GitHubReleasesFetcher)
             latest_tag = None
@@ -135,7 +146,13 @@ class VersionInfoManager:
                     releases = self.github_fetcher.get_releases(force_refresh=False)
                     if releases:
                         latest_tag = releases[0].get("tag_name") or None
-                except (OSError, RuntimeError, TypeError, ValueError) as e:
+                except OSError as e:
+                    logger.warning(f"Using cached/stale releases after error: {e}")
+                except RuntimeError as e:
+                    logger.warning(f"Using cached/stale releases after error: {e}")
+                except TypeError as e:
+                    logger.warning(f"Using cached/stale releases after error: {e}")
+                except ValueError as e:
                     logger.warning(f"Using cached/stale releases after error: {e}")
 
             if current_tag and latest_tag:
@@ -151,14 +168,36 @@ class VersionInfoManager:
                     "latest_version": latest_tag,
                     "current_version": current_version,
                 }
-        except (
-            OSError,
-            RuntimeError,
-            TypeError,
-            ValueError,
-            subprocess.SubprocessError,
-        ) as e:
-            logger.error(f"Error checking for new release: {e}")
+        except OSError as e:
+            logger.error(f"Error checking for new release: {e}", exc_info=True)
+            self._release_info_cache = {
+                "has_update": False,
+                "latest_version": None,
+                "current_version": None,
+            }
+        except RuntimeError as e:
+            logger.error(f"Error checking for new release: {e}", exc_info=True)
+            self._release_info_cache = {
+                "has_update": False,
+                "latest_version": None,
+                "current_version": None,
+            }
+        except TypeError as e:
+            logger.error(f"Error checking for new release: {e}", exc_info=True)
+            self._release_info_cache = {
+                "has_update": False,
+                "latest_version": None,
+                "current_version": None,
+            }
+        except ValueError as e:
+            logger.error(f"Error checking for new release: {e}", exc_info=True)
+            self._release_info_cache = {
+                "has_update": False,
+                "latest_version": None,
+                "current_version": None,
+            }
+        except subprocess.SubprocessError as e:
+            logger.error(f"Error checking for new release: {e}", exc_info=True)
             self._release_info_cache = {
                 "has_update": False,
                 "latest_version": None,

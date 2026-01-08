@@ -129,8 +129,10 @@ class ComfyUISetupAPI:
                         data = tomllib.load(f)
                         if data.get("project", {}).get("name") == "ComfyUI":
                             return current
-                except (OSError, tomllib.TOMLDecodeError):
-                    pass
+                except OSError as exc:
+                    logger.debug("Failed to read %s: %s", pyproject, exc)
+                except tomllib.TOMLDecodeError as exc:
+                    logger.debug("Failed to parse %s: %s", pyproject, exc)
 
             # Move up one directory
             parent = current.parent
@@ -178,7 +180,15 @@ class ComfyUISetupAPI:
 
             if self._enable_background_prefetch:
                 self._prefetch_releases_if_needed()
-        except (ImportError, OSError, RuntimeError, TypeError, ValueError) as e:
+        except ImportError as e:
+            logger.warning(f"Version management initialization failed: {e}", exc_info=True)
+        except OSError as e:
+            logger.warning(f"Version management initialization failed: {e}", exc_info=True)
+        except RuntimeError as e:
+            logger.warning(f"Version management initialization failed: {e}", exc_info=True)
+        except TypeError as e:
+            logger.warning(f"Version management initialization failed: {e}", exc_info=True)
+        except ValueError as e:
             logger.warning(f"Version management initialization failed: {e}", exc_info=True)
             self.metadata_manager = None
             self.github_fetcher = None
@@ -260,7 +270,17 @@ class ComfyUISetupAPI:
                         return
                     else:
                         logger.info(f"GitHub cache is stale ({int(cache_age)}s old) - prefetching")
-                except (KeyError, TypeError, ValueError) as e:
+                except KeyError as e:
+                    logger.warning(
+                        f"Error checking cache validity: {e} - prefetching",
+                        exc_info=True,
+                    )
+                except TypeError as e:
+                    logger.warning(
+                        f"Error checking cache validity: {e} - prefetching",
+                        exc_info=True,
+                    )
+                except ValueError as e:
                     logger.warning(
                         f"Error checking cache validity: {e} - prefetching",
                         exc_info=True,
@@ -282,7 +302,16 @@ class ComfyUISetupAPI:
                         self._background_fetch_completed = True
                     else:
                         logger.warning("Background prefetch returned empty (likely offline)")
-                except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                except OSError as exc:
+                    logger.error(f"Background prefetch failed: {exc}", exc_info=True)
+                    logger.info("App will continue using stale cache")
+                except RuntimeError as exc:
+                    logger.error(f"Background prefetch failed: {exc}", exc_info=True)
+                    logger.info("App will continue using stale cache")
+                except TypeError as exc:
+                    logger.error(f"Background prefetch failed: {exc}", exc_info=True)
+                    logger.info("App will continue using stale cache")
+                except ValueError as exc:
                     logger.error(f"Background prefetch failed: {exc}", exc_info=True)
                     logger.info("App will continue using stale cache")
 
@@ -290,7 +319,13 @@ class ComfyUISetupAPI:
 
             threading.Thread(target=_background_fetch, daemon=True).start()
 
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Prefetch init error: {e}", exc_info=True)
+        except RuntimeError as e:
+            logger.error(f"Prefetch init error: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Prefetch init error: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Prefetch init error: {e}", exc_info=True)
 
     def has_background_fetch_completed(self) -> bool:
@@ -493,7 +528,25 @@ class ComfyUISetupAPI:
         try:
             releases = self.version_manager.get_available_releases(force_refresh)
             releases_source = "remote" if force_refresh else "cache/remote"
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(
+                f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                exc_info=True,
+            )
+            releases = []
+        except RuntimeError as e:
+            logger.error(
+                f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                exc_info=True,
+            )
+            releases = []
+        except TypeError as e:
+            logger.error(
+                f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                exc_info=True,
+            )
+            releases = []
+        except ValueError as e:
             logger.error(
                 f"Error fetching releases (force_refresh={force_refresh}): {e}",
                 exc_info=True,
@@ -507,7 +560,17 @@ class ComfyUISetupAPI:
                     releases = cache.get("releases", [])
                     releases_source = "cache-fallback"
                     logger.info("Using cached releases due to fetch error/rate-limit.")
-            except (OSError, TypeError, ValueError) as e:
+            except OSError as e:
+                logger.error(
+                    f"Error loading cached releases after fetch failure: {e}",
+                    exc_info=True,
+                )
+            except TypeError as e:
+                logger.error(
+                    f"Error loading cached releases after fetch failure: {e}",
+                    exc_info=True,
+                )
+            except ValueError as e:
                 logger.error(
                     f"Error loading cached releases after fetch failure: {e}",
                     exc_info=True,
@@ -522,7 +585,13 @@ class ComfyUISetupAPI:
             active_progress = self.version_manager.get_installation_progress()
             if active_progress and not active_progress.get("completed_at"):
                 installing_tag = active_progress.get("tag")
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
+        except RuntimeError as e:
+            logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Error checking installation progress for releases: {e}", exc_info=True)
 
         enriched_releases: List[Dict[str, Any]] = []
@@ -562,7 +631,13 @@ class ComfyUISetupAPI:
             installed_tags = set(self.get_installed_versions())
             if self.size_calc:
                 self.size_calc._refresh_release_sizes_async(releases, installed_tags, force_refresh)
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
+        except RuntimeError as e:
+            logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Error scheduling size refresh: {e}", exc_info=True)
 
         return enriched_releases
@@ -781,7 +856,13 @@ class ComfyUISetupAPI:
                 Path(local_path), family, official_name, repo_id
             )
             return {"success": True, "model_path": str(model_dir)}
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Model import failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Model import failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except ValueError as exc:
             logger.error("Model import failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
@@ -807,7 +888,13 @@ class ComfyUISetupAPI:
                 quant=quant,
             )
             return {"success": True, "model_path": str(model_dir)}
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Model download failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Model download failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except ValueError as exc:
             logger.error("Model download failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
@@ -833,7 +920,13 @@ class ComfyUISetupAPI:
                 quant=quant,
             )
             return {"success": True, **result}
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Model download start failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Model download start failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except ValueError as exc:
             logger.error("Model download start failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
@@ -867,7 +960,13 @@ class ComfyUISetupAPI:
         try:
             results = self.resource_manager.search_hf_models(query=query, kind=kind, limit=limit)
             return {"success": True, "models": results}
-        except (OSError, RuntimeError, ValueError) as exc:
+        except OSError as exc:
+            logger.error("Hugging Face search failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+        except RuntimeError as exc:
+            logger.error("Hugging Face search failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+        except ValueError as exc:
             logger.error("Hugging Face search failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc), "models": []}
 

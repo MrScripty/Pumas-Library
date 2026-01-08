@@ -62,7 +62,8 @@ def retry_with_backoff(
     base_delay: float = 2.0,
     max_delay: float = 60.0,
     on_retry: Optional[Callable[[int, float, Exception], None]] = None,
-    exceptions: tuple = (Exception,),
+    exceptions: tuple[type[Exception], ...] | type[Exception] = Exception,
+    exception_type: Optional[type[Exception]] = None,
 ) -> Optional[T]:
     """
     Retry a function with exponential backoff and jitter
@@ -73,7 +74,8 @@ def retry_with_backoff(
         base_delay: Base delay in seconds for exponential backoff
         max_delay: Maximum delay in seconds
         on_retry: Optional callback function(attempt, delay, error) called before each retry
-        exceptions: Tuple of exception types to catch and retry
+        exceptions: Exception types to catch and retry
+        exception_type: Deprecated alias for exceptions (kept for backward compatibility)
 
     Returns:
         Result of func if successful, None if all retries failed
@@ -82,15 +84,25 @@ def retry_with_backoff(
         >>> def fetch_data():
         ...     response = urllib.request.urlopen("https://api.example.com/data")
         ...     return response.read()
-        >>> result = retry_with_backoff(fetch_data, max_retries=3)
+        >>> result = retry_with_backoff(fetch_data, max_retries=3, exceptions=(OSError,))
     """
+    if exception_type is not None:
+        exceptions = exception_type
+
+    exceptions_to_retry: tuple[type[Exception], ...]
+    if isinstance(exceptions, type):
+        exceptions_to_retry = (exceptions,)
+    else:
+        exceptions_to_retry = tuple(exceptions)
+
     last_exception = None
 
     for attempt in range(max_retries + 1):  # +1 for initial attempt
         try:
             return func()
-        except exceptions as e:
+        except exceptions_to_retry as e:
             last_exception = e
+            logger.debug("Retryable error: %s", e)
 
             # If this was the last attempt, don't retry
             if attempt >= max_retries:
@@ -157,9 +169,8 @@ def retry_operation(
             max_retries=max_retries,
             base_delay=base_delay,
             on_retry=on_retry_callback,
-            exceptions=(Exception,),
         )
         return result is not None
-    except (RuntimeError, OSError, ValueError) as e:
+    except RuntimeError as e:
         logger.info(f"{operation_name} failed after {max_retries} attempts: {e}")
         return False

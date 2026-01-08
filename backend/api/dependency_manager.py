@@ -10,6 +10,10 @@ import subprocess
 from pathlib import Path
 from typing import List
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class DependencyManager:
     """Manages system dependencies for ComfyUI"""
@@ -41,6 +45,7 @@ class DependencyManager:
             __import__(module_name)
             return True
         except ImportError:
+            logger.debug("Python package missing: %s", module_name)
             return False
 
     def check_git(self) -> bool:
@@ -85,7 +90,11 @@ class DependencyManager:
                     stdout=subprocess.DEVNULL,
                     env=pip_env,
                 )
-            except (subprocess.CalledProcessError, OSError, FileNotFoundError):
+            except subprocess.CalledProcessError as exc:
+                logger.error("pip install failed: %s", exc, exc_info=True)
+                success = False
+            except OSError as exc:
+                logger.error("pip install failed to start: %s", exc, exc_info=True)
                 success = False
 
         # Install system packages (requires sudo)
@@ -94,7 +103,11 @@ class DependencyManager:
             try:
                 subprocess.run(["sudo", "apt", "update"], check=True)
                 subprocess.run(["sudo", "apt", "install", "-y"] + system_pkgs, check=True)
-            except (subprocess.CalledProcessError, OSError, FileNotFoundError):
+            except subprocess.CalledProcessError as exc:
+                logger.error("System package install failed: %s", exc, exc_info=True)
+                success = False
+            except OSError as exc:
+                logger.error("System package install failed to start: %s", exc, exc_info=True)
                 success = False
 
         return success

@@ -147,7 +147,7 @@ class ModelImporter:
             try:
                 if not any(local_path.iterdir()):
                     local_path.rmdir()
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to remove empty import directory %s: %s", local_path, exc)
 
         return model_dir

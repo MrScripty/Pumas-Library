@@ -41,7 +41,7 @@ interface UsePhysicsDragOptions {
   onSelectApp: (appId: string | null) => void;
   onReorderApps?: (reorderedApps: AppConfig[]) => void;
   onDeleteApp?: (appId: string) => void;
-  listRef: RefObject<HTMLDivElement>;
+  listRef: RefObject<HTMLDivElement | null>;
 }
 
 interface PhysicsDragState {
@@ -84,7 +84,7 @@ const resolveSelection = (snapshot: UndoSnapshot) => {
   }
 
   const safeIndex = clamp(snapshot.selectedIndex, 0, snapshot.apps.length - 1);
-  return snapshot.apps[safeIndex]?.id ?? snapshot.apps[0].id;
+  return snapshot.apps[safeIndex]?.id ?? snapshot.apps[0]?.id ?? null;
 };
 
 export const usePhysicsDrag = ({
@@ -158,7 +158,7 @@ export const usePhysicsDrag = ({
   }, [dragX, dragY]);
 
   const updateActiveAnchor = useCallback(
-    (localY: number, anchorStart: number, count: number) => {
+    (localY: number, anchorStart = 0, count: number) => {
       if (count <= 0) return 0;
       const rawIndex = Math.round((localY - anchorStart) / TOTAL_HEIGHT);
       const clampedIndex = clamp(rawIndex, 0, count - 1);
@@ -178,6 +178,7 @@ export const usePhysicsDrag = ({
 
       return nextIndex;
     },
+    [setActiveAnchorIndex]
   );
 
   const updateDragPhysics = useCallback(
@@ -397,9 +398,11 @@ export const usePhysicsDrag = ({
       if (currentIndex !== -1 && targetIndex !== currentIndex && onReorderApps) {
         const reordered = [...apps];
         const [removed] = reordered.splice(currentIndex, 1);
-        reordered.splice(targetIndex, 0, removed);
-        commitUndoSnapshot();
-        onReorderApps(reordered);
+        if (removed) {
+          reordered.splice(targetIndex, 0, removed);
+          commitUndoSnapshot();
+          onReorderApps(reordered);
+        }
       } else {
         pendingUndoRef.current = null;
       }
@@ -569,7 +572,7 @@ export const usePhysicsDrag = ({
       const element = event.currentTarget as HTMLElement | null;
       const elementRect = element?.getBoundingClientRect();
 
-      if (!elementRect) return;
+      if (!elementRect || !element) return;
 
       pendingDragRef.current = {
         appId,

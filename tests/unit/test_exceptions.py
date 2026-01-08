@@ -8,6 +8,8 @@ Tests verify:
 - Exceptions can be raised and caught correctly
 """
 
+import logging
+
 import pytest
 
 from backend.exceptions import (
@@ -21,6 +23,8 @@ from backend.exceptions import (
     ResourceError,
     ValidationError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class TestComfyUILauncherError:
@@ -294,6 +298,7 @@ class TestExceptionChaining:
             except ValueError as e:
                 raise NetworkError("GitHub API failed") from e
         except NetworkError as exc_info:
+            logger.debug("Caught chained NetworkError: %s", exc_info)
             assert exc_info.__cause__.__class__.__name__ == "ValueError"
             assert str(exc_info.__cause__) == "Original error"
 
@@ -309,5 +314,6 @@ class TestExceptionChaining:
             except FileNotFoundError as e:
                 raise MetadataError("Failed to load metadata") from e
         except MetadataError as exc:
+            logger.debug("Caught chained MetadataError: %s", exc)
             assert exc.__cause__ is not None
             assert isinstance(exc.__cause__, FileNotFoundError)

@@ -9,14 +9,15 @@ import subprocess
 import time
 from typing import Dict, Optional
 
-try:
-    import psutil
-except ImportError:
-    psutil = None  # type: ignore
-
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+try:
+    import psutil
+except ImportError as exc:
+    logger.debug("psutil not available; process resources disabled: %s", exc)
+    psutil = None  # type: ignore
 
 
 class ProcessResourceTracker:
@@ -103,8 +104,12 @@ class ProcessResourceTracker:
             if include_children:
                 try:
                     procs += proc.children(recursive=True)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                except psutil.NoSuchProcess as exc:
+                    logger.debug(
+                        "Process disappeared while collecting children for %s: %s", pid, exc
+                    )
+                except psutil.AccessDenied as exc:
+                    logger.debug("Access denied collecting children for %s: %s", pid, exc)
 
             total_cpu = 0.0
             for proc_item in procs:
@@ -113,12 +118,25 @@ class ProcessResourceTracker:
                     # Using interval=None for non-blocking, instantaneous reading
                     cpu = proc_item.cpu_percent(interval=None)
                     total_cpu += cpu
-                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                except psutil.NoSuchProcess as exc:
+                    logger.debug("Process disappeared while collecting CPU for %s: %s", pid, exc)
+                    continue
+                except psutil.AccessDenied as exc:
+                    logger.debug("Access denied collecting CPU for %s: %s", pid, exc)
+                    continue
+                except AttributeError as exc:
+                    logger.debug("CPU percent not available for %s: %s", pid, exc)
                     continue
 
             return round(total_cpu, 1)
 
-        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as e:
+        except psutil.NoSuchProcess as e:
+            logger.debug(f"Failed to get CPU usage for PID {pid}: {e}")
+            return 0.0
+        except psutil.AccessDenied as e:
+            logger.debug(f"Failed to get CPU usage for PID {pid}: {e}")
+            return 0.0
+        except OSError as e:
             logger.debug(f"Failed to get CPU usage for PID {pid}: {e}")
             return 0.0
 
@@ -143,8 +161,12 @@ class ProcessResourceTracker:
             if include_children:
                 try:
                     procs += proc.children(recursive=True)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                except psutil.NoSuchProcess as exc:
+                    logger.debug(
+                        "Process disappeared while collecting children for %s: %s", pid, exc
+                    )
+                except psutil.AccessDenied as exc:
+                    logger.debug("Access denied collecting children for %s: %s", pid, exc)
 
             total_ram_bytes = 0
             for proc_item in procs:
@@ -152,14 +174,27 @@ class ProcessResourceTracker:
                     # memory_info() returns memory usage in bytes
                     mem_info = proc_item.memory_info()
                     total_ram_bytes += mem_info.rss  # Resident Set Size (physical RAM)
-                except (psutil.NoSuchProcess, psutil.AccessDenied, AttributeError):
+                except psutil.NoSuchProcess as exc:
+                    logger.debug("Process disappeared while collecting RAM for %s: %s", pid, exc)
+                    continue
+                except psutil.AccessDenied as exc:
+                    logger.debug("Access denied collecting RAM for %s: %s", pid, exc)
+                    continue
+                except AttributeError as exc:
+                    logger.debug("RAM info not available for %s: %s", pid, exc)
                     continue
 
             # Convert bytes to GB
             total_ram_gb = total_ram_bytes / (1024**3)
             return round(total_ram_gb, 2)
 
-        except (psutil.NoSuchProcess, psutil.AccessDenied, OSError) as e:
+        except psutil.NoSuchProcess as e:
+            logger.debug(f"Failed to get RAM usage for PID {pid}: {e}")
+            return 0.0
+        except psutil.AccessDenied as e:
+            logger.debug(f"Failed to get RAM usage for PID {pid}: {e}")
+            return 0.0
+        except OSError as e:
             logger.debug(f"Failed to get RAM usage for PID {pid}: {e}")
             return 0.0
 
@@ -188,8 +223,12 @@ class ProcessResourceTracker:
                     proc = psutil.Process(pid)
                     children = proc.children(recursive=True)
                     pids_to_check.update(child.pid for child in children)
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                except psutil.NoSuchProcess as exc:
+                    logger.debug(
+                        "Process disappeared while collecting GPU children for %s: %s", pid, exc
+                    )
+                except psutil.AccessDenied as exc:
+                    logger.debug("Access denied collecting GPU children for %s: %s", pid, exc)
 
             # Get GPU process data (cached)
             gpu_processes = self._get_nvidia_gpu_processes()
@@ -203,7 +242,16 @@ class ProcessResourceTracker:
             # Convert MB to GB
             return round(total_gpu_memory_mb / 1024.0, 2)
 
-        except (OSError, RuntimeError, ValueError, psutil.Error) as e:
+        except OSError as e:
+            logger.debug(f"Failed to get GPU memory for PID {pid}: {e}")
+            return 0.0
+        except RuntimeError as e:
+            logger.debug(f"Failed to get GPU memory for PID {pid}: {e}")
+            return 0.0
+        except ValueError as e:
+            logger.debug(f"Failed to get GPU memory for PID {pid}: {e}")
+            return 0.0
+        except psutil.Error as e:
             logger.debug(f"Failed to get GPU memory for PID {pid}: {e}")
             return 0.0
 
@@ -249,10 +297,17 @@ class ProcessResourceTracker:
                             proc_pid = int(parts[0].strip())
                             memory_mb = float(parts[1].strip())
                             gpu_processes[proc_pid] = memory_mb
-                    except (ValueError, IndexError):
+                    except ValueError as exc:
+                        logger.debug("Failed to parse nvidia-smi output %r: %s", line, exc)
+                        continue
+                    except IndexError as exc:
+                        logger.debug("Failed to parse nvidia-smi output %r: %s", line, exc)
                         continue
 
-        except (subprocess.SubprocessError, FileNotFoundError) as e:
+        except subprocess.SubprocessError as e:
+            # nvidia-smi not available or failed - this is fine for CPU-only systems
+            logger.debug(f"nvidia-smi not available or failed: {e}")
+        except OSError as e:
             # nvidia-smi not available or failed - this is fine for CPU-only systems
             logger.debug(f"nvidia-smi not available or failed: {e}")
 

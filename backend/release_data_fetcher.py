@@ -44,7 +44,9 @@ class ReleaseDataFetcher:
                             if isinstance(key, str) and isinstance(value, dict):
                                 cleaned[key] = value
                         return cleaned
-            except (IOError, OSError, json.JSONDecodeError) as e:
+            except OSError as e:
+                logger.warning(f"Warning: Failed to load requirements cache: {e}")
+            except json.JSONDecodeError as e:
                 logger.warning(f"Warning: Failed to load requirements cache: {e}")
         return {}
 
@@ -53,7 +55,11 @@ class ReleaseDataFetcher:
         try:
             with open(self.requirements_cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
-        except (IOError, OSError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error saving requirements cache: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error saving requirements cache: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Error saving requirements cache: {e}", exc_info=True)
 
     def _compute_hash(self, content: str) -> str:
@@ -116,7 +122,13 @@ class ReleaseDataFetcher:
             else:
                 logger.error(f"HTTP error fetching requirements for {tag}: {e}", exc_info=True)
             return None
-        except (urllib.error.URLError, OSError, UnicodeDecodeError) as e:
+        except urllib.error.URLError as e:
+            logger.error(f"Error fetching requirements for {tag}: {e}", exc_info=True)
+            return None
+        except OSError as e:
+            logger.error(f"Error fetching requirements for {tag}: {e}", exc_info=True)
+            return None
+        except UnicodeDecodeError as e:
             logger.error(f"Error fetching requirements for {tag}: {e}", exc_info=True)
             return None
 

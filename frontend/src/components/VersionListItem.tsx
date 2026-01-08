@@ -1,0 +1,246 @@
+/**
+ * Version List Item Component
+ *
+ * Individual version card with install/uninstall/progress display.
+ * Extracted from InstallDialog.tsx
+ */
+
+import { motion } from 'framer-motion';
+import {
+  Download,
+  Check,
+  ExternalLink,
+  FileText,
+  Settings as Gear,
+  X,
+  XCircle,
+} from 'lucide-react';
+import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
+import { ProgressRing } from './ProgressRing';
+import { formatSpeed } from '../utils/formatters';
+import { formatVersionDate, formatGB } from '../utils/installationFormatters';
+
+interface VersionListItemProps {
+  release: VersionRelease;
+  isInstalled: boolean;
+  isInstalling: boolean;
+  progress: InstallationProgress | null;
+  hasError: boolean;
+  errorMessage: string | null;
+  isHovered: boolean;
+  isCancelHovered: boolean;
+  installNetworkStatus: 'idle' | 'downloading' | 'stalled' | 'failed';
+  failedLogPath: string | null;
+  onInstall: () => void;
+  onRemove: () => void;
+  onCancel: () => void;
+  onOpenUrl: (url: string) => void;
+  onOpenLogPath: (path: string) => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  onCancelMouseEnter: () => void;
+  onCancelMouseLeave: () => void;
+}
+
+export function VersionListItem({
+  release,
+  isInstalled,
+  isInstalling,
+  progress,
+  hasError,
+  errorMessage,
+  isHovered,
+  isCancelHovered,
+  installNetworkStatus,
+  failedLogPath,
+  onInstall,
+  onRemove,
+  onCancel,
+  onOpenUrl,
+  onOpenLogPath,
+  onMouseEnter,
+  onMouseLeave,
+  onCancelMouseEnter,
+  onCancelMouseLeave,
+}: VersionListItemProps) {
+  const displayTag = release.tag_name?.replace(/^v/i, '') || release.tag_name;
+  const releaseUrl = release.html_url || `https://github.com/comfyanonymous/ComfyUI/releases/tag/${release.tag_name}`;
+  const showUninstall = isInstalled && !isInstalling && isHovered;
+  const totalBytes = (progress ? progress.total_size : null) ?? release.total_size ?? null;
+  const isComplete = isInstalled || (isInstalling && progress?.success && !!progress?.completed_at);
+
+  // Progress calculations
+  const overallPercent = progress ? Math.round(progress.overall_progress || 0) : null;
+  const downloadPercent =
+    progress && progress.total_size && progress.total_size > 0
+      ? Math.min(100, Math.round((progress.downloaded_bytes / progress.total_size) * 100))
+      : null;
+  const stagePercent = progress ? progress.stage_progress : null;
+  const ringPercent =
+    progress && (progress.stage === 'download' || progress.stage === 'dependencies')
+      ? downloadPercent ?? stagePercent ?? overallPercent
+      : overallPercent ?? stagePercent;
+
+  const _speedLabel = progress?.download_speed !== null && progress?.download_speed !== undefined
+    ? formatSpeed(progress.download_speed)
+    : 'Waiting...';
+  const packageLabel = progress?.dependency_count !== null && progress?.dependency_count !== undefined && progress?.completed_dependencies !== null
+    ? `${progress.completed_dependencies}/${progress.dependency_count}`
+    : progress?.stage === 'dependencies'
+      ? 'Installing...'
+      : 'Downloading...';
+
+  const ringColor = progress?.error ? 'hsl(var(--accent-error))' : 'hsl(var(--accent-success))';
+
+  const downloadIconClass =
+    installNetworkStatus === 'stalled'
+      ? 'animate-pulse text-[hsl(var(--accent-warning))]'
+      : installNetworkStatus === 'failed'
+        ? 'animate-pulse text-[hsl(var(--accent-error))]'
+        : 'animate-pulse text-[hsl(var(--accent-success))]';
+  const downloadIconStyle =
+    installNetworkStatus === 'stalled'
+      ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-warning)))' }
+      : installNetworkStatus === 'failed'
+        ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
+        : { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' };
+
+  const handleButtonClick = () => {
+    if (isInstalling) {
+      onCancel();
+      return;
+    }
+    if (isInstalled && !isInstalling) {
+      onRemove();
+    } else {
+      onInstall();
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      className="w-full p-3 transition-colors"
+    >
+      <div className="flex items-center justify-between gap-3">
+        {/* Version Info */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <div className="flex flex-col min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <h3 className="text-[hsl(var(--text-primary))] font-medium truncate">
+                  {displayTag}
+                </h3>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenUrl(releaseUrl);
+                  }}
+                  className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
+                  title="Open release notes"
+                >
+                  <ExternalLink size={14} className="text-[hsl(var(--text-secondary))]" />
+                </button>
+                {failedLogPath && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenLogPath(failedLogPath);
+                    }}
+                    className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
+                    title="Open last install log"
+                  >
+                    <FileText size={14} className="text-[hsl(var(--accent-error))]" />
+                  </button>
+                )}
+                {release.prerelease && (
+                  <span className="px-2 py-0.5 bg-[hsl(var(--accent-warning))]/20 text-[hsl(var(--accent-warning))] text-[11px] rounded-full">
+                    Pre
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+                <span>{formatVersionDate(release.published_at)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Error message */}
+          {hasError && errorMessage && (
+            <div className="mt-1 flex items-start gap-2 text-sm text-[hsl(var(--accent-error))] bg-[hsl(var(--accent-error))]/10 rounded p-2">
+              <span>{errorMessage}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Install Button */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <motion.button
+            onClick={handleButtonClick}
+            onMouseEnter={isInstalling ? onCancelMouseEnter : undefined}
+            onMouseLeave={isInstalling ? onCancelMouseLeave : undefined}
+            whileHover={!isInstalling ? { scale: 1.05 } : {}}
+            whileTap={!isInstalling ? { scale: 0.96 } : {}}
+            className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[120px] min-w-[120px] overflow-hidden ${
+              isInstalling
+                ? isCancelHovered
+                  ? 'bg-[hsl(var(--surface-lowest))] border-[hsl(var(--accent-error))] text-[hsl(var(--accent-error))]'
+                  : 'bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))]'
+                : showUninstall
+                  ? 'bg-[hsl(var(--surface-lowest))] border-[hsl(var(--accent-error))] text-[hsl(var(--accent-error))]'
+                  : isInstalled
+                    ? 'bg-[hsl(var(--accent-success))]/20 border-[hsl(var(--accent-success))]/60 text-[hsl(var(--text-primary))]'
+                    : isComplete
+                      ? 'bg-[hsl(var(--accent-success))]/20 border-[hsl(var(--accent-success))]/60 text-[hsl(var(--text-primary))]'
+                      : 'bg-[hsl(var(--surface-control))] border-[hsl(var(--border-control))] text-[hsl(var(--text-primary))] hover:border-[hsl(var(--accent-success))] hover:text-[hsl(var(--accent-success))]'
+            }`}
+          >
+            {isInstalled && !showUninstall ? (
+              <>
+                <Check size={16} className="text-[hsl(var(--text-primary))]" />
+                <span className="text-xs font-semibold text-[hsl(var(--text-primary))] truncate whitespace-nowrap flex-1 min-w-0">Ready</span>
+              </>
+            ) : showUninstall ? (
+              <>
+                <X size={16} className="text-[hsl(var(--accent-error))]" />
+                <span className="text-xs font-semibold text-[hsl(var(--accent-error))] truncate whitespace-nowrap flex-1 min-w-0">Uninstall</span>
+              </>
+            ) : isInstalling ? (
+              <>
+                {isCancelHovered ? (
+                  <XCircle size={16} className="text-[hsl(var(--accent-error))]" />
+                ) : (
+                  <ProgressRing
+                    progress={ringPercent ?? 0}
+                    size={18}
+                    strokeWidth={2}
+                    trackColor="hsl(var(--surface-control))"
+                    indicatorColor={ringColor}
+                  >
+                    <Download size={14} className={downloadIconClass} style={downloadIconStyle} />
+                  </ProgressRing>
+                )}
+                {isCancelHovered ? (
+                  <span className="text-xs font-semibold text-[hsl(var(--accent-error))] truncate whitespace-nowrap flex-1 min-w-0">Cancel</span>
+                ) : (
+                  <span className="text-xs font-semibold truncate whitespace-nowrap flex-1 min-w-0">{packageLabel}</span>
+                )}
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                <span className="text-xs truncate whitespace-nowrap flex-1 min-w-0">
+                  {totalBytes ? formatGB(totalBytes) : 'Size TBD'}
+                </span>
+              </>
+            )}
+          </motion.button>
+          <Gear size={16} className="text-[hsl(var(--launcher-text-muted))]" />
+        </div>
+      </div>
+    </motion.div>
+  );
+}

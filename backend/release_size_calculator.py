@@ -61,7 +61,11 @@ class ReleaseSizeCalculator:
                         if isinstance(entry, dict) and entry.get("dependencies_size_source"):
                             cleaned[tag] = entry
                     return cleaned
-            except (json.JSONDecodeError, OSError, ValueError) as e:
+            except json.JSONDecodeError as e:
+                logger.warning(f"Warning: Failed to load release sizes cache: {e}")
+            except OSError as e:
+                logger.warning(f"Warning: Failed to load release sizes cache: {e}")
+            except ValueError as e:
                 logger.warning(f"Warning: Failed to load release sizes cache: {e}")
         return {}
 
@@ -70,7 +74,11 @@ class ReleaseSizeCalculator:
         try:
             with open(self.cache_file, "w") as f:
                 json.dump(self._cache, f, indent=2)
-        except (OSError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(f"Error saving release sizes cache: {e}", exc_info=True)
+        except TypeError as e:
+            logger.error(f"Error saving release sizes cache: {e}", exc_info=True)
+        except ValueError as e:
             logger.error(f"Error saving release sizes cache: {e}", exc_info=True)
 
     def _get_iso_timestamp(self) -> str:
@@ -241,7 +249,25 @@ class ReleaseSizeCalculator:
                 tag, "pip", cmd, temp_root, report_file
             )
 
-        except (OSError, RuntimeError, TypeError, ValueError) as e:
+        except OSError as e:
+            logger.error(
+                f"Error estimating dependency size via pip for {tag}: {e}",
+                exc_info=True,
+            )
+            return None
+        except RuntimeError as e:
+            logger.error(
+                f"Error estimating dependency size via pip for {tag}: {e}",
+                exc_info=True,
+            )
+            return None
+        except TypeError as e:
+            logger.error(
+                f"Error estimating dependency size via pip for {tag}: {e}",
+                exc_info=True,
+            )
+            return None
+        except ValueError as e:
             logger.error(
                 f"Error estimating dependency size via pip for {tag}: {e}",
                 exc_info=True,
@@ -252,8 +278,8 @@ class ReleaseSizeCalculator:
             try:
                 if temp_root.exists():
                     shutil.rmtree(temp_root)
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.debug("Failed to clean up temp directory %s: %s", temp_root, exc)
 
     def _estimate_dependencies_size_via_report(
         self,
@@ -281,7 +307,13 @@ class ReleaseSizeCalculator:
         try:
             with open(report_file, "r") as f:
                 report = json.load(f)
-        except (json.JSONDecodeError, OSError, ValueError) as e:
+        except json.JSONDecodeError as e:
+            logger.error(f"{tool_name} report parse failed for {tag}: {e}", exc_info=True)
+            return None
+        except OSError as e:
+            logger.error(f"{tool_name} report parse failed for {tag}: {e}", exc_info=True)
+            return None
+        except ValueError as e:
             logger.error(f"{tool_name} report parse failed for {tag}: {e}", exc_info=True)
             return None
 
@@ -333,7 +365,11 @@ class ReleaseSizeCalculator:
                 length = resp.headers.get("Content-Length")
                 if length:
                     return int(length)
-        except (urllib.error.URLError, OSError, ValueError) as e:
+        except urllib.error.URLError as e:
+            logger.warning(f"Warning: HEAD failed for {url}: {e}")
+        except OSError as e:
+            logger.warning(f"Warning: HEAD failed for {url}: {e}")
+        except ValueError as e:
             logger.warning(f"Warning: HEAD failed for {url}: {e}")
         return None
 

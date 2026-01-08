@@ -68,7 +68,19 @@ class PatchManager:
                         return main_py, tag
                     logger.warning(f"main.py not found for version {tag} at {main_py}")
                     return None, tag
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            except AttributeError as e:
+                logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
+                return None, tag
+            except OSError as e:
+                logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
+                return None, tag
+            except RuntimeError as e:
+                logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
+                return None, tag
+            except TypeError as e:
+                logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
+                return None, tag
+            except ValueError as e:
                 logger.error(f"Error resolving main.py for version {tag}: {e}", exc_info=True)
                 return None, tag
 
@@ -85,7 +97,19 @@ class PatchManager:
                             f"main.py not found for active version {active_tag} at {main_py}"
                         )
                         return None, active_tag
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as e:
+            except AttributeError as e:
+                logger.error(f"Error determining active version for patching: {e}", exc_info=True)
+                return None, active_tag
+            except OSError as e:
+                logger.error(f"Error determining active version for patching: {e}", exc_info=True)
+                return None, active_tag
+            except RuntimeError as e:
+                logger.error(f"Error determining active version for patching: {e}", exc_info=True)
+                return None, active_tag
+            except TypeError as e:
+                logger.error(f"Error determining active version for patching: {e}", exc_info=True)
+                return None, active_tag
+            except ValueError as e:
                 logger.error(f"Error determining active version for patching: {e}", exc_info=True)
                 return None, active_tag
 
@@ -100,8 +124,16 @@ class PatchManager:
                 if installed_versions:
                     # We have versions but no main.py found - this is an error
                     logger.warning(f"No main.py found to patch at {self.main_py}")
-            except (AttributeError, OSError, RuntimeError, TypeError, ValueError):
-                pass  # Silently handle errors checking for installed versions
+            except AttributeError as exc:
+                logger.debug("Failed to check installed versions: %s", exc)
+            except OSError as exc:
+                logger.debug("Failed to check installed versions: %s", exc)
+            except RuntimeError as exc:
+                logger.debug("Failed to check installed versions: %s", exc)
+            except TypeError as exc:
+                logger.debug("Failed to check installed versions: %s", exc)
+            except ValueError as exc:
+                logger.debug("Failed to check installed versions: %s", exc)
 
         return None, active_tag
 
@@ -128,7 +160,10 @@ class PatchManager:
                     content,
                 )
             )
-        except (OSError, UnicodeDecodeError) as e:
+        except OSError as e:
+            logger.error(f"Error reading {main_py} to check patch state: {e}", exc_info=True)
+            return False
+        except UnicodeDecodeError as e:
             logger.error(f"Error reading {main_py} to check patch state: {e}", exc_info=True)
             return False
 
@@ -153,7 +188,10 @@ class PatchManager:
         # Read existing content first to determine patch state
         try:
             content = main_py.read_text()
-        except (OSError, UnicodeDecodeError) as e:
+        except OSError as e:
+            logger.error(f"Error reading {main_py} for patching: {e}", exc_info=True)
+            return False
+        except UnicodeDecodeError as e:
             logger.error(f"Error reading {main_py} for patching: {e}", exc_info=True)
             return False
 
@@ -219,13 +257,12 @@ class PatchManager:
                     check=True,
                 )
                 return True
-            except (
-                subprocess.CalledProcessError,
-                FileNotFoundError,
-                OSError,
-                subprocess.SubprocessError,
-            ):
-                pass
+            except subprocess.CalledProcessError as exc:
+                logger.warning("Git checkout failed for %s: %s", main_py, exc)
+            except subprocess.SubprocessError as exc:
+                logger.warning("Git checkout failed for %s: %s", main_py, exc)
+            except OSError as exc:
+                logger.warning("Git checkout failed for %s: %s", main_py, exc)
 
         # Try downloading from GitHub
         try:
@@ -234,5 +271,9 @@ class PatchManager:
             with urllib.request.urlopen(url, timeout=10) as resp:
                 main_py.write_bytes(resp.read())
             return True
-        except (urllib.error.URLError, OSError):
+        except urllib.error.URLError as exc:
+            logger.error("Failed to download main.py for %s: %s", active_tag, exc)
+            return False
+        except OSError as exc:
+            logger.error("Failed to write downloaded main.py for %s: %s", active_tag, exc)
             return False

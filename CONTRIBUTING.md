@@ -125,6 +125,12 @@ logger.error("Error messages for failures", exc_info=True)
 ### Exception Handling
 
 **DO NOT use generic exception handlers.** Always catch specific exception types.
+**Only one exception type is allowed per `except` clause.** Split into multiple
+`except` blocks when needed.
+**Every `except` block must log** using `logger.*` or `logging.*` with the
+appropriate level. **Exception:** If the `except` block only re-raises
+(`raise` / `raise from`) and performs no other work, logging may be omitted
+to avoid double logging.
 
 ```python
 # ❌ BAD - Generic exception handling
@@ -151,9 +157,13 @@ All custom exceptions are defined in `backend/exceptions.py`:
 - `ValidationError` - Input validation failures
 - `MetadataError` - Metadata corruption
 
-**Pre-commit Hook:** Automatically detects bare `except:` and `except Exception:` handlers.
+**Pre-commit Hook:** Automatically detects bare `except:`, `except Exception:`,
+multi-exception tuples, and missing logging in `except` blocks (raise-only
+handlers are allowed to omit logging).
 
-**Exception:** Use `# noqa: generic-exception` for cases where generic catching is truly necessary.
+**Exception:** Use `# noqa: generic-exception` for cases where generic catching
+is truly necessary. Use `# noqa: multi-exception` or `# noqa: no-except-logging`
+only when there is no reasonable alternative.
 
 ### Input Validation
 

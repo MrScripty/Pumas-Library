@@ -87,11 +87,18 @@ class GitHubReleasesFetcher:
             except urllib.error.HTTPError as e:
                 # Don't retry on rate limit (403) or client errors (4xx)
                 if e.code in (403, 404, 400, 401):
+                    logger.error("GitHub API HTTP error %s: %s", e.code, e.reason)
                     raise
+                logger.warning("GitHub API HTTP error %s: %s", e.code, e.reason)
                 last_error = e
 
-            except (urllib.error.URLError, TimeoutError) as e:
+            except urllib.error.URLError as e:
                 # Network errors - retry with backoff
+                logger.debug("Network error fetching GitHub releases: %s", e)
+                last_error = e
+            except TimeoutError as e:
+                # Network errors - retry with backoff
+                logger.debug("Timeout fetching GitHub releases: %s", e)
                 last_error = e
 
             # If not the last attempt, wait with exponential backoff
@@ -169,7 +176,10 @@ class GitHubReleasesFetcher:
             now = parse_iso_timestamp(get_iso_timestamp())
             age_seconds = (now - last_fetched).total_seconds()
             return age_seconds < cache.get("ttl", self.ttl)
-        except (KeyError, ValueError) as e:
+        except KeyError as e:
+            logger.error(f"Error validating cache: {e}", exc_info=True)
+            return False
+        except ValueError as e:
             logger.error(f"Error validating cache: {e}", exc_info=True)
             return False
 
@@ -271,7 +281,31 @@ class GitHubReleasesFetcher:
 
                 return []
 
-            except (json.JSONDecodeError, KeyError, ValueError) as e:
+            except json.JSONDecodeError as e:
+                # JSON parsing or data format errors
+                logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
+
+                # Try stale cache
+                disk_cache = self.metadata_manager.load_github_cache()
+                if disk_cache and disk_cache.get("releases"):
+                    logger.info("Using stale disk cache (parse error)")
+                    return self._parse_release_list(disk_cache["releases"])
+
+                logger.warning("No cache available and fetch failed - returning empty")
+                return []
+            except KeyError as e:
+                # JSON parsing or data format errors
+                logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
+
+                # Try stale cache
+                disk_cache = self.metadata_manager.load_github_cache()
+                if disk_cache and disk_cache.get("releases"):
+                    logger.info("Using stale disk cache (parse error)")
+                    return self._parse_release_list(disk_cache["releases"])
+
+                logger.warning("No cache available and fetch failed - returning empty")
+                return []
+            except ValueError as e:
                 # JSON parsing or data format errors
                 logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
 
@@ -328,7 +362,11 @@ class GitHubReleasesFetcher:
                     now = parse_iso_timestamp(get_iso_timestamp())
                     status["age_seconds"] = int((now - last_fetched).total_seconds())
                     status["last_fetched"] = disk_cache.get("lastFetched")
-            except (KeyError, ValueError, TypeError) as e:
+            except KeyError as e:
+                logger.error(f"Error getting cache age: {e}", exc_info=True)
+            except ValueError as e:
+                logger.error(f"Error getting cache age: {e}", exc_info=True)
+            except TypeError as e:
                 logger.error(f"Error getting cache age: {e}", exc_info=True)
             return status
 
@@ -348,7 +386,21 @@ class GitHubReleasesFetcher:
                 age_seconds = (now - last_fetched).total_seconds()
                 status["age_seconds"] = int(age_seconds)
                 status["is_valid"] = age_seconds < disk_cache.get("ttl", self.ttl)
-            except (KeyError, ValueError, TypeError) as e:
+            except KeyError as e:
+                logger.error(
+                    f"Error validating disk cache in get_cache_status: {e}",
+                    exc_info=True,
+                )
+                # If we can't parse the timestamp, assume it's invalid but exists
+                status["is_valid"] = False
+            except ValueError as e:
+                logger.error(
+                    f"Error validating disk cache in get_cache_status: {e}",
+                    exc_info=True,
+                )
+                # If we can't parse the timestamp, assume it's invalid but exists
+                status["is_valid"] = False
+            except TypeError as e:
                 logger.error(
                     f"Error validating disk cache in get_cache_status: {e}",
                     exc_info=True,
@@ -440,8 +492,9 @@ class GitHubReleasesFetcher:
 
             try:
                 parsed = Version(normalized)
-            except InvalidVersion:
+            except InvalidVersion as exc:
                 # Skip unparseable tags to avoid breaking the list
+                logger.debug("Skipping invalid version tag %s: %s", normalized, exc)
                 continue
 
             minor_key = f"{parsed.major}.{parsed.minor}"
@@ -454,7 +507,8 @@ class GitHubReleasesFetcher:
             current_tag = (current_best.get("tag_name") or "").lstrip("vV")
             try:
                 current_version = Version(current_tag)
-            except InvalidVersion:
+            except InvalidVersion as exc:
+                logger.debug("Skipping invalid current tag %s: %s", current_tag, exc)
                 best_by_minor[minor_key] = release
                 continue
 
@@ -471,7 +525,8 @@ class GitHubReleasesFetcher:
             normalized = tag.lstrip("vV")
             try:
                 parsed = Version(normalized)
-            except InvalidVersion:
+            except InvalidVersion as exc:
+                logger.debug("Skipping invalid version tag %s: %s", normalized, exc)
                 continue
             minor_key = f"{parsed.major}.{parsed.minor}"
             best = best_by_minor.get(minor_key)
@@ -594,7 +649,7 @@ class DownloadManager:
             if destination.exists():
                 destination.unlink()
             return False
-        except (OSError, IOError) as e:
+        except OSError as e:
             # File I/O errors (permissions, disk full, etc.)
             logger.error(f"File system error during download: {e}", exc_info=True)
             # Clean up partial download

@@ -117,7 +117,7 @@ describe('AppIndicator', () => {
 
   describe('Error State', () => {
     it('should flash between alert and play icons when in error state', () => {
-      const { container } = render(
+      render(
         <AppIndicator {...defaultProps} state="error" launchError={true} />
       );
 
@@ -222,7 +222,7 @@ describe('AppIndicator', () => {
     });
 
     it('should enhance play icon on hover', () => {
-      const { container } = render(
+      render(
         <AppIndicator {...defaultProps} state="offline" hasInstall={true} />
       );
 
@@ -297,7 +297,7 @@ describe('AppIndicator', () => {
       const onLaunch = vi.fn();
       const parentClick = vi.fn();
 
-      const { container } = render(
+      render(
         <div onClick={parentClick}>
           <AppIndicator {...defaultProps} state="offline" hasInstall={true} onLaunch={onLaunch} />
         </div>
@@ -381,7 +381,7 @@ describe('AppIndicator', () => {
 
     it('should handle optional callbacks being undefined', () => {
       // Test without any callbacks
-      const { container } = render(
+      render(
         <AppIndicator {...defaultProps} state="offline" hasInstall={true} />
       );
 

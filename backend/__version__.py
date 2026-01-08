@@ -4,6 +4,10 @@ import subprocess
 from pathlib import Path
 from typing import Optional
 
+from backend.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 def get_current_commit() -> str:
     """Get current git commit SHA (short format)"""
@@ -17,8 +21,8 @@ def get_current_commit() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except (subprocess.SubprocessError, OSError, FileNotFoundError):
-        pass
+    except OSError as exc:
+        logger.debug("Unable to read git commit: %s", exc)
     return "unknown"
 
 
@@ -34,8 +38,8 @@ def get_current_branch() -> str:
         )
         if result.returncode == 0:
             return result.stdout.strip()
-    except (subprocess.SubprocessError, OSError, FileNotFoundError):
-        pass
+    except OSError as exc:
+        logger.debug("Unable to read git branch: %s", exc)
     return "main"
 
 

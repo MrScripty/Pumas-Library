@@ -4,7 +4,7 @@ This project uses third-party software and assets. The following notices are pro
 
 ## ComfyUI Logo/Icon
 
-The ComfyUI icon (`comfyui-icon.webp`) is property of the ComfyUI project:
+The ComfyUI icon (`launcher-data/icons/comfyui_logo_2025.png`) is property of the ComfyUI project:
 - **Source**: [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 - **License**: GPL-3.0
 - **Usage**: The icon is used solely to represent and launch the ComfyUI application

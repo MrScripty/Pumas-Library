@@ -71,8 +71,8 @@ class ComfyUISetupAPI:
             self.comfyui_dir = self.script_dir.parent
 
         self.main_py: Path = self.comfyui_dir / "main.py"
-        self.icon_webp: Path = self.script_dir / "comfyui-icon.webp"
         self.launcher_data_dir: Path = self.script_dir / "launcher-data"
+        self.icon_webp: Path = self.launcher_data_dir / "icons" / "comfyui_logo_2025.png"
         self.shortcut_scripts_dir = self.launcher_data_dir / "shortcuts"
         self.generated_icons_dir = self.launcher_data_dir / "icons"
 

@@ -1,10 +1,10 @@
-# Linux ComfyUI Launcher
+# Pumas Library
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
 
-A comprehensive yet easy to use launcher that opens ComfyUI as a standalone app, manages models across multiple installs, and adds minor QOL improvements.
+Easy to use AI model library that links your models to other apps in the launcher, and other QOL improvements.
 
 ## Features
 

@@ -25,6 +25,13 @@ This document outlines the development standards, practices, and workflows for c
 - Node.js 24 LTS
 - GTK/WebKit libraries (for PyWebView)
 
+Linux (Mint 22.x / Ubuntu 24.04) packages:
+```bash
+sudo add-apt-repository universe
+sudo apt update
+sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 libwebkit2gtk-4.1-0
+```
+
 ### Initial Setup
 
 ```bash
@@ -44,6 +51,11 @@ pre-commit install
 
 # Or do both via launcher
 ./launcher dev-install
+```
+
+Note: On Linux, `gi` (PyGObject) is provided by the OS. If you create a new venv, use:
+```bash
+python3.12 -m venv venv --system-site-packages
 ```
 
 ### Running the Application

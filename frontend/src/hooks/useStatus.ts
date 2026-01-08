@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { pywebview } from '../api/pywebview';
 import type { StatusResponse } from '../types/pywebview';
+import type { SystemResources } from '../types/apps';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -24,7 +25,9 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [statusData, setStatusData] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingDeps, setIsCheckingDeps] = useState(true);
+  const [systemResources, setSystemResources] = useState<SystemResources | null>(null);
   const isPolling = useRef(false);
+  const lastResourcesFetch = useRef(0);
 
   const fetchStatus = useCallback(async (isInitialLoad = false) => {
     if (isPolling.current) {
@@ -48,6 +51,15 @@ export function useStatus(options: UseStatusOptions = {}) {
 
       const data = await pywebview.getStatus();
       setStatusData(data);
+
+      const now = Date.now();
+      if (now - lastResourcesFetch.current >= 2000) {
+        const resourcesResult = await pywebview.getSystemResources();
+        if (resourcesResult?.success) {
+          setSystemResources(resourcesResult.resources);
+        }
+        lastResourcesFetch.current = now;
+      }
 
       if (isInitialLoad) {
         const elapsedTime = Date.now() - startTime;
@@ -116,6 +128,7 @@ export function useStatus(options: UseStatusOptions = {}) {
 
   return {
     status: statusData,
+    systemResources,
     isLoading,
     isCheckingDeps,
     refetch: fetchStatus,

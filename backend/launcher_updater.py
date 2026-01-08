@@ -22,7 +22,7 @@ class LauncherUpdater:
         self,
         metadata_manager: "MetadataManager",
         repo_owner: str = "MrScripty",
-        repo_name: str = "Linux-ComfyUI-Launcher",
+        repo_name: str = "Pumas-Library",
     ):
         self.metadata = metadata_manager
         self.repo_owner = repo_owner

@@ -16,17 +16,20 @@ from backend.logging_config import get_logger
 logger = get_logger(__name__)
 
 # Optional Pillow import for icon editing (used for version-specific shortcut icons)
-Image: Optional[ModuleType]
-ImageDraw: Optional[ModuleType]
-ImageFont: Optional[ModuleType]
+Image: Optional[ModuleType] = None
+ImageDraw: Optional[ModuleType] = None
+ImageFont: Optional[ModuleType] = None
 
 try:
-    from PIL import Image, ImageDraw, ImageFont
+    from PIL import Image as PILImage
+    from PIL import ImageDraw as PILImageDraw
+    from PIL import ImageFont as PILImageFont
 except ImportError as exc:
     logger.debug("Pillow not available; version icon overlays disabled: %s", exc)
-    Image = None
-    ImageDraw = None
-    ImageFont = None
+else:
+    Image = PILImage
+    ImageDraw = PILImageDraw
+    ImageFont = PILImageFont
 
 
 class ShortcutManager:

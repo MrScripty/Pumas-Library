@@ -15,7 +15,7 @@ import { useComfyUIProcess } from './hooks/useComfyUIProcess';
 import { useModels } from './hooks/useModels';
 import { pywebview } from './api/pywebview';
 import { DEFAULT_APPS } from './config/apps';
-import type { AppConfig, SystemResources } from './types/apps';
+import type { AppConfig } from './types/apps';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
 
@@ -27,7 +27,6 @@ export default function App() {
   // --- Multi-App State ---
   const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
   const [selectedAppId, setSelectedAppId] = useState<string | null>('comfyui');
-  const [systemResources, setSystemResources] = useState<SystemResources | undefined>();
 
   // --- UI State ---
   const [isInstalling, setIsInstalling] = useState(false);
@@ -40,7 +39,7 @@ export default function App() {
   const [linkedModels, setLinkedModels] = useState<Set<string>>(new Set());
 
   // --- Custom Hooks ---
-  const { status, isCheckingDeps, refetch: refetchStatus } = useStatus();
+  const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
   const { launchError, launchLogPath, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess();
   const { modelGroups, scanModels } = useModels();
@@ -91,27 +90,6 @@ export default function App() {
   const desktopShortcut = status?.desktop_shortcut ?? false;
 
   // --- API Helpers ---
-  const fetchSystemResources = async () => {
-    try {
-      if (pywebview.isAvailable()) {
-        const result = await pywebview.getSystemResources();
-        if (result.success) {
-          setSystemResources(result.resources);
-          return result.resources;
-        }
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error fetching system resources', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error fetching system resources', { error: error.message });
-      } else {
-        logger.error('Unknown error fetching system resources', { error });
-      }
-    }
-    return null;
-  };
-
   const checkLauncherVersion = async (forceRefresh = false) => {
     try {
       if (!window.pywebview?.api) return;
@@ -140,11 +118,14 @@ export default function App() {
   useEffect(() => {
     let waitTimeout: NodeJS.Timeout | null = null;
 
+    const startPolling = () => {
+      checkLauncherVersion(true);
+      void fetchDiskSpace();
+    };
+
     const waitForApi = () => {
       if (pywebview.isAvailable()) {
-        checkLauncherVersion(true);
-        void fetchSystemResources();
-        void fetchDiskSpace();
+        startPolling();
         return;
       }
       waitTimeout = setTimeout(waitForApi, 100);
@@ -382,6 +363,7 @@ export default function App() {
     <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
       <Header
         systemResources={systemResources}
+        appResources={status?.app_resources?.comfyui}
         launcherUpdateAvailable={launcherUpdateAvailable}
         onClose={closeWindow}
         cacheStatus={cacheStatus}

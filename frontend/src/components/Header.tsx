@@ -31,6 +31,10 @@ interface InstallationProgress {
 
 interface HeaderProps {
   systemResources?: SystemResources;
+  appResources?: {
+    gpu_memory?: number;
+    ram_memory?: number;
+  };
   launcherUpdateAvailable: boolean;
   onClose: () => void;
   cacheStatus: {
@@ -79,6 +83,7 @@ const IconWithTooltip: React.FC<TooltipProps> = ({ children, tooltip, className 
 
 export const Header: React.FC<HeaderProps> = ({
   systemResources,
+  appResources,
   launcherUpdateAvailable,
   onClose,
   cacheStatus,
@@ -89,9 +94,10 @@ export const Header: React.FC<HeaderProps> = ({
   const ramPercent = Math.round(systemResources?.ram?.usage ?? 0);
   const ramTotal = systemResources?.ram?.total ?? 0;
   const ramUsed = (ramTotal * ramPercent) / 100;
-  const vramTotal = systemResources?.gpu?.memory_total ?? 1;
-  const vramUsed = systemResources?.gpu?.memory ?? 0;
-  const vramPercent = Math.round((vramUsed / vramTotal) * 100);
+  const vramTotal = systemResources?.gpu?.memory_total ?? 0;
+  const vramUsedSystem = systemResources?.gpu?.memory ?? 0;
+  const vramUsed = Math.max(vramUsedSystem, appResources?.gpu_memory ?? 0);
+  const vramPercent = vramTotal > 0 ? Math.min(100, Math.round((vramUsed / vramTotal) * 100)) : 0;
 
   // Get status info (same logic as StatusFooter)
   const getStatusInfo = () => {

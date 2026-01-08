@@ -155,6 +155,7 @@ fi
 echo ""
 echo -e "${BLUE}[4/4] Checking Python GTK bindings...${NC}"
 check_dpkg_package "python3-gi" "Python GObject Introspection"
+check_dpkg_package "python3-gi-cairo" "Python GObject Introspection (Cairo)"
 check_dpkg_package "gir1.2-gtk-3.0" "GTK 3.0 GObject Introspection"
 
 echo ""

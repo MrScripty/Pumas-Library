@@ -99,16 +99,46 @@ if [ -f "$SCRIPT_DIR/scripts/system-check.sh" ]; then
             PACKAGES_TO_INSTALL+=("libgtk-3-0")
         fi
 
-        if ! dpkg -l 2>/dev/null | grep -q "^ii  libwebkit2gtk-4.1-0" && ! dpkg -l 2>/dev/null | grep -q "^ii  libwebkit2gtk-4.0-37"; then
-            PACKAGES_TO_INSTALL+=("libwebkit2gtk-4.1-0")
+        WEBKIT_PKG=""
+        if dpkg -l 2>/dev/null | grep -q "^ii  libwebkit2gtk-4.1-0"; then
+            :
+        elif dpkg -l 2>/dev/null | grep -q "^ii  libwebkit2gtk-4.0-37"; then
+            :
+        elif apt-cache show libwebkit2gtk-4.1-0 >/dev/null 2>&1; then
+            WEBKIT_PKG="libwebkit2gtk-4.1-0"
+        elif apt-cache show libwebkit2gtk-4.0-37 >/dev/null 2>&1; then
+            WEBKIT_PKG="libwebkit2gtk-4.0-37"
+        else
+            echo -e "${YELLOW}Warning: WebKitGTK package not found in apt cache. You may need to enable 'universe'.${NC}"
         fi
 
-        if ! dpkg -l 2>/dev/null | grep -q "^ii  gir1.2-webkit2-4.1" && ! dpkg -l 2>/dev/null | grep -q "^ii  gir1.2-webkit2-4.0"; then
-            PACKAGES_TO_INSTALL+=("gir1.2-webkit2-4.1")
+        if [ -n "$WEBKIT_PKG" ]; then
+            PACKAGES_TO_INSTALL+=("$WEBKIT_PKG")
+        fi
+
+        WEBKIT_GIR_PKG=""
+        if dpkg -l 2>/dev/null | grep -q "^ii  gir1.2-webkit2-4.1"; then
+            :
+        elif dpkg -l 2>/dev/null | grep -q "^ii  gir1.2-webkit2-4.0"; then
+            :
+        elif apt-cache show gir1.2-webkit2-4.1 >/dev/null 2>&1; then
+            WEBKIT_GIR_PKG="gir1.2-webkit2-4.1"
+        elif apt-cache show gir1.2-webkit2-4.0 >/dev/null 2>&1; then
+            WEBKIT_GIR_PKG="gir1.2-webkit2-4.0"
+        else
+            echo -e "${YELLOW}Warning: WebKitGTK GIR package not found in apt cache. You may need to enable 'universe'.${NC}"
+        fi
+
+        if [ -n "$WEBKIT_GIR_PKG" ]; then
+            PACKAGES_TO_INSTALL+=("$WEBKIT_GIR_PKG")
         fi
 
         if ! dpkg -l 2>/dev/null | grep -q "^ii  python3-gi"; then
             PACKAGES_TO_INSTALL+=("python3-gi")
+        fi
+
+        if ! dpkg -l 2>/dev/null | grep -q "^ii  python3-gi-cairo"; then
+            PACKAGES_TO_INSTALL+=("python3-gi-cairo")
         fi
 
         if ! dpkg -l 2>/dev/null | grep -q "^ii  gir1.2-gtk-3.0"; then
@@ -287,7 +317,7 @@ install_dev_tools() {
     pip install -r "$SCRIPT_DIR/requirements-dev.txt"
 
     if command -v pre-commit >/dev/null 2>&1 && [ -d "$SCRIPT_DIR/.git" ]; then
-        pre-commit install
+        pre-commit install --install-hooks
     fi
 
     echo -e "${GREEN}✓ Dev tooling installed${NC}"

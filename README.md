@@ -39,7 +39,7 @@ The installer will:
 
 - **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
 - **Python**: 3.12+ (3.12 recommended)
-- **Node.js**: 24+ (22 LTS recommended for frontend tooling)
+- **Node.js**: 24+ LTS
 - **System Libraries**:
   - GTK 3.0 (`libgtk-3-0`)
   - WebKit2GTK (`libwebkit2gtk-4.1-0` or `libwebkit2gtk-4.0-37`)

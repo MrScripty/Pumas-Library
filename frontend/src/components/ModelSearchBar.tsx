@@ -5,7 +5,7 @@
  * Extracted from ModelManager.tsx
  */
 
-import { Search, Filter, Globe, Folder } from 'lucide-react';
+import { Search, Filter, Globe, Folder, Import } from 'lucide-react';
 
 interface ModelSearchBarProps {
   searchQuery: string;
@@ -20,6 +20,7 @@ interface ModelSearchBarProps {
   selectedFilter: string;
   onSelectFilter: (filter: string) => void;
   onOpenModelsRoot?: () => void;
+  onImportModels?: () => void;
   showModeToggle?: boolean;
 }
 
@@ -36,6 +37,7 @@ export function ModelSearchBar({
   selectedFilter,
   onSelectFilter,
   onOpenModelsRoot,
+  onImportModels,
   showModeToggle = true,
 }: ModelSearchBarProps) {
   return (
@@ -67,6 +69,17 @@ export function ModelSearchBar({
               className="w-full pl-9 pr-16 py-2 text-sm bg-[hsl(var(--launcher-bg-primary))] border border-[hsl(var(--launcher-border))] rounded text-[hsl(var(--launcher-text-primary))] placeholder:text-[hsl(var(--launcher-text-muted))] focus:outline-none focus:border-[hsl(var(--launcher-accent-primary))] transition-colors"
             />
             <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+              {onImportModels && !isDownloadMode && (
+                <button
+                  type="button"
+                  onClick={onImportModels}
+                  className="p-1 rounded text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))] transition-colors"
+                  title="Import models"
+                  aria-label="Import models"
+                >
+                  <Import className="w-4 h-4" />
+                </button>
+              )}
               {onOpenModelsRoot && (
                 <button
                   type="button"

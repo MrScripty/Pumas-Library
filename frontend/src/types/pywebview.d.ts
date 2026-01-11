@@ -1063,6 +1063,11 @@ export interface PyWebViewAPI {
   open_path(path: string): Promise<OpenPathResponse>;
   open_active_install(): Promise<OpenActiveInstallResponse>;
   close_window(): Promise<CloseWindowResponse>;
+
+  // Model Import
+  // ========================================
+  /** Open native file picker for model import */
+  open_model_import_dialog(): Promise<{ success: boolean; paths: string[] }>;
 }
 
 // ============================================================================

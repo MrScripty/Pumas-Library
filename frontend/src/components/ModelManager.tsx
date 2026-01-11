@@ -253,6 +253,25 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   }, [onModelsImported]);
 
+  // Handler for file picker import button
+  const handleImportClick = useCallback(async () => {
+    if (!window.pywebview?.api?.open_model_import_dialog) {
+      logger.warn('open_model_import_dialog API not available');
+      return;
+    }
+
+    try {
+      const result = await window.pywebview.api.open_model_import_dialog();
+      if (result.success && result.paths.length > 0) {
+        logger.info('Files selected for import', { count: result.paths.length });
+        setDroppedFiles(result.paths);
+        setShowImportDialog(true);
+      }
+    } catch (error) {
+      logger.error('Failed to open model import dialog', { error });
+    }
+  }, []);
+
   return (
     <>
       {/* Drag and drop overlay */}
@@ -289,6 +308,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         selectedFilter={selectedFilter}
         onSelectFilter={handleFilterSelect}
         onOpenModelsRoot={onOpenModelsRoot}
+        onImportModels={handleImportClick}
         showModeToggle={Boolean(onAddModels)}
       />
 

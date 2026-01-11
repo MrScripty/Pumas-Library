@@ -30,6 +30,112 @@ class JavaScriptAPI:
 
     def __init__(self):
         self.api = ComfyUISetupAPI()
+        self._window = None
+        self._drop_handler_registered = False
+
+    def _register_drop_handler(self):
+        """Register Python-side drop handler for GTK compatibility.
+
+        PyWebView GTK requires drop listeners to be registered through the Python
+        DOM API rather than standard web event listeners. This method registers
+        a handler that captures drops and forwards them to the frontend.
+
+        This is cross-platform safe - it works on all backends, not just GTK.
+        """
+        import json
+
+        if self._drop_handler_registered or not self._window:
+            logger.info("Drop handler: skipping (already registered or no window)")
+            return
+
+        def on_drop(event):
+            logger.info("Drop event received from PyWebView")
+            files = event.get("dataTransfer", {}).get("files", [])
+            paths = []
+            for f in files:
+                path = f.get("pywebviewFullPath")
+                if path:
+                    paths.append(path)
+
+            logger.info("Extracted %d file paths from drop", len(paths))
+
+            if paths:
+                # Dispatch custom event to frontend
+                self._window.evaluate_js(
+                    f"window.dispatchEvent(new CustomEvent('pywebview-drop', {{ detail: {{ paths: {json.dumps(paths)} }} }}))"
+                )
+                logger.info("Dispatched pywebview-drop event to frontend")
+
+        try:
+            self._window.dom.document.on("drop", on_drop)
+            self._drop_handler_registered = True
+            logger.info("Drop handler registered successfully on document")
+        except AttributeError as exc:
+            logger.warning("Failed to register drop handler on document: %s", exc)
+            # Try body as fallback
+            try:
+                self._window.dom.body.on("drop", on_drop)
+                self._drop_handler_registered = True
+                logger.info("Drop handler registered successfully on body (fallback)")
+            except AttributeError as exc2:
+                logger.error("Failed to register drop handler on body: %s", exc2)
+            except RuntimeError as exc2:
+                logger.error("Failed to register drop handler on body: %s", exc2)
+        except RuntimeError as exc:
+            logger.warning("Failed to register drop handler on document: %s", exc)
+
+    def _enable_gtk_drop_target(self):
+        """Enable GTK drop target on the webview widget.
+
+        PyWebView GTK connects drag-data-received but never enables the widget
+        as a drop target. We fix this with minimal flags to avoid conflicts.
+
+        IMPORTANT: Use MOTION only, NOT ALL or DROP!
+        DestDefaults.DROP auto-calls gtk_drag_finish() which conflicts with
+        PyWebView's own handling and causes the desktop to freeze.
+        """
+        try:
+            import gi
+
+            gi.require_version("Gtk", "3.0")
+            from gi.repository import Gdk, Gtk
+
+            # Get the BrowserView instance from PyWebView's internal state
+            # BrowserView.instances is keyed by window.uid
+            from webview.platforms.gtk import BrowserView
+
+            browser_view = BrowserView.instances.get(self._window.uid)
+            if browser_view is None:
+                logger.warning(
+                    "Cannot access BrowserView instance for GTK drop setup (uid=%s)",
+                    self._window.uid,
+                )
+                return
+
+            webview_widget = getattr(browser_view, "webview", None)
+            if webview_widget is None:
+                logger.warning("Cannot access webview widget for GTK drop setup")
+                return
+
+            # Use MOTION only - provides drag cursor feedback without auto-handling
+            # DO NOT use DestDefaults.ALL or DestDefaults.DROP - they conflict
+            # with PyWebView's drop handling and freeze the desktop!
+            target_entry = Gtk.TargetEntry.new("text/uri-list", 0, 0)
+            webview_widget.drag_dest_set(
+                Gtk.DestDefaults.MOTION,
+                [target_entry],
+                Gdk.DragAction.COPY,
+            )
+            logger.info("GTK drop target enabled (MOTION only)")
+
+        except ImportError as exc:
+            logger.debug("GTK not available, skipping drop target setup: %s", exc)
+        except AttributeError as exc:
+            logger.warning("Failed to enable GTK drop target: %s", exc)
+        except RuntimeError as exc:
+            logger.warning("Failed to enable GTK drop target: %s", exc)
+        except TypeError as exc:
+            logger.warning("Failed to enable GTK drop target: %s", exc)
 
     def _call_api(
         self,
@@ -398,6 +504,31 @@ class JavaScriptAPI:
             lambda exc: {"success": False, "error": str(exc)},
         )
 
+    def open_model_import_dialog(self):
+        """Open native file picker for model import."""
+
+        def _do():
+            file_types = (
+                "Model Files (*.safetensors;*.ckpt;*.gguf;*.pt;*.bin;*.pth;*.onnx)",
+                "All Files (*.*)",
+            )
+
+            result = self._window.create_file_dialog(
+                webview.OPEN_DIALOG,
+                allow_multiple=True,
+                file_types=file_types,
+            )
+
+            if result:
+                return {"success": True, "paths": list(result)}
+            return {"success": True, "paths": []}
+
+        return self._call_api(
+            "open_model_import_dialog",
+            _do,
+            lambda exc: {"success": False, "error": str(exc), "paths": []},
+        )
+
     def launch_version(self, tag, extra_args=None):
         """Launch a specific ComfyUI version"""
 
@@ -562,6 +693,129 @@ class JavaScriptAPI:
             "scan_shared_storage",
             lambda: {"success": True, "result": self.api.scan_shared_storage()},
             lambda exc: {"success": False, "error": str(exc), "result": {}},
+        )
+
+    # ==================== Model Import API Methods ====================
+
+    def import_batch(self, specs):
+        """Import multiple models in a batch operation"""
+        return self._call_api(
+            "import_batch",
+            lambda: self.api.import_batch(specs),
+            lambda exc: {
+                "success": False,
+                "error": str(exc),
+                "imported": 0,
+                "failed": len(specs) if specs else 0,
+                "results": [],
+            },
+        )
+
+    def lookup_hf_metadata_for_file(self, filename, file_path=None):
+        """Look up HuggingFace metadata for a file"""
+        return self._call_api(
+            "lookup_hf_metadata_for_file",
+            lambda: self.api.lookup_hf_metadata_for_file(filename, file_path),
+            lambda exc: {
+                "success": False,
+                "found": False,
+                "error": str(exc),
+            },
+        )
+
+    def detect_sharded_sets(self, file_paths):
+        """Detect and group sharded model files"""
+        return self._call_api(
+            "detect_sharded_sets",
+            lambda: self.api.detect_sharded_sets(file_paths),
+            lambda exc: {
+                "success": False,
+                "error": str(exc),
+                "groups": {},
+            },
+        )
+
+    def validate_file_type(self, file_path):
+        """Validate file type using magic bytes"""
+        return self._call_api(
+            "validate_file_type",
+            lambda: self.api.validate_file_type(file_path),
+            lambda exc: {
+                "success": False,
+                "valid": False,
+                "detected_type": "error",
+                "error": str(exc),
+            },
+        )
+
+    def get_network_status(self):
+        """Get network status including circuit breaker state"""
+        return self._call_api(
+            "get_network_status",
+            lambda: self.api.get_network_status(),
+            lambda exc: {"success": False, "error": str(exc)},
+        )
+
+    def get_library_status(self):
+        """Get current library status including indexing state"""
+        return self._call_api(
+            "get_library_status",
+            lambda: self.api.get_library_status(),
+            lambda exc: {
+                "success": False,
+                "error": str(exc),
+                "indexing": False,
+                "model_count": 0,
+            },
+        )
+
+    def get_file_link_count(self, file_path):
+        """Get number of hard links for a file"""
+        return self._call_api(
+            "get_file_link_count",
+            lambda: self.api.get_file_link_count(file_path),
+            lambda exc: {
+                "success": False,
+                "link_count": 1,
+                "is_hard_linked": False,
+                "error": str(exc),
+            },
+        )
+
+    def check_files_writable(self, file_paths):
+        """Check if files can be safely deleted"""
+        return self._call_api(
+            "check_files_writable",
+            lambda: self.api.check_files_writable(file_paths),
+            lambda exc: {
+                "success": False,
+                "all_writable": False,
+                "details": [],
+                "error": str(exc),
+            },
+        )
+
+    def mark_metadata_as_manual(self, model_id):
+        """Mark model metadata as manually corrected"""
+        return self._call_api(
+            "mark_metadata_as_manual",
+            lambda: self.api.mark_metadata_as_manual(model_id),
+            lambda exc: {"success": False, "error": str(exc)},
+        )
+
+    def search_models_fts(self, query, limit=100, offset=0, model_type=None, tags=None):
+        """Search local model library using FTS5 full-text search"""
+        return self._call_api(
+            "search_models_fts",
+            lambda: self.api.search_models_fts(query, limit, offset, model_type, tags),
+            lambda exc: {
+                "success": False,
+                "error": str(exc),
+                "models": [],
+                "total_count": 0,
+                "query_time_ms": 0,
+                "query": "",
+            },
         )
 
     # ==================== Size Calculation Methods (Phase 6.2.5a/c) ====================
@@ -809,6 +1063,20 @@ def main():
         easy_drag=False,  # Disabled - using .pywebview-drag-region class for specific draggable areas
         background_color="#000000",
     )
+
+    # Store window reference for drop handler registration
+    js_api._window = window
+
+    # Register drop handler after window is shown (for GTK compatibility)
+    # Using 'shown' event instead of 'loaded' ensures DOM is fully ready
+    def on_shown():
+        logger.info("Window shown - enabling GTK drop target and registering handler")
+        # First, enable GTK drop target (fixes PyWebView GTK bug)
+        js_api._enable_gtk_drop_target()
+        # Then register the Python-side drop handler
+        js_api._register_drop_handler()
+
+    window.events.shown += on_shown
 
     # Start the webview application
     # Use 'gtk' backend on Linux for best compatibility with Debian/Mint

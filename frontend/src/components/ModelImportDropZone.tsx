@@ -38,7 +38,8 @@ function fileUriToPath(uri: string): string {
 
 /**
  * Extract file paths from drag event data.
- * Supports both File API and text/uri-list (Linux file managers).
+ * Supports File API, text/uri-list, and text/plain for cross-platform support.
+ * PyWebView GTK/WebKit may use different data formats depending on the file manager.
  */
 function extractFilePaths(e: DragEvent): string[] {
   const paths: string[] = [];
@@ -51,6 +52,23 @@ function extractFilePaths(e: DragEvent): string[] {
       const path = fileUriToPath(uri.trim());
       if (path) {
         paths.push(path);
+      }
+    }
+  }
+
+  // Fallback: Try text/plain (some file managers use this)
+  if (paths.length === 0) {
+    const plainText = e.dataTransfer?.getData('text/plain');
+    if (plainText) {
+      const lines = plainText
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => line);
+      for (const line of lines) {
+        const path = fileUriToPath(line);
+        if (path) {
+          paths.push(path);
+        }
       }
     }
   }
@@ -112,8 +130,16 @@ export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({
 
       dragCounterRef.current++;
 
-      // Check if dragging files
-      if (e.dataTransfer?.types.includes('Files') || e.dataTransfer?.types.includes('text/uri-list')) {
+      // Check if dragging files - PyWebView GTK/WebKit may use different types
+      // Accept any of: Files, text/uri-list, text/plain, or application/x-moz-file
+      const types = e.dataTransfer?.types || [];
+      const hasFileType =
+        types.includes('Files') ||
+        types.includes('text/uri-list') ||
+        types.includes('text/plain') ||
+        types.includes('application/x-moz-file');
+
+      if (hasFileType) {
         setIsDragging(true);
       }
     },
@@ -177,22 +203,46 @@ export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({
     [enabled, onFilesDropped]
   );
 
+  // Handler for PyWebView drop events (sent from Python for GTK compatibility)
+  // This also fires on Windows/macOS as a parallel path
+  const handlePyWebViewDrop = useCallback(
+    (e: CustomEvent<{ paths: string[] }>) => {
+      if (!enabled) return;
+
+      // Reset drag state
+      dragCounterRef.current = 0;
+      setIsDragging(false);
+
+      const { paths } = e.detail;
+      const { valid } = filterValidPaths(paths);
+      if (valid.length > 0) {
+        onFilesDropped(valid);
+      }
+    },
+    [enabled, onFilesDropped]
+  );
+
   // Attach window-level event listeners
   useEffect(() => {
     if (!enabled) return;
 
+    // Standard web drag-drop listeners (work on Windows/macOS)
     window.addEventListener('dragenter', handleDragEnter);
     window.addEventListener('dragleave', handleDragLeave);
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('drop', handleDrop);
+
+    // PyWebView drop listener (required for GTK, works on all platforms)
+    window.addEventListener('pywebview-drop', handlePyWebViewDrop as EventListener);
 
     return () => {
       window.removeEventListener('dragenter', handleDragEnter);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('drop', handleDrop);
+      window.removeEventListener('pywebview-drop', handlePyWebViewDrop as EventListener);
     };
-  }, [enabled, handleDragEnter, handleDragLeave, handleDragOver, handleDrop]);
+  }, [enabled, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handlePyWebViewDrop]);
 
   if (!isDragging) {
     return null;

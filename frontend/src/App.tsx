@@ -42,7 +42,7 @@ export default function App() {
   const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
   const { launchError, launchLogPath, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess();
-  const { modelGroups, scanModels } = useModels();
+  const { modelGroups, scanModels, fetchModels } = useModels();
 
   const {
     installedVersions,
@@ -507,6 +507,7 @@ export default function App() {
                 selectedAppId={selectedAppId}
                 onAddModels={scanModels}
                 onOpenModelsRoot={openModelsRoot}
+                onModelsImported={fetchModels}
                 activeVersion={activeVersion}
               />
             </div>

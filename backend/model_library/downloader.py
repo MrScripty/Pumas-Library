@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import hashlib
-import os
-import re
 import shutil
-import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from backend.logging_config import get_logger
+from backend.model_library.hf.client import HfClient
+from backend.model_library.hf.metadata import coerce_int
+from backend.model_library.hf.quant import normalize_quant_source, token_in_normalized
+from backend.model_library.hf.search import list_repo_tree_paths, search_models
 from backend.model_library.library import ModelLibrary
 from backend.model_library.naming import normalize_filename, normalize_name, unique_path
 from backend.models import ModelFileInfo, ModelMetadata, get_iso_timestamp
@@ -28,132 +29,35 @@ class ModelDownloader:
 
     def __init__(self, library: ModelLibrary) -> None:
         self.library = library
-        self.hf_token = os.getenv("HF_TOKEN")
-        self._api = None
+        self._hf_client = HfClient()
         self._download_lock = threading.Lock()
         self._downloads: dict[str, dict[str, object]] = {}
 
     def _get_api(self):
-        if self._api:
-            return self._api
-        try:
-            from huggingface_hub import HfApi, login
-        except ImportError as exc:
-            raise RuntimeError("huggingface_hub is not installed") from exc
+        """Get the HuggingFace API instance."""
+        return self._hf_client.get_api()
 
-        if self.hf_token:
-            login(self.hf_token)
-        self._api = HfApi()
-        return self._api
+    def search_models(
+        self,
+        query: str,
+        kind: Optional[str] = None,
+        limit: int = 25,
+    ) -> list[dict[str, object]]:
+        """Search for models on HuggingFace Hub.
 
-    def _known_formats(self) -> set[str]:
-        return {
-            "safetensors",
-            "gguf",
-            "ckpt",
-            "pt",
-            "pth",
-            "bin",
-            "onnx",
-            "tflite",
-            "mlmodel",
-            "pb",
-        }
+        Args:
+            query: Search query string
+            kind: Optional model kind/task filter
+            limit: Maximum number of results
 
-    def _quant_tokens(self) -> list[str]:
-        return [
-            "iq1",
-            "iq1_s",
-            "iq1_m",
-            "iq2_xxs",
-            "iq2_xs",
-            "iq2_s",
-            "iq2_k_s",
-            "iq2_k",
-            "iq2_m",
-            "iq3_xxs",
-            "iq3_xs",
-            "iq3_s",
-            "iq3_k_s",
-            "iq3_m",
-            "iq3_k_m",
-            "iq3_k_l",
-            "iq4_xxs",
-            "iq4_xs",
-            "iq4_s",
-            "iq4_m",
-            "iq4_k_s",
-            "iq4_k_m",
-            "iq4_k_l",
-            "q2",
-            "q2_k",
-            "q2_k_s",
-            "q2_k_m",
-            "q3",
-            "q3_k",
-            "q3_k_s",
-            "q3_k_m",
-            "q3_k_l",
-            "q4",
-            "q4_0",
-            "q4_1",
-            "q4_k_s",
-            "q4_k_m",
-            "q5",
-            "q5_0",
-            "q5_1",
-            "q5_k_s",
-            "q5_k_m",
-            "q6",
-            "q6_k",
-            "q8",
-            "q8_0",
-            "int4",
-            "int8",
-            "fp16",
-            "fp32",
-            "bf16",
-            "f16",
-            "f32",
-        ]
-
-    def _normalize_quant_source(self, value: str) -> str:
-        normalized = re.sub(r"[^a-z0-9]+", "_", value.lower())
-        return normalized.strip("_")
-
-    def _token_in_normalized(self, normalized: str, token: str) -> bool:
-        if not normalized or not token:
-            return False
-        segments = normalized.split("_")
-        token_segments = token.split("_")
-        if not token_segments or len(token_segments) > len(segments):
-            return False
-        for index in range(len(segments) - len(token_segments) + 1):
-            if segments[index : index + len(token_segments)] == token_segments:
-                return True
-        return False
-
-    def _sorted_quants(self, quants: Iterable[str]) -> list[str]:
-        order = {token: index for index, token in enumerate(self._quant_tokens())}
-        unique = {quant for quant in quants if quant}
-        return sorted(unique, key=lambda token: (order.get(token, len(order)), token))
-
-    def _coerce_int(self, value: object) -> int:
-        if isinstance(value, bool):
-            return int(value)
-        if isinstance(value, int):
-            return value
-        if isinstance(value, float):
-            return int(value)
-        if isinstance(value, str):
-            try:
-                return int(value)
-            except ValueError:
-                logger.debug("Failed to coerce int from %r", value)
-                return 0
-        return 0
+        Returns:
+            List of model dictionaries with metadata
+        """
+        api = self._get_api()
+        return search_models(api, query, kind, limit)
 
     def _download_allow_patterns(self, quant: Optional[str]) -> list[str] | None:
+        """Get file patterns to allow for a specific quantization."""
         if not quant:
             return None
         quant_token = quant.strip()
@@ -176,10 +80,11 @@ class ModelDownloader:
         ]
 
     def _matches_quant_path(self, path: str, quant: str) -> bool:
-        normalized_path = self._normalize_quant_source(path)
+        """Check if a file path matches a quantization pattern."""
+        normalized_path = normalize_quant_source(path)
         lower = path.lower()
-        token = self._normalize_quant_source(quant)
-        if self._token_in_normalized(normalized_path, token):
+        token = normalize_quant_source(quant)
+        if token_in_normalized(normalized_path, token):
             return True
         config_files = {
             "model_index.json",
@@ -195,276 +100,8 @@ class ModelDownloader:
             return True
         return False
 
-    def _collect_paths_with_sizes(self, siblings: Iterable[object]) -> list[tuple[str, int]]:
-        results: list[tuple[str, int]] = []
-        for sibling in siblings:
-            path = getattr(sibling, "rfilename", "") or ""
-            if not path:
-                continue
-            size = getattr(sibling, "size", None)
-            if size is None:
-                lfs = getattr(sibling, "lfs", None)
-                if isinstance(lfs, dict):
-                    size = lfs.get("size")
-            try:
-                size_value = int(size) if size is not None else 0
-            except TypeError as exc:
-                logger.debug("Invalid size value %r: %s", size, exc)
-                size_value = 0
-            except ValueError as exc:
-                logger.debug("Invalid size value %r: %s", size, exc)
-                size_value = 0
-            if size_value > 0:
-                results.append((path, size_value))
-        return results
-
-    def _list_repo_tree_paths(self, api, repo_id: str) -> list[tuple[str, int]]:
-        try:
-            items = api.list_repo_tree(repo_id=repo_id, repo_type="model", recursive=True)
-        except OSError as exc:
-            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
-            return []
-        except RuntimeError as exc:
-            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
-            return []
-        except ValueError as exc:
-            logger.debug("Failed to list repo tree for %s: %s", repo_id, exc)
-            return []
-
-        results: list[tuple[str, int]] = []
-        for item in items:
-            path = getattr(item, "path", "") or getattr(item, "rfilename", "") or ""
-            if not path:
-                continue
-            size = getattr(item, "size", None)
-            try:
-                size_value = int(size) if size is not None else 0
-            except TypeError as exc:
-                logger.debug("Invalid size value %r: %s", size, exc)
-                size_value = 0
-            except ValueError as exc:
-                logger.debug("Invalid size value %r: %s", size, exc)
-                size_value = 0
-            if size_value > 0:
-                results.append((path, size_value))
-        return results
-
-    def _extract_formats_from_paths(self, paths: Iterable[str], tags: Iterable[str]) -> list[str]:
-        formats = set()
-        for path in paths:
-            lower = path.lower()
-            for ext in self._known_formats():
-                token = f".{ext}"
-                if lower.endswith(token) or token in lower:
-                    formats.add(ext)
-        for tag in tags:
-            lower = tag.lower()
-            for ext in self._known_formats():
-                if ext in lower:
-                    formats.add(ext)
-        return sorted(formats)
-
-    def _extract_formats(self, siblings: Iterable[object], tags: Iterable[str]) -> list[str]:
-        paths = [getattr(sibling, "rfilename", "") or "" for sibling in siblings]
-        return self._extract_formats_from_paths(paths, tags)
-
-    def _extract_quants_from_paths(self, paths: Iterable[str], tags: Iterable[str]) -> list[str]:
-        quants = set()
-        quant_tokens = sorted(self._quant_tokens(), key=len, reverse=True)
-        for path in paths:
-            normalized = self._normalize_quant_source(path)
-            matched = None
-            for token in quant_tokens:
-                if self._token_in_normalized(normalized, token):
-                    matched = token
-                    break
-            if matched:
-                quants.add(matched)
-        for tag in tags:
-            normalized = self._normalize_quant_source(tag)
-            matched = None
-            for token in quant_tokens:
-                if self._token_in_normalized(normalized, token):
-                    matched = token
-                    break
-            if matched:
-                quants.add(matched)
-        return self._sorted_quants(quants)
-
-    def _extract_quants(self, siblings: Iterable[object], tags: Iterable[str]) -> list[str]:
-        paths = [getattr(sibling, "rfilename", "") or "" for sibling in siblings]
-        return self._extract_quants_from_paths(paths, tags)
-
-    def _quant_sizes_from_paths(
-        self, paths_with_sizes: Iterable[tuple[str, int]]
-    ) -> dict[str, int]:
-        quant_sizes: dict[str, int] = {}
-        tokens = sorted(self._quant_tokens(), key=len, reverse=True)
-        shared_size = 0
-        shared_exts = {".json", ".yml", ".yaml", ".txt", ".md"}
-        for path, size in paths_with_sizes:
-            normalized = self._normalize_quant_source(path)
-            lower = path.lower()
-            matched = None
-            for token in tokens:
-                if self._token_in_normalized(normalized, token):
-                    matched = token
-                    break
-            if matched:
-                quant_sizes[matched] = quant_sizes.get(matched, 0) + size
-            else:
-                if any(lower.endswith(ext) for ext in shared_exts):
-                    shared_size += size
-        if shared_size and quant_sizes:
-            for token in list(quant_sizes.keys()):
-                quant_sizes[token] += shared_size
-        return quant_sizes
-
-    def _infer_kind_from_tags(self, tags: Iterable[str]) -> str:
-        normalized = [tag.lower() for tag in tags]
-        mapping = {
-            "text-to-image": ["text-to-image", "text2img", "text-to-img"],
-            "image-to-image": ["image-to-image", "img2img", "image-to-img"],
-            "text-to-video": ["text-to-video", "text2video"],
-            "text-to-audio": ["text-to-audio", "text-to-speech", "tts"],
-            "audio-to-text": [
-                "audio-to-text",
-                "speech-recognition",
-                "automatic-speech-recognition",
-                "asr",
-            ],
-            "text-to-3d": ["text-to-3d", "text2shape"],
-            "image-to-3d": ["image-to-3d", "img2shape", "image-to-shape"],
-        }
-        for kind, needles in mapping.items():
-            for tag in normalized:
-                if any(needle in tag for needle in needles):
-                    return kind
-        for tag in normalized:
-            if "video" in tag:
-                return "video"
-            if "audio" in tag:
-                return "audio"
-            if "image" in tag:
-                return "image"
-            if "text" in tag:
-                return "text"
-            if "3d" in tag:
-                return "3d"
-        return "unknown"
-
-    def search_models(
-        self,
-        query: str,
-        kind: Optional[str] = None,
-        limit: int = 25,
-    ) -> list[dict[str, object]]:
-        api = self._get_api()
-        filter_arg = None
-        if kind:
-            try:
-                from huggingface_hub import ModelFilter
-            except ImportError as exc:
-                logger.debug("huggingface_hub ModelFilter unavailable: %s", exc)
-                filter_arg = kind
-            else:
-                filter_arg = ModelFilter(task=kind)
-
-        results = api.list_models(
-            search=query or None,
-            filter=filter_arg,
-            full=True,
-            limit=limit,
-        )
-
-        models: list[dict[str, object]] = []
-        for info in results:
-            repo_id = getattr(info, "modelId", None) or getattr(info, "id", None)
-            if not repo_id:
-                continue
-            tags = list(getattr(info, "tags", []) or [])
-            siblings = getattr(info, "siblings", []) or []
-            developer = getattr(info, "author", None) or repo_id.split("/")[0]
-            kind_value = getattr(info, "pipeline_tag", None) or "unknown"
-            if kind_value == "unknown" and tags:
-                kind_value = self._infer_kind_from_tags(tags)
-            release_date = ""
-            last_modified = getattr(info, "last_modified", None)
-            if last_modified:
-                try:
-                    release_date = last_modified.isoformat()
-                except AttributeError as exc:
-                    logger.debug("Failed to format last_modified %r: %s", last_modified, exc)
-                    release_date = str(last_modified)
-            downloads = getattr(info, "downloads", None)
-            if downloads is not None:
-                try:
-                    downloads = int(downloads)
-                except TypeError as exc:
-                    logger.debug("Invalid downloads value %r: %s", downloads, exc)
-                    downloads = None
-                except ValueError as exc:
-                    logger.debug("Invalid downloads value %r: %s", downloads, exc)
-                    downloads = None
-            formats = self._extract_formats(siblings, tags)
-            quants = self._extract_quants(siblings, tags)
-            paths_with_sizes = self._collect_paths_with_sizes(siblings)
-            total_size_bytes = sum(size for _, size in paths_with_sizes)
-            quant_sizes = self._quant_sizes_from_paths(paths_with_sizes)
-
-            if not formats or not quants or total_size_bytes == 0:
-                try:
-                    repo_files = api.list_repo_files(repo_id=repo_id, repo_type="model")
-                except OSError as exc:
-                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
-                    repo_files = []
-                except RuntimeError as exc:
-                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
-                    repo_files = []
-                except ValueError as exc:
-                    logger.debug("Failed to list repo files for %s: %s", repo_id, exc)
-                    repo_files = []
-                if repo_files:
-                    if not formats:
-                        formats = self._extract_formats_from_paths(repo_files, tags)
-                    if not quants:
-                        quants = self._extract_quants_from_paths(repo_files, tags)
-            if total_size_bytes == 0 or (quants and not quant_sizes):
-                repo_paths_with_sizes = self._list_repo_tree_paths(api, repo_id)
-                if repo_paths_with_sizes:
-                    if total_size_bytes == 0:
-                        total_size_bytes = sum(size for _, size in repo_paths_with_sizes)
-                    if quants and not quant_sizes:
-                        quant_sizes = self._quant_sizes_from_paths(repo_paths_with_sizes)
-
-            if quant_sizes:
-                quant_candidates = set(quant_sizes.keys())
-            else:
-                quant_candidates = set(quants)
-            sorted_quants = self._sorted_quants(quant_candidates)
-            download_options = [
-                {"quant": quant, "sizeBytes": quant_sizes.get(quant)} for quant in sorted_quants
-            ]
-
-            models.append(
-                {
-                    "repoId": repo_id,
-                    "name": repo_id.split("/")[-1],
-                    "developer": developer,
-                    "kind": kind_value,
-                    "formats": formats,
-                    "quants": sorted_quants,
-                    "url": f"https://huggingface.co/{repo_id}",
-                    "releaseDate": release_date,
-                    "downloads": downloads,
-                    "totalSizeBytes": total_size_bytes or None,
-                    "quantSizes": quant_sizes,
-                    "downloadOptions": download_options,
-                }
-            )
-        return models
-
     def _compute_blake3(self, file_path: Path) -> str:
+        """Compute BLAKE3 hash of a file."""
         try:
             import blake3
         except ImportError:
@@ -478,6 +115,7 @@ class ModelDownloader:
         return h.hexdigest().lower()
 
     def _choose_primary_file(self, model_dir: Path) -> Optional[Path]:
+        """Choose the primary model file from a directory."""
         candidates = [
             path
             for path in model_dir.rglob("*")
@@ -497,10 +135,25 @@ class ModelDownloader:
         subtype: str = "",
         quant: Optional[str] = None,
     ) -> Path:
+        """Download a model from HuggingFace synchronously.
+
+        Args:
+            repo_id: HuggingFace repository ID
+            family: Model family name
+            official_name: Official model name
+            model_type: Type of model (default: 'llm')
+            subtype: Model subtype
+            quant: Quantization to download
+
+        Returns:
+            Path to the downloaded model directory
+        """
         try:
             from huggingface_hub import snapshot_download
         except ImportError as exc:
             raise RuntimeError("huggingface_hub is not installed") from exc
+
+        import tempfile
 
         cleaned_name = normalize_name(official_name)
         effective_model_type = model_type or "llm"
@@ -583,6 +236,19 @@ class ModelDownloader:
         subtype: str = "",
         quant: Optional[str] = None,
     ) -> dict[str, object]:
+        """Start an asynchronous model download.
+
+        Args:
+            repo_id: HuggingFace repository ID
+            family: Model family name
+            official_name: Official model name
+            model_type: Type of model
+            subtype: Model subtype
+            quant: Quantization to download
+
+        Returns:
+            Dictionary with download_id and total_bytes
+        """
         download_id = hashlib.sha1(
             f"{repo_id}:{quant or 'all'}:{time.time()}".encode("utf-8")
         ).hexdigest()
@@ -620,14 +286,22 @@ class ModelDownloader:
         return {"download_id": download_id, "total_bytes": total_bytes}
 
     def get_model_download_status(self, download_id: str) -> dict[str, object] | None:
+        """Get the status of an ongoing download.
+
+        Args:
+            download_id: The download ID
+
+        Returns:
+            Status dictionary or None if not found
+        """
         with self._download_lock:
             state = self._downloads.get(download_id)
             if not state:
                 return None
 
         status = str(state.get("status", "unknown"))
-        total_bytes = self._coerce_int(state.get("total_bytes"))
-        downloaded_bytes = self._coerce_int(state.get("downloaded_bytes"))
+        total_bytes = coerce_int(state.get("total_bytes"))
+        downloaded_bytes = coerce_int(state.get("downloaded_bytes"))
         temp_dir = state.get("temp_dir")
 
         if status in {"queued", "downloading", "cancelling"} and isinstance(temp_dir, Path):
@@ -652,6 +326,14 @@ class ModelDownloader:
         }
 
     def cancel_model_download(self, download_id: str) -> bool:
+        """Cancel an ongoing download.
+
+        Args:
+            download_id: The download ID to cancel
+
+        Returns:
+            True if cancelled, False if not found or already complete
+        """
         with self._download_lock:
             state = self._downloads.get(download_id)
             if not state:
@@ -673,6 +355,7 @@ class ModelDownloader:
         return True
 
     def _calculate_downloaded_bytes(self, temp_dir: Path) -> int:
+        """Calculate bytes downloaded so far."""
         total = 0
         try:
             for path in temp_dir.rglob("*"):
@@ -689,8 +372,9 @@ class ModelDownloader:
         return total
 
     def _calculate_total_bytes(self, repo_id: str, quant: Optional[str]) -> int:
+        """Calculate total bytes to download."""
         api = self._get_api()
-        paths_with_sizes = self._list_repo_tree_paths(api, repo_id)
+        paths_with_sizes = list_repo_tree_paths(api, repo_id)
         if not paths_with_sizes:
             return 0
         if not quant:
@@ -706,6 +390,7 @@ class ModelDownloader:
         subtype: str,
         temp_dir: Path,
     ) -> Path:
+        """Finalize a download by moving files and creating metadata."""
         cleaned_name = normalize_name(official_name)
         effective_model_type = model_type or "llm"
 
@@ -768,6 +453,7 @@ class ModelDownloader:
         quant: Optional[str],
         cancel_event: threading.Event,
     ) -> None:
+        """Download files with cancellation support."""
         api = self._get_api()
         try:
             items = api.list_repo_tree(repo_id=repo_id, repo_type="model", recursive=True)
@@ -815,6 +501,7 @@ class ModelDownloader:
             )
 
     def _run_download(self, download_id: str) -> None:
+        """Run the download in a background thread."""
         with self._download_lock:
             state = self._downloads.get(download_id)
             if not state:
@@ -936,6 +623,7 @@ class ModelDownloader:
         model_dir: Path,
         official_name: str,
     ) -> ModelMetadata:
+        """Build metadata for a downloaded model."""
         now = get_iso_timestamp()
         metadata: ModelMetadata = {
             "model_id": model_dir.name,

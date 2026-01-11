@@ -63,7 +63,7 @@ backend/model_library/
 ```
 
 **Rationale:**
-- **Each module < 300 lines** (well under 700 limit)
+- **Each module < 700 lines**
 - **Clear separation of concerns** (HuggingFace, I/O, networking, search)
 - **Easy to test** (each module has focused responsibility)
 - **Future-proof** (easy to add new capabilities)

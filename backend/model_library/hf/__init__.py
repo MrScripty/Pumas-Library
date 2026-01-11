@@ -22,6 +22,7 @@ from backend.model_library.hf.quant import (  # pragma: no cover
     sorted_quants,
     token_in_normalized,
 )
+from backend.model_library.hf.search import list_repo_tree_paths, search_models  # pragma: no cover
 
 __all__ = [  # pragma: no cover
     "HfClient",
@@ -34,8 +35,10 @@ __all__ = [  # pragma: no cover
     "extract_formats_from_paths",
     "extract_quants_from_paths",
     "infer_kind_from_tags",
+    "list_repo_tree_paths",
     "normalize_quant_source",
     "quant_sizes_from_paths",
+    "search_models",
     "sorted_quants",
     "token_in_normalized",
 ]

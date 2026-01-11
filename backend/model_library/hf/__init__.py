@@ -2,4 +2,6 @@
 
 from __future__ import annotations  # pragma: no cover
 
-__all__ = []  # pragma: no cover
+from backend.model_library.hf.client import HfClient  # pragma: no cover
+
+__all__ = ["HfClient"]  # pragma: no cover

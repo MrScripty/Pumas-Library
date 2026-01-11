@@ -70,7 +70,7 @@ def get_coverage_report() -> dict[str, float] | None:
                 "-m",
                 "pytest",
                 "--cov=backend",
-                "--cov-report=term-missing:skip-covered",
+                "--cov-report=term",
                 "--tb=no",
                 "-q",
                 "--no-cov-on-fail",

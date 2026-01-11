@@ -10,9 +10,15 @@ from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
 
 from backend.logging_config import get_logger
+from backend.model_library.io.platform import (
+    LinkStrategy,
+    create_link,
+    get_default_strategy,
+    verify_link,
+)
 from backend.model_library.library import ModelLibrary
 from backend.model_library.naming import normalize_filename, unique_path
-from backend.utils import ensure_directory, is_broken_symlink, make_relative_symlink
+from backend.utils import ensure_directory
 
 logger = get_logger(__name__)
 
@@ -131,16 +137,43 @@ class ModelMapper:
                 seen.add(candidate)
                 yield candidate
 
-    def _create_link(self, source: Path, target: Path) -> bool:
-        if target.exists():
-            if target.is_symlink():
-                target.unlink()
-            else:
-                logger.warning("Skipping existing non-symlink: %s", target)
-                return False
+    def _create_link(
+        self,
+        source: Path,
+        target: Path,
+        strategy: LinkStrategy | None = None,
+    ) -> bool:
+        """Create a link from target to source using io/platform.
 
-        ensure_directory(target.parent)
-        return make_relative_symlink(source, target)
+        Args:
+            source: The actual file to link to
+            target: Where the link will be created
+            strategy: Link strategy to use (defaults to platform default)
+
+        Returns:
+            True if link was created successfully
+        """
+        if strategy is None:
+            strategy = get_default_strategy()
+
+        # Handle existing non-symlinks
+        if target.exists() and not target.is_symlink():
+            logger.warning("Skipping existing non-symlink: %s", target)
+            return False
+
+        result = create_link(
+            source=source,
+            target=target,
+            strategy=strategy,
+            relative=True,
+            overwrite=True,
+        )
+
+        if not result.success:
+            logger.warning("Failed to create link %s -> %s: %s", target, source, result.error)
+            return False
+
+        return True
 
     def apply_for_app(self, app_id: str, app_version: str, app_models_root: Path) -> int:
         configs = self._load_configs(app_id, app_version)
@@ -190,14 +223,20 @@ class ModelMapper:
                     for source_file in self._iter_matching_files(model_dir, patterns):
                         cleaned_name = normalize_filename(source_file.name)
                         target_path = target_dir / cleaned_name
-                        if target_path.exists():
+
+                        # Handle existing targets
+                        if target_path.exists() or target_path.is_symlink():
                             if target_path.is_symlink():
-                                target_path.unlink()
+                                # Check if symlink is broken
+                                is_valid, _ = verify_link(target_path)
+                                if not is_valid:
+                                    target_path.unlink()
+                                else:
+                                    target_path.unlink()  # Replace with new link
                             else:
+                                # Non-symlink exists, use unique path
                                 target_path = unique_path(target_path)
 
-                        if is_broken_symlink(target_path):
-                            target_path.unlink()
                         if self._create_link(source_file, target_path):
                             total_links += 1
 

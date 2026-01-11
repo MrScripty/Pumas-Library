@@ -9,12 +9,14 @@ import React, { useState, useMemo, useCallback } from 'react';
 import type { ModelCategory } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
+import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
 import { ModelImportDropZone } from './ModelImportDropZone';
 import { ModelImportDialog } from './ModelImportDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
+import { NetworkStatusBanner } from './NetworkStatusBanner';
 import { getReleaseTimestamp } from '../utils/modelFormatters';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
@@ -75,6 +77,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setDownloadError,
     setDownloadRepoId,
   } = useModelDownloads();
+
+  // Network status for offline/rate limit indicators
+  const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
 
   // Computed Values
   const categories = useMemo(() => {
@@ -263,6 +268,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       )}
 
     <div className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col">
+      {/* Network status banner */}
+      <NetworkStatusBanner
+        isOffline={isOffline}
+        isRateLimited={isRateLimited}
+        successRate={successRate}
+        circuitBreakerRejections={circuitBreakerRejections}
+      />
       {/* Header */}
       <ModelSearchBar
         searchQuery={searchQuery}

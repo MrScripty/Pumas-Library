@@ -1122,21 +1122,37 @@ class ComfyUISetupAPI:
             - circuit_breaker_rejections: Requests rejected by circuit breaker
             - retries: Total number of retry attempts
             - success_rate: Success rate as percentage
+            - circuit_states: Map of domain to circuit state
+            - is_offline: True if any circuit breaker is OPEN
 
         Returns:
             Dict with network statistics
         """
         from dataclasses import asdict
 
-        from backend.model_library.network import NetworkManager
+        from backend.model_library.network import CircuitState, NetworkManager
 
         try:
-            # Get global network manager stats if available
-            # For now, create a fresh manager to get stats structure
-            manager = NetworkManager()
+            # Use global network manager for persistent circuit state tracking
+            if not hasattr(self, "_network_manager"):
+                self._network_manager = NetworkManager(
+                    circuit_failure_threshold=3,  # 3 failures before circuit opens
+                    circuit_recovery_timeout=60.0,  # 60s before circuit closes
+                )
+
+            manager = self._network_manager
             stats = manager.get_stats()
             stats_dict = asdict(stats)
             stats_dict["success_rate"] = stats.success_rate
+
+            # Add circuit breaker states
+            circuit_states = manager.get_all_circuit_states()
+            stats_dict["circuit_states"] = circuit_states
+
+            # Check if any circuit is OPEN (offline indicator)
+            is_offline = any(state == CircuitState.OPEN.value for state in circuit_states.values())
+            stats_dict["is_offline"] = is_offline
+
             return {"success": True, **stats_dict}
         except OSError as exc:
             logger.error("Failed to get network status: %s", exc, exc_info=True)

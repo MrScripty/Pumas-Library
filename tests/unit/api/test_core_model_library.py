@@ -150,6 +150,64 @@ class TestNetworkStatus:
         assert stats_dict["successful_requests"] == 8
         assert stats_dict["circuit_breaker_rejections"] == 1
 
+    def test_network_manager_has_circuit_states(self) -> None:
+        """Test that NetworkManager provides circuit breaker states."""
+        from backend.model_library.network import NetworkManager
+
+        manager = NetworkManager()
+        # Should have a method to get all circuit states
+        assert hasattr(manager, "get_all_circuit_states")
+        circuit_states = manager.get_all_circuit_states()
+        assert isinstance(circuit_states, dict)
+
+    def test_circuit_state_enum_values(self) -> None:
+        """Test that CircuitState enum has expected values."""
+        from backend.model_library.network import CircuitState
+
+        assert hasattr(CircuitState, "CLOSED")
+        assert hasattr(CircuitState, "OPEN")
+        assert hasattr(CircuitState, "HALF_OPEN")
+        # Values should be lowercase strings
+        assert CircuitState.CLOSED.value == "closed"
+        assert CircuitState.OPEN.value == "open"
+        assert CircuitState.HALF_OPEN.value == "half_open"
+
+    def test_circuit_breaker_starts_closed(self) -> None:
+        """Test that circuit breakers start in CLOSED state."""
+        from backend.model_library.network import CircuitBreaker, CircuitState
+
+        cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
+        assert cb.state == CircuitState.CLOSED
+
+    def test_circuit_breaker_opens_after_failures(self) -> None:
+        """Test that circuit breaker opens after threshold failures."""
+        from backend.model_library.network import CircuitBreaker, CircuitState
+
+        cb = CircuitBreaker(failure_threshold=3, recovery_timeout=60.0)
+
+        # Record 3 failures
+        for _ in range(3):
+            cb.record_failure()
+
+        assert cb.state == CircuitState.OPEN
+
+    def test_network_manager_is_circuit_open(self) -> None:
+        """Test that NetworkManager can check if circuit is open."""
+        from backend.model_library.network import NetworkManager
+
+        manager = NetworkManager(circuit_failure_threshold=3, circuit_recovery_timeout=60.0)
+
+        # Initially no circuit should be open
+        assert manager.is_circuit_open("example.com") is False
+
+        # Record failures for a domain
+        cb = manager.get_circuit_breaker("example.com")
+        for _ in range(3):
+            cb.record_failure()
+
+        # Now it should be open
+        assert manager.is_circuit_open("example.com") is True
+
 
 @pytest.mark.unit
 class TestImportBatch:

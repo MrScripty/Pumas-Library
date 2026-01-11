@@ -229,6 +229,10 @@ export interface NetworkStatusResponse extends BaseResponse {
   circuit_breaker_rejections: number;
   retries: number;
   success_rate: number;
+  /** Map of domain to circuit state (CLOSED, OPEN, HALF_OPEN) */
+  circuit_states: Record<string, string>;
+  /** Whether any circuit breaker is currently open (offline indicator) */
+  is_offline: boolean;
 }
 
 /**

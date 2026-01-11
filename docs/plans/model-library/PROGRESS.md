@@ -1,8 +1,8 @@
 # Model Library Implementation Progress
 
 **Last Updated:** 2026-01-11
-**Current Phase:** Phase 1A - Core Infrastructure
-**Status:** Part 6 ✅ COMPLETE (Frontend)
+**Current Phase:** Phase 1B - Link Registry Database
+**Status:** In Progress
 
 ---
 
@@ -134,16 +134,35 @@
 
 ## Phase 1B: Link Registry Database
 
-**Status:** Not Started (depends on Phase 1A)
+**Status:** In Progress
 
-- [ ] backend/model_library/link_registry.py
-- [ ] Create registry.db schema
-- [ ] Add cascade delete support
-- [ ] Add health check methods
-- [ ] Add broken link detection
-- [ ] Add orphaned link detection
-- [ ] Update API endpoints
-- [ ] Add frontend health status UI
+### Part 1: Link Registry Core ✅ COMPLETE
+- [x] backend/model_library/link_registry.py - LinkRegistry class with SQLite storage
+- [x] Create registry.db schema (links, settings tables with indexes)
+- [x] Add cascade delete support (`delete_links_for_model`)
+- [x] Add broken link detection (`find_broken_links`)
+- [x] Add orphaned link detection (`find_orphaned_links`)
+- [x] Add health check methods (`perform_health_check`)
+- [x] Update mapper.py with registry integration
+- [x] Add tests for link_registry.py (45 tests, 94%+ coverage)
+- [x] Add tests for mapper registry integration (5 tests)
+
+**Part 1 Results:**
+| Module | Lines | Tests | Coverage |
+|--------|-------|-------|----------|
+| link_registry.py | 340 | 45 | 94%+ |
+| mapper.py updates | +90 | 5 | - |
+| **Total** | 430 | 50 | 94%+ |
+
+### Part 2: API Endpoints (Pending)
+- [ ] Add `get_link_health` endpoint to api/core.py
+- [ ] Add `clean_broken_links` endpoint
+- [ ] Add `remove_orphaned_links` endpoint
+- [ ] Add `get_links_for_model` endpoint
+
+### Part 3: Frontend Health UI (Pending)
+- [ ] Add TypeScript types for health check responses
+- [ ] Add health status component to Settings page
 
 ---
 
@@ -163,6 +182,17 @@
 ---
 
 ## Completed Items
+
+### 2026-01-11: Link Registry Core ✅ COMPLETE
+- Created link_registry.py (340 lines, 45 tests, 94%+ coverage)
+- SQLite-backed registry with WAL mode for concurrent access
+- Links table with indexes on model_id, app, and is_external
+- Cascade delete removes symlinks and registry entries
+- Health check detects broken links, orphaned links, external links
+- Bulk path update for drive mount point changes
+- Updated mapper.py with optional registry integration
+- Added 5 tests for mapper-registry integration
+- Total: 50 new tests, all pre-commit hooks passing
 
 ### 2026-01-11: Frontend ✅ COMPLETE
 - Added TypeScript types to pywebview.d.ts (9 new interfaces/types)
@@ -235,4 +265,4 @@
 
 ---
 
-**Next Session Focus:** Phase 1A Complete! Begin Phase 1B (Link Registry Database)
+**Next Session Focus:** Complete Phase 1B Parts 2-3 (API endpoints and frontend health UI)

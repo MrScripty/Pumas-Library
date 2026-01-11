@@ -8,10 +8,30 @@ from backend.model_library.io.hashing import (  # pragma: no cover
     hash_file_blake3,
     hash_file_sha256,
 )
+from backend.model_library.io.validator import (  # pragma: no cover
+    ValidationIssue,
+    ValidationResult,
+    ValidationSeverity,
+    is_filesystem_writable,
+    is_ntfs_dirty,
+    is_path_on_readonly_mount,
+    validate_import_source,
+    validate_mapping_target,
+)
 
 __all__ = [  # pragma: no cover
+    # Hashing
     "StreamHasher",
     "compute_dual_hash",
     "hash_file_blake3",
     "hash_file_sha256",
+    # Validation
+    "ValidationIssue",
+    "ValidationResult",
+    "ValidationSeverity",
+    "is_filesystem_writable",
+    "is_ntfs_dirty",
+    "is_path_on_readonly_mount",
+    "validate_import_source",
+    "validate_mapping_target",
 ]

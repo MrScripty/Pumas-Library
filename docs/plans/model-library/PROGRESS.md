@@ -1,8 +1,8 @@
 # Model Library Implementation Progress
 
-**Last Updated:** 2026-01-10
+**Last Updated:** 2026-01-11
 **Current Phase:** Phase 1A - Core Infrastructure
-**Status:** Search Infrastructure ✅ COMPLETE (2/2 modules)
+**Status:** Part 4 ✅ COMPLETE (Update Existing Files)
 
 ---
 
@@ -74,13 +74,22 @@
 | search/query.py | 248 | 34 | 91%+ |
 | **Total** | 667 | 62 | 88%+ |
 
-### Part 4: Update Existing Files
+### Part 4: Update Existing Files ✅ COMPLETE
 **Goal:** Integrate new modules into existing codebase
 
-- [ ] importer.py - Use io/* modules for stream hashing
-- [ ] library.py - Add FTS5 support
-- [ ] mapper.py - Use io/platform for link creation
-- [ ] naming.py - Add NTFS sanitization functions
+- [x] importer.py - Use io/* modules for stream hashing - `793fc83`
+- [x] library.py - Add FTS5 support - `cdcf8f1`
+- [x] mapper.py - Use io/platform for link creation - `411f82b`
+- [x] naming.py - Add NTFS sanitization functions - `e649b86`
+
+**Part 4 Results:**
+| Module | Tests Added | Coverage |
+|--------|-------------|----------|
+| importer.py | 16 | 93%+ |
+| library.py | 15 | 86%+ |
+| mapper.py | 17 | 75%+ |
+| naming.py | 21 | 90%+ |
+| **Total** | 69 | 85%+ |
 
 ### Part 5: API Layer
 **Goal:** Expose new functionality via PyWebView API
@@ -133,6 +142,14 @@
 
 ## Completed Items
 
+### 2026-01-11: Update Existing Files ✅ COMPLETE
+- Updated importer.py with io/hashing.compute_dual_hash (16 tests, 93%+ coverage)
+- Updated library.py with FTS5 search_models method (15 tests, 86%+ coverage)
+- Updated mapper.py with io/platform.create_link (17 tests, 75%+ coverage)
+- Updated naming.py with NTFS sanitization functions (21 tests, 90%+ coverage)
+- 4 atomic commits, all pre-commit hooks passing
+- Total: 69 new tests
+
 ### 2026-01-10: Search Infrastructure ✅ COMPLETE
 - Created search/fts5.py (419 lines, 28 tests, 85%+ coverage)
 - Created search/query.py (248 lines, 34 tests, 91%+ coverage)
@@ -178,4 +195,4 @@
 
 ---
 
-**Next Session Focus:** Part 4 - Update Existing Files (importer.py, library.py, mapper.py, naming.py)
+**Next Session Focus:** Part 5 - API Layer (api/core.py endpoints)

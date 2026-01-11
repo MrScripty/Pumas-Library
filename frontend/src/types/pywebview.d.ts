@@ -271,6 +271,101 @@ export interface FileLinkCountResponse extends BaseResponse {
   is_hard_linked: boolean;
 }
 
+/**
+ * HuggingFace metadata lookup result (Phase 2 - Model Import)
+ */
+export interface HFMetadataLookupResult {
+  repo_id: string;
+  official_name: string;
+  family: string;
+  model_type?: string;
+  subtype?: string;
+  variant?: string;
+  precision?: string;
+  tags?: string[];
+  base_model?: string;
+  download_url?: string;
+  description?: string;
+  match_confidence?: number;
+  match_method?: 'hash' | 'filename_exact' | 'filename_fuzzy';
+  requires_confirmation?: boolean;
+  hash_mismatch?: boolean;
+  matched_filename?: string;
+  pending_full_verification?: boolean;
+  fast_hash?: string;
+  expected_sha256?: string;
+}
+
+/**
+ * HuggingFace metadata lookup response
+ */
+export interface HFMetadataLookupResponse extends BaseResponse {
+  found: boolean;
+  metadata?: HFMetadataLookupResult;
+}
+
+/**
+ * Shard validation result
+ */
+export interface ShardValidation {
+  complete: boolean;
+  missing_shards: number[];
+  total_expected: number;
+  total_found: number;
+  error?: string;
+}
+
+/**
+ * Sharded set group info
+ */
+export interface ShardedSetGroup {
+  files: string[];
+  validation: ShardValidation;
+}
+
+/**
+ * Detect sharded sets response
+ */
+export interface DetectShardedSetsResponse extends BaseResponse {
+  groups: Record<string, ShardedSetGroup>;
+}
+
+/**
+ * File type validation response
+ */
+export interface FileTypeValidationResponse extends BaseResponse {
+  valid: boolean;
+  detected_type: 'safetensors' | 'gguf' | 'ggml' | 'pickle' | 'onnx' | 'unknown' | 'error';
+  error?: string;
+}
+
+/**
+ * Library status response
+ */
+export interface GetLibraryStatusResponse extends BaseResponse {
+  indexing: boolean;
+  deep_scan_in_progress: boolean;
+  model_count: number;
+  pending_lookups?: number;
+  deep_scan_progress?: {
+    current: number;
+    total: number;
+    stage: string;
+  };
+}
+
+/**
+ * Check files writable response
+ */
+export interface CheckFilesWritableResponse extends BaseResponse {
+  all_writable: boolean;
+  details: Array<{
+    path: string;
+    writable: boolean;
+    reason?: string;
+  }>;
+}
+
 // ============================================================================
 // Link Registry Types (Phase 1B)
 // ============================================================================
@@ -760,6 +855,47 @@ export interface PyWebViewAPI {
    * Get network status including circuit breaker state
    */
   get_network_status(): Promise<NetworkStatusResponse>;
+
+  // ========================================
+  // Model Import (Phase 2)
+  // ========================================
+  /**
+   * Look up HuggingFace metadata for a file using hybrid filename + hash matching
+   */
+  lookup_hf_metadata_for_file(
+    filename: string,
+    filePath?: string | null
+  ): Promise<HFMetadataLookupResponse>;
+
+  /**
+   * Detect and group sharded model files
+   */
+  detect_sharded_sets(filePaths: string[]): Promise<DetectShardedSetsResponse>;
+
+  /**
+   * Validate file type using magic bytes
+   */
+  validate_file_type(filePath: string): Promise<FileTypeValidationResponse>;
+
+  /**
+   * Mark model metadata as manually corrected to protect from auto-updates
+   */
+  mark_metadata_as_manual(modelId: string): Promise<BaseResponse>;
+
+  /**
+   * Get current library status including indexing state
+   */
+  get_library_status(): Promise<GetLibraryStatusResponse>;
+
+  /**
+   * Get number of hard links for a file (NTFS detection)
+   */
+  get_file_link_count(filePath: string): Promise<FileLinkCountResponse>;
+
+  /**
+   * Check if files can be safely deleted
+   */
+  check_files_writable(filePaths: string[]): Promise<CheckFilesWritableResponse>;
 
   // ========================================
   // Link Health (Phase 1B)

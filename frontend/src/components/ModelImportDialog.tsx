@@ -5,7 +5,7 @@
  * Steps: File Review -> Metadata Lookup -> Import Progress -> Complete
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   X,
   FileBox,
@@ -17,15 +17,27 @@ import {
   Shield,
   ShieldAlert,
   ShieldQuestion,
+  ShieldCheck,
+  Link,
+  Unlink,
+  Eye,
+  Folder,
 } from 'lucide-react';
 import { importAPI } from '../api/import';
-import type { ModelImportSpec, SecurityTier } from '../types/pywebview';
+import type {
+  ModelImportSpec,
+  SecurityTier,
+  HFMetadataLookupResult,
+} from '../types/pywebview';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('ModelImportDialog');
 
 /** Import step enumeration */
-type ImportStep = 'review' | 'importing' | 'complete';
+type ImportStep = 'review' | 'lookup' | 'importing' | 'complete';
+
+/** Metadata match status */
+type MetadataStatus = 'pending' | 'found' | 'not_found' | 'error' | 'manual';
 
 /** Individual file status during import */
 interface FileImportStatus {
@@ -35,6 +47,23 @@ interface FileImportStatus {
   error?: string;
   securityTier?: SecurityTier;
   securityAcknowledged?: boolean;
+  /** HuggingFace metadata lookup result */
+  hfMetadata?: HFMetadataLookupResult;
+  metadataStatus?: MetadataStatus;
+  /** Whether this file is part of a sharded set */
+  shardedSetKey?: string;
+  /** Whether file type is valid */
+  validFileType?: boolean;
+  detectedFileType?: string;
+}
+
+/** Sharded set info for UI display */
+interface ShardedSetInfo {
+  key: string;
+  files: string[];
+  complete: boolean;
+  missingShards: number[];
+  expanded: boolean;
 }
 
 interface ModelImportDialogProps {
@@ -94,6 +123,48 @@ function getSecurityBadge(tier: SecurityTier): { className: string; text: string
   }
 }
 
+/**
+ * Get trust badge based on HF metadata match.
+ */
+function getTrustBadge(metadata?: HFMetadataLookupResult): {
+  className: string;
+  text: string;
+  Icon: typeof ShieldCheck;
+  tooltip: string;
+} | null {
+  if (!metadata || !metadata.match_method) return null;
+
+  if (metadata.match_method === 'hash' && metadata.match_confidence === 1.0) {
+    return {
+      className: 'bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))]',
+      text: 'Verified',
+      Icon: ShieldCheck,
+      tooltip: 'Hash matches HuggingFace - file is authentic',
+    };
+  }
+
+  if (metadata.match_method === 'filename_exact') {
+    return {
+      className: 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--launcher-accent-primary))]',
+      text: 'Matched',
+      Icon: Link,
+      tooltip: `Filename matched: ${metadata.repo_id}`,
+    };
+  }
+
+  if (metadata.match_method === 'filename_fuzzy') {
+    const confidence = metadata.match_confidence ?? 0;
+    return {
+      className: 'bg-[hsl(var(--launcher-accent-warning)/0.2)] text-[hsl(var(--launcher-accent-warning))]',
+      text: 'Possible Match',
+      Icon: Eye,
+      tooltip: `Possible match: ${metadata.repo_id} (${Math.round(confidence * 100)}% confidence)`,
+    };
+  }
+
+  return null;
+}
+
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   filePaths,
   onClose,
@@ -103,6 +174,8 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   const [files, setFiles] = useState<FileImportStatus[]>([]);
   const [importedCount, setImportedCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
+  const [shardedSets, setShardedSets] = useState<ShardedSetInfo[]>([]);
+  const [lookupProgress, setLookupProgress] = useState({ current: 0, total: 0 });
 
   // Initialize file statuses
   useEffect(() => {
@@ -115,10 +188,53 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
         status: 'pending',
         securityTier,
         securityAcknowledged: securityTier !== 'pickle', // Auto-acknowledge safe formats
+        metadataStatus: 'pending',
       };
     });
     setFiles(fileStatuses);
   }, [filePaths]);
+
+  // Detect sharded sets when files change
+  useEffect(() => {
+    if (files.length === 0) return;
+
+    const detectShards = async () => {
+      try {
+        const paths = files.map(f => f.path);
+        const result = await importAPI.detectShardedSets(paths);
+
+        if (result.success && result.groups) {
+          const sets: ShardedSetInfo[] = [];
+          const fileToSetMap: Record<string, string> = {};
+
+          Object.entries(result.groups).forEach(([key, group]) => {
+            if (group.files.length > 1) {
+              sets.push({
+                key,
+                files: group.files,
+                complete: group.validation.complete,
+                missingShards: group.validation.missing_shards,
+                expanded: false,
+              });
+              group.files.forEach(file => {
+                fileToSetMap[file] = key;
+              });
+            }
+          });
+
+          setShardedSets(sets);
+          setFiles(prev => prev.map(f => ({
+            ...f,
+            shardedSetKey: fileToSetMap[f.path],
+          })));
+        }
+      } catch (error) {
+        logger.error('Failed to detect sharded sets', { error });
+      }
+    };
+
+    detectShards();
+  }, [files.length]); // Only run when file count changes
 
   // Check if all pickle files are acknowledged
   const allPickleAcknowledged = files.every(
@@ -144,29 +260,109 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
     setFiles((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
+  // Toggle sharded set expansion
+  const toggleShardedSet = useCallback((key: string) => {
+    setShardedSets(prev => prev.map(set =>
+      set.key === key ? { ...set, expanded: !set.expanded } : set
+    ));
+  }, []);
+
+  // Perform HuggingFace metadata lookup
+  const performMetadataLookup = useCallback(async () => {
+    setStep('lookup');
+    setLookupProgress({ current: 0, total: files.length });
+
+    const updatedFiles = [...files];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file) continue;
+
+      setLookupProgress({ current: i + 1, total: files.length });
+
+      try {
+        // First validate file type
+        const typeResult = await importAPI.validateFileType(file.path);
+        updatedFiles[i] = {
+          ...updatedFiles[i]!,
+          validFileType: typeResult.valid,
+          detectedFileType: typeResult.detected_type,
+        };
+
+        if (!typeResult.valid) {
+          updatedFiles[i] = {
+            ...updatedFiles[i]!,
+            metadataStatus: 'error',
+          };
+          continue;
+        }
+
+        // Then lookup HF metadata
+        const result = await importAPI.lookupHFMetadata(file.filename, file.path);
+
+        if (result.success && result.found && result.metadata) {
+          updatedFiles[i] = {
+            ...updatedFiles[i]!,
+            hfMetadata: result.metadata,
+            metadataStatus: 'found',
+          };
+        } else {
+          updatedFiles[i] = {
+            ...updatedFiles[i]!,
+            metadataStatus: 'not_found',
+          };
+        }
+      } catch (error) {
+        logger.error('Metadata lookup failed', { file: file.filename, error });
+        updatedFiles[i] = {
+          ...updatedFiles[i]!,
+          metadataStatus: 'error',
+        };
+      }
+    }
+
+    setFiles(updatedFiles);
+  }, [files]);
+
   // Start the import process
   const startImport = useCallback(async () => {
     if (!allPickleAcknowledged || files.length === 0) return;
 
     setStep('importing');
 
-    // Build import specs
-    const specs: ModelImportSpec[] = files.map((f) => ({
-      path: f.path,
-      family: 'imported', // Will be determined by backend metadata lookup
-      official_name: f.filename.replace(/\.[^.]+$/, ''), // Remove extension
-      security_acknowledged: f.securityAcknowledged,
-    }));
+    // Build import specs with HF metadata
+    const specs: ModelImportSpec[] = files
+      .filter(f => f.validFileType !== false) // Skip invalid file types
+      .map((f) => ({
+        path: f.path,
+        family: f.hfMetadata?.family || 'imported',
+        official_name: f.hfMetadata?.official_name || f.filename.replace(/\.[^.]+$/, ''),
+        repo_id: f.hfMetadata?.repo_id,
+        model_type: f.hfMetadata?.model_type,
+        subtype: f.hfMetadata?.subtype,
+        tags: f.hfMetadata?.tags,
+        security_acknowledged: f.securityAcknowledged,
+      }));
 
     try {
       // Mark all as importing
-      setFiles((prev) => prev.map((f) => ({ ...f, status: 'importing' })));
+      setFiles((prev) => prev.map((f) => ({
+        ...f,
+        status: f.validFileType !== false ? 'importing' : 'error',
+      })));
 
       const result = await importAPI.importBatch(specs);
 
       // Update statuses based on results
       setFiles((prev) =>
         prev.map((f) => {
+          if (f.validFileType === false) {
+            return {
+              ...f,
+              status: 'error',
+              error: `Invalid file type: ${f.detectedFileType}`,
+            };
+          }
           const importResult = result.results.find((r) => r.path === f.path);
           if (importResult) {
             return {
@@ -181,7 +377,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
       );
 
       setImportedCount(result.imported);
-      setFailedCount(result.failed);
+      setFailedCount(result.failed + files.filter(f => f.validFileType === false).length);
       setStep('complete');
 
       if (result.imported > 0) {
@@ -201,10 +397,15 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
     }
   }, [allPickleAcknowledged, files, onImportComplete]);
 
+  // Proceed from review to lookup
+  const proceedToLookup = useCallback(() => {
+    performMetadataLookup();
+  }, [performMetadataLookup]);
+
   // Handle close with confirmation if import in progress
   const handleClose = useCallback(() => {
-    if (step === 'importing') {
-      // Don't allow closing during import
+    if (step === 'importing' || step === 'lookup') {
+      // Don't allow closing during import/lookup
       return;
     }
     onClose();
@@ -213,6 +414,20 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   // Count pickle files that need acknowledgment
   const pickleFilesCount = files.filter((f) => f.securityTier === 'pickle').length;
   const acknowledgedCount = files.filter((f) => f.securityTier === 'pickle' && f.securityAcknowledged).length;
+
+  // Count files with invalid file types
+  const invalidFileCount = files.filter(f => f.validFileType === false).length;
+
+  // Count verified vs unverified files
+  const verifiedCount = files.filter(f =>
+    f.hfMetadata?.match_method === 'hash' && f.hfMetadata?.match_confidence === 1.0
+  ).length;
+
+  // Group files by sharded set for display
+  const standaloneFiles = useMemo(() =>
+    files.filter(f => !f.shardedSetKey),
+    [files]
+  );
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -223,13 +438,14 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
             <FileBox className="w-5 h-5 text-[hsl(var(--launcher-accent-primary))]" />
             <h2 className="text-lg font-semibold text-[hsl(var(--launcher-text-primary))]">
               {step === 'review' && 'Import Models'}
+              {step === 'lookup' && 'Looking up metadata...'}
               {step === 'importing' && 'Importing...'}
               {step === 'complete' && 'Import Complete'}
             </h2>
           </div>
           <button
             onClick={handleClose}
-            disabled={step === 'importing'}
+            disabled={step === 'importing' || step === 'lookup'}
             className="p-1 rounded-md text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             <X className="w-5 h-5" />
@@ -241,6 +457,23 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
           {/* Step 1: Review Files */}
           {step === 'review' && (
             <div className="space-y-4">
+              {/* Sharded sets warning */}
+              {shardedSets.some(s => !s.complete) && (
+                <div className="p-4 rounded-lg border-l-4 border-[hsl(var(--launcher-accent-warning))] bg-[hsl(var(--launcher-accent-warning)/0.1)]">
+                  <div className="flex items-start gap-3">
+                    <Unlink className="w-5 h-5 text-[hsl(var(--launcher-accent-warning))] flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
+                        Incomplete sharded model detected
+                      </p>
+                      <p className="text-xs text-[hsl(var(--launcher-text-muted))] mt-1">
+                        Some model shards are missing. The model may not work correctly.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Security warning for pickle files */}
               {pickleFilesCount > 0 && (
                 <div className="p-4 rounded-lg border-l-4 border-[hsl(var(--launcher-accent-error))] bg-[hsl(var(--launcher-accent-error)/0.1)]">
@@ -259,52 +492,120 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                 </div>
               )}
 
-              {/* File list */}
-              <div className="space-y-2">
-                {files.map((file, index) => {
-                  const badge = getSecurityBadge(file.securityTier || 'unknown');
-                  const BadgeIcon = badge.Icon;
-
-                  return (
+              {/* Sharded sets */}
+              {shardedSets.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="text-sm font-medium text-[hsl(var(--launcher-text-secondary))] flex items-center gap-2">
+                    <Folder className="w-4 h-4" />
+                    Sharded Models ({shardedSets.length})
+                  </h3>
+                  {shardedSets.map((set) => (
                     <div
-                      key={file.path}
-                      className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
+                      key={set.key}
+                      className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)] overflow-hidden"
                     >
-                      <FileBox className="w-5 h-5 text-[hsl(var(--launcher-text-muted))] flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-[hsl(var(--launcher-text-primary))] truncate">
-                          {file.filename}
-                        </p>
-                        <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
-                          {file.path}
-                        </p>
-                      </div>
-                      <span className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${badge.className}`}>
-                        <BadgeIcon className="w-3 h-3" />
-                        {badge.text}
-                      </span>
-                      {file.securityTier === 'pickle' && (
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={file.securityAcknowledged}
-                            onChange={() => toggleSecurityAck(index)}
-                            className="w-4 h-4 rounded border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-control))] text-[hsl(var(--launcher-accent-primary))] focus:ring-[hsl(var(--launcher-accent-primary))]"
-                          />
-                          <span className="text-xs text-[hsl(var(--launcher-text-muted))]">I understand</span>
-                        </label>
-                      )}
                       <button
-                        onClick={() => removeFile(index)}
-                        className="p-1 rounded text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-error))] hover:bg-[hsl(var(--launcher-bg-tertiary))] transition-colors"
-                        title="Remove from import"
+                        onClick={() => toggleShardedSet(set.key)}
+                        className="w-full flex items-center gap-3 p-3 hover:bg-[hsl(var(--launcher-bg-tertiary))] transition-colors"
                       >
-                        <X className="w-4 h-4" />
+                        <Folder className="w-5 h-5 text-[hsl(var(--launcher-accent-primary))] flex-shrink-0" />
+                        <div className="flex-1 text-left">
+                          <p className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
+                            {set.key}
+                          </p>
+                          <p className="text-xs text-[hsl(var(--launcher-text-muted))]">
+                            {set.files.length} shards
+                          </p>
+                        </div>
+                        {set.complete ? (
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))] flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" />
+                            Complete
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded text-xs font-medium bg-[hsl(var(--launcher-accent-warning)/0.2)] text-[hsl(var(--launcher-accent-warning))] flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            Missing {set.missingShards.length} shard(s)
+                          </span>
+                        )}
+                        <ChevronRight className={`w-4 h-4 text-[hsl(var(--launcher-text-muted))] transition-transform ${set.expanded ? 'rotate-90' : ''}`} />
                       </button>
+                      {set.expanded && (
+                        <div className="px-3 pb-3 space-y-1">
+                          {set.files.map((filePath) => {
+                            const file = files.find(f => f.path === filePath);
+                            if (!file) return null;
+                            return (
+                              <div
+                                key={filePath}
+                                className="flex items-center gap-2 p-2 rounded bg-[hsl(var(--launcher-bg-secondary))] text-xs text-[hsl(var(--launcher-text-muted))]"
+                              >
+                                <FileBox className="w-3 h-3" />
+                                {file.filename}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Standalone file list */}
+              {standaloneFiles.length > 0 && (
+                <div className="space-y-2">
+                  {shardedSets.length > 0 && (
+                    <h3 className="text-sm font-medium text-[hsl(var(--launcher-text-secondary))]">
+                      Individual Files ({standaloneFiles.length})
+                    </h3>
+                  )}
+                  {standaloneFiles.map((file) => {
+                    const realIndex = files.findIndex(f => f.path === file.path);
+                    const badge = getSecurityBadge(file.securityTier || 'unknown');
+                    const BadgeIcon = badge.Icon;
+
+                    return (
+                      <div
+                        key={file.path}
+                        className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
+                      >
+                        <FileBox className="w-5 h-5 text-[hsl(var(--launcher-text-muted))] flex-shrink-0" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-[hsl(var(--launcher-text-primary))] truncate">
+                            {file.filename}
+                          </p>
+                          <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
+                            {file.path}
+                          </p>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${badge.className}`}>
+                          <BadgeIcon className="w-3 h-3" />
+                          {badge.text}
+                        </span>
+                        {file.securityTier === 'pickle' && (
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={file.securityAcknowledged}
+                              onChange={() => toggleSecurityAck(realIndex)}
+                              className="w-4 h-4 rounded border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-control))] text-[hsl(var(--launcher-accent-primary))] focus:ring-[hsl(var(--launcher-accent-primary))]"
+                            />
+                            <span className="text-xs text-[hsl(var(--launcher-text-muted))]">I understand</span>
+                          </label>
+                        )}
+                        <button
+                          onClick={() => removeFile(realIndex)}
+                          className="p-1 rounded text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-error))] hover:bg-[hsl(var(--launcher-bg-tertiary))] transition-colors"
+                          title="Remove from import"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
               {files.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-12 text-[hsl(var(--launcher-text-muted))]">
@@ -315,7 +616,64 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
             </div>
           )}
 
-          {/* Step 2: Importing */}
+          {/* Step 2: Metadata Lookup */}
+          {step === 'lookup' && (
+            <div className="space-y-4">
+              <div className="flex flex-col items-center justify-center py-8">
+                <Loader2 className="w-12 h-12 text-[hsl(var(--launcher-accent-primary))] animate-spin mb-4" />
+                <p className="text-sm text-[hsl(var(--launcher-text-secondary))]">
+                  Looking up metadata ({lookupProgress.current}/{lookupProgress.total})
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                {files.map((file) => {
+                  const trustBadge = getTrustBadge(file.hfMetadata);
+
+                  return (
+                    <div
+                      key={file.path}
+                      className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
+                    >
+                      {file.metadataStatus === 'pending' && (
+                        <div className="w-4 h-4 rounded-full border-2 border-[hsl(var(--launcher-border))] flex-shrink-0" />
+                      )}
+                      {file.metadataStatus === 'found' && (
+                        <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
+                      )}
+                      {file.metadataStatus === 'not_found' && (
+                        <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))] flex-shrink-0" />
+                      )}
+                      {file.metadataStatus === 'error' && (
+                        <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
+                          {file.filename}
+                        </p>
+                        {file.hfMetadata && (
+                          <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
+                            {file.hfMetadata.repo_id}
+                          </p>
+                        )}
+                      </div>
+                      {trustBadge && (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
+                          title={trustBadge.tooltip}
+                        >
+                          <trustBadge.Icon className="w-3 h-3" />
+                          {trustBadge.text}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Importing */}
           {step === 'importing' && (
             <div className="space-y-4">
               <div className="flex items-center justify-center py-8">
@@ -348,7 +706,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
             </div>
           )}
 
-          {/* Step 3: Complete */}
+          {/* Step 4: Complete */}
           {step === 'complete' && (
             <div className="space-y-4">
               {/* Summary */}
@@ -359,6 +717,12 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                     <p className="text-lg font-medium text-[hsl(var(--launcher-text-primary))]">
                       {importedCount} model{importedCount !== 1 ? 's' : ''} imported successfully
                     </p>
+                    {verifiedCount > 0 && (
+                      <p className="text-sm text-[hsl(var(--launcher-text-muted))] flex items-center gap-1 mt-1">
+                        <ShieldCheck className="w-4 h-4 text-[hsl(var(--launcher-accent-success))]" />
+                        {verifiedCount} verified from HuggingFace
+                      </p>
+                    )}
                   </div>
                 ) : importedCount === 0 ? (
                   <div className="flex flex-col items-center">
@@ -385,29 +749,42 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
 
               {/* Results list */}
               <div className="space-y-2">
-                {files.map((file) => (
-                  <div
-                    key={file.path}
-                    className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
-                  >
-                    {file.status === 'success' && (
-                      <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
-                    )}
-                    {file.status === 'error' && (
-                      <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
-                    )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
-                        {file.filename}
-                      </p>
-                      {file.error && (
-                        <p className="text-xs text-[hsl(var(--launcher-accent-error))] truncate">
-                          {file.error}
+                {files.map((file) => {
+                  const trustBadge = getTrustBadge(file.hfMetadata);
+
+                  return (
+                    <div
+                      key={file.path}
+                      className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
+                    >
+                      {file.status === 'success' && (
+                        <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
+                      )}
+                      {file.status === 'error' && (
+                        <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
+                          {file.filename}
                         </p>
+                        {file.error && (
+                          <p className="text-xs text-[hsl(var(--launcher-accent-error))] truncate">
+                            {file.error}
+                          </p>
+                        )}
+                      </div>
+                      {trustBadge && file.status === 'success' && (
+                        <span
+                          className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
+                          title={trustBadge.tooltip}
+                        >
+                          <trustBadge.Icon className="w-3 h-3" />
+                          {trustBadge.text}
+                        </span>
                       )}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -420,8 +797,10 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
               <>
                 {files.length} file{files.length !== 1 ? 's' : ''} selected
                 {pickleFilesCount > 0 && ` (${acknowledgedCount}/${pickleFilesCount} acknowledged)`}
+                {shardedSets.length > 0 && ` • ${shardedSets.length} sharded set${shardedSets.length > 1 ? 's' : ''}`}
               </>
             )}
+            {step === 'lookup' && `Looking up ${lookupProgress.current}/${lookupProgress.total}...`}
             {step === 'importing' && 'Please wait...'}
             {step === 'complete' && 'Import finished'}
           </div>
@@ -435,14 +814,24 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                   Cancel
                 </button>
                 <button
-                  onClick={startImport}
+                  onClick={proceedToLookup}
                   disabled={!allPickleAcknowledged || files.length === 0}
                   className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-[hsl(var(--launcher-accent-primary))] text-[hsl(var(--launcher-bg-primary))] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
                 >
-                  Import
+                  Continue
                   <ChevronRight className="w-4 h-4" />
                 </button>
               </>
+            )}
+            {step === 'lookup' && (
+              <button
+                onClick={startImport}
+                disabled={lookupProgress.current < lookupProgress.total}
+                className="flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg bg-[hsl(var(--launcher-accent-primary))] text-[hsl(var(--launcher-bg-primary))] hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
+              >
+                Import{invalidFileCount > 0 ? ` (${files.length - invalidFileCount})` : ''}
+                <ChevronRight className="w-4 h-4" />
+              </button>
             )}
             {step === 'complete' && (
               <button

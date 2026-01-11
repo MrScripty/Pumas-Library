@@ -507,6 +507,7 @@ export default function App() {
                 selectedAppId={selectedAppId}
                 onAddModels={scanModels}
                 onOpenModelsRoot={openModelsRoot}
+                activeVersion={activeVersion}
               />
             </div>
           )}

@@ -14,6 +14,7 @@ import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
 import { ModelImportDropZone } from './ModelImportDropZone';
 import { ModelImportDialog } from './ModelImportDialog';
+import { LinkHealthStatus } from './LinkHealthStatus';
 import { getReleaseTimestamp } from '../utils/modelFormatters';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
@@ -31,6 +32,8 @@ interface ModelManagerProps {
   onOpenModelsRoot?: () => void;
   /** Callback when models are imported to refresh the list */
   onModelsImported?: () => void;
+  /** Active version tag for link health check */
+  activeVersion?: string | null;
 }
 
 export const ModelManager: React.FC<ModelManagerProps> = ({
@@ -43,6 +46,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   onAddModels,
   onOpenModelsRoot,
   onModelsImported,
+  activeVersion,
 }) => {
   // UI State
   const [searchQuery, setSearchQuery] = useState('');
@@ -296,17 +300,23 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               selectedKind={selectedKind}
             />
           ) : (
-            <LocalModelsList
-              modelGroups={filteredGroups}
-              starredModels={starredModels}
-              linkedModels={linkedModels}
-              onToggleStar={onToggleStar}
-              onToggleLink={onToggleLink}
-              selectedAppId={selectedAppId}
-              totalModels={totalModels}
-              hasFilters={hasLocalFilters}
-              onClearFilters={handleClearLocalFilters}
-            />
+            <>
+              <LocalModelsList
+                modelGroups={filteredGroups}
+                starredModels={starredModels}
+                linkedModels={linkedModels}
+                onToggleStar={onToggleStar}
+                onToggleLink={onToggleLink}
+                selectedAppId={selectedAppId}
+                totalModels={totalModels}
+                hasFilters={hasLocalFilters}
+                onClearFilters={handleClearLocalFilters}
+              />
+              {/* Link Health Status */}
+              <div className="mt-4">
+                <LinkHealthStatus activeVersion={activeVersion} />
+              </div>
+            </>
           )}
         </div>
       </div>

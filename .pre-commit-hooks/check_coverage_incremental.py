@@ -34,7 +34,13 @@ def get_staged_python_files() -> list[str]:
             check=True,
         )
         files = result.stdout.strip().split("\n")
-        excluded = {"backend/model_library/__init__.py"}
+        excluded = {
+            "backend/model_library/__init__.py",
+            "backend/model_library/hf/__init__.py",
+            "backend/model_library/io/__init__.py",
+            "backend/model_library/network/__init__.py",
+            "backend/model_library/search/__init__.py",
+        }
         # Filter for backend Python files only
         backend_files = [
             f

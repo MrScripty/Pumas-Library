@@ -496,6 +496,139 @@ class ResourceManager:
             logger.error("Failed to cascade delete model %s: %s", model_id, exc, exc_info=True)
             return {"success": False, "error": str(exc), "links_removed": 0}
 
+    def preview_model_mapping(self, version_tag: str, app_id: str = "comfyui") -> Dict[str, object]:
+        """Preview model mapping operations without making changes.
+
+        Args:
+            version_tag: ComfyUI version tag
+            app_id: Application identifier (default: "comfyui")
+
+        Returns:
+            Dict with preview information:
+                - to_create: List of links to create
+                - conflicts: List of conflicts
+                - broken_to_remove: List of broken links to clean
+                - warnings: List of warning messages
+                - errors: List of error messages
+        """
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            return {"success": False, "error": f"Version {version_tag} not found"}
+
+        models_dir = version_path / "models"
+        app_version = version_tag.lstrip("vV")
+
+        preview = self.model_mapper.preview_mapping(app_id, app_version, models_dir)
+
+        # Convert dataclass to dict for JSON serialization
+        return {
+            "success": True,
+            "to_create": [
+                {
+                    "model_id": a.model_id,
+                    "model_name": a.model_name,
+                    "source_path": str(a.source_path),
+                    "target_path": str(a.target_path),
+                    "link_type": a.link_type,
+                    "reason": a.reason,
+                }
+                for a in preview.to_create
+            ],
+            "to_skip_exists": [
+                {
+                    "model_id": a.model_id,
+                    "model_name": a.model_name,
+                    "source_path": str(a.source_path),
+                    "target_path": str(a.target_path),
+                    "reason": a.reason,
+                }
+                for a in preview.to_skip_exists
+            ],
+            "conflicts": [
+                {
+                    "model_id": a.model_id,
+                    "model_name": a.model_name,
+                    "source_path": str(a.source_path),
+                    "target_path": str(a.target_path),
+                    "reason": a.reason,
+                    "existing_target": a.existing_target,
+                }
+                for a in preview.conflicts
+            ],
+            "broken_to_remove": [
+                {
+                    "target_path": str(a.target_path),
+                    "existing_target": a.existing_target,
+                    "reason": a.reason,
+                }
+                for a in preview.broken_to_remove
+            ],
+            "total_actions": preview.total_actions,
+            "warnings": preview.warnings,
+            "errors": preview.errors,
+        }
+
+    def sync_models_incremental(
+        self,
+        version_tag: str,
+        model_ids: List[str],
+        app_id: str = "comfyui",
+    ) -> Dict[str, object]:
+        """Incrementally sync specific models to a version.
+
+        Much faster than full sync when only a few models were added.
+
+        Args:
+            version_tag: ComfyUI version tag
+            model_ids: List of model IDs (library paths) to sync
+            app_id: Application identifier (default: "comfyui")
+
+        Returns:
+            Dict with sync results:
+                - success: Whether sync completed
+                - links_created: Number of new links created
+                - links_updated: Number of links updated
+                - links_skipped: Number of links already correct
+        """
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            return {"success": False, "error": f"Version {version_tag} not found"}
+
+        models_dir = version_path / "models"
+        ensure_directory(models_dir)
+        app_version = version_tag.lstrip("vV")
+
+        try:
+            result = self.model_mapper.sync_models_incremental(
+                app_id, app_version, models_dir, model_ids
+            )
+            return {"success": True, **result}
+        except OSError as exc:
+            logger.error("Failed incremental sync: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_updated": 0,
+                "links_skipped": 0,
+            }
+
+    def get_cross_filesystem_warning(self, version_tag: str) -> Optional[Dict[str, object]]:
+        """Check if library and app version are on different filesystems.
+
+        Args:
+            version_tag: ComfyUI version tag
+
+        Returns:
+            Warning dict if cross-filesystem, None otherwise
+        """
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            return None
+
+        models_dir = version_path / "models"
+        return self.model_mapper.get_cross_filesystem_warning(models_dir)
+
     # ==================== Custom Nodes Operations ====================
 
     def get_version_custom_nodes_dir(self, version_tag: str) -> Path:

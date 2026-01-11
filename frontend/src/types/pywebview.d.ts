@@ -353,6 +353,65 @@ export interface DeleteModelCascadeResponse extends BaseResponse {
 }
 
 // ============================================================================
+// Mapping Preview Types (Phase 1C)
+// ============================================================================
+
+/**
+ * A single mapping action to be performed
+ */
+export interface MappingAction {
+  model_id: string;
+  model_name: string;
+  source_path: string;
+  target_path: string;
+  link_type?: string;
+  reason: string;
+  existing_target?: string;
+}
+
+/**
+ * Broken link to be removed
+ */
+export interface BrokenLinkToRemove {
+  target_path: string;
+  existing_target: string;
+  reason: string;
+}
+
+/**
+ * Mapping preview response
+ */
+export interface MappingPreviewResponse extends BaseResponse {
+  to_create: MappingAction[];
+  to_skip_exists: MappingAction[];
+  conflicts: MappingAction[];
+  broken_to_remove: BrokenLinkToRemove[];
+  total_actions: number;
+  warnings: string[];
+  errors: string[];
+}
+
+/**
+ * Incremental sync response
+ */
+export interface IncrementalSyncResponse extends BaseResponse {
+  links_created: number;
+  links_updated: number;
+  links_skipped: number;
+}
+
+/**
+ * Cross-filesystem warning response
+ */
+export interface CrossFilesystemWarningResponse extends BaseResponse {
+  cross_filesystem: boolean;
+  library_path?: string;
+  app_path?: string;
+  warning?: string;
+  recommendation?: string;
+}
+
+// ============================================================================
 // Version Management Types
 // ============================================================================
 
@@ -729,6 +788,27 @@ export interface PyWebViewAPI {
    * Delete a model and all its symlinks
    */
   delete_model_with_cascade(modelId: string): Promise<DeleteModelCascadeResponse>;
+
+  // ========================================
+  // Mapping Preview (Phase 1C)
+  // ========================================
+  /**
+   * Preview model mapping operations without making changes
+   */
+  preview_model_mapping(versionTag: string): Promise<MappingPreviewResponse>;
+
+  /**
+   * Incrementally sync specific models to a version
+   */
+  sync_models_incremental(
+    versionTag: string,
+    modelIds: string[]
+  ): Promise<IncrementalSyncResponse>;
+
+  /**
+   * Check if library and app version are on different filesystems
+   */
+  get_cross_filesystem_warning(versionTag: string): Promise<CrossFilesystemWarningResponse>;
 
   // ========================================
   // Custom Nodes

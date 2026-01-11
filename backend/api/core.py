@@ -1264,6 +1264,102 @@ class ComfyUISetupAPI:
             logger.error("Failed to cascade delete model %s: %s", model_id, exc, exc_info=True)
             return {"success": False, "error": str(exc), "links_removed": 0}
 
+    def preview_model_mapping(self, version_tag: str) -> Dict[str, Any]:
+        """Preview model mapping operations without making changes.
+
+        Performs a dry run to show what would happen if model mapping was applied.
+        Shows links to create, conflicts, broken links to remove, and warnings.
+
+        Args:
+            version_tag: ComfyUI version tag to preview mapping for
+
+        Returns:
+            Dict with preview information including to_create, conflicts, warnings
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available"}
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected mapping preview for invalid tag: %r", version_tag)
+            return {"success": False, "error": "Invalid version tag"}
+
+        try:
+            return self.resource_manager.preview_model_mapping(version_tag)
+        except OSError as exc:
+            logger.error("Failed to preview mapping for %s: %s", version_tag, exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Failed to preview mapping for %s: %s", version_tag, exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def sync_models_incremental(self, version_tag: str, model_ids: List[str]) -> Dict[str, Any]:
+        """Incrementally sync specific models to a version.
+
+        Much faster than full sync when only a few models were added.
+
+        Args:
+            version_tag: ComfyUI version tag
+            model_ids: List of model IDs (library paths) to sync
+
+        Returns:
+            Dict with sync results
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager not available",
+                "links_created": 0,
+                "links_updated": 0,
+                "links_skipped": 0,
+            }
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected incremental sync for invalid tag: %r", version_tag)
+            return {
+                "success": False,
+                "error": "Invalid version tag",
+                "links_created": 0,
+                "links_updated": 0,
+                "links_skipped": 0,
+            }
+
+        try:
+            return self.resource_manager.sync_models_incremental(version_tag, model_ids)
+        except OSError as exc:
+            logger.error("Failed incremental sync for %s: %s", version_tag, exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_updated": 0,
+                "links_skipped": 0,
+            }
+
+    def get_cross_filesystem_warning(self, version_tag: str) -> Dict[str, Any]:
+        """Check if library and app version are on different filesystems.
+
+        Args:
+            version_tag: ComfyUI version tag
+
+        Returns:
+            Dict with warning information if cross-filesystem, empty dict otherwise
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available"}
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected cross-fs check for invalid tag: %r", version_tag)
+            return {"success": False, "error": "Invalid version tag"}
+
+        try:
+            warning = self.resource_manager.get_cross_filesystem_warning(version_tag)
+            if warning:
+                return {"success": True, **warning}
+            return {"success": True, "cross_filesystem": False}
+        except OSError as exc:
+            logger.error("Failed cross-fs check for %s: %s", version_tag, exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
     def get_custom_nodes(self, version_tag: str) -> List[str]:
         """Get list of custom nodes for a specific version"""
         if not self.resource_manager:

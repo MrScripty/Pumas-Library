@@ -15,6 +15,16 @@ from backend.model_library.io.manager import (  # pragma: no cover
     get_drive_info,
     get_drive_type,
 )
+from backend.model_library.io.platform import (  # pragma: no cover
+    LinkResult,
+    LinkStrategy,
+    create_link,
+    get_available_strategies,
+    get_default_strategy,
+    is_cross_filesystem,
+    remove_link,
+    verify_link,
+)
 from backend.model_library.io.validator import (  # pragma: no cover
     ValidationIssue,
     ValidationResult,
@@ -38,6 +48,15 @@ __all__ = [  # pragma: no cover
     "IOManager",
     "get_drive_info",
     "get_drive_type",
+    # Platform
+    "LinkResult",
+    "LinkStrategy",
+    "create_link",
+    "get_available_strategies",
+    "get_default_strategy",
+    "is_cross_filesystem",
+    "remove_link",
+    "verify_link",
     # Validation
     "ValidationIssue",
     "ValidationResult",

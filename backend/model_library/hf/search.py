@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, cast
 
 from backend.logging_config import get_logger
+from backend.model_library.hf.cache import hf_metadata_cache, make_cache_key
 from backend.model_library.hf.formats import extract_formats, extract_formats_from_paths
 from backend.model_library.hf.metadata import collect_paths_with_sizes, infer_kind_from_tags
 from backend.model_library.hf.quant import (
@@ -83,6 +84,14 @@ def search_models(
     Returns:
         List of model dictionaries with metadata
     """
+    # Check cache first (1 hour TTL)
+    normalized_query = query.lower().strip() if query else ""
+    cache_key = make_cache_key("search", normalized_query, kind, limit)
+    cached = hf_metadata_cache.get(cache_key)
+    if cached is not None:
+        logger.debug("Cache hit for HF search: %s", query)
+        return cast(list[dict[str, object]], cached)
+
     filter_arg = None
     if kind:
         try:
@@ -164,6 +173,11 @@ def search_models(
                 "downloadOptions": download_options,
             }
         )
+
+    # Cache results for 1 hour
+    hf_metadata_cache.set(cache_key, models, ttl=3600)
+    logger.debug("Cached HF search results for: %s (%d models)", query, len(models))
+
     return models
 
 

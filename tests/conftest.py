@@ -203,6 +203,24 @@ def pytest_configure(config):
     )
 
 
+# ==================== Cache Fixtures ====================
+
+
+@pytest.fixture(autouse=True)
+def clear_hf_metadata_cache():
+    """
+    Clear the HuggingFace metadata cache before each test.
+
+    This ensures tests don't pollute each other with cached search results.
+    The fixture runs automatically (autouse=True) for all tests.
+    """
+    from backend.model_library.hf.cache import hf_metadata_cache
+
+    hf_metadata_cache.clear()
+    yield
+    hf_metadata_cache.clear()
+
+
 # ==================== Test Hooks ====================
 
 

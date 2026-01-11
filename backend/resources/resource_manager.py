@@ -6,12 +6,14 @@ Main coordinator for shared storage, custom nodes, and model library management
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.model_library import ModelDownloader, ModelImporter, ModelLibrary, ModelMapper
+from backend.model_library.search import SearchResult
 from backend.models import ModelOverrides, RepairReport, ScanResult
 from backend.resources.custom_nodes_manager import CustomNodesManager
 from backend.resources.shared_storage import SharedStorageManager
@@ -249,6 +251,139 @@ class ResourceManager:
     ) -> List[Dict[str, object]]:
         """Search Hugging Face models for download UI."""
         return self.model_downloader.search_models(query=query, kind=kind, limit=limit)
+
+    def search_models_fts(
+        self,
+        query: str,
+        limit: int = 100,
+        offset: int = 0,
+        model_type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, object]:
+        """Search local model library using FTS5 full-text search.
+
+        Performs fast full-text search across model metadata including
+        names, types, tags, family, and description.
+
+        Args:
+            query: Search terms (space-separated for OR matching)
+            limit: Maximum number of results to return
+            offset: Number of results to skip (for pagination)
+            model_type: Filter by model type (e.g., "diffusion", "llm")
+            tags: Filter by required tags
+
+        Returns:
+            Dict with keys:
+                - models: List of matching model metadata
+                - total_count: Total number of matches
+                - query_time_ms: Query execution time in milliseconds
+                - query: The FTS5 query that was executed
+        """
+        result: SearchResult = self.model_library.search_models(
+            terms=query,
+            limit=limit,
+            offset=offset,
+            model_type=model_type,
+            tags=tags,
+        )
+        return asdict(result)
+
+    def import_batch(
+        self,
+        import_specs: List[Dict[str, str]],
+    ) -> Dict[str, object]:
+        """Import multiple models in a batch operation.
+
+        Args:
+            import_specs: List of import specifications, each containing:
+                - path: Local filesystem path to model file or directory
+                - family: Model family name
+                - official_name: Display name for the model
+                - repo_id: Optional Hugging Face repo ID
+
+        Returns:
+            Dict with keys:
+                - success: Overall success status
+                - imported: Number of successfully imported models
+                - failed: Number of failed imports
+                - results: List of individual import results
+        """
+        results: List[Dict[str, object]] = []
+        imported = 0
+        failed = 0
+
+        for spec in import_specs:
+            path = spec.get("path", "")
+            family = spec.get("family", "unknown")
+            official_name = spec.get("official_name", "")
+            repo_id = spec.get("repo_id")
+
+            if not path:
+                results.append(
+                    {
+                        "path": path,
+                        "success": False,
+                        "error": "Missing path",
+                    }
+                )
+                failed += 1
+                continue
+
+            try:
+                local_path = Path(path)
+                if not local_path.exists():
+                    results.append(
+                        {
+                            "path": path,
+                            "success": False,
+                            "error": "Path does not exist",
+                        }
+                    )
+                    failed += 1
+                    continue
+
+                # Use filename as official_name if not provided
+                if not official_name:
+                    official_name = local_path.stem
+
+                model_dir = self.model_importer.import_path(
+                    local_path, family, official_name, repo_id
+                )
+                results.append(
+                    {
+                        "path": path,
+                        "success": True,
+                        "model_path": str(model_dir),
+                    }
+                )
+                imported += 1
+            except OSError as exc:
+                logger.error("Batch import failed for %s: %s", path, exc, exc_info=True)
+                results.append(
+                    {
+                        "path": path,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                )
+                failed += 1
+            except ValueError as exc:
+                logger.error("Batch import failed for %s: %s", path, exc, exc_info=True)
+                results.append(
+                    {
+                        "path": path,
+                        "success": False,
+                        "error": str(exc),
+                    }
+                )
+                failed += 1
+
+        return {
+            "success": failed == 0,
+            "imported": imported,
+            "failed": failed,
+            "results": results,
+        }
 
     # ==================== Custom Nodes Operations ====================
 

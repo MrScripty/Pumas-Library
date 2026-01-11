@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-01-11
 **Current Phase:** Phase 1A - Core Infrastructure
-**Status:** Part 4 ✅ COMPLETE (Update Existing Files)
+**Status:** Part 5 ✅ COMPLETE (API Layer)
 
 ---
 
@@ -91,12 +91,21 @@
 | naming.py | 21 | 90%+ |
 | **Total** | 69 | 85%+ |
 
-### Part 5: API Layer
+### Part 5: API Layer ✅ COMPLETE
 **Goal:** Expose new functionality via PyWebView API
 
-- [ ] api/core.py - Add import batch endpoints
-- [ ] api/core.py - Add FTS5 search endpoint
-- [ ] api/core.py - Add network status endpoint
+- [x] api/core.py - Add FTS5 search endpoint (`search_models_fts`)
+- [x] api/core.py - Add import batch endpoints (`import_batch`)
+- [x] api/core.py - Add network status endpoint (`get_network_status`)
+- [x] resources/resource_manager.py - Add `search_models_fts` and `import_batch` methods
+
+**Part 5 Results:**
+| Endpoint | Description | Tests |
+|----------|-------------|-------|
+| search_models_fts | FTS5 full-text model search | 10 |
+| import_batch | Batch model import | 3 |
+| get_network_status | Network/circuit breaker status | 5 |
+| **Total** | 3 new API endpoints | 18 |
 
 ### Part 6: Frontend (TypeScript FIRST!)
 **Goal:** User interface for model import
@@ -141,6 +150,14 @@
 ---
 
 ## Completed Items
+
+### 2026-01-11: API Layer ✅ COMPLETE
+- Added `search_models_fts` to api/core.py and resource_manager.py (FTS5 search)
+- Added `import_batch` to api/core.py and resource_manager.py (batch imports)
+- Added `get_network_status` to api/core.py (network/circuit breaker status)
+- Created tests/unit/api/test_core_model_library.py (18 tests)
+- All pre-commit hooks passing
+- Total: 3 new API endpoints, 18 tests
 
 ### 2026-01-11: Update Existing Files ✅ COMPLETE
 - Updated importer.py with io/hashing.compute_dual_hash (16 tests, 93%+ coverage)
@@ -195,4 +212,4 @@
 
 ---
 
-**Next Session Focus:** Part 5 - API Layer (api/core.py endpoints)
+**Next Session Focus:** Part 6 - Frontend (TypeScript types and components)

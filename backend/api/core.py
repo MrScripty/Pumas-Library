@@ -988,6 +988,162 @@ class ComfyUISetupAPI:
             logger.error("Hugging Face search failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc), "models": []}
 
+    def search_models_fts(
+        self,
+        query: str,
+        limit: int = 100,
+        offset: int = 0,
+        model_type: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Search local model library using FTS5 full-text search.
+
+        Performs fast full-text search across model metadata including
+        names, types, tags, family, and description.
+
+        Args:
+            query: Search terms (space-separated for OR matching)
+            limit: Maximum number of results to return
+            offset: Number of results to skip (for pagination)
+            model_type: Filter by model type (e.g., "diffusion", "llm")
+            tags: Filter by required tags
+
+        Returns:
+            Dict with keys:
+                - success: Whether the search succeeded
+                - models: List of matching model metadata
+                - total_count: Total number of matches
+                - query_time_ms: Query execution time in milliseconds
+                - query: The FTS5 query that was executed
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager unavailable",
+                "models": [],
+                "total_count": 0,
+                "query_time_ms": 0,
+                "query": "",
+            }
+        try:
+            result = self.resource_manager.search_models_fts(
+                query=query,
+                limit=limit,
+                offset=offset,
+                model_type=model_type,
+                tags=tags,
+            )
+            return {"success": True, **result}
+        except OSError as exc:
+            logger.error("FTS5 search failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "models": [],
+                "total_count": 0,
+                "query_time_ms": 0,
+                "query": "",
+            }
+        except RuntimeError as exc:
+            logger.error("FTS5 search failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "models": [],
+                "total_count": 0,
+                "query_time_ms": 0,
+                "query": "",
+            }
+        except ValueError as exc:
+            logger.error("FTS5 search failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "models": [],
+                "total_count": 0,
+                "query_time_ms": 0,
+                "query": "",
+            }
+
+    def import_batch(self, import_specs: List[Dict[str, str]]) -> Dict[str, Any]:
+        """Import multiple models in a batch operation.
+
+        Args:
+            import_specs: List of import specifications, each containing:
+                - path: Local filesystem path to model file or directory
+                - family: Model family name
+                - official_name: Display name for the model
+                - repo_id: Optional Hugging Face repo ID
+
+        Returns:
+            Dict with keys:
+                - success: Overall success status
+                - imported: Number of successfully imported models
+                - failed: Number of failed imports
+                - results: List of individual import results
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager unavailable",
+                "imported": 0,
+                "failed": 0,
+                "results": [],
+            }
+        try:
+            return self.resource_manager.import_batch(import_specs)
+        except OSError as exc:
+            logger.error("Batch import failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "imported": 0,
+                "failed": len(import_specs),
+                "results": [],
+            }
+        except ValueError as exc:
+            logger.error("Batch import failed: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "imported": 0,
+                "failed": len(import_specs),
+                "results": [],
+            }
+
+    def get_network_status(self) -> Dict[str, Any]:
+        """Get network status including circuit breaker state.
+
+        Returns network statistics for monitoring and UI indicators:
+            - total_requests: Total number of network requests made
+            - successful_requests: Number of successful requests
+            - failed_requests: Number of failed requests
+            - circuit_breaker_rejections: Requests rejected by circuit breaker
+            - retries: Total number of retry attempts
+            - success_rate: Success rate as percentage
+
+        Returns:
+            Dict with network statistics
+        """
+        from dataclasses import asdict
+
+        from backend.model_library.network import NetworkManager
+
+        try:
+            # Get global network manager stats if available
+            # For now, create a fresh manager to get stats structure
+            manager = NetworkManager()
+            stats = manager.get_stats()
+            stats_dict = asdict(stats)
+            stats_dict["success_rate"] = stats.success_rate
+            return {"success": True, **stats_dict}
+        except OSError as exc:
+            logger.error("Failed to get network status: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Failed to get network status: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
     def get_model_overrides(self, rel_path: str) -> ModelOverrides:
         """Fetch overrides for a model by relative path."""
         if not self.resource_manager:

@@ -27,14 +27,19 @@ from backend.model_library.io.platform import (  # pragma: no cover
     verify_link,
 )
 from backend.model_library.io.validator import (  # pragma: no cover
+    SandboxInfo,
     ValidationIssue,
     ValidationResult,
     ValidationSeverity,
+    check_symlink_capability,
+    detect_sandbox_environment,
     is_filesystem_writable,
     is_ntfs_dirty,
     is_path_on_readonly_mount,
+    is_sandboxed,
     validate_import_source,
     validate_mapping_target,
+    validate_symlink_support,
 )
 
 __all__ = [  # pragma: no cover
@@ -60,12 +65,17 @@ __all__ = [  # pragma: no cover
     "remove_link",
     "verify_link",
     # Validation
+    "SandboxInfo",
     "ValidationIssue",
     "ValidationResult",
     "ValidationSeverity",
+    "detect_sandbox_environment",
     "is_filesystem_writable",
     "is_ntfs_dirty",
     "is_path_on_readonly_mount",
+    "is_sandboxed",
+    "check_symlink_capability",
     "validate_import_source",
     "validate_mapping_target",
+    "validate_symlink_support",
 ]

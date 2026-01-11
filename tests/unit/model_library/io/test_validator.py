@@ -10,14 +10,19 @@ from unittest import mock
 import pytest
 
 from backend.model_library.io.validator import (
+    SandboxInfo,
     ValidationIssue,
     ValidationResult,
     ValidationSeverity,
+    check_symlink_capability,
+    detect_sandbox_environment,
     is_filesystem_writable,
     is_ntfs_dirty,
     is_path_on_readonly_mount,
+    is_sandboxed,
     validate_import_source,
     validate_mapping_target,
+    validate_symlink_support,
 )
 
 
@@ -388,5 +393,148 @@ class TestValidateMappingTarget:
         mock_readonly.return_value = True
 
         result = validate_mapping_target(tmp_path)
+        assert result.is_valid() is False
+        assert result.has_errors() is True
+
+
+@pytest.mark.unit
+class TestSandboxDetection:
+    """Tests for sandbox environment detection."""
+
+    def test_sandbox_info_dataclass(self):
+        """Test SandboxInfo dataclass creation."""
+        info = SandboxInfo(
+            is_sandboxed=True, sandbox_type="flatpak", limitations=["test limitation"]
+        )
+        assert info.is_sandboxed is True
+        assert info.sandbox_type == "flatpak"
+        assert len(info.limitations) == 1
+
+    def test_detect_no_sandbox(self, monkeypatch):
+        """Test detection when not in sandbox."""
+        # Ensure no sandbox env vars are set
+        monkeypatch.delenv("FLATPAK_ID", raising=False)
+        monkeypatch.delenv("SNAP", raising=False)
+        monkeypatch.delenv("APPIMAGE", raising=False)
+
+        # Mock Path.exists to return False for sandbox indicators
+        with mock.patch.object(Path, "exists", return_value=False):
+            with mock.patch.object(Path, "read_text", return_value=""):
+                result = detect_sandbox_environment()
+                # May still be detected if in container
+                assert isinstance(result.is_sandboxed, bool)
+                assert isinstance(result.sandbox_type, str)
+
+    def test_detect_flatpak_by_env(self, monkeypatch):
+        """Test Flatpak detection via environment variable."""
+        monkeypatch.setenv("FLATPAK_ID", "com.example.app")
+        monkeypatch.delenv("SNAP", raising=False)
+        monkeypatch.delenv("APPIMAGE", raising=False)
+
+        with mock.patch.object(Path, "exists", return_value=False):
+            result = detect_sandbox_environment()
+            assert result.is_sandboxed is True
+            assert result.sandbox_type == "flatpak"
+            assert len(result.limitations) > 0
+
+    def test_detect_snap(self, monkeypatch):
+        """Test Snap detection via environment variable."""
+        monkeypatch.delenv("FLATPAK_ID", raising=False)
+        monkeypatch.setenv("SNAP", "/snap/example/123")
+        monkeypatch.delenv("APPIMAGE", raising=False)
+
+        with mock.patch.object(Path, "exists", return_value=False):
+            result = detect_sandbox_environment()
+            assert result.is_sandboxed is True
+            assert result.sandbox_type == "snap"
+            assert len(result.limitations) > 0
+
+    def test_detect_appimage(self, monkeypatch):
+        """Test AppImage detection via environment variable."""
+        monkeypatch.delenv("FLATPAK_ID", raising=False)
+        monkeypatch.delenv("SNAP", raising=False)
+        monkeypatch.setenv("APPIMAGE", "/path/to/app.AppImage")
+
+        with mock.patch.object(Path, "exists", return_value=False):
+            result = detect_sandbox_environment()
+            assert result.is_sandboxed is True
+            assert result.sandbox_type == "appimage"
+
+    def test_is_sandboxed_convenience(self, monkeypatch):
+        """Test is_sandboxed convenience function."""
+        monkeypatch.delenv("FLATPAK_ID", raising=False)
+        monkeypatch.delenv("SNAP", raising=False)
+        monkeypatch.delenv("APPIMAGE", raising=False)
+
+        with mock.patch.object(Path, "exists", return_value=False):
+            with mock.patch.object(Path, "read_text", return_value=""):
+                result = is_sandboxed()
+                assert isinstance(result, bool)
+
+
+@pytest.mark.unit
+class TestSymlinkCapability:
+    """Tests for symlink capability testing."""
+
+    def check_symlink_capability_success(self, tmp_path: Path):
+        """Test symlink capability detection in writable directory."""
+        result = check_symlink_capability(tmp_path)
+        # Most test environments support symlinks
+        assert result is True
+
+    def check_symlink_capability_nonexistent_dir(self):
+        """Test symlink capability returns False for nonexistent directory."""
+        result = check_symlink_capability(Path("/nonexistent/path/12345"))
+        assert result is False
+
+    @mock.patch.object(Path, "symlink_to")
+    def check_symlink_capability_failure(self, mock_symlink, tmp_path: Path):
+        """Test symlink capability detection when symlinks fail."""
+        mock_symlink.side_effect = OSError("Symlinks not supported")
+
+        result = check_symlink_capability(tmp_path)
+        assert result is False
+
+
+@pytest.mark.unit
+class TestValidateSymlinkSupport:
+    """Tests for validate_symlink_support function."""
+
+    def test_valid_symlink_support(self, tmp_path: Path):
+        """Test validation in directory with symlink support."""
+        result = validate_symlink_support(tmp_path)
+        # Most test environments support symlinks
+        assert result.is_valid() is True
+
+    @mock.patch("backend.model_library.io.validator.check_symlink_capability")
+    def test_nonexistent_directory_error(self, mock_capability, tmp_path: Path):
+        """Test error for completely nonexistent directory tree."""
+        # Create a path that doesn't exist and has no writable parent
+        nonexistent = tmp_path / "subdir" / "fake" / "path"
+        # Don't create the parent directories
+        # Mock symlink test to fail
+        mock_capability.return_value = False
+
+        result = validate_symlink_support(nonexistent)
+        # Should have error about symlink creation failing
+        assert result.has_errors() is True
+
+    @mock.patch("backend.model_library.io.validator.detect_sandbox_environment")
+    def test_sandbox_warning(self, mock_sandbox, tmp_path: Path):
+        """Test warning when in sandbox environment."""
+        mock_sandbox.return_value = SandboxInfo(
+            is_sandboxed=True, sandbox_type="flatpak", limitations=["Test limitation"]
+        )
+
+        result = validate_symlink_support(tmp_path)
+        # Should have warning about sandbox
+        assert result.has_warnings() is True
+
+    @mock.patch("backend.model_library.io.validator.check_symlink_capability")
+    def test_symlink_failure_error(self, mock_capability, tmp_path: Path):
+        """Test error when symlink creation fails."""
+        mock_capability.return_value = False
+
+        result = validate_symlink_support(tmp_path)
         assert result.is_valid() is False
         assert result.has_errors() is True

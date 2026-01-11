@@ -5,12 +5,15 @@ Provides validation for import sources and mapping targets, including:
 - Read-only mount detection
 - Filesystem writability checks
 - Path existence and type validation
+- Sandbox/Flatpak environment detection
+- Canary link testing for symlink support
 """
 
 from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -357,6 +360,221 @@ def validate_mapping_target(path: Path) -> ValidationResult:
                     "NTFS filesystem has dirty bit set. "
                     "Please run chkdsk/ntfsfix before creating mappings."
                 ),
+                path=path,
+            )
+        )
+
+    return ValidationResult(path=path, issues=issues)
+
+
+@dataclass
+class SandboxInfo:
+    """Information about sandbox environment detection.
+
+    Attributes:
+        is_sandboxed: Whether running in a sandboxed environment
+        sandbox_type: Type of sandbox (flatpak, snap, docker, none)
+        limitations: List of limitations that may affect model library operations
+    """
+
+    is_sandboxed: bool
+    sandbox_type: str
+    limitations: list[str]
+
+
+def detect_sandbox_environment() -> SandboxInfo:
+    """Detect if running in a sandboxed environment.
+
+    Checks for:
+    - Flatpak (/.flatpak-info or FLATPAK_ID env)
+    - Snap (SNAP env variable)
+    - Docker (/.dockerenv or cgroup indicators)
+    - AppImage (APPIMAGE env variable)
+
+    Returns:
+        SandboxInfo with detection results and potential limitations
+    """
+    limitations: list[str] = []
+    sandbox_type = "none"
+
+    # Check for Flatpak
+    if Path("/.flatpak-info").exists() or os.environ.get("FLATPAK_ID"):
+        sandbox_type = "flatpak"
+        limitations.extend(
+            [
+                "Symlinks may not work across sandbox boundary",
+                "Access to external drives requires portal permissions",
+                "Some filesystem operations may be restricted",
+            ]
+        )
+
+    # Check for Snap
+    elif os.environ.get("SNAP"):
+        sandbox_type = "snap"
+        limitations.extend(
+            [
+                "Access to home directory may be restricted",
+                "External drive access requires interface connections",
+                "Symlinks outside snap-allowed paths may fail",
+            ]
+        )
+
+    # Check for Docker
+    elif Path("/.dockerenv").exists():
+        sandbox_type = "docker"
+        limitations.extend(
+            [
+                "Filesystem is container-isolated",
+                "External volumes require explicit mounting",
+            ]
+        )
+    else:
+        # Check cgroup for container indicators
+        try:
+            cgroup_path = Path("/proc/1/cgroup")
+            if cgroup_path.exists():
+                cgroup_content = cgroup_path.read_text()
+                if "docker" in cgroup_content or "containerd" in cgroup_content:
+                    sandbox_type = "docker"
+                    limitations.append("Running in containerized environment")
+        except OSError:  # noqa: no-except-logging
+            pass
+
+    # Check for AppImage
+    if os.environ.get("APPIMAGE"):
+        sandbox_type = "appimage"
+        limitations.extend(
+            [
+                "Running from portable AppImage",
+                "Some system paths may not be accessible",
+            ]
+        )
+
+    is_sandboxed = sandbox_type != "none"
+
+    if is_sandboxed:
+        logger.info("Detected %s sandbox environment", sandbox_type)
+
+    return SandboxInfo(
+        is_sandboxed=is_sandboxed,
+        sandbox_type=sandbox_type,
+        limitations=limitations,
+    )
+
+
+def is_sandboxed() -> bool:
+    """Check if running in a sandboxed environment.
+
+    Convenience function for quick sandbox detection.
+
+    Returns:
+        True if running in Flatpak, Snap, Docker, or AppImage
+    """
+    return detect_sandbox_environment().is_sandboxed
+
+
+def check_symlink_capability(target_dir: Path) -> bool:
+    """Test if symlinks can be created in a directory.
+
+    Creates a temporary canary symlink to verify that symlink creation
+    is supported. This catches:
+    - Filesystem limitations (FAT32, exFAT)
+    - Sandbox restrictions (Flatpak, Snap)
+    - Permission issues
+
+    Args:
+        target_dir: Directory to test symlink creation in
+
+    Returns:
+        True if symlinks can be created, False otherwise
+    """
+    if not target_dir.exists():
+        return False
+
+    # Create a unique test file and symlink name
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=target_dir, prefix=".canary_source_", delete=False
+        ) as tmp_source:
+            source_path = Path(tmp_source.name)
+
+        symlink_path = source_path.with_suffix(".link")
+
+        try:
+            symlink_path.symlink_to(source_path)
+            # Verify the symlink works
+            if symlink_path.is_symlink() and symlink_path.resolve() == source_path:
+                logger.debug("Symlink capability confirmed in %s", target_dir)
+                return True
+            return False
+        except OSError as e:
+            logger.debug("Symlink creation failed in %s: %s", target_dir, e)
+            return False
+        finally:
+            # Clean up
+            if symlink_path.exists() or symlink_path.is_symlink():
+                symlink_path.unlink()
+            if source_path.exists():
+                source_path.unlink()
+
+    except OSError as e:
+        logger.debug("Canary test failed in %s: %s", target_dir, e)
+        return False
+
+
+def validate_symlink_support(path: Path) -> ValidationResult:
+    """Validate that a path supports symlink creation.
+
+    Performs a canary test to verify symlink support and detects
+    sandbox environments that may restrict symlink operations.
+
+    Args:
+        path: Path to validate for symlink support
+
+    Returns:
+        ValidationResult with any issues found
+    """
+    issues: list[ValidationIssue] = []
+
+    # Determine which directory to check
+    check_dir = path if path.is_dir() else path.parent
+
+    # Try to create parent directories if they don't exist
+    if not check_dir.exists():
+        try:
+            check_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.debug("Cannot create directory %s: %s", check_dir, e)
+
+    if not check_dir.exists():
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.ERROR,
+                message=f"Target directory does not exist: {check_dir}",
+                path=path,
+            )
+        )
+        return ValidationResult(path=path, issues=issues)
+
+    # Check sandbox environment
+    sandbox_info = detect_sandbox_environment()
+    if sandbox_info.is_sandboxed:
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.WARNING,
+                message=f"Running in {sandbox_info.sandbox_type} sandbox - "
+                "symlink operations may be restricted",
+                path=path,
+            )
+        )
+
+    # Test actual symlink creation
+    if not check_symlink_capability(check_dir):
+        issues.append(
+            ValidationIssue(
+                severity=ValidationSeverity.ERROR,
+                message="Symlink creation failed - filesystem may not support symlinks "
+                "or permissions are insufficient",
                 path=path,
             )
         )

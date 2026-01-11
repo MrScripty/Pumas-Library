@@ -2,6 +2,11 @@
 
 from __future__ import annotations  # pragma: no cover
 
+from backend.model_library.hf.cache import (  # pragma: no cover
+    HFMetadataCache,
+    hf_metadata_cache,
+    make_cache_key,
+)
 from backend.model_library.hf.client import HfClient  # pragma: no cover
 from backend.model_library.hf.formats import (  # pragma: no cover
     KNOWN_FORMATS,
@@ -28,6 +33,7 @@ from backend.model_library.hf.throttle import HFAPIThrottle, hf_throttle  # prag
 __all__ = [  # pragma: no cover
     "HfClient",
     "HFAPIThrottle",
+    "HFMetadataCache",
     "KIND_TAG_MAPPING",
     "KNOWN_FORMATS",
     "QUANT_TOKENS",
@@ -36,9 +42,11 @@ __all__ = [  # pragma: no cover
     "extract_formats",
     "extract_formats_from_paths",
     "extract_quants_from_paths",
+    "hf_metadata_cache",
     "hf_throttle",
     "infer_kind_from_tags",
     "list_repo_tree_paths",
+    "make_cache_key",
     "normalize_quant_source",
     "quant_sizes_from_paths",
     "search_models",

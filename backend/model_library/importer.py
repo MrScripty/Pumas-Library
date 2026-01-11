@@ -7,10 +7,11 @@ from pathlib import Path
 from typing import Optional, Tuple
 
 from backend.logging_config import get_logger
+from backend.model_library.io.hashing import compute_dual_hash
 from backend.model_library.library import ModelLibrary
 from backend.model_library.naming import normalize_filename, normalize_name, unique_path
 from backend.models import ModelFileInfo, ModelMetadata, get_iso_timestamp
-from backend.utils import calculate_file_hash, ensure_directory
+from backend.utils import ensure_directory
 
 logger = get_logger(__name__)
 
@@ -50,18 +51,19 @@ class ModelImporter:
             return None
         return max(candidates, key=lambda p: p.stat().st_size)
 
-    def _compute_blake3(self, file_path: Path) -> str:
-        try:
-            import blake3
-        except ImportError:
-            logger.warning("blake3 not available; skipping BLAKE3 hash")
-            return ""
+    def _compute_hashes(self, file_path: Path) -> Tuple[str, str]:
+        """Compute SHA256 and BLAKE3 hashes in a single file read.
 
-        h = blake3.blake3()
-        with file_path.open("rb") as f:
-            for chunk in iter(lambda: f.read(8192 * 1024), b""):
-                h.update(chunk)
-        return h.hexdigest().lower()
+        Uses io/hashing.compute_dual_hash for efficient streaming hash
+        computation without reading the file multiple times.
+
+        Args:
+            file_path: Path to the file to hash
+
+        Returns:
+            Tuple of (sha256_hex, blake3_hex)
+        """
+        return compute_dual_hash(file_path)
 
     def import_path(
         self,
@@ -112,8 +114,10 @@ class ModelImporter:
             )
 
         primary_file = self._choose_primary_file(model_dir)
-        sha256 = calculate_file_hash(primary_file) if primary_file else ""
-        blake3_hash = self._compute_blake3(primary_file) if primary_file else ""
+        if primary_file:
+            sha256, blake3_hash = self._compute_hashes(primary_file)
+        else:
+            sha256, blake3_hash = "", ""
 
         now = get_iso_timestamp()
         metadata: ModelMetadata = {

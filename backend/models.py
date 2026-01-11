@@ -154,6 +154,14 @@ class ModelMetadata(TypedDict, total=False):
     updated_date: str  # ISO 8601
     size_bytes: int
     files: List[ModelFileInfo]
+    # Metadata source tracking (Phase 2 - Model Import)
+    match_source: str  # 'auto', 'manual', 'hash' - protects user edits
+    match_method: str  # 'hash', 'filename_exact', 'filename_fuzzy'
+    match_confidence: float  # 0.0-1.0
+    # Offline fallback tracking
+    pending_online_lookup: bool  # True if HF lookup was skipped due to offline
+    lookup_attempts: int  # Number of failed lookup attempts
+    last_lookup_attempt: str  # ISO 8601 timestamp of last attempt
 
 
 class ModelOverrides(TypedDict, total=False):

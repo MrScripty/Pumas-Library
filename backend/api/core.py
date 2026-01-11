@@ -1420,3 +1420,251 @@ class ComfyUISetupAPI:
                 "totalSize": 0,
             }
         return self.resource_manager.scan_shared_storage()
+
+    # =========================================================================
+    # Model Import - HuggingFace Metadata Lookup
+    # =========================================================================
+
+    def lookup_hf_metadata_for_file(
+        self,
+        filename: str,
+        file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Look up HuggingFace metadata for a given filename.
+
+        Uses hybrid filename + hash verification for accurate matching.
+
+        Args:
+            filename: Name of the model file
+            file_path: Optional path to local file for hash verification
+
+        Returns:
+            Dict with success, found, metadata, or error
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "found": False,
+                "error": "Resource manager unavailable",
+            }
+
+        try:
+            path = Path(file_path) if file_path else None
+            metadata = self.resource_manager.lookup_hf_metadata(filename, path)
+
+            if metadata:
+                return {
+                    "success": True,
+                    "found": True,
+                    "metadata": metadata,
+                }
+            else:
+                return {
+                    "success": True,
+                    "found": False,
+                    "metadata": None,
+                }
+        except OSError as e:
+            logger.error("Error looking up metadata: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "found": False,
+                "error": str(e),
+            }
+        except RuntimeError as e:
+            logger.error("Error looking up metadata: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "found": False,
+                "error": str(e),
+            }
+
+    def detect_sharded_sets(
+        self,
+        file_paths: List[str],
+    ) -> Dict[str, Any]:
+        """Detect and group sharded model files.
+
+        Args:
+            file_paths: List of file paths to analyze
+
+        Returns:
+            Dict with groups mapping base names to file lists,
+            and validation info for each group
+        """
+        from backend.model_library.importer import detect_sharded_sets as detect_sets
+        from backend.model_library.importer import validate_shard_completeness
+
+        try:
+            paths = [Path(p) for p in file_paths]
+            groups = detect_sets(paths)
+
+            result_groups = {}
+            for base_name, shard_files in groups.items():
+                validation = validate_shard_completeness(shard_files)
+                result_groups[base_name] = {
+                    "files": [str(p) for p in shard_files],
+                    "validation": validation,
+                }
+
+            return {
+                "success": True,
+                "groups": result_groups,
+            }
+        except OSError as e:
+            logger.error("Error detecting sharded sets: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "groups": {},
+            }
+
+    def validate_file_type(self, file_path: str) -> Dict[str, Any]:
+        """Validate file type using magic bytes.
+
+        Prevents importing .txt/.html files masquerading as models.
+
+        Args:
+            file_path: Path to file to validate
+
+        Returns:
+            Dict with valid, detected_type, and optional error
+        """
+        from backend.model_library.importer import validate_file_type as validate_type
+
+        try:
+            result = validate_type(Path(file_path))
+            return {"success": True, **result}
+        except OSError as e:
+            logger.error("Error validating file type: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "valid": False,
+                "detected_type": "error",
+                "error": str(e),
+            }
+
+    def mark_metadata_as_manual(self, model_id: str) -> Dict[str, Any]:
+        """Mark model metadata as manually corrected to protect from auto-updates.
+
+        Args:
+            model_id: Model ID to protect
+
+        Returns:
+            Dict with success status
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable"}
+
+        try:
+            success = self.resource_manager.mark_metadata_as_manual(model_id)
+            if success:
+                return {"success": True}
+            else:
+                return {"success": False, "error": "Model not found"}
+        except OSError as e:
+            logger.error("Error marking metadata as manual: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def get_library_status(self) -> Dict[str, Any]:
+        """Get current library status, including indexing state.
+
+        Returns:
+            Dict with indexing state and model count
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager unavailable",
+                "indexing": False,
+                "model_count": 0,
+            }
+
+        try:
+            status = self.resource_manager.get_library_status()
+            return {"success": True, **status}
+        except OSError as e:
+            logger.error("Error getting library status: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "indexing": False,
+                "model_count": 0,
+            }
+
+    def get_file_link_count(self, file_path: str) -> Dict[str, Any]:
+        """Get number of hard links for a file.
+
+        Used to warn users about hard-linked files on NTFS.
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            Dict with link_count and is_hard_linked flag
+        """
+        try:
+            path = Path(file_path)
+            link_count = path.stat().st_nlink
+            return {
+                "success": True,
+                "link_count": link_count,
+                "is_hard_linked": link_count > 1,
+            }
+        except OSError as e:
+            logger.error("Failed to get link count: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "link_count": 1,
+                "is_hard_linked": False,
+                "error": str(e),
+            }
+
+    def check_files_writable(self, file_paths: List[str]) -> Dict[str, Any]:
+        """Check if files can be safely deleted.
+
+        Args:
+            file_paths: List of file paths to check
+
+        Returns:
+            Dict with all_writable flag and per-file details
+        """
+        import os
+
+        details = []
+        all_writable = True
+
+        for file_path in file_paths:
+            try:
+                path = Path(file_path)
+                writable = path.exists() and os.access(path.parent, os.W_OK)
+
+                details.append(
+                    {
+                        "path": str(path),
+                        "writable": writable,
+                        "reason": (
+                            None if writable else "Read-only filesystem or no write permission"
+                        ),
+                    }
+                )
+
+                if not writable:
+                    all_writable = False
+
+            except OSError as e:
+                logger.warning("Failed to check writability for %s: %s", file_path, e)
+                details.append(
+                    {
+                        "path": file_path,
+                        "writable": False,
+                        "reason": str(e),
+                    }
+                )
+                all_writable = False
+
+        return {
+            "success": True,
+            "all_writable": all_writable,
+            "details": details,
+        }

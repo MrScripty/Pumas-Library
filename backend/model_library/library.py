@@ -286,3 +286,184 @@ class ModelLibrary:
             model_type=model_type,
             tags=tags,
         )
+
+    # =========================================================================
+    # Manual Match Protection & Offline Fallback
+    # =========================================================================
+
+    def mark_metadata_as_manual(self, model_id: str) -> bool:
+        """Mark model metadata as manually corrected to protect from auto-updates.
+
+        Prevents future Deep Scans and retry lookups from overwriting user changes.
+
+        Args:
+            model_id: Model ID (relative path) to protect
+
+        Returns:
+            True if successful, False if model not found
+        """
+        from backend.models import get_iso_timestamp
+
+        # Find model directory
+        model_dir = self.library_root / model_id
+        if not model_dir.exists():
+            logger.warning("Model directory not found: %s", model_id)
+            return False
+
+        metadata = self.load_metadata(model_dir)
+        if not metadata:
+            logger.warning("No metadata found for: %s", model_id)
+            return False
+
+        # Update metadata to mark as manual
+        metadata["match_source"] = "manual"
+        metadata["updated_date"] = get_iso_timestamp()
+
+        self.save_metadata(model_dir, metadata)
+        logger.info("Marked metadata as manual for %s", model_id)
+
+        return True
+
+    def get_pending_lookups(self) -> List[Dict[str, Any]]:
+        """Get models that need online HuggingFace lookup.
+
+        Returns models with pending_online_lookup=True that haven't
+        been manually corrected.
+
+        Returns:
+            List of model metadata dicts needing lookup
+        """
+        pending = []
+
+        for model_dir in self.model_dirs():
+            metadata = self.load_metadata(model_dir)
+            if not metadata:
+                continue
+
+            # Skip manually corrected models
+            if metadata.get("match_source") == "manual":
+                continue
+
+            # Check if pending online lookup
+            if metadata.get("pending_online_lookup", False):
+                model_id = str(model_dir.relative_to(self.library_root))
+                pending.append(
+                    {
+                        "model_id": model_id,
+                        "model_dir": str(model_dir),
+                        "official_name": metadata.get("official_name", ""),
+                        "lookup_attempts": metadata.get("lookup_attempts", 0),
+                        "last_lookup_attempt": metadata.get("last_lookup_attempt"),
+                    }
+                )
+
+        return pending
+
+    def update_metadata_from_hf(
+        self,
+        model_id: str,
+        hf_metadata: Dict[str, Any],
+    ) -> bool:
+        """Update model metadata with HuggingFace lookup results.
+
+        Respects match_source="manual" protection.
+
+        Args:
+            model_id: Model ID (relative path) to update
+            hf_metadata: Metadata from HuggingFace lookup
+
+        Returns:
+            True if updated, False if protected or not found
+        """
+        from backend.models import get_iso_timestamp
+
+        model_dir = self.library_root / model_id
+        if not model_dir.exists():
+            return False
+
+        metadata = self.load_metadata(model_dir)
+        if not metadata:
+            return False
+
+        # Respect manual protection
+        if metadata.get("match_source") == "manual":
+            logger.debug("Skipping HF update for manually protected: %s", model_id)
+            return False
+
+        # Merge HF data
+        metadata.update(
+            {
+                "official_name": hf_metadata.get(
+                    "official_name", metadata.get("official_name", "")
+                ),
+                "tags": hf_metadata.get("tags", metadata.get("tags", [])),
+                "download_url": hf_metadata.get("download_url", metadata.get("download_url", "")),
+                "pending_online_lookup": False,
+                "match_source": "auto",
+                "match_method": hf_metadata.get("match_method", ""),
+                "match_confidence": hf_metadata.get("match_confidence", 0.0),
+                "updated_date": get_iso_timestamp(),
+            }
+        )
+
+        self.save_metadata(model_dir, metadata)
+        self.index_model_dir(model_dir, metadata)
+
+        logger.info("Updated metadata from HF for %s", model_id)
+        return True
+
+    def mark_lookup_failed(self, model_id: str) -> bool:
+        """Mark a pending lookup as failed, incrementing attempt counter.
+
+        Args:
+            model_id: Model ID that failed lookup
+
+        Returns:
+            True if updated, False if not found
+        """
+        from backend.models import get_iso_timestamp
+
+        model_dir = self.library_root / model_id
+        if not model_dir.exists():
+            return False
+
+        metadata = self.load_metadata(model_dir)
+        if not metadata:
+            return False
+
+        metadata["lookup_attempts"] = metadata.get("lookup_attempts", 0) + 1
+        metadata["last_lookup_attempt"] = get_iso_timestamp()
+
+        self.save_metadata(model_dir, metadata)
+
+        logger.warning(
+            "Lookup failed for %s (attempt %d)",
+            model_id,
+            metadata["lookup_attempts"],
+        )
+        return True
+
+    def set_pending_online_lookup(self, model_id: str, pending: bool = True) -> bool:
+        """Set the pending_online_lookup flag for a model.
+
+        Used when importing offline to mark models needing HF enrichment.
+
+        Args:
+            model_id: Model ID to update
+            pending: Whether lookup is pending
+
+        Returns:
+            True if updated, False if not found
+        """
+        model_dir = self.library_root / model_id
+        if not model_dir.exists():
+            return False
+
+        metadata = self.load_metadata(model_dir)
+        if not metadata:
+            return False
+
+        metadata["pending_online_lookup"] = pending
+
+        self.save_metadata(model_dir, metadata)
+        return True

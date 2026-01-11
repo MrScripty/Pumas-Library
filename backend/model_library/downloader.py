@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import shutil
 import threading
 import time
+from datetime import datetime, timedelta
+from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional, TypedDict
 
 from backend.logging_config import get_logger
 from backend.model_library.hf.client import HfClient
@@ -20,6 +23,72 @@ from backend.models import ModelFileInfo, ModelMetadata, get_iso_timestamp
 from backend.utils import calculate_file_hash, ensure_directory
 
 logger = get_logger(__name__)
+
+# Cache for repo file lists (24 hours TTL)
+_repo_cache: dict[str, tuple[list, datetime]] = {}
+_repo_cache_ttl = timedelta(hours=24)
+
+
+class HFMetadataResult(TypedDict, total=False):
+    """Result of HuggingFace metadata lookup."""
+
+    repo_id: str
+    official_name: str
+    family: str
+    model_type: str
+    subtype: str
+    variant: str
+    precision: str
+    tags: list[str]
+    base_model: str
+    download_url: str
+    description: str
+    match_confidence: float
+    match_method: str  # 'hash', 'filename_exact', 'filename_fuzzy'
+    requires_confirmation: bool
+    hash_mismatch: bool
+    matched_filename: str
+    pending_full_verification: bool
+    fast_hash: str
+    expected_sha256: str
+
+
+def compute_fast_hash(file_path: Path) -> str:
+    """Compute a fast hash using first and last 8MB of file.
+
+    This provides a quick candidate filter without reading the entire file.
+    For a 20GB file on HDD, this reads ~16MB instead of 20GB.
+
+    Args:
+        file_path: Path to the model file
+
+    Returns:
+        SHA256 hash of (first_8MB + last_8MB + file_size)
+    """
+    chunk_size = 8 * 1024 * 1024  # 8MB
+
+    file_size = file_path.stat().st_size
+    hasher = hashlib.sha256()
+
+    with open(file_path, "rb") as f:
+        # Read first 8MB
+        first_chunk = f.read(chunk_size)
+        hasher.update(first_chunk)
+
+        # Read last 8MB (if file is larger than 16MB)
+        if file_size > chunk_size * 2:
+            f.seek(-chunk_size, 2)  # Seek to last 8MB
+            last_chunk = f.read(chunk_size)
+            hasher.update(last_chunk)
+        elif file_size > chunk_size:
+            # File is between 8-16MB, read remaining
+            remaining = f.read()
+            hasher.update(remaining)
+
+        # Include file size to differentiate files with same head/tail
+        hasher.update(str(file_size).encode())
+
+    return hasher.hexdigest()
 
 
 class ModelDownloader:
@@ -682,3 +751,381 @@ class ModelDownloader:
             logger.warning("Failed to enrich metadata for %s: %s", repo_id, exc)
 
         return metadata
+
+    # =========================================================================
+    # HuggingFace Metadata Lookup Methods
+    # =========================================================================
+
+    def lookup_model_metadata_by_filename(
+        self,
+        filename: str,
+        file_path: Optional[Path] = None,
+        timeout: float = 5.0,
+    ) -> Optional[HFMetadataResult]:
+        """Lookup HuggingFace metadata using hybrid filename + hash verification.
+
+        Strategy:
+        1. Filename-based search to find top candidates (3-5 repos)
+        2. Compute fast hash if file_path provided (first 8MB + last 8MB)
+        3. Verify hash against top 2 candidates
+        4. Return best match with confidence score
+
+        Args:
+            filename: Name of the model file
+            file_path: Optional path to local file for hash verification
+            timeout: Timeout for API calls (default: 5 seconds)
+
+        Returns:
+            HFMetadataResult with match details, or None if no match found
+        """
+        logger.info("Looking up metadata for: %s", filename)
+
+        # Step 1: Get candidate repos via filename search
+        candidates = self._get_candidate_repos(filename, limit=5)
+
+        if not candidates:
+            logger.info("No candidates found for %s", filename)
+            return None
+
+        # Step 2: Compute fast hash for candidate filtering
+        fast_hash = None
+        if file_path and file_path.exists():
+            try:
+                fast_hash = compute_fast_hash(file_path)
+                logger.debug("Fast hash computed: %s...", fast_hash[:16])
+            except OSError as exc:
+                logger.warning("Failed to compute fast hash: %s", exc)
+
+        # Step 3: Sort candidates by popularity (download count)
+        candidates_sorted = sorted(
+            candidates,
+            key=lambda r: getattr(r, "downloads", 0) or 0,
+            reverse=True,
+        )
+
+        # Step 4: Try hash verification on top 2 candidates (if file provided)
+        if file_path and file_path.exists():
+            for candidate in candidates_sorted[:2]:
+                hash_match = self._verify_hash_single_candidate(file_path, candidate, filename)
+                if hash_match:
+                    logger.info("Hash match found: %s", candidate.id)
+                    hash_match["fast_hash"] = fast_hash or ""
+                    return hash_match
+
+        # Step 5: Fall back to filename matching with confidence
+        best_match = self._find_best_filename_match(filename, candidates_sorted)
+
+        if best_match:
+            logger.info(
+                "Filename match: %s (confidence: %.2f)",
+                best_match.get("repo_id", ""),
+                best_match.get("match_confidence", 0.0),
+            )
+            best_match["pending_full_verification"] = True
+            best_match["fast_hash"] = fast_hash or ""
+            return best_match
+
+        return None
+
+    def _get_candidate_repos(self, filename: str, limit: int = 5) -> list:
+        """Get candidate repositories from HuggingFace based on filename.
+
+        Args:
+            filename: Model filename to search for
+            limit: Maximum number of candidates to return
+
+        Returns:
+            List of HuggingFace model info objects
+        """
+        base_name = self._extract_base_name(filename)
+
+        try:
+            api = self._get_api()
+            models = list(api.list_models(search=base_name, limit=limit))
+            return models
+        except OSError as exc:
+            logger.warning("Failed to search HuggingFace: %s", exc)
+            return []
+        except RuntimeError as exc:
+            logger.warning("Failed to search HuggingFace: %s", exc)
+            return []
+
+    def _extract_base_name(self, filename: str) -> str:
+        """Extract base model name from filename by removing quant/version suffixes.
+
+        Examples:
+            'llama-3-8b-Q4_K_M.gguf' -> 'llama-3-8b'
+            'stable-diffusion-v1-5-pruned-emaonly.safetensors' -> 'stable-diffusion-v1-5'
+        """
+        # Remove extension
+        name = Path(filename).stem
+
+        # Common patterns to remove
+        patterns = [
+            r"[-_]Q[0-9]+_K[_SM]*$",  # GGUF quantization (Q4_K_M, Q5_K_S, etc.)
+            r"[-_]q[0-9]+_k[_sm]*$",  # lowercase variant
+            r"[-_]fp16$",
+            r"[-_]fp32$",
+            r"[-_]bf16$",
+            r"[-_]int[48]$",
+            r"[-_]pruned[-_]?.*$",
+            r"[-_]ema[-_]?.*$",
+            r"[-_]v\d+(\.\d+)*$",  # Version numbers like -v1.5
+            r"[-_]\d+[bB]$",  # Parameter counts like -8B
+        ]
+
+        for pattern in patterns:
+            name = re.sub(pattern, "", name, flags=re.IGNORECASE)
+
+        return name.strip("-_")
+
+    def _verify_hash_single_candidate(
+        self,
+        file_path: Path,
+        candidate_repo: Any,
+        filename: str,
+    ) -> Optional[HFMetadataResult]:
+        """Verify local file hash against single candidate repo.
+
+        Returns metadata dict with match_confidence=1.0 if found, else None.
+        """
+        # Compute local file hash (SHA256 for LFS compatibility)
+        try:
+            local_hash = calculate_file_hash(file_path)
+            if local_hash is None:
+                logger.warning("Failed to compute file hash for %s", file_path)
+                return None
+            logger.debug("Local file SHA256: %s...", local_hash[:16])
+        except OSError as exc:
+            logger.warning("Failed to compute file hash: %s", exc)
+            return None
+
+        repo_id = candidate_repo.id
+
+        try:
+            # Fetch LFS files with hashes
+            lfs_files = self._get_lfs_files_cached(repo_id)
+
+            # Look for hash match
+            for lfs_file in lfs_files:
+                file_oid = getattr(lfs_file, "oid", None) or getattr(lfs_file, "lfs", {}).get(
+                    "oid", ""
+                )
+                if not file_oid:
+                    continue
+
+                # SHA256 OID may be prefixed with "sha256:"
+                file_hash = str(file_oid).replace("sha256:", "").lower()
+
+                if file_hash == local_hash.lower():
+                    logger.info(
+                        "Hash match! %s / %s (SHA256: %s...)",
+                        repo_id,
+                        getattr(lfs_file, "path", ""),
+                        file_hash[:16],
+                    )
+
+                    # Extract full metadata with 100% confidence
+                    metadata = self._extract_metadata_from_repo(candidate_repo)
+                    metadata["match_confidence"] = 1.0
+                    metadata["match_method"] = "hash"
+                    metadata["matched_filename"] = getattr(lfs_file, "path", "")
+                    metadata["requires_confirmation"] = False
+                    metadata["hash_mismatch"] = False
+                    metadata["expected_sha256"] = file_hash
+
+                    return metadata
+
+        except OSError as exc:
+            logger.warning("Could not fetch LFS files for %s: %s", repo_id, exc)
+        except RuntimeError as exc:
+            logger.warning("Could not fetch LFS files for %s: %s", repo_id, exc)
+
+        return None
+
+    def _get_lfs_files_cached(self, repo_id: str) -> list:
+        """Get LFS files for a repo with 24-hour caching.
+
+        This dramatically reduces API calls when importing multiple
+        files from the same repository.
+        """
+        global _repo_cache
+
+        now = datetime.now()
+
+        # Check cache
+        if repo_id in _repo_cache:
+            cached_files, cached_time = _repo_cache[repo_id]
+            if now - cached_time < _repo_cache_ttl:
+                logger.debug("Cache hit for %s (age: %s)", repo_id, now - cached_time)
+                return cached_files
+
+        # Cache miss or expired - fetch from API
+        api = self._get_api()
+        try:
+            # Use list_repo_tree to get file info including LFS data
+            items = list(api.list_repo_tree(repo_id=repo_id, repo_type="model", recursive=True))
+            lfs_files = [item for item in items if hasattr(item, "lfs") or hasattr(item, "oid")]
+
+            # Store in cache
+            _repo_cache[repo_id] = (lfs_files, now)
+            logger.debug("Cached LFS files for %s (%d files)", repo_id, len(lfs_files))
+
+            return lfs_files
+        except OSError as exc:
+            logger.warning("Failed to list repo tree for %s: %s", repo_id, exc)
+            return []
+        except RuntimeError as exc:
+            logger.warning("Failed to list repo tree for %s: %s", repo_id, exc)
+            return []
+
+    def _find_best_filename_match(
+        self,
+        filename: str,
+        candidates: list,
+    ) -> Optional[HFMetadataResult]:
+        """Find best candidate based on filename similarity.
+
+        Returns metadata with match_confidence < 1.0 and requires_confirmation flag.
+        """
+        base_name = self._extract_base_name(filename).lower()
+        best_match = None
+        best_score = 0.0
+
+        for repo in candidates:
+            repo_name = repo.id.lower()
+            # Compare against repo name (owner/model format)
+            model_name = repo_name.split("/")[-1] if "/" in repo_name else repo_name
+            score = SequenceMatcher(None, base_name, model_name).ratio()
+
+            if score > best_score:
+                best_score = score
+                best_match = repo
+
+        if not best_match:
+            return None
+
+        # Extract metadata
+        metadata = self._extract_metadata_from_repo(best_match)
+
+        # Determine match method based on score
+        if best_score > 0.9:
+            match_method = "filename_exact"
+        else:
+            match_method = "filename_fuzzy"
+
+        metadata["match_confidence"] = best_score
+        metadata["match_method"] = match_method
+        metadata["requires_confirmation"] = best_score < 0.6
+        metadata["hash_mismatch"] = False
+
+        return metadata
+
+    def _extract_metadata_from_repo(self, repo: Any) -> HFMetadataResult:
+        """Extract metadata from a HuggingFace model info object."""
+        repo_id = repo.id
+        model_name = repo_id.split("/")[-1] if "/" in repo_id else repo_id
+
+        # Infer family from repo name
+        family = self._infer_family(model_name)
+
+        # Infer variant and precision from model info
+        variant, precision = self._infer_variant_and_precision(model_name)
+
+        # Get tags
+        tags = list(getattr(repo, "tags", []) or [])
+
+        # Determine model type from pipeline tag
+        pipeline_tag = getattr(repo, "pipeline_tag", "") or ""
+        if pipeline_tag in ("text-generation", "conversational"):
+            model_type = "llm"
+        elif pipeline_tag in ("text-to-image", "image-to-image"):
+            model_type = "diffusion"
+        else:
+            model_type = "llm"  # Default
+
+        result: HFMetadataResult = {
+            "repo_id": repo_id,
+            "official_name": getattr(repo, "id", model_name).split("/")[-1],
+            "family": family,
+            "model_type": model_type,
+            "subtype": "",
+            "variant": variant,
+            "precision": precision,
+            "tags": tags,
+            "base_model": "",
+            "download_url": f"https://huggingface.co/{repo_id}",
+            "description": getattr(repo, "description", "") or "",
+            "match_confidence": 0.0,
+            "match_method": "",
+            "requires_confirmation": True,
+            "hash_mismatch": False,
+            "matched_filename": "",
+            "pending_full_verification": False,
+            "fast_hash": "",
+            "expected_sha256": "",
+        }
+
+        return result
+
+    def _infer_family(self, model_name: str) -> str:
+        """Infer model family from model name."""
+        name_lower = model_name.lower()
+
+        # Common family patterns
+        families = [
+            ("llama", "llama"),
+            ("mistral", "mistral"),
+            ("gemma", "gemma"),
+            ("phi", "phi"),
+            ("qwen", "qwen"),
+            ("yi", "yi"),
+            ("falcon", "falcon"),
+            ("mpt", "mpt"),
+            ("stable-diffusion", "stable-diffusion"),
+            ("sdxl", "sdxl"),
+            ("flux", "flux"),
+            ("sd", "stable-diffusion"),
+        ]
+
+        for pattern, family in families:
+            if pattern in name_lower:
+                return family
+
+        return "unknown"
+
+    def _infer_variant_and_precision(self, filename: str) -> tuple[str, str]:
+        """Infer model variant and precision from filename.
+
+        Returns:
+            (variant, precision) tuple
+        """
+        filename_lower = filename.lower()
+
+        # Variant detection
+        if "ema" in filename_lower:
+            variant = "ema"
+        elif "pruned" in filename_lower:
+            variant = "pruned"
+        elif "full" in filename_lower:
+            variant = "full"
+        elif filename.endswith(".safetensors"):
+            variant = "safetensors"
+        else:
+            variant = "standard"
+
+        # Precision detection
+        if "fp16" in filename_lower or "half" in filename_lower:
+            precision = "fp16"
+        elif "bf16" in filename_lower:
+            precision = "bf16"
+        elif "fp32" in filename_lower or "float32" in filename_lower:
+            precision = "fp32"
+        elif "int8" in filename_lower or "8bit" in filename_lower:
+            precision = "int8"
+        elif "int4" in filename_lower or "4bit" in filename_lower:
+            precision = "int4"
+        else:
+            precision = "unknown"
+
+        return variant, precision

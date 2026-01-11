@@ -647,3 +647,50 @@ class ResourceManager:
 
     def remove_custom_node(self, node_name: str, version_tag: str) -> bool:
         return self.custom_nodes_mgr.remove_custom_node(node_name, version_tag)
+
+    # ==================== HuggingFace Metadata Lookup Operations ====================
+
+    def lookup_hf_metadata(
+        self,
+        filename: str,
+        file_path: Optional[Path] = None,
+    ) -> Optional[Dict[str, object]]:
+        """Look up HuggingFace metadata for a file using hybrid filename + hash matching.
+
+        Args:
+            filename: Name of the model file
+            file_path: Optional path to local file for hash verification
+
+        Returns:
+            Metadata dict if found, None otherwise
+        """
+        result = self.model_downloader.lookup_model_metadata_by_filename(filename, file_path)
+        # Convert TypedDict to plain dict for JSON serialization
+        return dict(result) if result else None
+
+    def mark_metadata_as_manual(self, model_id: str) -> bool:
+        """Mark model metadata as manually corrected to protect from auto-updates.
+
+        Args:
+            model_id: Model ID (relative path) to protect
+
+        Returns:
+            True if successful, False if not found
+        """
+        return self.model_library.mark_metadata_as_manual(model_id)
+
+    def get_library_status(self) -> Dict[str, object]:
+        """Get current library status including indexing state.
+
+        Returns:
+            Dict with indexing state, model count, etc.
+        """
+        model_count = len(self.model_library.list_models())
+        pending_lookups = len(self.model_library.get_pending_lookups())
+
+        return {
+            "indexing": False,  # Would need a flag to track async indexing
+            "deep_scan_in_progress": False,
+            "model_count": model_count,
+            "pending_lookups": pending_lookups,
+        }

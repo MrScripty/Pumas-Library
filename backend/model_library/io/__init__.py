@@ -8,6 +8,13 @@ from backend.model_library.io.hashing import (  # pragma: no cover
     hash_file_blake3,
     hash_file_sha256,
 )
+from backend.model_library.io.manager import (  # pragma: no cover
+    DriveInfo,
+    DriveType,
+    IOManager,
+    get_drive_info,
+    get_drive_type,
+)
 from backend.model_library.io.validator import (  # pragma: no cover
     ValidationIssue,
     ValidationResult,
@@ -25,6 +32,12 @@ __all__ = [  # pragma: no cover
     "compute_dual_hash",
     "hash_file_blake3",
     "hash_file_sha256",
+    # Manager
+    "DriveInfo",
+    "DriveType",
+    "IOManager",
+    "get_drive_info",
+    "get_drive_type",
     # Validation
     "ValidationIssue",
     "ValidationResult",

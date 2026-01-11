@@ -58,12 +58,18 @@ interface MappingPreviewProps {
   onPreviewLoaded?: (preview: MappingPreviewResponse) => void;
   /** Whether to auto-refresh on mount */
   autoRefresh?: boolean;
+  /** Callback when mapping is applied */
+  onMappingApplied?: (result: { links_created: number; links_removed: number }) => void;
+  /** Whether to show the apply button */
+  showApplyButton?: boolean;
 }
 
 export const MappingPreview: React.FC<MappingPreviewProps> = ({
   versionTag,
   onPreviewLoaded,
   autoRefresh = true,
+  onMappingApplied,
+  showApplyButton = true,
 }) => {
   const [preview, setPreview] = useState<MappingPreviewResponse | null>(null);
   const [crossFsWarning, setCrossFsWarning] = useState<{
@@ -72,8 +78,15 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
     recommendation?: string;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
+  const [applyResult, setApplyResult] = useState<{
+    success: boolean;
+    links_created: number;
+    links_removed: number;
+    error?: string;
+  } | null>(null);
 
   const fetchPreview = useCallback(async () => {
     if (!window.pywebview?.api?.preview_model_mapping || !versionTag) {
@@ -107,6 +120,50 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
       setIsLoading(false);
     }
   }, [versionTag, onPreviewLoaded]);
+
+  const applyMapping = useCallback(async () => {
+    if (!window.pywebview?.api?.apply_model_mapping || !versionTag) {
+      logger.warn('Apply API not available or no version tag');
+      return;
+    }
+
+    setIsApplying(true);
+    setApplyResult(null);
+    try {
+      const result = await window.pywebview.api.apply_model_mapping(versionTag);
+      setApplyResult({
+        success: result.success,
+        links_created: result.links_created || 0,
+        links_removed: result.links_removed || 0,
+        error: result.error,
+      });
+
+      if (result.success) {
+        logger.info('Mapping applied successfully', {
+          links_created: result.links_created,
+          links_removed: result.links_removed,
+        });
+        onMappingApplied?.({
+          links_created: result.links_created || 0,
+          links_removed: result.links_removed || 0,
+        });
+        // Refresh preview after applying
+        void fetchPreview();
+      } else {
+        logger.error('Failed to apply mapping', { error: result.error });
+      }
+    } catch (error) {
+      logger.error('Error applying mapping', { error });
+      setApplyResult({
+        success: false,
+        links_created: 0,
+        links_removed: 0,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    } finally {
+      setIsApplying(false);
+    }
+  }, [versionTag, onMappingApplied, fetchPreview]);
 
   useEffect(() => {
     if (autoRefresh && versionTag) {
@@ -416,20 +473,82 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
                 </div>
               )}
 
+              {/* Apply Result Message */}
+              {applyResult && (
+                <div
+                  className={`p-3 rounded-lg border ${
+                    applyResult.success
+                      ? 'bg-[hsl(var(--accent-success)/0.1)] border-[hsl(var(--accent-success)/0.3)]'
+                      : 'bg-[hsl(var(--accent-error)/0.1)] border-[hsl(var(--accent-error)/0.3)]'
+                  }`}
+                >
+                  <div className="flex items-start gap-2">
+                    {applyResult.success ? (
+                      <CheckCircle className="w-4 h-4 text-[hsl(var(--accent-success))] flex-shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle className="w-4 h-4 text-[hsl(var(--accent-error))] flex-shrink-0 mt-0.5" />
+                    )}
+                    <div>
+                      <div
+                        className={`text-sm font-medium ${
+                          applyResult.success
+                            ? 'text-[hsl(var(--accent-success))]'
+                            : 'text-[hsl(var(--accent-error))]'
+                        }`}
+                      >
+                        {applyResult.success ? 'Mapping Applied' : 'Mapping Failed'}
+                      </div>
+                      <div className="text-xs text-[hsl(var(--launcher-text-secondary))] mt-1">
+                        {applyResult.success ? (
+                          <>
+                            Created {applyResult.links_created} link
+                            {applyResult.links_created !== 1 ? 's' : ''}
+                            {applyResult.links_removed > 0 && (
+                              <>, removed {applyResult.links_removed} broken</>
+                            )}
+                          </>
+                        ) : (
+                          applyResult.error || 'Unknown error occurred'
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Action Buttons */}
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => void fetchPreview()}
-                  disabled={isLoading}
+                  disabled={isLoading || isApplying}
                   className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs bg-[hsl(var(--launcher-bg-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] rounded transition-colors disabled:opacity-50"
                 >
                   <RefreshCw className={`w-3 h-3 ${isLoading ? 'animate-spin' : ''}`} />
-                  Refresh Preview
+                  Refresh
                 </button>
+                {showApplyButton && toCreateCount > 0 && (
+                  <button
+                    onClick={() => void applyMapping()}
+                    disabled={isLoading || isApplying || status === 'errors'}
+                    className="flex-1 flex items-center justify-center gap-2 px-3 py-2 text-xs bg-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary-hover))] text-white rounded transition-colors disabled:opacity-50"
+                  >
+                    {isApplying ? (
+                      <>
+                        <RefreshCw className="w-3 h-3 animate-spin" />
+                        Applying...
+                      </>
+                    ) : (
+                      <>
+                        <Link className="w-3 h-3" />
+                        Apply Mapping
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
               {/* Success Message */}
-              {!hasIssues && preview && toCreateCount === 0 && skipCount > 0 && (
+              {!hasIssues && preview && toCreateCount === 0 && skipCount > 0 && !applyResult && (
                 <div className="text-xs text-center text-[hsl(var(--accent-success))] py-2 flex items-center justify-center gap-2">
                   <CheckCircle className="w-4 h-4" />
                   All models already linked

@@ -496,6 +496,15 @@ export interface IncrementalSyncResponse extends BaseResponse {
 }
 
 /**
+ * Apply model mapping response
+ */
+export interface ApplyModelMappingResponse extends BaseResponse {
+  links_created: number;
+  links_removed: number;
+  total_links: number;
+}
+
+/**
  * Cross-filesystem warning response
  */
 export interface CrossFilesystemWarningResponse extends BaseResponse {
@@ -945,6 +954,12 @@ export interface PyWebViewAPI {
    * Check if library and app version are on different filesystems
    */
   get_cross_filesystem_warning(versionTag: string): Promise<CrossFilesystemWarningResponse>;
+
+  /**
+   * Apply model mapping for a specific version
+   * Cleans broken links and creates/updates symlinks for all mapped models
+   */
+  apply_model_mapping(versionTag: string): Promise<ApplyModelMappingResponse>;
 
   // ========================================
   // Custom Nodes

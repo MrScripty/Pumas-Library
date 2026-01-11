@@ -629,6 +629,93 @@ class ResourceManager:
         models_dir = version_path / "models"
         return self.model_mapper.get_cross_filesystem_warning(models_dir)
 
+    def apply_model_mapping(
+        self,
+        version_tag: str,
+        app_id: str = "comfyui",
+    ) -> Dict[str, object]:
+        """Apply model mapping for a specific version.
+
+        This function:
+        1. Removes broken symlinks (targets no longer exist)
+        2. Re-applies all mapping configurations
+        3. Recreates missing symlinks
+        4. Creates new symlinks for newly imported models
+
+        Args:
+            version_tag: ComfyUI version tag
+            app_id: Application identifier (default: "comfyui")
+
+        Returns:
+            Dict with sync results:
+                - success: Whether sync completed
+                - links_created: Number of new links created
+                - links_removed: Number of broken links removed
+                - total_links: Total links after operation
+        """
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            return {
+                "success": False,
+                "error": f"Version {version_tag} not found",
+                "links_created": 0,
+                "links_removed": 0,
+                "total_links": 0,
+            }
+
+        models_dir = version_path / "models"
+        ensure_directory(models_dir)
+        app_version = version_tag.lstrip("vV")
+
+        try:
+            # Step 1: Clean broken symlinks
+            links_removed = self._clean_broken_symlinks(models_dir)
+
+            # Step 2: Apply all mappings
+            links_created = self.model_mapper.apply_for_app(app_id, app_version, models_dir)
+
+            return {
+                "success": True,
+                "links_created": links_created,
+                "links_removed": links_removed,
+                "total_links": links_created,
+            }
+        except OSError as exc:
+            logger.error("Failed to apply model mapping: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_removed": 0,
+                "total_links": 0,
+            }
+
+    def _clean_broken_symlinks(self, models_root: Path) -> int:
+        """Remove broken symlinks in app model directories.
+
+        Args:
+            models_root: Root path to the application's models directory
+
+        Returns:
+            Number of broken symlinks removed
+        """
+        count = 0
+        if not models_root.exists():
+            return count
+
+        for subdir in models_root.iterdir():
+            if not subdir.is_dir():
+                continue
+            for item in subdir.iterdir():
+                if item.is_symlink() and not item.exists():
+                    try:
+                        item.unlink()
+                        count += 1
+                        logger.debug("Removed broken symlink: %s", item)
+                    except OSError as exc:
+                        logger.warning("Failed to remove broken symlink %s: %s", item, exc)
+        return count
+
     # ==================== Custom Nodes Operations ====================
 
     def get_version_custom_nodes_dir(self, version_tag: str) -> Path:

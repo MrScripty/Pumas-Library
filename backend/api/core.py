@@ -1360,6 +1360,52 @@ class ComfyUISetupAPI:
             logger.error("Failed cross-fs check for %s: %s", version_tag, exc, exc_info=True)
             return {"success": False, "error": str(exc)}
 
+    def apply_model_mapping(self, version_tag: str) -> Dict[str, Any]:
+        """Apply model mapping for a specific version.
+
+        This function:
+        1. Removes broken symlinks (targets no longer exist)
+        2. Re-applies all mapping configurations
+        3. Recreates missing symlinks
+        4. Creates new symlinks for newly imported models
+
+        Args:
+            version_tag: ComfyUI version tag
+
+        Returns:
+            Dict with sync results including links_created, links_removed, total_links
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager not available",
+                "links_created": 0,
+                "links_removed": 0,
+                "total_links": 0,
+            }
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected apply mapping for invalid tag: %r", version_tag)
+            return {
+                "success": False,
+                "error": "Invalid version tag",
+                "links_created": 0,
+                "links_removed": 0,
+                "total_links": 0,
+            }
+
+        try:
+            return self.resource_manager.apply_model_mapping(version_tag)
+        except OSError as exc:
+            logger.error("Failed to apply mapping for %s: %s", version_tag, exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_removed": 0,
+                "total_links": 0,
+            }
+
     def get_custom_nodes(self, version_tag: str) -> List[str]:
         """Get list of custom nodes for a specific version"""
         if not self.resource_manager:

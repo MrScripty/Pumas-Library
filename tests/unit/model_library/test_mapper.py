@@ -318,3 +318,104 @@ class TestApplyForApp:
         if checkpoints_dir.exists():
             links = list(checkpoints_dir.glob("*"))
             assert len(links) >= 1
+
+
+@pytest.mark.unit
+class TestLinkRegistryIntegration:
+    """Tests for link registry integration."""
+
+    def test_mapper_accepts_registry(
+        self, library: ModelLibrary, config_root: Path, tmp_path: Path
+    ) -> None:
+        """Test that mapper accepts a link registry."""
+        from backend.model_library.link_registry import LinkRegistry
+
+        registry = LinkRegistry(tmp_path / "registry.db")
+        mapper = ModelMapper(library, config_root, link_registry=registry)
+
+        assert mapper._link_registry is registry
+
+    def test_mapper_without_registry(self, library: ModelLibrary, config_root: Path) -> None:
+        """Test that mapper works without a link registry."""
+        mapper = ModelMapper(library, config_root)
+        assert mapper._link_registry is None
+
+    def test_create_link_with_registry_tracks_link(
+        self, library: ModelLibrary, config_root: Path, tmp_path: Path
+    ) -> None:
+        """Test that creating a link registers it in the registry."""
+        from backend.model_library.link_registry import LinkRegistry
+
+        registry = LinkRegistry(tmp_path / "registry.db")
+        mapper = ModelMapper(library, config_root, link_registry=registry)
+
+        # Create source file
+        model_dir = library.library_root / "diffusion" / "test" / "model"
+        model_dir.mkdir(parents=True)
+        source = model_dir / "model.safetensors"
+        source.write_bytes(b"model data")
+
+        # Create target path
+        target_dir = tmp_path / "app" / "models"
+        target_dir.mkdir(parents=True)
+        target = target_dir / "model.safetensors"
+
+        # Create link with registry tracking
+        result = mapper._create_link_with_registry(
+            source=source,
+            target=target,
+            model_id="test-model",
+            app_id="comfyui",
+            app_version="0.6.0",
+        )
+
+        assert result is True
+        assert target.exists()
+
+        # Check registry
+        links = registry.get_links_for_model("test-model")
+        assert len(links) == 1
+        assert links[0].app_id == "comfyui"
+        assert links[0].app_version == "0.6.0"
+
+    def test_delete_model_with_cascade(
+        self, library: ModelLibrary, config_root: Path, tmp_path: Path
+    ) -> None:
+        """Test cascade delete removes links."""
+        from backend.model_library.link_registry import LinkRegistry
+
+        registry = LinkRegistry(tmp_path / "registry.db")
+        mapper = ModelMapper(library, config_root, link_registry=registry)
+
+        # Create source file
+        model_dir = library.library_root / "diffusion" / "test" / "model"
+        model_dir.mkdir(parents=True)
+        source = model_dir / "model.safetensors"
+        source.write_bytes(b"model data")
+
+        # Create multiple links
+        for i in range(3):
+            target_dir = tmp_path / f"app{i}" / "models"
+            target_dir.mkdir(parents=True)
+            target = target_dir / "model.safetensors"
+            mapper._create_link_with_registry(
+                source=source,
+                target=target,
+                model_id="test-model",
+                app_id="comfyui",
+                app_version="0.6.0",
+            )
+
+        assert registry.get_link_count() == 3
+
+        # Cascade delete
+        removed = mapper.delete_model_with_cascade("test-model")
+
+        assert removed == 3
+        assert registry.get_link_count() == 0
+
+    def test_delete_model_without_registry(self, library: ModelLibrary, config_root: Path) -> None:
+        """Test cascade delete without registry returns 0."""
+        mapper = ModelMapper(library, config_root)
+        removed = mapper.delete_model_with_cascade("test-model")
+        assert removed == 0

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
 from packaging.version import InvalidVersion, Version
@@ -14,11 +14,15 @@ from backend.model_library.io.platform import (
     LinkStrategy,
     create_link,
     get_default_strategy,
+    is_cross_filesystem,
     verify_link,
 )
 from backend.model_library.library import ModelLibrary
 from backend.model_library.naming import normalize_filename, unique_path
 from backend.utils import ensure_directory
+
+if TYPE_CHECKING:
+    from backend.model_library.link_registry import LinkRegistry
 
 logger = get_logger(__name__)
 
@@ -26,10 +30,23 @@ logger = get_logger(__name__)
 class ModelMapper:
     """Applies translation configs to map library models into app folders."""
 
-    def __init__(self, library: ModelLibrary, config_root: Path) -> None:
+    def __init__(
+        self,
+        library: ModelLibrary,
+        config_root: Path,
+        link_registry: LinkRegistry | None = None,
+    ) -> None:
+        """Initialize the model mapper.
+
+        Args:
+            library: Model library instance
+            config_root: Path to mapping configuration files
+            link_registry: Optional link registry for tracking created links
+        """
         self.library = library
         self.config_root = Path(config_root)
         self.config_root.mkdir(parents=True, exist_ok=True)
+        self._link_registry = link_registry
 
     def _load_configs(self, app_id: str, app_version: str) -> List[Dict[str, Any]]:
         configs: List[Dict[str, Any]] = []
@@ -145,6 +162,8 @@ class ModelMapper:
     ) -> bool:
         """Create a link from target to source using io/platform.
 
+        This is the base link creation method without registry tracking.
+
         Args:
             source: The actual file to link to
             target: Where the link will be created
@@ -172,6 +191,65 @@ class ModelMapper:
         if not result.success:
             logger.warning("Failed to create link %s -> %s: %s", target, source, result.error)
             return False
+
+        return True
+
+    def _create_link_with_registry(
+        self,
+        source: Path,
+        target: Path,
+        model_id: str,
+        app_id: str,
+        app_version: str,
+        strategy: LinkStrategy | None = None,
+    ) -> bool:
+        """Create a link from target to source and register it.
+
+        Args:
+            source: The actual file to link to
+            target: Where the link will be created
+            model_id: ID of the model being linked
+            app_id: Application identifier
+            app_version: Application version
+            strategy: Link strategy to use (defaults to platform default)
+
+        Returns:
+            True if link was created successfully
+        """
+        if strategy is None:
+            strategy = get_default_strategy()
+
+        # Create the link using base method
+        if not self._create_link(source, target, strategy):
+            return False
+
+        # Register in link registry if available
+        if self._link_registry is not None:
+            from backend.model_library.link_registry import LinkType
+
+            # Map LinkStrategy to LinkType
+            link_type_map = {
+                LinkStrategy.SYMLINK: LinkType.SYMLINK,
+                LinkStrategy.HARDLINK: LinkType.HARDLINK,
+                LinkStrategy.COPY: LinkType.COPY,
+            }
+            link_type = link_type_map.get(strategy, LinkType.SYMLINK)
+
+            # Check if this is a cross-filesystem link
+            is_external = is_cross_filesystem(source, target)
+
+            # Unregister any existing link at this target first
+            self._link_registry.unregister_by_target(target)
+
+            self._link_registry.register_link(
+                model_id=model_id,
+                source_path=source,
+                target_path=target,
+                link_type=link_type,
+                app_id=app_id,
+                app_version=app_version,
+                is_external=is_external,
+            )
 
         return True
 
@@ -220,6 +298,9 @@ class ModelMapper:
                     if not self._matches_filters(metadata, filters):
                         continue
 
+                    # Get model_id for registry tracking
+                    model_id = rel_path
+
                     for source_file in self._iter_matching_files(model_dir, patterns):
                         cleaned_name = normalize_filename(source_file.name)
                         target_path = target_dir / cleaned_name
@@ -237,7 +318,26 @@ class ModelMapper:
                                 # Non-symlink exists, use unique path
                                 target_path = unique_path(target_path)
 
-                        if self._create_link(source_file, target_path):
+                        if self._create_link_with_registry(
+                            source_file, target_path, model_id, app_id, app_version
+                        ):
                             total_links += 1
 
         return total_links
+
+    def delete_model_with_cascade(self, model_id: str) -> int:
+        """Delete all links for a model using the registry.
+
+        This should be called before deleting a model from the library.
+
+        Args:
+            model_id: ID of the model to delete links for
+
+        Returns:
+            Number of links removed
+        """
+        if self._link_registry is None:
+            logger.warning("No link registry available for cascade delete")
+            return 0
+
+        return self._link_registry.delete_links_for_model(model_id)

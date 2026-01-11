@@ -2,16 +2,18 @@
  * Model Manager Component (Refactored)
  *
  * Main component for managing local and remote models.
- * Reduced from 986 lines to ~280 lines by extracting hooks and components.
+ * Includes drag-and-drop import support.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import type { ModelCategory } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
+import { ModelImportDropZone } from './ModelImportDropZone';
+import { ModelImportDialog } from './ModelImportDialog';
 import { getReleaseTimestamp } from '../utils/modelFormatters';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
@@ -27,6 +29,8 @@ interface ModelManagerProps {
   selectedAppId: string | null;
   onAddModels?: () => void;
   onOpenModelsRoot?: () => void;
+  /** Callback when models are imported to refresh the list */
+  onModelsImported?: () => void;
 }
 
 export const ModelManager: React.FC<ModelManagerProps> = ({
@@ -38,6 +42,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   selectedAppId,
   onAddModels,
   onOpenModelsRoot,
+  onModelsImported,
 }) => {
   // UI State
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,6 +50,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [selectedKind, setSelectedKind] = useState<string>('all');
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [isDownloadMode, setIsDownloadMode] = useState(false);
+
+  // Import State
+  const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   // Custom Hooks
   const { results: remoteResults, kinds: remoteKinds, error: remoteError, isLoading: isRemoteLoading } =
@@ -216,7 +225,39 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setShowCategoryMenu(false);
   };
 
+  // Import handlers
+  const handleFilesDropped = useCallback((paths: string[]) => {
+    logger.info('Files dropped for import', { count: paths.length });
+    setDroppedFiles(paths);
+    setShowImportDialog(true);
+  }, []);
+
+  const handleImportDialogClose = useCallback(() => {
+    setShowImportDialog(false);
+    setDroppedFiles([]);
+  }, []);
+
+  const handleImportComplete = useCallback(() => {
+    logger.info('Import complete, refreshing model list');
+    if (onModelsImported) {
+      onModelsImported();
+    }
+  }, [onModelsImported]);
+
   return (
+    <>
+      {/* Drag and drop overlay */}
+      <ModelImportDropZone onFilesDropped={handleFilesDropped} enabled={!isDownloadMode} />
+
+      {/* Import dialog */}
+      {showImportDialog && droppedFiles.length > 0 && (
+        <ModelImportDialog
+          filePaths={droppedFiles}
+          onClose={handleImportDialogClose}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+
     <div className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col">
       {/* Header */}
       <ModelSearchBar
@@ -270,5 +311,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         </div>
       </div>
     </div>
+    </>
   );
 };

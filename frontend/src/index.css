@@ -382,4 +382,26 @@
     animation: download-scan-spin 1.2s linear infinite;
     pointer-events: none;
   }
+
+  /* Drop zone pulse border animation */
+  @keyframes pulse-border {
+    0%, 100% {
+      border-color: hsl(var(--launcher-accent-primary));
+      box-shadow: 0 0 0 0 hsl(var(--launcher-accent-primary)/0.4);
+    }
+    50% {
+      border-color: hsl(var(--launcher-accent-primary)/0.6);
+      box-shadow: 0 0 20px 4px hsl(var(--launcher-accent-primary)/0.2);
+    }
+  }
+
+  .animate-pulse-border {
+    animation: pulse-border 1.5s ease-in-out infinite;
+  }
+
+  /* Drop zone backdrop blur */
+  .drop-zone-backdrop {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+  }
 }

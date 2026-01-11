@@ -129,6 +129,149 @@ export interface ScanSharedStorageResponse extends BaseResponse {
 }
 
 // ============================================================================
+// Model Library Types (Phase 1A - Part 6)
+// ============================================================================
+
+/**
+ * Match methods indicating how metadata was matched
+ */
+export type MatchMethod = 'hash' | 'filename_exact' | 'filename_fuzzy' | 'manual' | 'none';
+
+/**
+ * Import stages for progress tracking
+ */
+export type ImportStage = 'copying' | 'hashing' | 'writing_metadata' | 'indexing' | 'syncing' | 'complete';
+
+/**
+ * Security tier for pickle scanning
+ */
+export type SecurityTier = 'safe' | 'unknown' | 'pickle';
+
+/**
+ * Library status including indexing state
+ */
+export interface LibraryStatusResponse extends BaseResponse {
+  indexing: boolean;
+  deep_scan_in_progress: boolean;
+  deep_scan_progress?: {
+    current: number;
+    total: number;
+    stage: string;
+  };
+  model_count: number;
+  last_scan?: string;
+}
+
+/**
+ * HuggingFace metadata lookup result
+ */
+export interface HFMetadataLookupResponse extends BaseResponse {
+  found: boolean;
+  match_method?: MatchMethod;
+  confidence?: number;
+  metadata?: {
+    repo_id: string;
+    official_name: string;
+    family: string;
+    model_type?: string;
+    subtype?: string;
+    tags?: string[];
+    description?: string;
+  };
+  related_files?: Array<{
+    filename: string;
+    size_bytes: number;
+    quant?: string;
+  }>;
+}
+
+/**
+ * Individual model import specification
+ */
+export interface ModelImportSpec {
+  path: string;
+  family: string;
+  official_name: string;
+  repo_id?: string;
+  model_type?: string;
+  subtype?: string;
+  tags?: string[];
+  security_acknowledged?: boolean;
+}
+
+/**
+ * Individual model import result
+ */
+export interface ModelImportResult {
+  path: string;
+  success: boolean;
+  model_path?: string;
+  error?: string;
+  security_tier?: SecurityTier;
+}
+
+/**
+ * Batch import response
+ */
+export interface ImportBatchResponse extends BaseResponse {
+  imported: number;
+  failed: number;
+  results: ModelImportResult[];
+}
+
+/**
+ * Network status including circuit breaker state
+ */
+export interface NetworkStatusResponse extends BaseResponse {
+  total_requests: number;
+  successful_requests: number;
+  failed_requests: number;
+  circuit_breaker_rejections: number;
+  retries: number;
+  success_rate: number;
+}
+
+/**
+ * FTS5 search response for local model library
+ */
+export interface FTSSearchResponse extends BaseResponse {
+  models: Array<{
+    model_id: string;
+    repo_id?: string;
+    official_name: string;
+    family: string;
+    model_type?: string;
+    subtype?: string;
+    tags?: string[];
+    description?: string;
+    file_path: string;
+    size_bytes?: number;
+    security_tier?: SecurityTier;
+    added_date?: string;
+    last_used?: string;
+  }>;
+  total_count: number;
+  query_time_ms: number;
+  query: string;
+}
+
+/**
+ * File writability check response
+ */
+export interface FileWritableResponse extends BaseResponse {
+  writable: boolean;
+  reason?: string;
+}
+
+/**
+ * File link count response (for NTFS hard link detection)
+ */
+export interface FileLinkCountResponse extends BaseResponse {
+  link_count: number;
+  is_hard_linked: boolean;
+}
+
+// ============================================================================
 // Version Management Types
 // ============================================================================
 
@@ -453,6 +596,30 @@ export interface PyWebViewAPI {
   ): Promise<ModelDownloadResponse>;
   get_model_download_status(downloadId: string): Promise<ModelDownloadStatusResponse>;
   cancel_model_download(downloadId: string): Promise<BaseResponse>;
+
+  // ========================================
+  // Model Library Import (Phase 1A - Part 6)
+  // ========================================
+  /**
+   * Search local model library using FTS5 full-text search
+   */
+  search_models_fts(
+    query: string,
+    limit?: number,
+    offset?: number,
+    modelType?: string | null,
+    tags?: string[] | null
+  ): Promise<FTSSearchResponse>;
+
+  /**
+   * Import multiple models in a batch operation
+   */
+  import_batch(importSpecs: ModelImportSpec[]): Promise<ImportBatchResponse>;
+
+  /**
+   * Get network status including circuit breaker state
+   */
+  get_network_status(): Promise<NetworkStatusResponse>;
 
   // ========================================
   // Custom Nodes

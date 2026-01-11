@@ -13,6 +13,7 @@ from typing import Dict, List, Optional
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.model_library import ModelDownloader, ModelImporter, ModelLibrary, ModelMapper
+from backend.model_library.link_registry import LinkRegistry
 from backend.model_library.search import SearchResult
 from backend.models import ModelOverrides, RepairReport, ScanResult
 from backend.resources.custom_nodes_manager import CustomNodesManager
@@ -57,7 +58,14 @@ class ResourceManager:
         )
 
         self.model_library = ModelLibrary(self.shared_models_dir)
-        self.model_mapper = ModelMapper(self.model_library, self.translation_config_dir)
+
+        # Link registry for tracking symlinks created by mapper
+        self.link_registry_db = self.shared_models_dir / "link_registry.db"
+        self.link_registry = LinkRegistry(self.link_registry_db)
+
+        self.model_mapper = ModelMapper(
+            self.model_library, self.translation_config_dir, link_registry=self.link_registry
+        )
         self.model_importer = ModelImporter(self.model_library)
         self.model_downloader = ModelDownloader(self.model_library)
 
@@ -384,6 +392,109 @@ class ResourceManager:
             "failed": failed,
             "results": results,
         }
+
+    # ==================== Link Registry Operations ====================
+
+    def get_link_health(self, app_models_root: Optional[Path] = None) -> Dict[str, object]:
+        """Get health status of model symlinks.
+
+        Checks for broken links, orphaned links, and cross-filesystem warnings.
+
+        Args:
+            app_models_root: Optional path to check for orphaned links
+
+        Returns:
+            Dict with health check results including:
+                - status: Overall health status (healthy, warnings, errors)
+                - total_links: Total registered links
+                - healthy_links: Number of valid links
+                - broken_links: List of broken link info
+                - orphaned_links: List of orphaned symlink paths
+                - warnings: List of warning messages
+                - errors: List of error messages
+        """
+        result = self.link_registry.perform_health_check(app_models_root)
+        return {
+            "status": result.status.value,
+            "total_links": result.total_links,
+            "healthy_links": result.healthy_links,
+            "broken_links": [
+                {
+                    "link_id": bl.link_id,
+                    "target_path": bl.target_path,
+                    "expected_source": bl.expected_source,
+                    "model_id": bl.model_id,
+                    "reason": bl.reason,
+                }
+                for bl in result.broken_links
+            ],
+            "orphaned_links": result.orphaned_links,
+            "warnings": result.warnings,
+            "errors": result.errors,
+        }
+
+    def clean_broken_links(self) -> Dict[str, object]:
+        """Remove broken links from the registry and filesystem.
+
+        Returns:
+            Dict with cleanup results:
+                - success: Whether cleanup completed
+                - cleaned: Number of broken links removed
+        """
+        try:
+            cleaned = self.link_registry.clean_broken_links()
+            return {"success": True, "cleaned": cleaned}
+        except OSError as exc:
+            logger.error("Failed to clean broken links: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "cleaned": 0}
+
+    def remove_orphaned_links(self, app_models_root: Path) -> Dict[str, object]:
+        """Remove orphaned symlinks from the application directory.
+
+        Args:
+            app_models_root: Root path to the application's models directory
+
+        Returns:
+            Dict with cleanup results:
+                - success: Whether cleanup completed
+                - removed: Number of orphaned links removed
+        """
+        try:
+            removed = self.link_registry.remove_orphaned_links(app_models_root)
+            return {"success": True, "removed": removed}
+        except OSError as exc:
+            logger.error("Failed to remove orphaned links: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "removed": 0}
+
+    def get_links_for_model(self, model_id: str) -> List[Dict[str, object]]:
+        """Get all links for a specific model.
+
+        Args:
+            model_id: ID of the model
+
+        Returns:
+            List of link information dictionaries
+        """
+        links = self.link_registry.get_links_for_model(model_id)
+        return [self.link_registry.to_dict(link) for link in links]
+
+    def delete_model_with_cascade(self, model_id: str) -> Dict[str, object]:
+        """Delete a model and all its symlinks.
+
+        Args:
+            model_id: ID of the model to delete
+
+        Returns:
+            Dict with deletion results:
+                - success: Whether deletion completed
+                - links_removed: Number of symlinks removed
+        """
+        try:
+            links_removed = self.model_mapper.delete_model_with_cascade(model_id)
+            return {"success": True, "links_removed": links_removed}
+        except OSError as exc:
+            logger.error("Failed to cascade delete model %s: %s", model_id, exc, exc_info=True)
+            return {"success": False, "error": str(exc), "links_removed": 0}
 
     # ==================== Custom Nodes Operations ====================
 

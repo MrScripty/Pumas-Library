@@ -302,3 +302,168 @@ class TestSearchResultSerialization:
         assert hasattr(result, "models")
         assert hasattr(result, "total_count")
         assert hasattr(result, "query_time_ms")
+
+
+@pytest.mark.unit
+class TestLinkHealth:
+    """Tests for link health API endpoints."""
+
+    def test_get_link_health_returns_status(self, mock_resource_manager: MagicMock) -> None:
+        """Test that get_link_health returns health status."""
+        mock_resource_manager.get_link_health.return_value = {
+            "status": "healthy",
+            "total_links": 10,
+            "healthy_links": 10,
+            "broken_links": [],
+            "orphaned_links": [],
+            "warnings": [],
+            "errors": [],
+        }
+
+        result = mock_resource_manager.get_link_health(None)
+
+        assert result["status"] == "healthy"
+        assert result["total_links"] == 10
+        assert result["healthy_links"] == 10
+
+    def test_get_link_health_with_broken_links(self, mock_resource_manager: MagicMock) -> None:
+        """Test that get_link_health reports broken links."""
+        mock_resource_manager.get_link_health.return_value = {
+            "status": "errors",
+            "total_links": 5,
+            "healthy_links": 3,
+            "broken_links": [
+                {
+                    "link_id": 1,
+                    "target_path": "/app/models/broken.safetensors",
+                    "expected_source": "/library/models/model.safetensors",
+                    "model_id": "test-model",
+                    "reason": "Source file missing",
+                }
+            ],
+            "orphaned_links": [],
+            "warnings": [],
+            "errors": ["Found 2 broken links"],
+        }
+
+        result = mock_resource_manager.get_link_health(None)
+
+        assert result["status"] == "errors"
+        assert len(result["broken_links"]) == 1
+        assert result["broken_links"][0]["model_id"] == "test-model"
+
+    def test_get_link_health_with_orphaned_links(self, mock_resource_manager: MagicMock) -> None:
+        """Test that get_link_health reports orphaned links."""
+        mock_resource_manager.get_link_health.return_value = {
+            "status": "warnings",
+            "total_links": 5,
+            "healthy_links": 5,
+            "broken_links": [],
+            "orphaned_links": ["/app/models/orphan.safetensors"],
+            "warnings": ["Found 1 orphaned symlinks"],
+            "errors": [],
+        }
+
+        result = mock_resource_manager.get_link_health(Path("/app/models"))
+
+        assert result["status"] == "warnings"
+        assert len(result["orphaned_links"]) == 1
+
+    def test_clean_broken_links_returns_count(self, mock_resource_manager: MagicMock) -> None:
+        """Test that clean_broken_links returns cleanup count."""
+        mock_resource_manager.clean_broken_links.return_value = {
+            "success": True,
+            "cleaned": 3,
+        }
+
+        result = mock_resource_manager.clean_broken_links()
+
+        assert result["success"] is True
+        assert result["cleaned"] == 3
+
+    def test_remove_orphaned_links_returns_count(self, mock_resource_manager: MagicMock) -> None:
+        """Test that remove_orphaned_links returns removal count."""
+        mock_resource_manager.remove_orphaned_links.return_value = {
+            "success": True,
+            "removed": 2,
+        }
+
+        result = mock_resource_manager.remove_orphaned_links(Path("/app/models"))
+
+        assert result["success"] is True
+        assert result["removed"] == 2
+
+    def test_get_links_for_model_returns_list(self, mock_resource_manager: MagicMock) -> None:
+        """Test that get_links_for_model returns link list."""
+        mock_resource_manager.get_links_for_model.return_value = [
+            {
+                "link_id": 1,
+                "model_id": "test-model",
+                "source_path": "/library/model.safetensors",
+                "target_path": "/app/model.safetensors",
+                "link_type": "symlink",
+                "app_id": "comfyui",
+                "app_version": "0.6.0",
+                "is_external": False,
+                "created_at": "2026-01-11T00:00:00Z",
+            }
+        ]
+
+        result = mock_resource_manager.get_links_for_model("test-model")
+
+        assert len(result) == 1
+        assert result[0]["app_id"] == "comfyui"
+
+    def test_delete_model_with_cascade_returns_count(
+        self, mock_resource_manager: MagicMock
+    ) -> None:
+        """Test that delete_model_with_cascade returns link removal count."""
+        mock_resource_manager.delete_model_with_cascade.return_value = {
+            "success": True,
+            "links_removed": 5,
+        }
+
+        result = mock_resource_manager.delete_model_with_cascade("test-model")
+
+        assert result["success"] is True
+        assert result["links_removed"] == 5
+
+
+@pytest.mark.unit
+class TestLinkRegistryIntegration:
+    """Tests for LinkRegistry integration with ResourceManager."""
+
+    def test_resource_manager_has_link_registry(self) -> None:
+        """Test that ResourceManager creates a LinkRegistry."""
+        from backend.resources.resource_manager import ResourceManager
+
+        # Check that ResourceManager has link_registry attribute
+        assert hasattr(ResourceManager, "__init__")
+
+    def test_link_registry_class_exists(self) -> None:
+        """Test that LinkRegistry class is available."""
+        from backend.model_library.link_registry import LinkRegistry
+
+        assert LinkRegistry is not None
+
+    def test_link_registry_has_health_check(self) -> None:
+        """Test that LinkRegistry has perform_health_check method."""
+        from backend.model_library.link_registry import LinkRegistry
+
+        assert hasattr(LinkRegistry, "perform_health_check")
+
+    def test_health_check_result_structure(self, tmp_path: Path) -> None:
+        """Test HealthCheckResult has expected structure."""
+        from backend.model_library.link_registry import (
+            HealthCheckResult,
+            HealthStatus,
+            LinkRegistry,
+        )
+
+        registry = LinkRegistry(tmp_path / "test.db")
+        result = registry.perform_health_check()
+
+        assert isinstance(result, HealthCheckResult)
+        assert isinstance(result.status, HealthStatus)
+        assert isinstance(result.broken_links, list)
+        assert isinstance(result.orphaned_links, list)

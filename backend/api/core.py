@@ -1156,6 +1156,114 @@ class ComfyUISetupAPI:
             return False
         return self.resource_manager.update_model_overrides(rel_path, overrides)
 
+    def get_link_health(self, version_tag: Optional[str] = None) -> Dict[str, Any]:
+        """Get health status of model symlinks.
+
+        Checks for broken links, orphaned links, and cross-filesystem warnings.
+
+        Args:
+            version_tag: Optional version tag to check orphaned links for
+
+        Returns:
+            Dict with health check results including status, broken/orphaned links
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available"}
+
+        try:
+            app_models_root = None
+            if version_tag:
+                if not validate_version_tag(version_tag):
+                    logger.warning("Rejected link health check for invalid tag: %r", version_tag)
+                    return {"success": False, "error": "Invalid version tag"}
+                versions_dir = self.resource_manager.versions_dir
+                app_models_root = versions_dir / version_tag / "models"
+
+            result = self.resource_manager.get_link_health(app_models_root)
+            return {"success": True, **result}
+        except OSError as exc:
+            logger.error("Failed to get link health: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+        except RuntimeError as exc:
+            logger.error("Failed to get link health: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc)}
+
+    def clean_broken_links(self) -> Dict[str, Any]:
+        """Remove broken links from the registry and filesystem.
+
+        Returns:
+            Dict with cleanup results
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available", "cleaned": 0}
+
+        try:
+            return self.resource_manager.clean_broken_links()
+        except OSError as exc:
+            logger.error("Failed to clean broken links: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "cleaned": 0}
+
+    def remove_orphaned_links(self, version_tag: str) -> Dict[str, Any]:
+        """Remove orphaned symlinks from a version's models directory.
+
+        Args:
+            version_tag: Version tag to clean orphaned links from
+
+        Returns:
+            Dict with cleanup results
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available", "removed": 0}
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected orphan removal for invalid tag: %r", version_tag)
+            return {"success": False, "error": "Invalid version tag", "removed": 0}
+
+        try:
+            versions_dir = self.resource_manager.versions_dir
+            app_models_root = versions_dir / version_tag / "models"
+            return self.resource_manager.remove_orphaned_links(app_models_root)
+        except OSError as exc:
+            logger.error("Failed to remove orphaned links: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "removed": 0}
+
+    def get_links_for_model(self, model_id: str) -> Dict[str, Any]:
+        """Get all links for a specific model.
+
+        Args:
+            model_id: ID of the model
+
+        Returns:
+            Dict with list of link information
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available", "links": []}
+
+        try:
+            links = self.resource_manager.get_links_for_model(model_id)
+            return {"success": True, "links": links}
+        except OSError as exc:
+            logger.error("Failed to get links for model %s: %s", model_id, exc, exc_info=True)
+            return {"success": False, "error": str(exc), "links": []}
+
+    def delete_model_with_cascade(self, model_id: str) -> Dict[str, Any]:
+        """Delete a model and all its symlinks.
+
+        Args:
+            model_id: ID of the model to delete
+
+        Returns:
+            Dict with deletion results
+        """
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager not available", "links_removed": 0}
+
+        try:
+            return self.resource_manager.delete_model_with_cascade(model_id)
+        except OSError as exc:
+            logger.error("Failed to cascade delete model %s: %s", model_id, exc, exc_info=True)
+            return {"success": False, "error": str(exc), "links_removed": 0}
+
     def get_custom_nodes(self, version_tag: str) -> List[str]:
         """Get list of custom nodes for a specific version"""
         if not self.resource_manager:

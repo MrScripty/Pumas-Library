@@ -2,6 +2,7 @@
  * Models management hook
  *
  * Handles model fetching, scanning, organization, and FTS search.
+ * Implements Stale-While-Revalidate (SWR) pattern for instant UI response.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -16,15 +17,31 @@ const logger = getLogger('useModels');
 /** Debounce delay for search queries (ms) */
 const SEARCH_DEBOUNCE_MS = 300;
 
+/** Cache TTL for SWR pattern (ms) - show cached results for up to 30 seconds */
+const CACHE_TTL_MS = 30000;
+
+/** Cache entry for SWR pattern */
+interface CacheEntry {
+  query: string;
+  modelType?: string | null;
+  tags?: string[] | null;
+  results: ModelCategory[];
+  queryTime: number | null;
+  timestamp: number;
+}
+
 export function useModels() {
   const [modelGroups, setModelGroups] = useState<ModelCategory[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isRevalidating, setIsRevalidating] = useState(false);
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
+  const [hasNewResults, setHasNewResults] = useState(false);
   const modelCountRef = useRef<number | null>(null);
   const isModelCountPolling = useRef(false);
   const searchSequenceRef = useRef(0);
   const lastRenderedSequenceRef = useRef(0);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchCacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
   const fetchModels = useCallback(async () => {
     try {
@@ -139,7 +156,70 @@ export function useModels() {
   }, [fetchModels]);
 
   /**
+   * Generate a cache key for a search query
+   */
+  const getCacheKey = useCallback(
+    (query: string, modelType?: string | null, tags?: string[] | null): string => {
+      return JSON.stringify({ query, modelType, tags: tags?.sort() });
+    },
+    []
+  );
+
+  /**
+   * Transform FTS results to ModelCategory format
+   */
+  const transformFTSResults = useCallback(
+    (models: Array<{
+      model_id: string;
+      official_name: string;
+      model_type?: string;
+      file_path: string;
+      size_bytes?: number;
+      added_date?: string;
+    }>): ModelCategory[] => {
+      const categoryMap = new Map<string, ModelInfo[]>();
+
+      for (const model of models) {
+        const category = model.model_type || 'uncategorized';
+        const modelInfo: ModelInfo = {
+          id: model.model_id,
+          name: model.official_name,
+          category: category,
+          path: model.file_path,
+          size: model.size_bytes,
+          date: model.added_date,
+        };
+
+        if (!categoryMap.has(category)) {
+          categoryMap.set(category, []);
+        }
+        categoryMap.get(category)!.push(modelInfo);
+      }
+
+      const categorizedModels: ModelCategory[] = [];
+      categoryMap.forEach((models, category) => {
+        categorizedModels.push({ category, models });
+      });
+
+      return categorizedModels;
+    },
+    []
+  );
+
+  /**
+   * Dismiss the "new results available" notification
+   */
+  const dismissNewResults = useCallback(() => {
+    setHasNewResults(false);
+  }, []);
+
+  /**
    * Debounced FTS search for models.
+   * Implements Stale-While-Revalidate (SWR) pattern:
+   * 1. Show cached results immediately if available
+   * 2. Fetch fresh results in background
+   * 3. Update UI when new results arrive
+   *
    * Uses sequence guards to discard stale responses.
    */
   const searchModelsFTS = useCallback(
@@ -149,21 +229,40 @@ export function useModels() {
         clearTimeout(searchTimeoutRef.current);
       }
 
+      // Reset new results notification
+      setHasNewResults(false);
+
       // Empty query - reset to full list
       if (!query.trim()) {
         setIsSearching(false);
+        setIsRevalidating(false);
         setSearchQueryTime(null);
         void fetchModels();
         return;
       }
 
+      // Check cache for immediate response (SWR pattern)
+      const cacheKey = getCacheKey(query, modelType, tags);
+      const cached = searchCacheRef.current.get(cacheKey);
+      const now = Date.now();
+
+      if (cached && now - cached.timestamp < CACHE_TTL_MS) {
+        // Show cached results immediately
+        setModelGroups(cached.results);
+        setSearchQueryTime(cached.queryTime);
+        setIsSearching(false);
+        setIsRevalidating(true);
+        logger.debug('Showing cached results for query', { query, age: now - cached.timestamp });
+      } else {
+        setIsSearching(true);
+        setIsRevalidating(false);
+      }
+
       // Increment sequence for this search
       const currentSequence = ++searchSequenceRef.current;
 
-      // Debounce the search
+      // Debounce the search (revalidation happens in background)
       searchTimeoutRef.current = setTimeout(async () => {
-        setIsSearching(true);
-
         try {
           const result = await importAPI.searchModelsFTS(query, 100, 0, modelType, tags);
 
@@ -179,33 +278,31 @@ export function useModels() {
           lastRenderedSequenceRef.current = currentSequence;
 
           if (result.success && result.models) {
-            // Transform FTS results to ModelCategory format
-            const categoryMap = new Map<string, ModelInfo[]>();
+            const categorizedModels = transformFTSResults(result.models);
 
-            for (const model of result.models) {
-              const category = model.model_type || 'uncategorized';
-              const modelInfo: ModelInfo = {
-                id: model.model_id,
-                name: model.official_name,
-                category: category,
-                path: model.file_path,
-                size: model.size_bytes,
-                date: model.added_date,
-              };
+            // Check if results differ from cached (for notification)
+            const resultsChanged =
+              cached && JSON.stringify(categorizedModels) !== JSON.stringify(cached.results);
 
-              if (!categoryMap.has(category)) {
-                categoryMap.set(category, []);
-              }
-              categoryMap.get(category)!.push(modelInfo);
-            }
-
-            const categorizedModels: ModelCategory[] = [];
-            categoryMap.forEach((models, category) => {
-              categorizedModels.push({ category, models });
+            // Update cache
+            searchCacheRef.current.set(cacheKey, {
+              query,
+              modelType,
+              tags,
+              results: categorizedModels,
+              queryTime: result.query_time_ms,
+              timestamp: Date.now(),
             });
 
+            // Update UI
             setModelGroups(categorizedModels);
             setSearchQueryTime(result.query_time_ms);
+
+            // Notify if results changed during revalidation
+            if (resultsChanged) {
+              setHasNewResults(true);
+              logger.debug('New results available after revalidation', { query });
+            }
           }
         } catch (error) {
           if (error instanceof APIError) {
@@ -220,10 +317,11 @@ export function useModels() {
           }
         } finally {
           setIsSearching(false);
+          setIsRevalidating(false);
         }
       }, SEARCH_DEBOUNCE_MS);
     },
-    [fetchModels]
+    [fetchModels, getCacheKey, transformFTSResults]
   );
 
   // Cleanup search timeout on unmount
@@ -241,6 +339,9 @@ export function useModels() {
     scanModels,
     searchModelsFTS,
     isSearching,
+    isRevalidating,
     searchQueryTime,
+    hasNewResults,
+    dismissNewResults,
   };
 }

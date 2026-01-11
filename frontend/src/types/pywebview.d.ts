@@ -496,6 +496,27 @@ export interface IncrementalSyncResponse extends BaseResponse {
 }
 
 /**
+ * Conflict resolution action types
+ */
+export type ConflictResolutionAction = 'skip' | 'overwrite' | 'rename';
+
+/**
+ * Conflict resolutions map
+ */
+export type ConflictResolutions = Record<string, ConflictResolutionAction>;
+
+/**
+ * Sync with resolutions response
+ */
+export interface SyncWithResolutionsResponse extends BaseResponse {
+  links_created: number;
+  links_skipped: number;
+  links_renamed: number;
+  overwrites: number;
+  errors: string[];
+}
+
+/**
  * Apply model mapping response
  */
 export interface ApplyModelMappingResponse extends BaseResponse {
@@ -974,6 +995,15 @@ export interface PyWebViewAPI {
    * Cleans broken links and creates/updates symlinks for all mapped models
    */
   apply_model_mapping(versionTag: string): Promise<ApplyModelMappingResponse>;
+
+  /**
+   * Apply model mapping with user-provided conflict resolutions
+   * Allows user to choose skip/overwrite/rename for each conflict
+   */
+  sync_with_resolutions(
+    versionTag: string,
+    resolutions: ConflictResolutions
+  ): Promise<SyncWithResolutionsResponse>;
 
   /**
    * Get sandbox environment information

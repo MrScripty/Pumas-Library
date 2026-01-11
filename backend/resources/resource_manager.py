@@ -690,6 +690,67 @@ class ResourceManager:
                 "total_links": 0,
             }
 
+    def sync_with_resolutions(
+        self,
+        version_tag: str,
+        resolutions: Dict[str, str],
+        app_id: str = "comfyui",
+    ) -> Dict[str, object]:
+        """Apply model mapping with user-provided conflict resolutions.
+
+        For conflicts, applies the resolution chosen by the user:
+        - 'skip': Do not create link, leave existing file
+        - 'overwrite': Delete existing, create new link
+        - 'rename': Rename existing to .old, create new link
+
+        Args:
+            version_tag: ComfyUI version tag
+            resolutions: Dict mapping model_id to resolution action
+            app_id: Application identifier (default: "comfyui")
+
+        Returns:
+            Dict with sync results and resolution counts
+        """
+        version_path = self.versions_dir / version_tag
+        if not version_path.exists():
+            return {
+                "success": False,
+                "error": f"Version {version_tag} not found",
+                "links_created": 0,
+                "links_skipped": 0,
+                "links_renamed": 0,
+                "overwrites": 0,
+                "errors": [],
+            }
+
+        models_dir = version_path / "models"
+        ensure_directory(models_dir)
+        app_version = version_tag.lstrip("vV")
+
+        try:
+            result = self.model_mapper.sync_with_resolutions(
+                app_id, app_version, models_dir, resolutions
+            )
+            return {
+                "success": len(result.errors) == 0,
+                "links_created": result.links_created,
+                "links_skipped": result.links_skipped,
+                "links_renamed": result.links_renamed,
+                "overwrites": result.overwrites,
+                "errors": result.errors,
+            }
+        except OSError as exc:
+            logger.error("Failed to sync with resolutions: %s", exc, exc_info=True)
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_skipped": 0,
+                "links_renamed": 0,
+                "overwrites": 0,
+                "errors": [str(exc)],
+            }
+
     def _clean_broken_symlinks(self, models_root: Path) -> int:
         """Remove broken symlinks in app model directories.
 

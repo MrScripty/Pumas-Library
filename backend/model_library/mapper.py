@@ -112,6 +112,25 @@ def detect_sandbox_environment() -> SandboxInfo:
     return SandboxInfo(sandboxed=False)
 
 
+class ConflictAction(Enum):
+    """Actions for resolving mapping conflicts."""
+
+    SKIP = "skip"
+    OVERWRITE = "overwrite"
+    RENAME = "rename"
+
+
+@dataclass
+class SyncResolutionResult:
+    """Result from sync_with_resolutions operation."""
+
+    links_created: int = 0
+    links_skipped: int = 0
+    links_renamed: int = 0
+    overwrites: int = 0
+    errors: List[str] = field(default_factory=list)
+
+
 class ModelMapper:
     """Applies translation configs to map library models into app folders."""
 
@@ -1086,3 +1105,123 @@ class ModelMapper:
             return True
 
         return False
+
+    def sync_with_resolutions(
+        self,
+        app_id: str,
+        app_version: str,
+        app_models_root: Path,
+        resolutions: Dict[str, str],
+    ) -> SyncResolutionResult:
+        """Execute mapping sync with user-provided conflict resolutions.
+
+        For conflicts, applies the resolution chosen by the user:
+        - 'skip': Do not create link, leave existing file
+        - 'overwrite': Delete existing, create new link
+        - 'rename': Rename existing to .old, create new link
+
+        Args:
+            app_id: Application ID ("comfyui")
+            app_version: Version string
+            app_models_root: Path to app's models/ directory
+            resolutions: Dict mapping model_id to resolution action
+                        ('skip', 'overwrite', 'rename')
+
+        Returns:
+            SyncResolutionResult with counts
+        """
+        result = SyncResolutionResult()
+
+        # First, get the preview to know what actions are needed
+        preview = self.preview_mapping(app_id, app_version, app_models_root)
+
+        if preview.errors:
+            result.errors = list(preview.errors)
+            return result
+
+        # Phase 1: Remove broken symlinks
+        for broken in preview.broken_to_remove:
+            target = Path(broken.target_path)
+            try:
+                if target.is_symlink():
+                    target.unlink()
+                    logger.info("Removed broken symlink: %s", target)
+            except OSError as exc:
+                logger.error("Failed to remove broken symlink %s: %s", target, exc)
+                result.errors.append(f"Failed to remove {target}: {exc}")
+
+        # Phase 2: Create new links (no conflicts)
+        for action in preview.to_create:
+            target_dir = Path(action.target_path).parent
+            ensure_directory(target_dir)
+
+            if self._create_link_with_registry(
+                action.source_path,
+                action.target_path,
+                action.model_id,
+                app_id,
+                app_version,
+            ):
+                result.links_created += 1
+
+        # Phase 3: Handle conflicts based on resolutions
+        for conflict in preview.conflicts:
+            model_id = conflict.model_id
+            resolution = resolutions.get(model_id, "skip")
+            target = Path(conflict.target_path)
+
+            try:
+                if resolution == "skip":
+                    result.links_skipped += 1
+                    logger.debug("Skipping conflict for %s", model_id)
+                    continue
+
+                elif resolution == "overwrite":
+                    # Delete existing and create link
+                    if target.exists() or target.is_symlink():
+                        if target.is_symlink():
+                            target.unlink()
+                        else:
+                            # Regular file - be careful
+                            target.unlink()
+                        logger.info("Overwrote existing: %s", target)
+
+                    if self._create_link_with_registry(
+                        conflict.source_path,
+                        target,
+                        model_id,
+                        app_id,
+                        app_version,
+                    ):
+                        result.overwrites += 1
+                        result.links_created += 1
+
+                elif resolution == "rename":
+                    # Rename existing to .old, then create link
+                    if target.exists() or target.is_symlink():
+                        old_path = target.with_suffix(target.suffix + ".old")
+                        # Handle case where .old already exists
+                        counter = 1
+                        while old_path.exists():
+                            old_path = target.with_suffix(f"{target.suffix}.old.{counter}")
+                            counter += 1
+
+                        target.rename(old_path)
+                        logger.info("Renamed existing to %s", old_path)
+
+                    if self._create_link_with_registry(
+                        conflict.source_path,
+                        target,
+                        model_id,
+                        app_id,
+                        app_version,
+                    ):
+                        result.links_renamed += 1
+                        result.links_created += 1
+
+            except OSError as exc:
+                error_msg = f"Failed to resolve conflict for {model_id}: {exc}"
+                logger.error(error_msg)
+                result.errors.append(error_msg)
+
+        return result

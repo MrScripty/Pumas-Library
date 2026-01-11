@@ -467,6 +467,12 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
                             </div>
                           ))}
                         </div>
+                        {/* Resolve Conflicts Button - opens ConflictResolutionDialog */}
+                        <div className="px-3 pb-2">
+                          <p className="text-xs text-[hsl(var(--launcher-text-tertiary))] mb-2">
+                            Use the Resolve Conflicts button to choose how to handle each conflict.
+                          </p>
+                        </div>
                       </motion.div>
                     )}
                   </AnimatePresence>

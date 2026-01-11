@@ -1407,6 +1407,77 @@ class ComfyUISetupAPI:
                 "total_links": 0,
             }
 
+    def sync_with_resolutions(
+        self, version_tag: str, resolutions: Dict[str, str]
+    ) -> Dict[str, Any]:
+        """Apply model mapping with user-provided conflict resolutions.
+
+        For conflicts, applies the resolution chosen by the user:
+        - 'skip': Do not create link, leave existing file
+        - 'overwrite': Delete existing, create new link
+        - 'rename': Rename existing to .old, create new link
+
+        Args:
+            version_tag: ComfyUI version tag
+            resolutions: Dict mapping model_id to resolution action
+
+        Returns:
+            Dict with sync results including links_created, links_skipped,
+            links_renamed, overwrites, errors
+        """
+        if not self.resource_manager:
+            return {
+                "success": False,
+                "error": "Resource manager not available",
+                "links_created": 0,
+                "links_skipped": 0,
+                "links_renamed": 0,
+                "overwrites": 0,
+                "errors": [],
+            }
+
+        if not validate_version_tag(version_tag):
+            logger.warning("Rejected sync with resolutions for invalid tag: %r", version_tag)
+            return {
+                "success": False,
+                "error": "Invalid version tag",
+                "links_created": 0,
+                "links_skipped": 0,
+                "links_renamed": 0,
+                "overwrites": 0,
+                "errors": [],
+            }
+
+        # Validate resolution values
+        valid_actions = {"skip", "overwrite", "rename"}
+        for model_id, action in resolutions.items():
+            if action not in valid_actions:
+                return {
+                    "success": False,
+                    "error": f"Invalid resolution action '{action}' for model {model_id}",
+                    "links_created": 0,
+                    "links_skipped": 0,
+                    "links_renamed": 0,
+                    "overwrites": 0,
+                    "errors": [],
+                }
+
+        try:
+            return self.resource_manager.sync_with_resolutions(version_tag, resolutions)
+        except OSError as exc:
+            logger.error(
+                "Failed to sync with resolutions for %s: %s", version_tag, exc, exc_info=True
+            )
+            return {
+                "success": False,
+                "error": str(exc),
+                "links_created": 0,
+                "links_skipped": 0,
+                "links_renamed": 0,
+                "overwrites": 0,
+                "errors": [str(exc)],
+            }
+
     def get_custom_nodes(self, version_tag: str) -> List[str]:
         """Get list of custom nodes for a specific version"""
         if not self.resource_manager:

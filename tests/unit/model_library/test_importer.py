@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 from typing import Generator
 from unittest.mock import Mock, patch
 
 import pytest
 
-from backend.model_library.importer import ModelImporter
+from backend.model_library.importer import (
+    ModelImporter,
+    detect_sharded_sets,
+    validate_file_type,
+    validate_shard_completeness,
+)
 from backend.model_library.io.hashing import compute_dual_hash
 
 
@@ -259,3 +265,213 @@ class TestImporterWithIOManager:
         assert "sha256" in metadata["hashes"]
         # BLAKE3 may be empty if not available
         assert "blake3" in metadata["hashes"]
+
+
+@pytest.mark.unit
+class TestDetectShardedSets:
+    """Tests for sharded model detection."""
+
+    def test_detect_standard_shards(self, tmp_path: Path) -> None:
+        """Test detection of standard HF shard pattern (model-00001-of-00005.ext)."""
+        files = [
+            tmp_path / "model-00001-of-00003.safetensors",
+            tmp_path / "model-00002-of-00003.safetensors",
+            tmp_path / "model-00003-of-00003.safetensors",
+        ]
+        for f in files:
+            f.touch()
+
+        groups = detect_sharded_sets(files)
+
+        assert "model.safetensors" in groups
+        assert len(groups["model.safetensors"]) == 3
+
+    def test_detect_part_shards(self, tmp_path: Path) -> None:
+        """Test detection of .part1, .part2 pattern."""
+        files = [
+            tmp_path / "model.gguf.part1",
+            tmp_path / "model.gguf.part2",
+            tmp_path / "model.gguf.part3",
+        ]
+        for f in files:
+            f.touch()
+
+        groups = detect_sharded_sets(files)
+
+        assert "model.gguf" in groups
+        assert len(groups["model.gguf"]) == 3
+
+    def test_detect_underscore_shards(self, tmp_path: Path) -> None:
+        """Test detection of model_00001.ext pattern."""
+        files = [
+            tmp_path / "llama_00001.safetensors",
+            tmp_path / "llama_00002.safetensors",
+        ]
+        for f in files:
+            f.touch()
+
+        groups = detect_sharded_sets(files)
+
+        assert "llama.safetensors" in groups
+        assert len(groups["llama.safetensors"]) == 2
+
+    def test_standalone_files_separate(self, tmp_path: Path) -> None:
+        """Test that standalone files are kept separate."""
+        files = [
+            tmp_path / "model-00001-of-00002.safetensors",
+            tmp_path / "model-00002-of-00002.safetensors",
+            tmp_path / "other_model.safetensors",
+        ]
+        for f in files:
+            f.touch()
+
+        groups = detect_sharded_sets(files)
+
+        assert "model.safetensors" in groups
+        assert "other_model.safetensors" in groups
+        assert len(groups["model.safetensors"]) == 2
+        assert len(groups["other_model.safetensors"]) == 1
+
+    def test_single_file_not_grouped(self, tmp_path: Path) -> None:
+        """Test that single files matching pattern aren't incorrectly grouped."""
+        files = [tmp_path / "model-00001-of-00002.safetensors"]
+        files[0].touch()
+
+        groups = detect_sharded_sets(files)
+
+        # Single file should be treated as standalone
+        assert len(groups) == 1
+        # Key should be the file name itself, not the base pattern
+        assert "model-00001-of-00002.safetensors" in groups
+
+
+@pytest.mark.unit
+class TestValidateShardCompleteness:
+    """Tests for shard completeness validation."""
+
+    def test_complete_set(self, tmp_path: Path) -> None:
+        """Test validation of complete shard set."""
+        files = [
+            tmp_path / "model-00001-of-00003.safetensors",
+            tmp_path / "model-00002-of-00003.safetensors",
+            tmp_path / "model-00003-of-00003.safetensors",
+        ]
+
+        result = validate_shard_completeness(files)
+
+        assert result["complete"] is True
+        assert result["missing_shards"] == []
+        assert result["total_expected"] == 3
+        assert result["total_found"] == 3
+
+    def test_incomplete_set(self, tmp_path: Path) -> None:
+        """Test validation of incomplete shard set."""
+        files = [
+            tmp_path / "model-00001-of-00005.safetensors",
+            tmp_path / "model-00003-of-00005.safetensors",
+            tmp_path / "model-00005-of-00005.safetensors",
+        ]
+
+        result = validate_shard_completeness(files)
+
+        assert result["complete"] is False
+        assert 2 in result["missing_shards"]
+        assert 4 in result["missing_shards"]
+        assert result["total_expected"] == 5
+        assert result["total_found"] == 3
+
+    def test_empty_set(self) -> None:
+        """Test validation of empty file list."""
+        result = validate_shard_completeness([])
+
+        assert result["complete"] is False
+        assert result["total_found"] == 0
+
+
+@pytest.mark.unit
+class TestValidateFileType:
+    """Tests for file type validation using magic bytes."""
+
+    def test_valid_gguf(self, tmp_path: Path) -> None:
+        """Test validation of GGUF file format."""
+        model_file = tmp_path / "model.gguf"
+        model_file.write_bytes(b"GGUF" + b"\x00" * 12)
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is True
+        assert result["detected_type"] == "gguf"
+
+    def test_valid_ggml(self, tmp_path: Path) -> None:
+        """Test validation of GGML file format."""
+        model_file = tmp_path / "model.ggml"
+        model_file.write_bytes(b"GGML" + b"\x00" * 12)
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is True
+        assert result["detected_type"] == "ggml"
+
+    def test_valid_safetensors(self, tmp_path: Path) -> None:
+        """Test validation of safetensors file format."""
+        model_file = tmp_path / "model.safetensors"
+        # Safetensors: 8-byte header length + JSON header starting with '{'
+        header_json = b'{"test": "value"}'
+        header_len = struct.pack("<Q", len(header_json))
+        model_file.write_bytes(header_len + header_json + b"data")
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is True
+        assert result["detected_type"] == "safetensors"
+
+    def test_valid_pickle(self, tmp_path: Path) -> None:
+        """Test validation of pickle file format."""
+        model_file = tmp_path / "model.pt"
+        # Pickle protocol 4 marker
+        model_file.write_bytes(b"\x80\x04" + b"\x00" * 14)
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is True
+        assert result["detected_type"] == "pickle"
+
+    def test_valid_zip_pytorch(self, tmp_path: Path) -> None:
+        """Test validation of ZIP-based PyTorch file format."""
+        model_file = tmp_path / "model.pt"
+        # ZIP magic number (PyTorch .pt files are often ZIP archives)
+        model_file.write_bytes(b"PK\x03\x04" + b"\x00" * 12)
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is True
+        assert result["detected_type"] == "pickle"
+
+    def test_invalid_text_file(self, tmp_path: Path) -> None:
+        """Test rejection of text file masquerading as model."""
+        model_file = tmp_path / "model.safetensors"
+        model_file.write_text("This is not a model file!")
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is False
+        assert result["detected_type"] == "unknown"
+
+    def test_invalid_html_file(self, tmp_path: Path) -> None:
+        """Test rejection of HTML file masquerading as model."""
+        model_file = tmp_path / "model.gguf"
+        model_file.write_text("<!DOCTYPE html><html>Error page</html>")
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is False
+        assert result["detected_type"] == "unknown"
+
+    def test_nonexistent_file(self, tmp_path: Path) -> None:
+        """Test handling of nonexistent file."""
+        model_file = tmp_path / "nonexistent.safetensors"
+
+        result = validate_file_type(model_file)
+
+        assert result["valid"] is False
+        assert result["detected_type"] == "error"

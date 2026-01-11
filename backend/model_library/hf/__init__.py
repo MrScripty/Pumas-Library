@@ -23,9 +23,11 @@ from backend.model_library.hf.quant import (  # pragma: no cover
     token_in_normalized,
 )
 from backend.model_library.hf.search import list_repo_tree_paths, search_models  # pragma: no cover
+from backend.model_library.hf.throttle import HFAPIThrottle, hf_throttle  # pragma: no cover
 
 __all__ = [  # pragma: no cover
     "HfClient",
+    "HFAPIThrottle",
     "KIND_TAG_MAPPING",
     "KNOWN_FORMATS",
     "QUANT_TOKENS",
@@ -34,6 +36,7 @@ __all__ = [  # pragma: no cover
     "extract_formats",
     "extract_formats_from_paths",
     "extract_quants_from_paths",
+    "hf_throttle",
     "infer_kind_from_tags",
     "list_repo_tree_paths",
     "normalize_quant_source",

@@ -9,10 +9,12 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Generator
 
 from backend.logging_config import get_logger
 from backend.model_library.io.hashing import StreamHasher
@@ -209,6 +211,8 @@ class IOManager:
         self.ssd_concurrency = ssd_concurrency
         self.hdd_concurrency = hdd_concurrency
         self._drive_cache: Dict[Path, DriveType] = {}
+        self._semaphores: Dict[str, threading.Semaphore] = {}
+        self._semaphore_lock = threading.Lock()
 
     def _get_cached_drive_type(self, path: Path) -> DriveType:
         """Get drive type with caching.
@@ -254,6 +258,108 @@ class IOManager:
         Useful when drives are mounted/unmounted during runtime.
         """
         self._drive_cache.clear()
+
+    def _get_mount_point(self, path: Path) -> str:
+        """Get the mount point for a given path.
+
+        Args:
+            path: Path to check
+
+        Returns:
+            Mount point as string
+        """
+        try:
+            check_path = path.resolve()
+        except OSError:  # noqa: no-except-logging
+            check_path = path
+
+        while not check_path.is_mount() and check_path != check_path.parent:
+            check_path = check_path.parent
+
+        return str(check_path)
+
+    def get_semaphore(self, path: Path) -> threading.Semaphore:
+        """Get the appropriate semaphore for this path's drive.
+
+        Semaphores limit concurrent I/O operations based on drive type:
+        - SSD: Higher concurrency (default 4)
+        - HDD: Lower concurrency (default 2) to prevent disk thrashing
+
+        Args:
+            path: Path for the I/O operation
+
+        Returns:
+            Semaphore for this path's mount point/drive
+        """
+        mount_point = self._get_mount_point(path)
+
+        with self._semaphore_lock:
+            if mount_point not in self._semaphores:
+                concurrency = self.get_concurrency_for_path(path)
+                self._semaphores[mount_point] = threading.Semaphore(concurrency)
+                logger.debug(
+                    "Created semaphore for %s with concurrency=%d",
+                    mount_point,
+                    concurrency,
+                )
+
+            return self._semaphores[mount_point]
+
+    @contextmanager
+    def io_slot(self, path: Path) -> Generator[None, None, None]:
+        """Context manager for acquiring an I/O slot for a path.
+
+        Use this to limit concurrent I/O operations on a drive.
+        Blocks until a slot is available.
+
+        Example:
+            with io_manager.io_slot(dest_path):
+                # Perform I/O operation
+                shutil.copy(src, dest)
+
+        Args:
+            path: Path for the I/O operation
+
+        Yields:
+            None (just provides the context)
+        """
+        semaphore = self.get_semaphore(path)
+        semaphore.acquire()
+        try:
+            yield
+        finally:
+            semaphore.release()
+
+    def is_same_filesystem(self, path1: Path, path2: Path) -> bool:
+        """Check if two paths are on the same filesystem.
+
+        Useful for determining if atomic rename is possible or if
+        a cross-filesystem copy is required.
+
+        Args:
+            path1: First path
+            path2: Second path
+
+        Returns:
+            True if both paths are on the same filesystem
+        """
+        try:
+            # Get the closest existing path for each
+            check1 = path1
+            while not check1.exists() and check1 != check1.parent:
+                check1 = check1.parent
+
+            check2 = path2
+            while not check2.exists() and check2 != check2.parent:
+                check2 = check2.parent
+
+            if not check1.exists() or not check2.exists():
+                return False
+
+            return check1.stat().st_dev == check2.stat().st_dev
+        except OSError as e:
+            logger.debug("Failed to check filesystem: %s", e)
+            return False
 
     def copy_file(
         self,
@@ -374,3 +480,7 @@ class IOManager:
             self.copy_file(src, dst, preserve_mtime=preserve_mtime)
             src.unlink()
             return dst
+
+
+# Global instance for shared I/O management across the application
+io_manager = IOManager()

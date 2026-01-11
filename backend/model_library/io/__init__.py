@@ -14,6 +14,7 @@ from backend.model_library.io.manager import (  # pragma: no cover
     IOManager,
     get_drive_info,
     get_drive_type,
+    io_manager,
 )
 from backend.model_library.io.platform import (  # pragma: no cover
     LinkResult,
@@ -48,6 +49,7 @@ __all__ = [  # pragma: no cover
     "IOManager",
     "get_drive_info",
     "get_drive_type",
+    "io_manager",
     # Platform
     "LinkResult",
     "LinkStrategy",

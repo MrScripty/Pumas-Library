@@ -25,8 +25,21 @@ class ModelIndex:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
+        """Create a database connection with WAL mode and optimizations.
+
+        Returns:
+            sqlite3.Connection with WAL mode, busy timeout, and optimizations enabled
+        """
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.row_factory = sqlite3.Row
+        # Enable WAL mode for concurrent read/write access
+        conn.execute("PRAGMA journal_mode=WAL")
+        # Busy timeout for handling concurrent access
+        conn.execute("PRAGMA busy_timeout=30000")
+        # Faster sync while still safe
+        conn.execute("PRAGMA synchronous=NORMAL")
+        # Use memory for temp tables
+        conn.execute("PRAGMA temp_store=MEMORY")
         return conn
 
     def _ensure_schema(self) -> None:
@@ -138,3 +151,32 @@ class ModelIndex:
 
         payload.setdefault("library_path", row["path"])
         return payload
+
+    def checkpoint_wal(self) -> dict[str, int]:
+        """Checkpoint WAL file to main database.
+
+        Should be called after large batch operations, periodic maintenance,
+        or deep scan rebuilds to consolidate WAL data.
+
+        Returns:
+            Dictionary with checkpoint results:
+            - busy: 1 if checkpoint couldn't complete, 0 otherwise
+            - log_pages: Total pages in WAL log
+            - checkpointed_pages: Pages written to database
+        """
+        with self._connect() as conn:
+            result = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()
+            if result:
+                busy, log_pages, checkpointed_pages = result
+                logger.info(
+                    "WAL checkpoint: busy=%d, log_pages=%d, checkpointed=%d",
+                    busy,
+                    log_pages,
+                    checkpointed_pages,
+                )
+                return {
+                    "busy": busy,
+                    "log_pages": log_pages,
+                    "checkpointed_pages": checkpointed_pages,
+                }
+        return {"busy": 0, "log_pages": 0, "checkpointed_pages": 0}

@@ -2,7 +2,7 @@
 
 **Last Updated:** 2026-01-11
 **Current Phase:** Phase 1B - Link Registry Database
-**Status:** In Progress
+**Status:** Complete
 
 ---
 
@@ -132,9 +132,9 @@
 
 ---
 
-## Phase 1B: Link Registry Database
+## Phase 1B: Link Registry Database ✅ COMPLETE
 
-**Status:** In Progress
+**Status:** Complete
 
 ### Part 1: Link Registry Core ✅ COMPLETE
 - [x] backend/model_library/link_registry.py - LinkRegistry class with SQLite storage
@@ -154,15 +154,37 @@
 | mapper.py updates | +90 | 5 | - |
 | **Total** | 430 | 50 | 94%+ |
 
-### Part 2: API Endpoints (Pending)
-- [ ] Add `get_link_health` endpoint to api/core.py
-- [ ] Add `clean_broken_links` endpoint
-- [ ] Add `remove_orphaned_links` endpoint
-- [ ] Add `get_links_for_model` endpoint
+### Part 2: API Endpoints ✅ COMPLETE
+- [x] Add `get_link_health` endpoint to api/core.py - `cd1d1f7`
+- [x] Add `clean_broken_links` endpoint - `cd1d1f7`
+- [x] Add `remove_orphaned_links` endpoint - `cd1d1f7`
+- [x] Add `get_links_for_model` endpoint - `cd1d1f7`
+- [x] Add `delete_model_with_cascade` endpoint - `cd1d1f7`
+- [x] Add ResourceManager integration methods - `cd1d1f7`
+- [x] Add 12 tests for link health API endpoints - `cd1d1f7`
 
-### Part 3: Frontend Health UI (Pending)
-- [ ] Add TypeScript types for health check responses
-- [ ] Add health status component to Settings page
+**Part 2 Results:**
+| Endpoint | Description | Tests |
+|----------|-------------|-------|
+| get_link_health | Check broken/orphaned links | 4 |
+| clean_broken_links | Remove broken symlinks | 1 |
+| remove_orphaned_links | Delete orphaned symlinks | 1 |
+| get_links_for_model | Get links for a model | 1 |
+| delete_model_with_cascade | Delete model and links | 1 |
+| **Total** | 5 new API endpoints | 12 |
+
+### Part 3: Frontend Health UI ✅ COMPLETE
+- [x] Add TypeScript types for health check responses - `d726f56`
+- [x] Add LinkHealthStatus component to ModelManager - `d726f56`
+
+**Part 3 Results:**
+| Component | Lines | Description |
+|-----------|-------|-------------|
+| pywebview.d.ts | +109 | 9 new type definitions for link registry |
+| LinkHealthStatus.tsx | 318 | Health status display with actions |
+| ModelManager.tsx | +21 | Integration with activeVersion prop |
+| App.tsx | +1 | Pass activeVersion to ModelManager |
+| **Total** | ~450 | 4 files modified/created |
 
 ---
 
@@ -182,6 +204,29 @@
 ---
 
 ## Completed Items
+
+### 2026-01-11: Frontend Health UI ✅ COMPLETE
+- Added TypeScript types to pywebview.d.ts (9 new types for link registry)
+- Created LinkHealthStatus.tsx component (318 lines)
+- Shows health status (healthy/warnings/errors) with collapsible details
+- Displays broken links with paths and reasons
+- Displays orphaned links list
+- Action buttons: Refresh, Clean Broken, Remove Orphans
+- Integrated into ModelManager with activeVersion prop
+- All pre-commit hooks passing
+- Total: ~450 lines across 4 files
+
+### 2026-01-11: Link Health API Endpoints ✅ COMPLETE
+- Added 5 new API endpoints to api/core.py for link health management
+- Added ResourceManager integration with LinkRegistry
+- get_link_health: Check broken/orphaned links status
+- clean_broken_links: Remove broken symlinks from registry
+- remove_orphaned_links: Delete orphaned symlinks from app directory
+- get_links_for_model: Get all links for a specific model
+- delete_model_with_cascade: Delete model and all associated links
+- Added 12 new tests to test_core_model_library.py
+- All pre-commit hooks passing
+- Total: 5 new API endpoints, 12 tests
 
 ### 2026-01-11: Link Registry Core ✅ COMPLETE
 - Created link_registry.py (340 lines, 45 tests, 94%+ coverage)
@@ -265,4 +310,4 @@
 
 ---
 
-**Next Session Focus:** Complete Phase 1B Parts 2-3 (API endpoints and frontend health UI)
+**Next Session Focus:** Start Phase 1C (Basic Link Mapping System)

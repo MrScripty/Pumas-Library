@@ -74,28 +74,28 @@ class TestDetectType:
         importer = ModelImporter(mock_library)
         model_file = tmp_path / "model.safetensors"
         model_file.touch()
-        model_type, subtype = importer._detect_type(model_file)
+        model_type, subtype, detected_family = importer._detect_type(model_file)
         assert model_type in ("diffusion", "llm")
 
     def test_detect_gguf(self, mock_library: Mock, tmp_path: Path) -> None:
         """Test detection of GGUF files.
 
-        Note: GGUF appears in both checkpoints and llm categories.
-        Current implementation returns first match (checkpoints/diffusion).
+        GGUF files are identified as LLM by default since GGUF was created
+        specifically for llama.cpp (LLMs).
         """
         importer = ModelImporter(mock_library)
         model_file = tmp_path / "model.gguf"
         model_file.touch()
-        model_type, subtype = importer._detect_type(model_file)
-        # GGUF appears in both categories, current impl returns first match
-        assert model_type in ("llm", "diffusion")
+        model_type, subtype, detected_family = importer._detect_type(model_file)
+        # GGUF defaults to LLM (extension-based fallback, content detection fails on empty file)
+        assert model_type == "llm"
 
     def test_detect_ckpt(self, mock_library: Mock, tmp_path: Path) -> None:
         """Test detection of checkpoint files."""
         importer = ModelImporter(mock_library)
         model_file = tmp_path / "model.ckpt"
         model_file.touch()
-        model_type, _ = importer._detect_type(model_file)
+        model_type, _, detected_family = importer._detect_type(model_file)
         assert model_type == "diffusion"
 
 

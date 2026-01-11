@@ -11,6 +11,7 @@ from backend.logging_config import get_logger
 from backend.model_library.io.hashing import compute_dual_hash
 from backend.model_library.io.manager import io_manager
 from backend.model_library.library import ModelLibrary
+from backend.model_library.model_identifier import identify_model_type
 from backend.model_library.naming import normalize_filename, normalize_name, unique_path
 from backend.models import ModelFileInfo, ModelMetadata, get_iso_timestamp
 from backend.utils import ensure_directory
@@ -301,13 +302,15 @@ def validate_file_type(file_path: Path) -> FileTypeValidation:
         return {"valid": False, "detected_type": "error", "error": str(e)}
 
 
+# Extension-based fallback for when content detection fails
+# Order matters: LLM first since GGUF is specifically for LLMs
 _MODEL_EXTENSIONS = {
-    "checkpoints": {".ckpt", ".safetensors", ".gguf"},
+    "llm": {".gguf", ".bin"},  # GGUF was created for llama.cpp (LLMs)
+    "checkpoints": {".ckpt", ".safetensors"},
     "loras": {".safetensors", ".pt"},
     "vae": {".pt", ".safetensors"},
-    "controlnet": {".safetensors", ".pt", ".gguf"},
+    "controlnet": {".safetensors", ".pt"},
     "embeddings": {".pt"},
-    "llm": {".gguf", ".bin", ".json", ".pt"},
 }
 
 
@@ -317,14 +320,47 @@ class ModelImporter:
     def __init__(self, library: ModelLibrary) -> None:
         self.library = library
 
-    def _detect_type(self, file_path: Path) -> tuple[str, str]:
+    def _detect_type(self, file_path: Path) -> tuple[str, str, Optional[str]]:
+        """Detect model type using content inspection with extension fallback.
+
+        Args:
+            file_path: Path to the model file
+
+        Returns:
+            Tuple of (model_type, subtype, detected_family)
+            - model_type: "llm" or "diffusion"
+            - subtype: "" for LLM, or "checkpoints"/"loras"/etc. for diffusion
+            - detected_family: Family detected from file content, or None
+        """
+        # Try content-based detection first (reads GGUF/safetensors headers)
+        detected_type, detected_family, extra = identify_model_type(file_path)
+
+        if detected_type:
+            subtype = "" if detected_type == "llm" else "checkpoints"
+            logger.info(
+                "Content-based detection: type=%s, family=%s for %s",
+                detected_type,
+                detected_family,
+                file_path.name,
+            )
+            return detected_type, subtype, detected_family
+
+        # Fall back to extension-based detection
         ext = file_path.suffix.lower()
-        for subtype, extensions in _MODEL_EXTENSIONS.items():
+        for subtype_key, extensions in _MODEL_EXTENSIONS.items():
             if ext in extensions:
-                model_type = "llm" if subtype == "llm" else "diffusion"
-                subtype_value = "" if model_type == "llm" else subtype
-                return model_type, subtype_value
-        return "llm", ""
+                model_type = "llm" if subtype_key == "llm" else "diffusion"
+                subtype_value = "" if model_type == "llm" else subtype_key
+                logger.debug(
+                    "Extension-based detection: type=%s, subtype=%s for %s",
+                    model_type,
+                    subtype_value,
+                    file_path.name,
+                )
+                return model_type, subtype_value, None
+
+        # Default to LLM for unknown extensions
+        return "llm", "", None
 
     def _choose_primary_file(self, model_dir: Path) -> Optional[Path]:
         candidates = [
@@ -357,6 +393,8 @@ class ModelImporter:
         family: str,
         official_name: str,
         repo_id: Optional[str] = None,
+        model_type: Optional[str] = None,
+        subtype: Optional[str] = None,
     ) -> Path:
         """Import a local model file or directory into the library.
 
@@ -369,6 +407,8 @@ class ModelImporter:
             family: Model family name (e.g., "llama", "stable-diffusion")
             official_name: Official model name
             repo_id: Optional HuggingFace repo ID for download URL
+            model_type: Optional override for model type (from HF metadata)
+            subtype: Optional override for model subtype (from HF metadata)
 
         Returns:
             Path to the imported model directory
@@ -381,17 +421,41 @@ class ModelImporter:
         if not local_path.exists():
             raise FileNotFoundError(f"Local path not found: {local_path}")
 
-        if local_path.is_file():
-            model_type, subtype = self._detect_type(local_path)
+        # Determine model type using priority: provided > content detection > extension
+        detected_family: Optional[str] = None
+
+        if model_type:
+            # Use provided model_type (from HuggingFace lookup)
+            effective_model_type = model_type
+            effective_subtype = subtype or ("" if model_type == "llm" else "checkpoints")
+            logger.info(
+                "Using provided model_type=%s, subtype=%s for %s",
+                effective_model_type,
+                effective_subtype,
+                local_path.name,
+            )
+        elif local_path.is_file():
+            effective_model_type, effective_subtype, detected_family = self._detect_type(local_path)
         else:
             files = [p for p in local_path.iterdir() if p.is_file()]
             if files:
-                model_type, subtype = self._detect_type(max(files, key=lambda p: p.stat().st_size))
+                largest_file = max(files, key=lambda p: p.stat().st_size)
+                effective_model_type, effective_subtype, detected_family = self._detect_type(
+                    largest_file
+                )
             else:
-                model_type, subtype = "llm", ""
+                effective_model_type, effective_subtype, detected_family = "llm", "", None
+
+        # Use detected family if the provided family is generic
+        effective_family = family
+        if detected_family and family in ("imported", "unknown", ""):
+            effective_family = detected_family
+            logger.info("Using detected family '%s' instead of '%s'", detected_family, family)
 
         cleaned_name = normalize_name(official_name)
-        final_model_dir = self.library.build_model_path(model_type, family, cleaned_name)
+        final_model_dir = self.library.build_model_path(
+            effective_model_type, effective_family, cleaned_name
+        )
         final_model_dir = unique_path(final_model_dir)
 
         # Use a temporary directory with .tmp prefix for atomic import
@@ -437,9 +501,9 @@ class ModelImporter:
             now = get_iso_timestamp()
             metadata: ModelMetadata = {
                 "model_id": final_model_dir.name,
-                "family": normalize_name(family),
-                "model_type": model_type,
-                "subtype": subtype,
+                "family": normalize_name(effective_family),
+                "model_type": effective_model_type,
+                "subtype": effective_subtype,
                 "official_name": official_name,
                 "cleaned_name": final_model_dir.name,
                 "tags": [],

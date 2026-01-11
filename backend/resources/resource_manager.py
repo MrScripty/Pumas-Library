@@ -308,6 +308,8 @@ class ResourceManager:
                 - family: Model family name
                 - official_name: Display name for the model
                 - repo_id: Optional Hugging Face repo ID
+                - model_type: Optional model type override (from HF metadata)
+                - subtype: Optional model subtype override (from HF metadata)
 
         Returns:
             Dict with keys:
@@ -325,6 +327,8 @@ class ResourceManager:
             family = spec.get("family", "unknown")
             official_name = spec.get("official_name", "")
             repo_id = spec.get("repo_id")
+            model_type = spec.get("model_type")  # From HF metadata
+            subtype = spec.get("subtype")  # From HF metadata
 
             if not path:
                 results.append(
@@ -355,7 +359,12 @@ class ResourceManager:
                     official_name = local_path.stem
 
                 model_dir = self.model_importer.import_path(
-                    local_path, family, official_name, repo_id
+                    local_path,
+                    family,
+                    official_name,
+                    repo_id,
+                    model_type=model_type,
+                    subtype=subtype,
                 )
                 results.append(
                     {

@@ -32,9 +32,9 @@
 ### Part 1: I/O Infrastructure
 **Goal:** Drive-aware file operations with stream hashing
 
+- [x] io/hashing.py - Stream hashing utilities - `d861285`
+- [x] io/validator.py - Filesystem validation - `4f7d84a`
 - [ ] io/manager.py - Drive-aware I/O queue
-- [ ] io/validator.py - Filesystem validation
-- [ ] io/hashing.py - Stream hashing utilities
 - [ ] io/platform.py - Platform abstraction for links
 
 ### Part 2: Networking Infrastructure
@@ -109,6 +109,11 @@
 
 ## Completed Items
 
+### 2026-01-10: I/O Infrastructure (Partial)
+- Created io/hashing.py (154 lines, 18 tests, 95.92% coverage)
+- Created io/validator.py (364 lines, 38 tests, 88.29% coverage)
+- 2 atomic commits, all pre-commit hooks passing
+
 ### 2026-01-10: Downloader Refactor
 - Created 5 new modules in `backend/model_library/hf/`
 - Added 119 new unit tests
@@ -133,4 +138,4 @@
 
 ---
 
-**Next Session Focus:** Part 1 - I/O Infrastructure (io/manager.py, io/validator.py, etc.)
+**Next Session Focus:** Part 1 - I/O Infrastructure (io/manager.py, io/platform.py)

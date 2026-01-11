@@ -552,3 +552,38 @@ def test_check_mapping_config_exists(tmp_path: Path):
     specific.write_text('{"mappings": []}')
 
     assert mapper.check_mapping_config_exists("comfyui", "0.5.0") is True
+
+
+# ============================================================================
+# Phase 1C Tests: Sandbox Detection
+# ============================================================================
+
+
+def test_sandbox_detection_returns_info():
+    """Test that sandbox detection returns proper SandboxInfo."""
+    from backend.model_library.io import detect_sandbox_environment
+
+    info = detect_sandbox_environment()
+
+    # Should return a SandboxInfo dataclass
+    assert hasattr(info, "is_sandboxed")
+    assert hasattr(info, "sandbox_type")
+    assert hasattr(info, "limitations")
+    assert isinstance(info.is_sandboxed, bool)
+    assert isinstance(info.sandbox_type, str)
+    assert isinstance(info.limitations, list)
+
+
+def test_get_cross_filesystem_warning_same_fs(tmp_path: Path):
+    """Test that cross-filesystem warning returns None for same filesystem."""
+    library = ModelLibrary(tmp_path / "models")
+    mapper = ModelMapper(library, tmp_path / "config")
+
+    # Both on same filesystem (tmp_path)
+    app_models = tmp_path / "app" / "models"
+    app_models.mkdir(parents=True, exist_ok=True)
+
+    warning = mapper.get_cross_filesystem_warning(app_models)
+
+    # Should not warn for same filesystem
+    assert warning is None or warning.get("cross_filesystem") is False

@@ -71,9 +71,19 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
           }
         }
 
-        // Note: Sandbox detection would be done on backend startup
-        // and exposed via get_status() or similar. For now, we don't
-        // fetch it here but could add it if the API is available.
+        // Check for sandbox environment
+        if (window.pywebview?.api?.get_sandbox_info) {
+          const sbResult = await window.pywebview.api.get_sandbox_info();
+          if (sbResult.success && sbResult.is_sandboxed) {
+            setSandboxInfo({
+              is_sandboxed: true,
+              sandbox_type: sbResult.sandbox_type as SandboxInfo['sandbox_type'],
+              limitations: sbResult.limitations,
+            });
+          } else {
+            setSandboxInfo(null);
+          }
+        }
       } catch (error) {
         logger.error('Error fetching warnings', { error });
       }

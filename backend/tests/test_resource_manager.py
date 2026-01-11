@@ -130,3 +130,90 @@ def test_setup_version_symlinks_maps_models(resource_manager):
     user_link = version_dir / "user"
     assert user_link.exists()
     assert user_link.is_symlink()
+
+
+def test_apply_model_mapping_creates_links(resource_manager):
+    """Test that apply_model_mapping creates symlinks for models."""
+    resource_manager.initialize_shared_storage()
+    _create_model(resource_manager)
+
+    version_tag = "v0.2.0"
+    version_dir = resource_manager.versions_dir / version_tag
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    _write_mapping_config(resource_manager, "0.2.0")
+
+    result = resource_manager.apply_model_mapping(version_tag)
+
+    assert result["success"] is True
+    assert result["links_created"] == 1
+    assert result["links_removed"] == 0
+
+    linked_file = version_dir / "models" / "checkpoints" / "model.safetensors"
+    assert linked_file.exists()
+    assert linked_file.is_symlink()
+
+
+def test_apply_model_mapping_version_not_found(resource_manager):
+    """Test that apply_model_mapping returns error for non-existent version."""
+    result = resource_manager.apply_model_mapping("v99.99.99")
+
+    assert result["success"] is False
+    assert "not found" in result["error"]
+    assert result["links_created"] == 0
+
+
+def test_clean_broken_symlinks_removes_broken(resource_manager):
+    """Test that _clean_broken_symlinks removes broken symlinks."""
+    resource_manager.initialize_shared_storage()
+
+    version_tag = "v0.3.0"
+    version_dir = resource_manager.versions_dir / version_tag
+    models_dir = version_dir / "models" / "checkpoints"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a broken symlink
+    broken_link = models_dir / "broken.safetensors"
+    broken_link.symlink_to("/nonexistent/path/model.safetensors")
+
+    # Create a valid file (not a symlink)
+    valid_file = models_dir / "valid.txt"
+    valid_file.write_text("data")
+
+    assert broken_link.is_symlink()
+    assert not broken_link.exists()  # Target doesn't exist
+
+    count = resource_manager._clean_broken_symlinks(version_dir / "models")
+
+    assert count == 1
+    assert not broken_link.exists()
+    assert valid_file.exists()  # Valid file untouched
+
+
+def test_apply_model_mapping_cleans_broken_first(resource_manager):
+    """Test that apply_model_mapping cleans broken links before creating new ones."""
+    resource_manager.initialize_shared_storage()
+    _create_model(resource_manager)
+
+    version_tag = "v0.4.0"
+    version_dir = resource_manager.versions_dir / version_tag
+    models_dir = version_dir / "models" / "checkpoints"
+    models_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create a broken symlink in the checkpoints dir
+    broken_link = models_dir / "old-broken.safetensors"
+    broken_link.symlink_to("/nonexistent/path/old-model.safetensors")
+
+    _write_mapping_config(resource_manager, "0.4.0")
+
+    result = resource_manager.apply_model_mapping(version_tag)
+
+    assert result["success"] is True
+    assert result["links_created"] == 1
+    assert result["links_removed"] == 1
+    assert not broken_link.exists()  # Broken link removed
+
+    # New link created
+    linked_file = models_dir / "model.safetensors"
+    assert linked_file.exists()
+    assert linked_file.is_symlink()

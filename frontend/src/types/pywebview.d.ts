@@ -505,6 +505,20 @@ export interface ApplyModelMappingResponse extends BaseResponse {
 }
 
 /**
+ * Sandbox type enumeration
+ */
+export type SandboxType = 'flatpak' | 'snap' | 'docker' | 'appimage' | 'none' | 'unknown';
+
+/**
+ * Sandbox environment info response
+ */
+export interface SandboxInfoResponse extends BaseResponse {
+  is_sandboxed: boolean;
+  sandbox_type: SandboxType;
+  limitations: string[];
+}
+
+/**
  * Cross-filesystem warning response
  */
 export interface CrossFilesystemWarningResponse extends BaseResponse {
@@ -960,6 +974,12 @@ export interface PyWebViewAPI {
    * Cleans broken links and creates/updates symlinks for all mapped models
    */
   apply_model_mapping(versionTag: string): Promise<ApplyModelMappingResponse>;
+
+  /**
+   * Get sandbox environment information
+   * Detects Flatpak, Snap, Docker, AppImage environments
+   */
+  get_sandbox_info(): Promise<SandboxInfoResponse>;
 
   // ========================================
   // Custom Nodes

@@ -19,6 +19,7 @@ from backend.api.size_calculator import SizeCalculator
 from backend.api.system_utils import SystemUtils
 from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
+from backend.model_library.io import detect_sandbox_environment
 from backend.models import DependencyStatus, GitHubRelease, ModelOverrides, ScanResult, VersionInfo
 from backend.rate_limiter import RateLimiter
 from backend.validators import validate_package_name, validate_url, validate_version_tag
@@ -1636,6 +1637,37 @@ class ComfyUISetupAPI:
                 "error": str(e),
                 "indexing": False,
                 "model_count": 0,
+            }
+
+    def get_sandbox_info(self) -> Dict[str, Any]:
+        """Get information about sandbox environment.
+
+        Detects if running in Flatpak, Snap, Docker, or AppImage and returns
+        any limitations that may affect model library operations.
+
+        Returns:
+            Dict with sandbox detection results:
+                - success: Whether detection completed
+                - is_sandboxed: True if running in sandboxed environment
+                - sandbox_type: Type of sandbox (flatpak, snap, docker, appimage, none)
+                - limitations: List of limitation strings
+        """
+        try:
+            info = detect_sandbox_environment()
+            return {
+                "success": True,
+                "is_sandboxed": info.is_sandboxed,
+                "sandbox_type": info.sandbox_type,
+                "limitations": info.limitations,
+            }
+        except OSError as e:
+            logger.error("Error detecting sandbox: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "is_sandboxed": False,
+                "sandbox_type": "unknown",
+                "limitations": [],
             }
 
     def get_file_link_count(self, file_path: str) -> Dict[str, Any]:

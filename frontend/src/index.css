@@ -404,4 +404,33 @@
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
   }
+
+  /* Custom scrollbar styles matching theme */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--launcher-border-control)) hsl(var(--launcher-bg-primary));
+  }
+
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: hsl(var(--launcher-bg-primary));
+    border-radius: 4px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background: hsl(var(--launcher-border-control));
+    border-radius: 4px;
+  }
+
+  *::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--launcher-text-muted));
+  }
+
+  *::-webkit-scrollbar-corner {
+    background: hsl(var(--launcher-bg-primary));
+  }
 }

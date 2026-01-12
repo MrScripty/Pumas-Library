@@ -287,6 +287,20 @@ function isHiddenGgufField(key: string, value: unknown): boolean {
   return false;
 }
 
+/**
+ * Construct the quant repo URL from embedded metadata.
+ * Returns the URL if both quantized_by and name are available.
+ */
+function constructQuantUrl(embeddedMetadata: Record<string, unknown>): string | null {
+  const quantizedBy = embeddedMetadata['general.quantized_by'];
+  const name = embeddedMetadata['general.name'];
+
+  if (!quantizedBy || !name) return null;
+
+  // Construct HF URL: https://huggingface.co/{quantized_by}/{name}
+  return `https://huggingface.co/${String(quantizedBy)}/${String(name)}`;
+}
+
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   filePaths,
   onClose,
@@ -513,7 +527,70 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
           continue;
         }
 
-        // Then lookup HF metadata
+        // For GGUF/safetensors, try embedded metadata FIRST to avoid HF API calls
+        let skipHfSearch = false;
+        let embeddedRepoId: string | null = null;
+
+        if (typeResult.detected_type === 'gguf' || typeResult.detected_type === 'safetensors') {
+          try {
+            const embeddedResult = await importAPI.getEmbeddedMetadata(file.path);
+
+            if (embeddedResult.success && embeddedResult.metadata) {
+              // Store embedded metadata for later use
+              setFiles(prev => prev.map(f => {
+                if (f.path !== file.path) return f;
+                return {
+                  ...f,
+                  embeddedMetadata: embeddedResult.metadata,
+                  embeddedMetadataStatus: 'loaded',
+                };
+              }));
+
+              // Check if embedded metadata provides repo URL
+              const repoUrl = embeddedResult.metadata['general.repo_url'];
+              if (repoUrl && typeof repoUrl === 'string') {
+                // Extract repo_id from URL: https://huggingface.co/{user}/{repo} -> {user}/{repo}
+                const match = repoUrl.match(/huggingface\.co\/([^/]+\/[^/]+)/);
+                if (match && match[1]) {
+                  embeddedRepoId = match[1];
+                  skipHfSearch = true;
+                }
+              }
+
+              // Or construct from quantized_by + name
+              if (!skipHfSearch) {
+                const quantizedBy = embeddedResult.metadata['general.quantized_by'];
+                const name = embeddedResult.metadata['general.name'];
+                if (quantizedBy && name) {
+                  embeddedRepoId = `${String(quantizedBy)}/${String(name)}`;
+                  skipHfSearch = true;
+                }
+              }
+            }
+          } catch (error) {
+            logger.debug('Failed to extract embedded metadata early', { error });
+          }
+        }
+
+        // If we have repo_id from embedded metadata, use it and skip HF search
+        if (skipHfSearch && embeddedRepoId) {
+          setFiles(prev => prev.map(f => {
+            if (f.path !== file.path) return f;
+            return {
+              ...f,
+              hfMetadata: {
+                repo_id: embeddedRepoId!,
+                match_method: 'embedded',
+                match_confidence: 0.9, // High confidence from embedded metadata
+                requires_confirmation: false,
+              },
+              metadataStatus: 'found',
+            };
+          }));
+          continue; // Skip HF API search
+        }
+
+        // Fall back to HF API search
         const result = await importAPI.lookupHFMetadata(file.filename, file.path);
 
         // Update with HF metadata (preserves other state including embedded metadata)
@@ -1025,11 +1102,20 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                           {metadataEntries.length > 0 ? (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs max-h-48 overflow-y-auto">
                               {metadataEntries.map(({ key, label, value }) => {
-                                // Check if this field has a linked URL (only for embedded metadata)
-                                const linkedUrlKey = isShowingEmbedded ? LINKED_GGUF_FIELDS[key.toLowerCase()] : undefined;
-                                const linkedUrl = linkedUrlKey && file.embeddedMetadata
-                                  ? String(file.embeddedMetadata[linkedUrlKey] ?? '')
-                                  : '';
+                                const lowerKey = key.toLowerCase();
+                                let linkedUrl = '';
+
+                                if (isShowingEmbedded && file.embeddedMetadata) {
+                                  // Check for direct linked field first
+                                  const linkedUrlKey = LINKED_GGUF_FIELDS[lowerKey];
+                                  if (linkedUrlKey) {
+                                    linkedUrl = String(file.embeddedMetadata[linkedUrlKey] ?? '');
+                                  }
+                                  // For general.name, compute the quant URL from quantized_by + name
+                                  else if (lowerKey === 'general.name') {
+                                    linkedUrl = constructQuantUrl(file.embeddedMetadata) ?? '';
+                                  }
+                                }
 
                                 return (
                                   <div key={key} className="contents">

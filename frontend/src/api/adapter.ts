@@ -1,8 +1,8 @@
 /**
  * API Adapter
  *
- * Provides a unified API interface that works with both PyWebView and Electron.
- * Automatically detects the runtime environment and uses the appropriate backend.
+ * Provides the API interface for Electron IPC communication.
+ * The Python backend runs as a sidecar process, accessed via JSON-RPC.
  */
 
 import type { PyWebViewAPI } from '../types/pywebview';
@@ -10,7 +10,7 @@ import type { PyWebViewAPI } from '../types/pywebview';
 /**
  * Runtime environment detection
  */
-export type RuntimeEnvironment = 'electron' | 'pywebview' | 'browser';
+export type RuntimeEnvironment = 'electron' | 'browser';
 
 /**
  * Detect the current runtime environment
@@ -20,14 +20,9 @@ export function detectEnvironment(): RuntimeEnvironment {
     return 'browser';
   }
 
-  // Check for Electron API first (newer, preferred)
+  // Check for Electron API
   if ('electronAPI' in window) {
     return 'electron';
-  }
-
-  // Check for PyWebView API
-  if (window.pywebview?.api) {
-    return 'pywebview';
   }
 
   // Fallback to browser (development mode without backend)
@@ -43,11 +38,7 @@ function getAPIInstance(): PyWebViewAPI | null {
   switch (env) {
     case 'electron':
       // In Electron, the API is exposed as window.electronAPI
-      // but also as window.pywebview.api for backwards compatibility
       return (window as unknown as { electronAPI: PyWebViewAPI }).electronAPI;
-
-    case 'pywebview':
-      return window.pywebview?.api ?? null;
 
     case 'browser':
       // In browser mode (no backend), return null

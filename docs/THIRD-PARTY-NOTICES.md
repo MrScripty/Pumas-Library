@@ -12,11 +12,6 @@ The ComfyUI icon (`launcher-data/icons/comfyui_logo_2025.png`) is property of th
 
 ## Python Dependencies
 
-### pywebview
-- **License**: BSD-3-Clause
-- **Source**: https://github.com/r0x0r/pywebview
-- **Copyright**: Copyright (c) Roman Sirokov and contributors
-
 ### setproctitle
 - **License**: BSD-3-Clause
 - **Source**: https://github.com/dvarrazzo/py-setproctitle
@@ -28,6 +23,11 @@ The ComfyUI icon (`launcher-data/icons/comfyui_logo_2025.png`) is property of th
 - **Copyright**: Copyright (c) Donald Stufft and individual contributors
 
 ## JavaScript/TypeScript Dependencies
+
+### Electron
+- **License**: MIT
+- **Source**: https://github.com/electron/electron
+- **Copyright**: Copyright (c) Electron contributors and GitHub Inc.
 
 ### React
 - **License**: MIT

@@ -1,9 +1,6 @@
 # ComfyUI Setup Launcher - Python Dependencies
 # Target: Python 3.12+
 
-# Desktop GUI Framework
-pywebview>=5.0,<6.0
-
 # Application Packaging
 pyinstaller>=6.0,<7.0
 
@@ -37,6 +34,5 @@ gguf>=0.17.0,<0.18.0
 # HTTP/2 networking (Phase 5 - Networking & Caching)
 httpx[http2]>=0.27,<1.0
 
-# Note: PyGObject (GTK bindings) is used from system installation
-# Install via: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0
-# This is pre-installed on most Debian-based distros
+# Note: The desktop GUI is now handled by Electron.
+# See electron/package.json for Electron dependencies.

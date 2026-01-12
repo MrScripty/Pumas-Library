@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
-ComfyUI Setup Launcher - Main Entry Point
-Desktop application using PyWebView with React frontend
+ComfyUI Setup Launcher - JavaScript API Bridge
+Provides the API class used by the RPC server for Electron IPC.
+
+NOTE: PyWebView has been removed. This file is now only used by rpc_server.py.
+For the Electron main process, see electron/src/main.ts
 """
 
-import signal
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Callable
 
-import webview
-
 from backend.api import ComfyUISetupAPI
-from backend.config import UI
-from backend.exceptions import ComfyUILauncherError
 from backend.logging_config import get_logger, setup_logging
 
 # Initialize logging as early as possible
@@ -25,153 +23,13 @@ logger = get_logger(__name__)
 class JavaScriptAPI:
     """
     JavaScript API Bridge
-    All methods in this class are exposed to the JavaScript frontend via window.pywebview.api
+
+    This class provides the API methods that are exposed to the frontend.
+    In Electron mode, these are called via JSON-RPC from the Python sidecar (rpc_server.py).
     """
 
     def __init__(self):
         self.api = ComfyUISetupAPI()
-        self._window = None
-        self._drop_handler_registered = False
-
-    def _register_drop_handler(self):
-        """Register Python-side drop handler for GTK compatibility.
-
-        PyWebView GTK requires drop listeners to be registered through the Python
-        DOM API rather than standard web event listeners. This method registers
-        a handler that captures drops and forwards them to the frontend.
-
-        This is cross-platform safe - it works on all backends, not just GTK.
-        """
-        import json
-
-        if self._drop_handler_registered or not self._window:
-            logger.info("Drop handler: skipping (already registered or no window)")
-            return
-
-        def on_drop(event):
-            logger.info("Drop event received from PyWebView")
-            files = event.get("dataTransfer", {}).get("files", [])
-            paths = []
-            for f in files:
-                path = f.get("pywebviewFullPath")
-                if path:
-                    paths.append(path)
-
-            logger.info("Extracted %d file paths from drop", len(paths))
-
-            if paths:
-                # Dispatch custom event to frontend
-                self._window.evaluate_js(
-                    f"window.dispatchEvent(new CustomEvent('pywebview-drop', {{ detail: {{ paths: {json.dumps(paths)} }} }}))"
-                )
-                logger.info("Dispatched pywebview-drop event to frontend")
-
-        try:
-            self._window.dom.document.on("drop", on_drop)
-            self._drop_handler_registered = True
-            logger.info("Drop handler registered successfully on document")
-        except AttributeError as exc:
-            logger.warning("Failed to register drop handler on document: %s", exc)
-            # Try body as fallback
-            try:
-                self._window.dom.body.on("drop", on_drop)
-                self._drop_handler_registered = True
-                logger.info("Drop handler registered successfully on body (fallback)")
-            except AttributeError as exc2:
-                logger.error("Failed to register drop handler on body: %s", exc2)
-            except RuntimeError as exc2:
-                logger.error("Failed to register drop handler on body: %s", exc2)
-        except RuntimeError as exc:
-            logger.warning("Failed to register drop handler on document: %s", exc)
-
-    def _enable_gtk_drop_target(self):
-        """Enable GTK drop target on the Window level to avoid WebKit conflicts.
-
-        Using the Window instead of the WebView widget prevents deadlocks
-        and 'Desktop Freezes' caused by WebKit's internal DND logic.
-        DestDefaults.ALL allows GTK to handle cursor/status handshake automatically.
-        """
-        try:
-            import gi
-
-            gi.require_version("Gtk", "3.0")
-            from gi.repository import Gdk, GLib, Gtk
-
-            # Get the BrowserView instance from PyWebView's internal state
-            from webview.platforms.gtk import BrowserView
-
-            browser_view = BrowserView.instances.get(self._window.uid)
-            if browser_view is None:
-                logger.warning(
-                    "Cannot access BrowserView instance for GTK drop setup (uid=%s)",
-                    self._window.uid,
-                )
-                return
-
-            # CRITICAL: Target the top-level Window, not the webview widget
-            # This bypasses WebKit's internal DND handling that causes freezes
-            target_widget = browser_view.window
-            if target_widget is None:
-                logger.warning("Cannot access window widget for GTK drop setup")
-                return
-
-            # Define what we accept
-            target_entry = Gtk.TargetEntry.new("text/uri-list", 0, 0)
-
-            # DestDefaults.ALL (MOTION | HIGHLIGHT | DROP)
-            # GTK handles the cursor/status handshake automatically - most stable
-            target_widget.drag_dest_set(
-                Gtk.DestDefaults.ALL,
-                [target_entry],
-                Gdk.DragAction.COPY,
-            )
-            logger.info("GTK Window-level drop target enabled (stable mode)")
-
-            # We only need to handle drag-data-received
-            def on_drag_data_received(widget, context, x, y, selection_data, info, time):
-                import json
-                from urllib.parse import unquote, urlparse
-
-                success = False
-                try:
-                    uris = selection_data.get_uris()
-                    if uris:
-                        paths = [
-                            unquote(urlparse(uri).path)
-                            for uri in uris
-                            if urlparse(uri).scheme == "file"
-                        ]
-                        if paths and self._window:
-                            # Use idle_add to dispatch JS in the next main loop iteration
-                            # This ensures the signal handler returns instantly to the OS
-                            GLib.idle_add(
-                                self._window.evaluate_js,
-                                f"window.dispatchEvent(new CustomEvent('pywebview-drop', {{ detail: {{ paths: {json.dumps(paths)} }} }}))",
-                            )
-                            logger.info(
-                                "GTK Window DND: dispatched %d files to frontend",
-                                len(paths),
-                            )
-                            success = True
-                    else:
-                        logger.warning("GTK Window DND: no URIs in selection data")
-                except Exception as e:  # noqa: generic-exception
-                    logger.error("Error processing drop data: %s", e)
-                finally:
-                    # Signal GTK that the operation is finished
-                    Gtk.drag_finish(context, success, False, time)
-
-            target_widget.connect("drag-data-received", on_drag_data_received)
-            logger.info("GTK Window-level DND bridge enabled (stable mode)")
-
-        except ImportError as exc:
-            logger.debug("GTK not available, skipping drop target setup: %s", exc)
-        except AttributeError as exc:
-            logger.warning("Failed to enable GTK drop target: %s", exc)
-        except RuntimeError as exc:
-            logger.warning("Failed to enable GTK drop target: %s", exc)
-        except TypeError as exc:
-            logger.warning("Failed to enable GTK drop target: %s", exc)
 
     def _call_api(
         self,
@@ -306,7 +164,11 @@ class JavaScriptAPI:
         )
 
     def close_window(self):
-        """Close the application window and terminate the process"""
+        """Close the application and terminate the process.
+
+        In Electron mode, window closure is handled by Electron's main process.
+        This method handles cleanup and signals the RPC server to shut down.
+        """
 
         def _do():
             # Cancel any ongoing installation before closing
@@ -322,12 +184,10 @@ class JavaScriptAPI:
 
                     time.sleep(1)
 
-            # Destroy all windows
-            for window in webview.windows:
-                window.destroy()
+            return {"success": True}
 
-        self._call_api("close_window", _do, lambda _exc: None)
-        # Exit the application
+        result = self._call_api("close_window", _do, lambda _exc: {"success": False})
+        # Signal shutdown - Electron will handle the actual window close
         sys.exit(0)
 
     def launch_comfyui(self):
@@ -525,29 +385,19 @@ class JavaScriptAPI:
         )
 
     def open_model_import_dialog(self):
-        """Open native file picker for model import."""
+        """Open native file picker for model import.
 
-        def _do():
-            file_types = (
-                "Model Files (*.safetensors;*.ckpt;*.gguf;*.pt;*.bin;*.pth;*.onnx)",
-                "All Files (*.*)",
-            )
-
-            result = self._window.create_file_dialog(
-                webview.OPEN_DIALOG,
-                allow_multiple=True,
-                file_types=file_types,
-            )
-
-            if result:
-                return {"success": True, "paths": list(result)}
-            return {"success": True, "paths": []}
-
-        return self._call_api(
-            "open_model_import_dialog",
-            _do,
-            lambda exc: {"success": False, "error": str(exc), "paths": []},
-        )
+        In Electron mode, file dialogs are handled by Electron's main process
+        via IPC, not by Python. This method is kept for API compatibility but
+        returns an error indicating Electron should handle it.
+        """
+        # File dialogs are now handled by Electron's dialog.showOpenDialog()
+        # See electron/src/preload.ts for the implementation
+        return {
+            "success": False,
+            "error": "File dialogs are handled by Electron",
+            "paths": [],
+        }
 
     def launch_version(self, tag, extra_args=None):
         """Launch a specific ComfyUI version"""
@@ -999,123 +849,8 @@ class JavaScriptAPI:
         )
 
 
-def get_entrypoint():
-    """
-    Get the entry point for the web content
-    Returns either the built frontend or development server URL
-    """
-    # Determine base directory
-    if getattr(sys, "frozen", False):
-        # Running as PyInstaller bundle - use extracted temp directory
-        base_dir = Path(sys._MEIPASS)
-    else:
-        # Running in development mode
-        base_dir = Path(__file__).parent.parent
-
-    dist_dir = base_dir / "frontend" / "dist"
-    index_html = dist_dir / "index.html"
-
-    if index_html.exists():
-        # Production mode: serve from built files
-        return str(index_html.resolve())
-    else:
-        # Development mode: connect to Vite dev server
-        # User should run `npm run dev` in frontend/ directory first
-        return "http://127.0.0.1:3000"
-
-
-def signal_handler(signum, frame):
-    """Handle SIGINT (Ctrl+C) gracefully"""
-    logger.info("Received interrupt signal, shutting down gracefully...")
-    # Destroy all windows and exit cleanly
-    try:
-        for window in webview.windows:
-            window.destroy()
-    except AttributeError as exc:
-        logger.debug("Failed to destroy webview window: %s", exc)
-    except RuntimeError as exc:
-        logger.debug("Failed to destroy webview window: %s", exc)
-    sys.exit(0)
-
-
-def main():
-    """Main application entry point"""
-    try:
-        import setproctitle
-
-        setproctitle.setproctitle("Linux AI Launcher")
-    except AttributeError as exc:
-        logger.debug("setproctitle unavailable: %s", exc)
-    except ImportError as exc:
-        logger.debug("setproctitle unavailable: %s", exc)
-    except OSError as exc:
-        logger.debug("setproctitle unavailable: %s", exc)
-
-    # Register signal handler for keyboard interrupt
-    signal.signal(signal.SIGINT, signal_handler)
-
-    # Parse command-line arguments for debug mode
-    debug_mode = "--debug" in sys.argv or "--dev" in sys.argv
-
-    # Create JavaScript API instance
-    js_api = JavaScriptAPI()
-
-    # Get entry point (production build or dev server)
-    entry = get_entrypoint()
-
-    # Determine if we're in development mode
-    is_dev = entry.startswith("http://")
-
-    if is_dev:
-        logger.info("=" * 60)
-        logger.info("DEVELOPMENT MODE")
-        logger.info("=" * 60)
-        logger.info(f"Connecting to development server at: {entry}")
-        logger.info("Make sure you have run 'npm run dev' in the frontend/ directory")
-        logger.info("=" * 60)
-        logger.info(f"Development mode: connecting to {entry}")
-
-    if debug_mode:
-        logger.info("Developer console enabled (--debug flag)")
-        logger.info("Debug mode enabled")
-
-    # Create and configure the webview window
-    window = webview.create_window(
-        title="ComfyUI Setup",
-        url=entry,
-        js_api=js_api,
-        width=UI.WINDOW_WIDTH,
-        height=UI.WINDOW_HEIGHT,
-        resizable=False,
-        frameless=True,
-        easy_drag=False,  # Disabled - using .pywebview-drag-region class for specific draggable areas
-        background_color="#000000",
-    )
-
-    # Store window reference for drop handler registration
-    js_api._window = window
-
-    # Register drop handler after window is shown (for GTK compatibility)
-    # Using 'shown' event instead of 'loaded' ensures DOM is fully ready
-    def on_shown():
-        logger.info("Window shown - enabling GTK Window-level drop target")
-        # Enable GTK drop target on Window level (not WebView) to avoid WebKit conflicts
-        # NOTE: We do NOT call _register_drop_handler() as PyWebView's built-in
-        # DOM drop API conflicts with GTK signals and causes freezes on Linux
-        js_api._enable_gtk_drop_target()
-
-    window.events.shown += on_shown
-
-    # Start the webview application
-    # Use 'gtk' backend on Linux for best compatibility with Debian/Mint
-    # Enable debug console only if --debug or --dev flag is passed
-    try:
-        webview.start(debug=debug_mode, gui="gtk")
-    except KeyboardInterrupt:
-        # Handle keyboard interrupt during webview startup/running
-        logger.info("Application interrupted by user")
-        sys.exit(0)
-
-
-if __name__ == "__main__":
-    main()
+# NOTE: PyWebView main() entry point has been removed.
+# The application now runs via Electron with a Python sidecar.
+# See:
+#   - electron/src/main.ts - Electron main process
+#   - backend/rpc_server.py - Python RPC server (uses JavaScriptAPI)

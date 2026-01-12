@@ -37,12 +37,40 @@ function fileUriToPath(uri: string): string {
 }
 
 /**
+ * Get the Electron API for file path resolution (if available).
+ */
+function getElectronAPI(): { getPathForFile: (file: File) => string } | null {
+  if (typeof window !== 'undefined' && 'electronAPI' in window) {
+    return (window as unknown as { electronAPI: { getPathForFile: (file: File) => string } }).electronAPI;
+  }
+  return null;
+}
+
+/**
  * Extract file paths from drag event data.
  * Supports File API, text/uri-list, and text/plain for cross-platform support.
- * PyWebView GTK/WebKit may use different data formats depending on the file manager.
+ * In Electron with sandbox, uses webUtils.getPathForFile() via preload.
  */
 function extractFilePaths(e: DragEvent): string[] {
   const paths: string[] = [];
+  const electronAPI = getElectronAPI();
+
+  // In Electron, use the secure getPathForFile API (required for sandbox mode)
+  if (electronAPI && e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
+    for (const file of Array.from(e.dataTransfer.files)) {
+      try {
+        const path = electronAPI.getPathForFile(file);
+        if (path) {
+          paths.push(path);
+        }
+      } catch {
+        // Fall through to other methods if getPathForFile fails
+      }
+    }
+    if (paths.length > 0) {
+      return paths;
+    }
+  }
 
   // Try text/uri-list first (Linux file managers like Nautilus, Dolphin, Thunar)
   const uriList = e.dataTransfer?.getData('text/uri-list');
@@ -73,11 +101,10 @@ function extractFilePaths(e: DragEvent): string[] {
     }
   }
 
-  // Fallback to File API (may have limited path access)
+  // Last resort fallback to File API (may have limited path access without Electron)
   if (paths.length === 0 && e.dataTransfer?.files) {
     for (const file of Array.from(e.dataTransfer.files)) {
-      // In PyWebView, we may get the path through the File object
-      // This is a best-effort approach
+      // Try to get path property (non-sandboxed environments)
       const path = (file as File & { path?: string }).path || file.name;
       if (path) {
         paths.push(path);

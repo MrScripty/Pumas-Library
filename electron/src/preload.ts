@@ -5,7 +5,7 @@
  * Mirrors the PyWebView API interface for seamless migration.
  */
 
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 
 /**
  * Generic RPC call wrapper
@@ -150,7 +150,7 @@ const electronAPI = {
       tags,
     }),
   import_batch: (importSpecs: Array<Record<string, unknown>>) =>
-    apiCall('import_batch', { specs: importSpecs }),
+    apiCall('import_batch', { import_specs: importSpecs }),
   get_network_status: () => apiCall('get_network_status'),
 
   // ========================================
@@ -281,6 +281,17 @@ const electronAPI = {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   getTheme: () => ipcRenderer.invoke('theme:get'),
+
+  // ========================================
+  // File Utilities (for drag-and-drop)
+  // ========================================
+  /**
+   * Get the filesystem path for a dropped file.
+   * Required for sandboxed renderer to access file paths.
+   */
+  getPathForFile: (file: File): string => {
+    return webUtils.getPathForFile(file);
+  },
 };
 
 // Expose the API to the renderer process

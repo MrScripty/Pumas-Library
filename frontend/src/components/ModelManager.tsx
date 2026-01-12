@@ -13,7 +13,6 @@ import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
-import { ModelImportDropZone } from './ModelImportDropZone';
 import { ModelImportDialog } from './ModelImportDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
@@ -234,13 +233,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setShowCategoryMenu(false);
   };
 
-  // Import handlers
-  const handleFilesDropped = useCallback((paths: string[]) => {
-    logger.info('Files dropped for import', { count: paths.length });
-    setDroppedFiles(paths);
-    setShowImportDialog(true);
-  }, []);
-
+  // Import handlers (for file picker button)
   const handleImportDialogClose = useCallback(() => {
     setShowImportDialog(false);
     setDroppedFiles([]);
@@ -274,10 +267,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   return (
     <>
-      {/* Drag and drop overlay */}
-      <ModelImportDropZone onFilesDropped={handleFilesDropped} enabled={!isDownloadMode} />
-
-      {/* Import dialog */}
+      {/* Import dialog (for file picker button) */}
       {showImportDialog && droppedFiles.length > 0 && (
         <ModelImportDialog
           filePaths={droppedFiles}

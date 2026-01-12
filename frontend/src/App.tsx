@@ -6,6 +6,8 @@ import { InstallDialog } from './components/InstallDialog';
 import { Header } from './components/Header';
 import { AppSidebar } from './components/AppSidebar';
 import { ModelManager } from './components/ModelManager';
+import { ModelImportDropZone } from './components/ModelImportDropZone';
+import { ModelImportDialog } from './components/ModelImportDialog';
 import { DependencySection } from './components/DependencySection';
 import { StatusDisplay } from './components/StatusDisplay';
 import { useVersions } from './hooks/useVersions';
@@ -37,6 +39,10 @@ export default function App() {
   // Model Manager State
   const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
   const [linkedModels, setLinkedModels] = useState<Set<string>>(new Set());
+
+  // Model Import State (for app-level drag-drop)
+  const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
+  const [showImportDialog, setShowImportDialog] = useState(false);
 
   // --- Custom Hooks ---
   const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
@@ -330,6 +336,23 @@ export default function App() {
     });
   };
 
+  // Model import handlers (app-level drag-drop)
+  const handleFilesDropped = useCallback((paths: string[]) => {
+    logger.info('Files dropped for import', { count: paths.length });
+    setDroppedFiles(paths);
+    setShowImportDialog(true);
+  }, []);
+
+  const handleImportDialogClose = useCallback(() => {
+    setShowImportDialog(false);
+    setDroppedFiles([]);
+  }, []);
+
+  const handleImportComplete = useCallback(() => {
+    logger.info('Import complete, refreshing model list');
+    fetchModels();
+  }, [fetchModels]);
+
   const openModelsRoot = async () => {
     if (!pywebview.isAvailable()) return;
     try {
@@ -361,6 +384,18 @@ export default function App() {
 
   return (
     <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
+      {/* App-level drag-and-drop import overlay */}
+      <ModelImportDropZone onFilesDropped={handleFilesDropped} enabled={true} />
+
+      {/* Import dialog */}
+      {showImportDialog && droppedFiles.length > 0 && (
+        <ModelImportDialog
+          filePaths={droppedFiles}
+          onClose={handleImportDialogClose}
+          onImportComplete={handleImportComplete}
+        />
+      )}
+
       <Header
         systemResources={systemResources}
         appResources={status?.app_resources?.comfyui}

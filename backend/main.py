@@ -85,23 +85,19 @@ class JavaScriptAPI:
             logger.warning("Failed to register drop handler on document: %s", exc)
 
     def _enable_gtk_drop_target(self):
-        """Enable GTK drop target on the webview widget.
+        """Enable GTK drop target on the Window level to avoid WebKit conflicts.
 
-        PyWebView GTK connects drag-data-received but never enables the widget
-        as a drop target. We fix this with minimal flags to avoid conflicts.
-
-        IMPORTANT: Use MOTION only, NOT ALL or DROP!
-        DestDefaults.DROP auto-calls gtk_drag_finish() which conflicts with
-        PyWebView's own handling and causes the desktop to freeze.
+        Using the Window instead of the WebView widget prevents deadlocks
+        and 'Desktop Freezes' caused by WebKit's internal DND logic.
+        DestDefaults.ALL allows GTK to handle cursor/status handshake automatically.
         """
         try:
             import gi
 
             gi.require_version("Gtk", "3.0")
-            from gi.repository import Gdk, Gtk
+            from gi.repository import Gdk, GLib, Gtk
 
             # Get the BrowserView instance from PyWebView's internal state
-            # BrowserView.instances is keyed by window.uid
             from webview.platforms.gtk import BrowserView
 
             browser_view = BrowserView.instances.get(self._window.uid)
@@ -112,21 +108,61 @@ class JavaScriptAPI:
                 )
                 return
 
-            webview_widget = getattr(browser_view, "webview", None)
-            if webview_widget is None:
-                logger.warning("Cannot access webview widget for GTK drop setup")
+            # CRITICAL: Target the top-level Window, not the webview widget
+            # This bypasses WebKit's internal DND handling that causes freezes
+            target_widget = browser_view.window
+            if target_widget is None:
+                logger.warning("Cannot access window widget for GTK drop setup")
                 return
 
-            # Use MOTION only - provides drag cursor feedback without auto-handling
-            # DO NOT use DestDefaults.ALL or DestDefaults.DROP - they conflict
-            # with PyWebView's drop handling and freeze the desktop!
+            # Define what we accept
             target_entry = Gtk.TargetEntry.new("text/uri-list", 0, 0)
-            webview_widget.drag_dest_set(
-                Gtk.DestDefaults.MOTION,
+
+            # DestDefaults.ALL (MOTION | HIGHLIGHT | DROP)
+            # GTK handles the cursor/status handshake automatically - most stable
+            target_widget.drag_dest_set(
+                Gtk.DestDefaults.ALL,
                 [target_entry],
                 Gdk.DragAction.COPY,
             )
-            logger.info("GTK drop target enabled (MOTION only)")
+            logger.info("GTK Window-level drop target enabled (stable mode)")
+
+            # We only need to handle drag-data-received
+            def on_drag_data_received(widget, context, x, y, selection_data, info, time):
+                import json
+                from urllib.parse import unquote, urlparse
+
+                success = False
+                try:
+                    uris = selection_data.get_uris()
+                    if uris:
+                        paths = [
+                            unquote(urlparse(uri).path)
+                            for uri in uris
+                            if urlparse(uri).scheme == "file"
+                        ]
+                        if paths and self._window:
+                            # Use idle_add to dispatch JS in the next main loop iteration
+                            # This ensures the signal handler returns instantly to the OS
+                            GLib.idle_add(
+                                self._window.evaluate_js,
+                                f"window.dispatchEvent(new CustomEvent('pywebview-drop', {{ detail: {{ paths: {json.dumps(paths)} }} }}))",
+                            )
+                            logger.info(
+                                "GTK Window DND: dispatched %d files to frontend",
+                                len(paths),
+                            )
+                            success = True
+                    else:
+                        logger.warning("GTK Window DND: no URIs in selection data")
+                except Exception as e:  # noqa: generic-exception
+                    logger.error("Error processing drop data: %s", e)
+                finally:
+                    # Signal GTK that the operation is finished
+                    Gtk.drag_finish(context, success, False, time)
+
+            target_widget.connect("drag-data-received", on_drag_data_received)
+            logger.info("GTK Window-level DND bridge enabled (stable mode)")
 
         except ImportError as exc:
             logger.debug("GTK not available, skipping drop target setup: %s", exc)
@@ -1062,11 +1098,11 @@ def main():
     # Register drop handler after window is shown (for GTK compatibility)
     # Using 'shown' event instead of 'loaded' ensures DOM is fully ready
     def on_shown():
-        logger.info("Window shown - enabling GTK drop target and registering handler")
-        # First, enable GTK drop target (fixes PyWebView GTK bug)
+        logger.info("Window shown - enabling GTK Window-level drop target")
+        # Enable GTK drop target on Window level (not WebView) to avoid WebKit conflicts
+        # NOTE: We do NOT call _register_drop_handler() as PyWebView's built-in
+        # DOM drop API conflicts with GTK signals and causes freezes on Linux
         js_api._enable_gtk_drop_target()
-        # Then register the Python-side drop handler
-        js_api._register_drop_handler()
 
     window.events.shown += on_shown
 

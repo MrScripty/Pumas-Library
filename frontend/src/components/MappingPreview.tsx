@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
@@ -89,7 +90,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
   } | null>(null);
 
   const fetchPreview = useCallback(async () => {
-    if (!window.pywebview?.api?.preview_model_mapping || !versionTag) {
+    if (!isAPIAvailable() || !versionTag) {
       logger.warn('Preview API not available or no version tag');
       return;
     }
@@ -98,8 +99,8 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
     try {
       // Fetch both preview and cross-filesystem warning in parallel
       const [previewResult, crossFsResult] = await Promise.all([
-        window.pywebview.api.preview_model_mapping(versionTag),
-        window.pywebview.api.get_cross_filesystem_warning?.(versionTag),
+        api.preview_model_mapping(versionTag),
+        api.get_cross_filesystem_warning?.(versionTag),
       ]);
 
       if (previewResult.success) {
@@ -122,7 +123,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
   }, [versionTag, onPreviewLoaded]);
 
   const applyMapping = useCallback(async () => {
-    if (!window.pywebview?.api?.apply_model_mapping || !versionTag) {
+    if (!isAPIAvailable() || !versionTag) {
       logger.warn('Apply API not available or no version tag');
       return;
     }
@@ -130,7 +131,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
     setIsApplying(true);
     setApplyResult(null);
     try {
-      const result = await window.pywebview.api.apply_model_mapping(versionTag);
+      const result = await api.apply_model_mapping(versionTag);
       setApplyResult({
         success: result.success,
         links_created: result.links_created || 0,

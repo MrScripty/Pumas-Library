@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import type { InstallationProgress } from './useVersions';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -84,7 +85,7 @@ export function useInstallationProgress({
 
     const fetchProgress = async () => {
       try {
-        const result = await (window as any).pywebview.api.get_installation_progress();
+        const result = await api.get_installation_progress();
         setProgress(result);
 
         // Stop polling if installation is complete

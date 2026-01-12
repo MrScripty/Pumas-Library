@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Loader2, AlertCircle } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
@@ -145,7 +146,7 @@ export function InstallDialog({
 
       for (const release of releasesNeedingSize) {
         try {
-          await (window as any).pywebview.api.calculate_release_size(release.tag_name, false);
+          await api.calculate_release_size(release.tag_name, false);
         } catch (error) {
           if (error instanceof APIError) {
             logger.error('API error calculating release size', { error: error.message, endpoint: error.endpoint, tag: release.tag_name });
@@ -189,9 +190,9 @@ export function InstallDialog({
   const stickyFailedLogPath = failedLogPath || failedInstall?.log || null;
 
   const openLogPath = async (path?: string | null) => {
-    if (!path || !(window as any).pywebview?.api?.open_path) return;
+    if (!path || !isAPIAvailable()) return;
     try {
-      await (window as any).pywebview.api.open_path(path);
+      await api.open_path(path);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error opening log path', { error: error.message, endpoint: error.endpoint, path });
@@ -205,10 +206,10 @@ export function InstallDialog({
 
   const openReleaseLink = async (url: string) => {
     try {
-      if ((window as any).pywebview?.api?.open_url) {
-        const result = await (window as any).pywebview.api.open_url(url);
+      if (isAPIAvailable()) {
+        const result = await api.open_url(url);
         if (!result?.success) {
-          logger.warn('PyWebView failed to open URL, falling back to window.open', { url });
+          logger.warn('API failed to open URL, falling back to window.open', { url });
           window.open(url, '_blank');
         }
       } else {
@@ -277,7 +278,7 @@ export function InstallDialog({
 
     try {
       logger.info('Cancelling installation');
-      const result = await (window as any).pywebview.api.cancel_installation();
+      const result = await api.cancel_installation();
       if (result.success) {
         logger.info('Installation cancelled successfully');
         cancellationRef.current = true;

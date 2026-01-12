@@ -6,8 +6,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { pywebview } from '../api/pywebview';
-import type { StatusResponse } from '../types/pywebview';
+import { api, isAPIAvailable } from '../api/adapter';
+import type { StatusResponse } from '../types/api';
 import type { SystemResources } from '../types/apps';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -43,18 +43,18 @@ export function useStatus(options: UseStatusOptions = {}) {
     isPolling.current = true;
 
     try {
-      if (!pywebview.isAvailable()) {
+      if (!isAPIAvailable()) {
         setIsLoading(false);
         setIsCheckingDeps(false);
         return;
       }
 
-      const data = await pywebview.getStatus();
+      const data = await api.get_status();
       setStatusData(data);
 
       const now = Date.now();
       if (now - lastResourcesFetch.current >= 2000) {
-        const resourcesResult = await pywebview.getSystemResources();
+        const resourcesResult = await api.get_system_resources();
         if (resourcesResult?.success) {
           setSystemResources(resourcesResult.resources);
         }
@@ -111,7 +111,7 @@ export function useStatus(options: UseStatusOptions = {}) {
     };
 
     const waitForApi = () => {
-      if (window.pywebview?.api && typeof window.pywebview.api.get_status === 'function') {
+      if (isAPIAvailable()) {
         startPolling();
         return;
       }

@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import type { InstallationProgress, InstallNetworkStatus, VersionRelease, VersionInfo } from '../types/versions';
 import {
   createNetworkStatusState,
@@ -53,12 +54,12 @@ export function useInstallationManager({
 
   // Fetch current installation progress
   const fetchInstallationProgress = useCallback(async () => {
-    if (!window.pywebview?.api?.get_installation_progress) {
+    if (!isAPIAvailable()) {
       return null;
     }
 
     try {
-      const progress = await window.pywebview.api.get_installation_progress();
+      const progress = await api.get_installation_progress();
 
       if (progress && !progress.completed_at) {
         setInstallingTag(progress.tag || null);
@@ -162,12 +163,12 @@ export function useInstallationManager({
 
   // Switch to a different installed version
   const switchVersion = useCallback(async (tag: string) => {
-    if (!window.pywebview?.api?.switch_version) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'switch_version');
     }
 
     try {
-      const result = await window.pywebview.api.switch_version(tag);
+      const result = await api.switch_version(tag);
       if (result.success) {
         await onRefreshVersions();
         return true;
@@ -188,14 +189,14 @@ export function useInstallationManager({
 
   // Install a new version
   const installVersion = useCallback(async (tag: string) => {
-    if (!window.pywebview?.api?.install_version) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'install_version');
     }
 
     setInstallingTag(tag);
 
     try {
-      const result = await window.pywebview.api.install_version(tag);
+      const result = await api.install_version(tag);
       if (result.success) {
         // Start polling for installation progress
         if (installPollRef.current) {
@@ -225,12 +226,12 @@ export function useInstallationManager({
 
   // Remove a version
   const removeVersion = useCallback(async (tag: string) => {
-    if (!window.pywebview?.api?.remove_version) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'remove_version');
     }
 
     try {
-      const result = await window.pywebview.api.remove_version(tag);
+      const result = await api.remove_version(tag);
       if (result.success) {
         await onRefreshVersions();
         return true;
@@ -251,12 +252,12 @@ export function useInstallationManager({
 
   // Open arbitrary path in the system file manager
   const openPath = useCallback(async (path: string) => {
-    if (!window.pywebview?.api?.open_path) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'open_path');
     }
 
     try {
-      const result = await window.pywebview.api.open_path(path);
+      const result = await api.open_path(path);
       if (!result.success) {
         const message = result.error || 'Failed to open path';
         throw new APIError(message, 'open_path');
@@ -276,12 +277,12 @@ export function useInstallationManager({
 
   // Open the active installation directory
   const openActiveInstall = useCallback(async () => {
-    if (!window.pywebview?.api?.open_active_install) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'open_active_install');
     }
 
     try {
-      const result = await window.pywebview.api.open_active_install();
+      const result = await api.open_active_install();
       if (!result.success) {
         const message = result.error || 'Failed to open active installation';
         throw new APIError(message, 'open_active_install');
@@ -301,12 +302,12 @@ export function useInstallationManager({
 
   // Get version info
   const getVersionInfo = useCallback(async (tag: string): Promise<VersionInfo | null> => {
-    if (!window.pywebview?.api?.get_version_info) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'get_version_info');
     }
 
     try {
-      const result = await window.pywebview.api.get_version_info(tag);
+      const result = await api.get_version_info(tag);
       if (result.success) {
         return result.info || null;
       } else {

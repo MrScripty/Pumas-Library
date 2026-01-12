@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -55,14 +56,14 @@ export function useModelDownloads() {
         ['queued', 'downloading', 'cancelling'].includes(status.status)
       );
 
-      if (!window.pywebview?.api?.get_model_download_status || entries.length === 0) {
+      if (!isAPIAvailable() || entries.length === 0) {
         return;
       }
 
       const updates = await Promise.all(
         entries.map(async ([repoId, status]) => {
-          if (!window.pywebview?.api) return { repoId, status: 'error' as const, error: 'API not available' };
-          const result = await window.pywebview.api.get_model_download_status(status.downloadId);
+          if (!isAPIAvailable()) return { repoId, status: 'error' as const, error: 'API not available' };
+          const result = await api.get_model_download_status(status.downloadId);
           if (!result.success) {
             return { repoId, status: 'error' as const, error: result.error || 'Download failed.' };
           }
@@ -130,7 +131,7 @@ export function useModelDownloads() {
 
   const cancelDownload = async (repoId: string) => {
     const status = downloadStatusByRepo[repoId];
-    if (!status || !window.pywebview?.api?.cancel_model_download) {
+    if (!status || !isAPIAvailable()) {
       return;
     }
 
@@ -146,7 +147,7 @@ export function useModelDownloads() {
     }));
 
     try {
-      await window.pywebview.api.cancel_model_download(status.downloadId);
+      await api.cancel_model_download(status.downloadId);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error cancelling download', { error: error.message, endpoint: error.endpoint, repoId });

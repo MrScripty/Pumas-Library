@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { pywebview } from '../api/pywebview';
+import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -16,8 +16,8 @@ export function useDiskSpace() {
 
   const fetchDiskSpace = useCallback(async () => {
     try {
-      if (pywebview.isAvailable()) {
-        const diskData = await pywebview.getDiskSpace();
+      if (isAPIAvailable()) {
+        const diskData = await api.get_disk_space();
         if (diskData.success) {
           setDiskSpacePercent(diskData.percent || 0);
         }

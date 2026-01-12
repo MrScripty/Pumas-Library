@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
 import type { ModelCategory, ModelInfo } from '../types/apps';
@@ -45,8 +46,8 @@ export function useModels() {
 
   const fetchModels = useCallback(async () => {
     // Check API availability before fetching
-    if (!window.pywebview?.api?.get_models) {
-      logger.debug('get_models API not available yet, skipping fetch');
+    if (!isAPIAvailable()) {
+      logger.debug('API not available yet, skipping fetch');
       return;
     }
 

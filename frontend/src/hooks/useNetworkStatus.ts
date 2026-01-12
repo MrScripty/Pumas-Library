@@ -7,7 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { importAPI } from '../api/import';
-import type { NetworkStatusResponse } from '../types/pywebview';
+import type { NetworkStatusResponse } from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useNetworkStatus');

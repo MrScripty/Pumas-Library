@@ -203,9 +203,9 @@ export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({
     [enabled, onFilesDropped]
   );
 
-  // Handler for PyWebView drop events (sent from Python for GTK compatibility)
-  // This also fires on Windows/macOS as a parallel path
-  const handlePyWebViewDrop = useCallback(
+  // Handler for native drop events (sent from backend for platform compatibility)
+  // This fires as a parallel path for platforms with native drag-drop handling
+  const handleNativeDrop = useCallback(
     (e: CustomEvent<{ paths: string[] }>) => {
       if (!enabled) return;
 
@@ -232,17 +232,17 @@ export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({
     window.addEventListener('dragover', handleDragOver);
     window.addEventListener('drop', handleDrop);
 
-    // PyWebView drop listener (required for GTK, works on all platforms)
-    window.addEventListener('pywebview-drop', handlePyWebViewDrop as EventListener);
+    // Native drop listener (for platform-specific file drop handling)
+    window.addEventListener('native-file-drop', handleNativeDrop as EventListener);
 
     return () => {
       window.removeEventListener('dragenter', handleDragEnter);
       window.removeEventListener('dragleave', handleDragLeave);
       window.removeEventListener('dragover', handleDragOver);
       window.removeEventListener('drop', handleDrop);
-      window.removeEventListener('pywebview-drop', handlePyWebViewDrop as EventListener);
+      window.removeEventListener('native-file-drop', handleNativeDrop as EventListener);
     };
-  }, [enabled, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handlePyWebViewDrop]);
+  }, [enabled, handleDragEnter, handleDragLeave, handleDragOver, handleDrop, handleNativeDrop]);
 
   if (!isDragging) {
     return null;

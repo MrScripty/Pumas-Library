@@ -15,7 +15,7 @@ import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
 import { useModels } from './hooks/useModels';
-import { pywebview } from './api/pywebview';
+import { api, isAPIAvailable } from './api/adapter';
 import { DEFAULT_APPS } from './config/apps';
 import type { AppConfig } from './types/apps';
 import { getLogger } from './utils/logger';
@@ -23,7 +23,6 @@ import { APIError, ProcessError } from './errors';
 
 const logger = getLogger('App');
 
-// PyWebViewAPI is imported from api/pywebview.ts
 
 export default function App() {
   // --- Multi-App State ---
@@ -98,11 +97,11 @@ export default function App() {
   // --- API Helpers ---
   const checkLauncherVersion = async (forceRefresh = false) => {
     try {
-      if (!window.pywebview?.api) return;
+      if (!isAPIAvailable()) return;
 
-      await window.pywebview.api.get_launcher_version();
+      await api.get_launcher_version();
 
-      const updateResult = await window.pywebview.api.check_launcher_updates(forceRefresh);
+      const updateResult = await api.check_launcher_updates(forceRefresh);
       if (updateResult.success) {
         setLauncherUpdateAvailable(updateResult.hasUpdate);
       }
@@ -130,7 +129,7 @@ export default function App() {
     };
 
     const waitForApi = () => {
-      if (pywebview.isAvailable()) {
+      if (isAPIAvailable()) {
         startPolling();
         return;
       }
@@ -211,7 +210,7 @@ export default function App() {
 
   // Refetch status when active version changes
   useEffect(() => {
-    if (activeVersion && pywebview.isAvailable()) {
+    if (activeVersion && isAPIAvailable()) {
       void refetchStatus(false);
     }
   }, [activeVersion]);
@@ -227,11 +226,11 @@ export default function App() {
   };
 
   const handleInstallDeps = async () => {
-    if (!pywebview.isAvailable()) return;
+    if (!isAPIAvailable()) return;
 
     setIsInstalling(true);
     try {
-      await pywebview.installDeps();
+      await api.install_deps();
       await refetchStatus();
     } catch (error) {
       if (error instanceof APIError) {
@@ -354,9 +353,9 @@ export default function App() {
   }, [fetchModels]);
 
   const openModelsRoot = async () => {
-    if (!pywebview.isAvailable()) return;
+    if (!isAPIAvailable()) return;
     try {
-      await pywebview.openPath('shared-resources/models');
+      await api.open_path('shared-resources/models');
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error opening models folder', { error: error.message, endpoint: error.endpoint, path: 'shared-resources/models' });
@@ -369,8 +368,8 @@ export default function App() {
   };
 
   const closeWindow = () => {
-    if (pywebview.isAvailable()) {
-      void pywebview.closeWindow();
+    if (isAPIAvailable()) {
+      void api.close_window();
     } else {
       window.close();
     }

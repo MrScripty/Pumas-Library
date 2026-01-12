@@ -10,6 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { isAPIAvailable } from '../api/adapter';
 import { useVersionFetching } from './useVersionFetching';
 import { useInstallationManager } from './useInstallationManager';
 import type {
@@ -102,7 +103,7 @@ export function useVersions(): UseVersionsResult {
     let waitTimeout: NodeJS.Timeout | null = null;
 
     const waitForApi = () => {
-      if (window.pywebview?.api) {
+      if (isAPIAvailable()) {
         void refreshAll();
         return;
       }

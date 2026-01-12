@@ -5,6 +5,7 @@
  * FTS5 search, network status monitoring, and HuggingFace metadata lookup.
  */
 
+import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 import type {
   BaseResponse,
@@ -18,14 +19,14 @@ import type {
   ImportBatchResponse,
   ModelImportSpec,
   NetworkStatusResponse,
-} from '../types/pywebview';
+} from '../types/api';
 
 class ImportAPI {
   private getAPI() {
-    if (!window.pywebview?.api) {
-      throw new APIError('PyWebView API not available');
+    if (!isAPIAvailable()) {
+      throw new APIError('API not available');
     }
-    return window.pywebview.api;
+    return api;
   }
 
   /**

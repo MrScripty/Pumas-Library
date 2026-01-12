@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, Loader2, Download, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
 import { useHover } from '@react-aria/interactions';
@@ -207,12 +208,12 @@ export function VersionSelector({
   const { hoverProps: selectorAnchorHoverProps, isHovered: isSelectorAnchorHovered } = useHover({});
 
   const refreshShortcutStates = useCallback(async () => {
-    if (!window.pywebview?.api?.get_all_shortcut_states) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await window.pywebview.api.get_all_shortcut_states();
+      const result = await api.get_all_shortcut_states();
       const states = result?.states?.states;
       if (result.success && states) {
         const mapped: Record<string, { menu: boolean; desktop: boolean }> = {};
@@ -263,7 +264,7 @@ export function VersionSelector({
   };
 
   const handleToggleShortcuts = async (version: string, next: boolean) => {
-    if (!window.pywebview?.api?.set_version_shortcuts) {
+    if (!isAPIAvailable()) {
       logger.warn('Shortcut API not available');
       return;
     }
@@ -275,8 +276,8 @@ export function VersionSelector({
     }));
 
     try {
-      if (window.pywebview?.api?.set_version_shortcuts) {
-        const result = await window.pywebview.api.set_version_shortcuts(version, next);
+      if (isAPIAvailable()) {
+        const result = await api.set_version_shortcuts(version, next);
         if (result?.state) {
           setShortcutState((prev) => ({
             ...prev,

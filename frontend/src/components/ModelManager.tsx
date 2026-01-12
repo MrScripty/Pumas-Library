@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useMemo, useCallback } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
@@ -155,7 +156,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   };
 
   const handleStartRemoteDownload = async (model: any, quant?: string | null) => {
-    if (!window.pywebview?.api?.start_model_download_from_hf) {
+    if (!isAPIAvailable()) {
       const errorMsg = 'Download is unavailable.';
       logger.error('Download API not available');
       setDownloadError(errorMsg);
@@ -171,8 +172,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setDownloadError(null);
     setDownloadRepoId(repoId);
     try {
-      if (!window.pywebview?.api) return;
-      const result = await window.pywebview.api.start_model_download_from_hf(
+      if (!isAPIAvailable()) return;
+      const result = await api.start_model_download_from_hf(
         repoId,
         developer,
         officialName,
@@ -204,8 +205,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   };
 
   const openRemoteUrl = (url: string) => {
-    if (window.pywebview?.api?.open_url) {
-      void window.pywebview.api.open_url(url);
+    if (isAPIAvailable()) {
+      void api.open_url(url);
       return;
     }
     window.open(url, '_blank', 'noopener');
@@ -248,13 +249,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Handler for file picker import button
   const handleImportClick = useCallback(async () => {
-    if (!window.pywebview?.api?.open_model_import_dialog) {
+    if (!isAPIAvailable()) {
       logger.warn('open_model_import_dialog API not available');
       return;
     }
 
     try {
-      const result = await window.pywebview.api.open_model_import_dialog();
+      const result = await api.open_model_import_dialog();
       if (result.success && result.paths.length > 0) {
         logger.info('Files selected for import', { count: result.paths.length });
         setDroppedFiles(result.paths);

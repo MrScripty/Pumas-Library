@@ -19,7 +19,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import type { MappingAction } from '../types/pywebview';
+import type { MappingAction } from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('ConflictResolutionDialog');

@@ -7,6 +7,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
@@ -58,8 +59,8 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
     const fetchWarnings = async () => {
       try {
         // Check for cross-filesystem warning
-        if (window.pywebview?.api?.get_cross_filesystem_warning) {
-          const cfResult = await window.pywebview.api.get_cross_filesystem_warning(versionTag);
+        if (isAPIAvailable()) {
+          const cfResult = await api.get_cross_filesystem_warning(versionTag);
           if (cfResult.success && cfResult.cross_filesystem) {
             setCrossFsWarning({
               cross_filesystem: true,
@@ -72,8 +73,8 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
         }
 
         // Check for sandbox environment
-        if (window.pywebview?.api?.get_sandbox_info) {
-          const sbResult = await window.pywebview.api.get_sandbox_info();
+        if (isAPIAvailable()) {
+          const sbResult = await api.get_sandbox_info();
           if (sbResult.success && sbResult.is_sandboxed) {
             setSandboxInfo({
               is_sandboxed: true,

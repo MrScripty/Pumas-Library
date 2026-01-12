@@ -5,7 +5,7 @@
  */
 
 import { useState, useCallback } from 'react';
-import { pywebview } from '../api/pywebview';
+import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -16,12 +16,12 @@ export function useComfyUIProcess() {
   const [launchLogPath, setLaunchLogPath] = useState<string | null>(null);
 
   const launchComfyUI = useCallback(async () => {
-    if (!pywebview.isAvailable()) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await pywebview.launchComfyUI();
+      const result = await api.launch_comfyui();
 
       if (result.success) {
         setLaunchError(null);
@@ -45,12 +45,12 @@ export function useComfyUIProcess() {
   }, []);
 
   const stopComfyUI = useCallback(async () => {
-    if (!pywebview.isAvailable()) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await pywebview.stopComfyUI();
+      const result = await api.stop_comfyui();
 
       if (result.success) {
         setLaunchError(null);
@@ -72,12 +72,12 @@ export function useComfyUIProcess() {
   }, []);
 
   const openLogPath = useCallback(async (path: string | null | undefined) => {
-    if (!path || !pywebview.isAvailable()) {
+    if (!path || !isAPIAvailable()) {
       return;
     }
 
     try {
-      await pywebview.openPath(path);
+      await api.open_path(path);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error opening log path', { error: error.message, endpoint: error.endpoint, path });

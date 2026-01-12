@@ -1,17 +1,18 @@
 /**
  * Model Management API
  *
- * Handles all model-related API calls to PyWebView backend.
+ * Handles all model-related API calls to the backend.
  */
 
+import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 
 class ModelsAPI {
   private getAPI() {
-    if (!window.pywebview?.api) {
-      throw new APIError('PyWebView API not available');
+    if (!isAPIAvailable()) {
+      throw new APIError('API not available');
     }
-    return window.pywebview.api;
+    return api;
   }
 
   async getModels() {

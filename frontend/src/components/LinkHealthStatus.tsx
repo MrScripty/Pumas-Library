@@ -6,6 +6,7 @@
  */
 
 import React, { useState, useCallback, useEffect } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
@@ -22,7 +23,7 @@ import type {
   LinkHealthResponse,
   BrokenLinkInfo,
   HealthStatus,
-} from '../types/pywebview';
+} from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('LinkHealthStatus');
@@ -67,14 +68,14 @@ export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
   const [lastAction, setLastAction] = useState<string | null>(null);
 
   const fetchHealth = useCallback(async () => {
-    if (!window.pywebview?.api?.get_link_health) {
+    if (!isAPIAvailable()) {
       logger.warn('Link health API not available');
       return;
     }
 
     setIsLoading(true);
     try {
-      const result = await window.pywebview.api.get_link_health(activeVersion);
+      const result = await api.get_link_health(activeVersion);
       if (result.success) {
         setHealth(result);
       } else {
@@ -94,12 +95,12 @@ export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
   }, [autoRefresh, fetchHealth]);
 
   const handleCleanBrokenLinks = async () => {
-    if (!window.pywebview?.api?.clean_broken_links) return;
+    if (!isAPIAvailable()) return;
 
     setIsCleaning(true);
     setLastAction(null);
     try {
-      const result = await window.pywebview.api.clean_broken_links();
+      const result = await api.clean_broken_links();
       if (result.success) {
         setLastAction(`Cleaned ${result.cleaned} broken link${result.cleaned !== 1 ? 's' : ''}`);
         await fetchHealth();
@@ -116,12 +117,12 @@ export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
   };
 
   const handleRemoveOrphans = async () => {
-    if (!window.pywebview?.api?.remove_orphaned_links || !activeVersion) return;
+    if (!isAPIAvailable() || !activeVersion) return;
 
     setIsRemovingOrphans(true);
     setLastAction(null);
     try {
-      const result = await window.pywebview.api.remove_orphaned_links(activeVersion);
+      const result = await api.remove_orphaned_links(activeVersion);
       if (result.success) {
         setLastAction(`Removed ${result.removed} orphaned link${result.removed !== 1 ? 's' : ''}`);
         await fetchHealth();

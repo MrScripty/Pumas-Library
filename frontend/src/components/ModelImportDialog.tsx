@@ -28,7 +28,7 @@ import type {
   ModelImportSpec,
   SecurityTier,
   HFMetadataLookupResult,
-} from '../types/pywebview';
+} from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('ModelImportDialog');

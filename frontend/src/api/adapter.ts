@@ -5,7 +5,7 @@
  * The Python backend runs as a sidecar process, accessed via JSON-RPC.
  */
 
-import type { PyWebViewAPI } from '../types/pywebview';
+import type { PyWebViewAPI } from '../types/api';
 
 /**
  * Runtime environment detection
@@ -166,4 +166,4 @@ export const windowAPI = {
 };
 
 // Export types
-export type { PyWebViewAPI } from '../types/pywebview';
+export type { PyWebViewAPI } from '../types/api';

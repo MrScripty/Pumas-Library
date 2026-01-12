@@ -6,6 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import type { VersionRelease, VersionStatus, CacheStatus } from '../types/versions';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -55,12 +56,12 @@ export function useVersionFetching({
 
   // Fetch installed versions
   const fetchInstalledVersions = useCallback(async () => {
-    if (!window.pywebview?.api?.get_installed_versions) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await window.pywebview.api.get_installed_versions();
+      const result = await api.get_installed_versions();
       if (result.success) {
         setInstalledVersions(result.versions || []);
       } else {
@@ -82,12 +83,12 @@ export function useVersionFetching({
 
   // Fetch active version
   const fetchActiveVersion = useCallback(async () => {
-    if (!window.pywebview?.api?.get_active_version) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await window.pywebview.api.get_active_version();
+      const result = await api.get_active_version();
       if (result.success) {
         setActiveVersion(result.version || null);
       } else {
@@ -109,12 +110,12 @@ export function useVersionFetching({
 
   // Fetch default version
   const fetchDefaultVersion = useCallback(async () => {
-    if (!window.pywebview?.api?.get_default_version) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await window.pywebview.api.get_default_version();
+      const result = await api.get_default_version();
       if (result.success) {
         setDefaultVersionState(result.version || null);
       }
@@ -132,14 +133,14 @@ export function useVersionFetching({
 
   // Fetch available versions from GitHub
   const fetchAvailableVersions = useCallback(async (forceRefresh: boolean = false) => {
-    if (!window.pywebview?.api?.get_available_versions) {
+    if (!isAPIAvailable()) {
       logger.error('get_available_versions not available');
       return;
     }
 
     try {
       logger.debug('Fetching available versions', { forceRefresh });
-      const result = await window.pywebview.api.get_available_versions(forceRefresh);
+      const result = await api.get_available_versions(forceRefresh);
       logger.debug('Available versions result received', { versionsCount: result.versions?.length });
       if (result.success) {
         setAvailableVersions(result.versions || []);
@@ -183,12 +184,12 @@ export function useVersionFetching({
 
   // Fetch comprehensive version status
   const fetchVersionStatus = useCallback(async () => {
-    if (!window.pywebview?.api?.get_version_status) {
+    if (!isAPIAvailable()) {
       return;
     }
 
     try {
-      const result = await window.pywebview.api.get_version_status();
+      const result = await api.get_version_status();
       if (result.success) {
         setVersionStatus(result.status || null);
         if (result.status?.defaultVersion !== undefined) {
@@ -213,12 +214,12 @@ export function useVersionFetching({
 
   // Set default version
   const setDefaultVersion = useCallback(async (tag: string | null) => {
-    if (!window.pywebview?.api?.set_default_version) {
+    if (!isAPIAvailable()) {
       throw new APIError('API not available', 'set_default_version');
     }
 
     try {
-      const result = await window.pywebview.api.set_default_version(tag);
+      const result = await api.set_default_version(tag);
       if (result.success) {
         setDefaultVersionState(tag);
         await fetchVersionStatus();
@@ -271,8 +272,8 @@ export function useVersionFetching({
 
     const checkBackgroundFetch = async () => {
       try {
-        if (!window.pywebview?.api) return;
-        const status = await window.pywebview.api.get_github_cache_status();
+        if (!isAPIAvailable()) return;
+        const status = await api.get_github_cache_status();
         setCacheStatus(status);
 
         if (status.is_fetching && !status.has_cache) {
@@ -281,10 +282,10 @@ export function useVersionFetching({
           logger.info('Background GitHub fetch in progress (refreshing cache)');
         }
 
-        if (!window.pywebview?.api) return;
-        if (!status.is_fetching && status.has_cache && await window.pywebview.api.should_update_ui_from_background_fetch()) {
+        if (!isAPIAvailable()) return;
+        if (!status.is_fetching && status.has_cache && await api.should_update_ui_from_background_fetch()) {
           logger.info('Background fetch completed - refreshing UI with new data');
-          await window.pywebview.api.reset_background_fetch_flag();
+          await api.reset_background_fetch_flag();
           await fetchAvailableVersionsRef.current(false);
         }
       } catch (error) {
@@ -299,12 +300,12 @@ export function useVersionFetching({
     };
 
     const waitAndStartPolling = () => {
-      if (window.pywebview?.api && typeof window.pywebview.api.get_github_cache_status === 'function') {
+      if (isAPIAvailable()) {
         logger.debug('Starting cache status polling');
         void checkBackgroundFetch();
         interval = setInterval(checkBackgroundFetch, 2000);
       } else {
-        logger.debug('Waiting for PyWebView API to start cache status polling');
+        logger.debug('Waiting for API to start cache status polling');
         waitTimeout = setTimeout(waitAndStartPolling, 100);
       }
     };

@@ -6,6 +6,7 @@
  */
 
 import { useState, useEffect, useMemo } from 'react';
+import { api, isAPIAvailable } from '../api/adapter';
 import type { RemoteModelInfo } from '../types/apps';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -53,7 +54,7 @@ export function useRemoteModelSearch({
 
     let isActive = true;
     const handle = setTimeout(async () => {
-      if (!window.pywebview?.api?.search_hf_models) {
+      if (!isAPIAvailable()) {
         if (isActive) {
           setError('Hugging Face search is unavailable.');
           setResults([]);
@@ -65,7 +66,7 @@ export function useRemoteModelSearch({
       setIsLoading(true);
       setError(null);
       try {
-        const result = await window.pywebview.api.search_hf_models(trimmedQuery, null, 25);
+        const result = await api.search_hf_models(trimmedQuery, null, 25);
         if (!isActive) {
           return;
         }

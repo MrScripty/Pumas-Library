@@ -145,25 +145,9 @@ class JavaScriptAPI:
     ) -> Any:
         try:
             return func()
-        except ComfyUILauncherError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except ImportError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except OSError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except RuntimeError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except subprocess.SubprocessError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except TypeError as exc:
-            logger.error("%s failed: %s", action, exc, exc_info=True)
-            return on_error(exc)
-        except ValueError as exc:
+        except Exception as exc:  # noqa: generic-exception
+            # Catch all standard exceptions to prevent cascading failures
+            # This ensures the launcher can still report errors gracefully
             logger.error("%s failed: %s", action, exc, exc_info=True)
             return on_error(exc)
 
@@ -693,6 +677,14 @@ class JavaScriptAPI:
             "scan_shared_storage",
             lambda: {"success": True, "result": self.api.scan_shared_storage()},
             lambda exc: {"success": False, "error": str(exc), "result": {}},
+        )
+
+    def get_link_health(self, version_tag=None):
+        """Get health status of model symlinks"""
+        return self._call_api(
+            "get_link_health",
+            lambda: self.api.get_link_health(version_tag),
+            lambda exc: {"success": False, "error": str(exc)},
         )
 
     # ==================== Model Import API Methods ====================

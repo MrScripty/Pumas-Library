@@ -44,6 +44,12 @@ export function useModels() {
   const searchCacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
   const fetchModels = useCallback(async () => {
+    // Check API availability before fetching
+    if (!window.pywebview?.api?.get_models) {
+      logger.debug('get_models API not available yet, skipping fetch');
+      return;
+    }
+
     try {
       const result = await modelsAPI.getModels();
       if (result.success && result.models) {

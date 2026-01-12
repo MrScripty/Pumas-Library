@@ -21,11 +21,19 @@ import struct
 from pathlib import Path
 from typing import Optional, Tuple
 
-from gguf import GGUFReader
-
 from backend.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+# Make gguf import defensive - allows launcher to start even if dependency is missing
+try:
+    from gguf import GGUFReader
+
+    HAS_GGUF = True
+except ImportError:
+    HAS_GGUF = False
+    GGUFReader = None  # type: ignore
+    logger.warning("gguf library not found; GGUF content detection will be disabled")
 
 
 def identify_model_type(file_path: Path) -> Tuple[Optional[str], Optional[str], dict]:
@@ -60,6 +68,13 @@ def _identify_gguf(file_path: Path) -> Tuple[Optional[str], Optional[str], dict]
     Note: GGUF format was created specifically for llama.cpp (LLMs), so
     any valid GGUF file is assumed to be an LLM even if parsing fails.
     """
+    if not HAS_GGUF:
+        # Fall back to extension-based detection when gguf library is unavailable
+        logger.debug(
+            "GGUF library not available, using extension-based detection for %s", file_path
+        )
+        return "llm", None, {"warning": "gguf-library-missing"}
+
     try:
         # First do a quick magic check without loading the full file
         with open(file_path, "rb") as f:

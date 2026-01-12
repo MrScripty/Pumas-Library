@@ -31,6 +31,9 @@ pydantic>=2.7,<3.0
 tenacity>=8.2,<9.0
 blake3>=1.0,<2.0
 
+# GGUF model parsing (for content-based model type detection)
+gguf>=0.17.0,<0.18.0
+
 # HTTP/2 networking (Phase 5 - Networking & Caching)
 httpx[http2]>=0.27,<1.0
 

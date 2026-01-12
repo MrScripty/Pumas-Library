@@ -230,6 +230,63 @@ function formatMetadataValue(key: string, value: unknown): string {
   return String(value);
 }
 
+/** Priority GGUF fields to show in compact view */
+const PRIORITY_GGUF_FIELDS = [
+  'general.name',
+  'general.basename',
+  'general.architecture',
+  'general.size_label',
+  'general.finetune',
+  'general.tags',
+  'general.license',
+  'general.quantized_by',
+];
+
+/** Patterns for architecture-specific priority fields (matched with endsWith) */
+const PRIORITY_ARCH_PATTERNS = [
+  '.context_length',
+  '.embedding_length',
+];
+
+/** Field pairs: display field -> URL field (URL used as link target, not shown separately) */
+const LINKED_GGUF_FIELDS: Record<string, string> = {
+  'general.basename': 'general.base_model.0.repo_url',
+  'general.license': 'general.license.link',
+  'general.quantized_by': 'general.repo_url',
+};
+
+/** URL fields that are used as link targets (hidden from display) */
+const URL_TARGET_FIELDS = new Set(Object.values(LINKED_GGUF_FIELDS));
+
+/** Fields to always hide unless "Show all" is clicked */
+const HIDDEN_GGUF_FIELDS = new Set([
+  'tokenizer.chat_template',
+  'tokenizer.ggml.merges',
+  'tokenizer.ggml.tokens',
+  'tokenizer.ggml.token_type',
+  'tokenizer.ggml.scores',
+]);
+
+/** Check if a GGUF field is a priority field */
+function isPriorityGgufField(key: string): boolean {
+  const lowerKey = key.toLowerCase();
+  if (PRIORITY_GGUF_FIELDS.some((f) => lowerKey === f)) return true;
+  if (PRIORITY_ARCH_PATTERNS.some((p) => lowerKey.endsWith(p))) return true;
+  return false;
+}
+
+/** Check if a GGUF field should be hidden by default */
+function isHiddenGgufField(key: string, value: unknown): boolean {
+  const lowerKey = key.toLowerCase();
+  if (HIDDEN_GGUF_FIELDS.has(lowerKey)) return true;
+  // Hide URL fields that are used as link targets on other fields
+  if (URL_TARGET_FIELDS.has(lowerKey)) return true;
+  // Hide fields with very long values
+  const strValue = String(value ?? '');
+  if (strValue.length > 500) return true;
+  return false;
+}
+
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   filePaths,
   onClose,
@@ -244,6 +301,8 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(new Set());
   /** Track which files are showing embedded metadata vs HuggingFace metadata */
   const [showEmbeddedMetadata, setShowEmbeddedMetadata] = useState<Set<string>>(new Set());
+  /** Track which files have "show all" enabled for embedded metadata */
+  const [showAllEmbeddedMetadata, setShowAllEmbeddedMetadata] = useState<Set<string>>(new Set());
 
   /** Toggle expanded state for a file's metadata */
   const toggleMetadataExpand = useCallback((path: string) => {
@@ -307,6 +366,19 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
       }
 
       // Toggle the view
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  /** Toggle showing all embedded metadata fields for a file */
+  const toggleShowAllEmbeddedMetadata = useCallback((path: string) => {
+    setShowAllEmbeddedMetadata((prev) => {
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -795,16 +867,30 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                     : [];
 
                   // Get displayable embedded metadata fields
-                  const embeddedMetadataEntries = file.embeddedMetadata
+                  const isShowingAllEmbedded = showAllEmbeddedMetadata.has(file.path);
+                  const allEmbeddedEntries = file.embeddedMetadata
                     ? Object.entries(file.embeddedMetadata)
                         .filter(([, value]) => value != null && value !== '')
-                        .sort(([a], [b]) => a.localeCompare(b))
                         .map(([key, value]) => ({
                           key,
                           label: formatFieldName(key),
                           value: formatMetadataValue(key, value),
+                          isPriority: isPriorityGgufField(key),
+                          isHidden: isHiddenGgufField(key, value),
                         }))
                     : [];
+
+                  // Filter embedded entries based on show all state
+                  const embeddedMetadataEntries = allEmbeddedEntries
+                    .filter((entry) => isShowingAllEmbedded || (entry.isPriority && !entry.isHidden))
+                    .sort((a, b) => {
+                      // Priority fields first, then alphabetically
+                      if (a.isPriority !== b.isPriority) return a.isPriority ? -1 : 1;
+                      return a.key.localeCompare(b.key);
+                    });
+
+                  // Count hidden fields for "show more" button
+                  const hiddenEmbeddedCount = allEmbeddedEntries.length - embeddedMetadataEntries.length;
 
                   // Choose which entries to display
                   const metadataEntries = isShowingEmbedded ? embeddedMetadataEntries : hfMetadataEntries;
@@ -938,14 +1024,35 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                           {/* Metadata grid */}
                           {metadataEntries.length > 0 ? (
                             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs max-h-48 overflow-y-auto">
-                              {metadataEntries.map(({ key, label, value }) => (
-                                <div key={key} className="contents">
-                                  <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
-                                  <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
-                                    {value}
-                                  </span>
-                                </div>
-                              ))}
+                              {metadataEntries.map(({ key, label, value }) => {
+                                // Check if this field has a linked URL (only for embedded metadata)
+                                const linkedUrlKey = isShowingEmbedded ? LINKED_GGUF_FIELDS[key.toLowerCase()] : undefined;
+                                const linkedUrl = linkedUrlKey && file.embeddedMetadata
+                                  ? String(file.embeddedMetadata[linkedUrlKey] ?? '')
+                                  : '';
+
+                                return (
+                                  <div key={key} className="contents">
+                                    <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
+                                    {linkedUrl ? (
+                                      <a
+                                        href={linkedUrl}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-[hsl(var(--launcher-accent-primary))] hover:underline truncate"
+                                        title={`${value} (${linkedUrl})`}
+                                      >
+                                        {value}
+                                      </a>
+                                    ) : (
+                                      <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
+                                        {value}
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : (
                             !isShowingEmbedded && !hasMetadata && (
@@ -955,8 +1062,23 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                             )
                           )}
 
+                          {/* Show more/less button for embedded metadata */}
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'loaded' && hiddenEmbeddedCount > 0 && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleShowAllEmbeddedMetadata(file.path);
+                              }}
+                              className="mt-2 text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
+                            >
+                              {isShowingAllEmbedded
+                                ? 'Show less'
+                                : `Show ${hiddenEmbeddedCount} more field${hiddenEmbeddedCount === 1 ? '' : 's'}`}
+                            </button>
+                          )}
+
                           {/* Empty embedded metadata */}
-                          {isShowingEmbedded && file.embeddedMetadataStatus === 'loaded' && embeddedMetadataEntries.length === 0 && (
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'loaded' && allEmbeddedEntries.length === 0 && (
                             <div className="text-xs text-[hsl(var(--launcher-text-muted))] py-2">
                               No embedded metadata found in file
                             </div>

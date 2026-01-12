@@ -908,9 +908,9 @@ class ModelDownloader:
 
             # Look for hash match
             for lfs_file in lfs_files:
-                file_oid = getattr(lfs_file, "oid", None) or getattr(lfs_file, "lfs", {}).get(
-                    "oid", ""
-                )
+                file_oid = getattr(lfs_file, "oid", None) or (
+                    getattr(lfs_file, "lfs", None) or {}
+                ).get("oid", "")
                 if not file_oid:
                     continue
 

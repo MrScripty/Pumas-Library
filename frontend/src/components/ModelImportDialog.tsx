@@ -14,6 +14,7 @@ import {
   AlertCircle,
   AlertTriangle,
   ChevronRight,
+  ChevronDown,
   Shield,
   ShieldAlert,
   ShieldQuestion,
@@ -22,6 +23,7 @@ import {
   Unlink,
   Eye,
   Folder,
+  ExternalLink,
 } from 'lucide-react';
 import { importAPI } from '../api/import';
 import type {
@@ -165,6 +167,61 @@ function getTrustBadge(metadata?: HFMetadataLookupResult): {
   return null;
 }
 
+/** Priority order for metadata fields (lower = higher priority) */
+const FIELD_PRIORITY: Record<string, number> = {
+  official_name: 1,
+  family: 2,
+  model_type: 3,
+  subtype: 4,
+  variant: 5,
+  precision: 6,
+  base_model: 7,
+  tags: 8,
+  description: 9,
+  match_confidence: 10,
+  match_method: 11,
+  matched_filename: 12,
+};
+
+/** Fields to exclude from metadata display */
+const EXCLUDED_FIELDS = new Set([
+  'repo_id', // Shown as clickable link
+  'requires_confirmation', // Internal flag
+  'hash_mismatch', // Internal flag
+  'pending_full_verification', // Internal flag
+  'fast_hash', // Technical detail
+  'expected_sha256', // Technical detail
+  'download_url', // Not relevant for import
+]);
+
+/** Sort metadata fields by priority, then alphabetically */
+function sortMetadataFields(keys: string[]): string[] {
+  return [...keys].sort((a, b) => {
+    const priorityA = FIELD_PRIORITY[a] ?? 999;
+    const priorityB = FIELD_PRIORITY[b] ?? 999;
+    if (priorityA !== priorityB) return priorityA - priorityB;
+    return a.localeCompare(b);
+  });
+}
+
+/** Format field name from snake_case to Title Case */
+function formatFieldName(key: string): string {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** Format metadata value for display */
+function formatMetadataValue(key: string, value: unknown): string {
+  if (value == null) return '';
+  if (Array.isArray(value)) return value.join(', ');
+  if (key === 'match_confidence' && typeof value === 'number') {
+    return `${Math.round(value * 100)}%`;
+  }
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
+
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   filePaths,
   onClose,
@@ -176,6 +233,20 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   const [failedCount, setFailedCount] = useState(0);
   const [shardedSets, setShardedSets] = useState<ShardedSetInfo[]>([]);
   const [lookupProgress, setLookupProgress] = useState({ current: 0, total: 0 });
+  const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(new Set());
+
+  /** Toggle expanded state for a file's metadata */
+  const toggleMetadataExpand = useCallback((path: string) => {
+    setExpandedMetadata((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
 
   // Initialize file statuses
   useEffect(() => {
@@ -629,42 +700,112 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
               <div className="space-y-2">
                 {files.map((file) => {
                   const trustBadge = getTrustBadge(file.hfMetadata);
+                  const isExpanded = expandedMetadata.has(file.path);
+                  const hasMetadata = file.hfMetadata && file.metadataStatus === 'found';
+
+                  // Get displayable metadata fields
+                  const metadataEntries = hasMetadata
+                    ? sortMetadataFields(
+                        Object.keys(file.hfMetadata!).filter(
+                          (key) =>
+                            !EXCLUDED_FIELDS.has(key) &&
+                            file.hfMetadata![key as keyof HFMetadataLookupResult] != null &&
+                            file.hfMetadata![key as keyof HFMetadataLookupResult] !== ''
+                        )
+                      ).map((key) => ({
+                        key,
+                        label: formatFieldName(key),
+                        value: formatMetadataValue(
+                          key,
+                          file.hfMetadata![key as keyof HFMetadataLookupResult]
+                        ),
+                      }))
+                    : [];
 
                   return (
-                    <div
-                      key={file.path}
-                      className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
-                    >
-                      {file.metadataStatus === 'pending' && (
-                        <div className="w-4 h-4 rounded-full border-2 border-[hsl(var(--launcher-border))] flex-shrink-0" />
-                      )}
-                      {file.metadataStatus === 'found' && (
-                        <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
-                      )}
-                      {file.metadataStatus === 'not_found' && (
-                        <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))] flex-shrink-0" />
-                      )}
-                      {file.metadataStatus === 'error' && (
-                        <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
-                          {file.filename}
-                        </p>
-                        {file.hfMetadata && (
-                          <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
-                            {file.hfMetadata.repo_id}
+                    <div key={file.path} className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
+                      <div
+                        className={`flex items-center gap-3 p-3 ${hasMetadata ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
+                        onClick={hasMetadata ? () => toggleMetadataExpand(file.path) : undefined}
+                      >
+                        {/* Expand/collapse chevron */}
+                        {hasMetadata ? (
+                          <button
+                            className="w-4 h-4 flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleMetadataExpand(file.path);
+                            }}
+                          >
+                            {isExpanded ? (
+                              <ChevronDown className="w-4 h-4" />
+                            ) : (
+                              <ChevronRight className="w-4 h-4" />
+                            )}
+                          </button>
+                        ) : (
+                          <div className="w-4 h-4 flex-shrink-0" />
+                        )}
+
+                        {/* Status icon */}
+                        {file.metadataStatus === 'pending' && (
+                          <div className="w-4 h-4 rounded-full border-2 border-[hsl(var(--launcher-border))] flex-shrink-0" />
+                        )}
+                        {file.metadataStatus === 'found' && (
+                          <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
+                        )}
+                        {file.metadataStatus === 'not_found' && (
+                          <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))] flex-shrink-0" />
+                        )}
+                        {file.metadataStatus === 'error' && (
+                          <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
+                        )}
+
+                        {/* File info */}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
+                            {file.filename}
                           </p>
+                          {file.hfMetadata?.repo_id && (
+                            <a
+                              href={`https://huggingface.co/${file.hfMetadata.repo_id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline truncate flex items-center gap-1"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              {file.hfMetadata.repo_id}
+                              <ExternalLink className="w-3 h-3 flex-shrink-0" />
+                            </a>
+                          )}
+                        </div>
+
+                        {/* Trust badge */}
+                        {trustBadge && (
+                          <span
+                            className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
+                            title={trustBadge.tooltip}
+                          >
+                            <trustBadge.Icon className="w-3 h-3" />
+                            {trustBadge.text}
+                          </span>
                         )}
                       </div>
-                      {trustBadge && (
-                        <span
-                          className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
-                          title={trustBadge.tooltip}
-                        >
-                          <trustBadge.Icon className="w-3 h-3" />
-                          {trustBadge.text}
-                        </span>
+
+                      {/* Expanded metadata panel */}
+                      {isExpanded && metadataEntries.length > 0 && (
+                        <div className="px-3 pb-3 pt-1 ml-8 border-t border-[hsl(var(--launcher-border)/0.5)]">
+                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                            {metadataEntries.map(({ key, label, value }) => (
+                              <div key={key} className="contents">
+                                <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
+                                <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
+                                  {value}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
                       )}
                     </div>
                   );

@@ -2,6 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
+![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
 
 Easy to use AI model library that links your models to other apps in the launcher, and other QOL improvements.
@@ -17,7 +18,22 @@ Easy to use AI model library that links your models to other apps in the launche
 - Ghost bust the background servers when closing apps
 - And other technical mumbo-jumbo
 
+## Architecture
+
+Pumas Library uses a modern **Electron + Python sidecar** architecture:
+
+- **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
+- **Desktop Shell**: Electron 38+ with native Wayland support
+- **Backend**: Python 3.12+ running as a sidecar process
+- **IPC**: JSON-RPC communication between Electron and Python
+
 ## Installation
+
+### System Requirements
+
+- **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
+- **Python**: 3.12+
+- **Node.js**: 24+ LTS
 
 ### Quick Install (Recommended)
 
@@ -35,16 +51,6 @@ The installer will:
 4. Install and build the frontend
 5. Create the launcher script
 
-### System Requirements
-
-- **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
-- **Python**: 3.12+ (3.12 recommended)
-- **Node.js**: 24+ LTS
-- **System Libraries**:
-  - GTK 3.0 (`libgtk-3-0`)
-  - WebKit2GTK (`libwebkit2gtk-4.1-0` or `libwebkit2gtk-4.0-37`)
-  - Python GObject bindings (`python3-gi`, `gir1.2-gtk-3.0`, `gir1.2-webkit2-4.1`)
-
 ### Manual Installation
 
 If you prefer to install manually:
@@ -53,15 +59,13 @@ If you prefer to install manually:
 
    ```bash
    sudo apt update
-   sudo apt install python3.12 python3.12-venv nodejs npm \
-     libgtk-3-0 libwebkit2gtk-4.1-0 gir1.2-webkit2-4.1 \
-     python3-gi gir1.2-gtk-3.0
+   sudo apt install python3.12 python3.12-venv nodejs npm
    ```
 
 2. **Create Python virtual environment**:
 
    ```bash
-   python3.12 -m venv --system-site-packages venv
+   python3.12 -m venv venv
    source venv/bin/activate
    ```
 
@@ -87,9 +91,16 @@ If you prefer to install manually:
    cd ..
    ```
 
-   If your distro ships Node.js < 20, install Node.js 22 LTS via nvm or NodeSource.
+5. **Install Electron dependencies**:
 
-5. **Make launcher executable** (should already be executable):
+   ```bash
+   cd electron
+   npm install
+   npm run build
+   cd ..
+   ```
+
+6. **Make launcher executable** (should already be executable):
 
    ```bash
    chmod +x launcher
@@ -100,29 +111,32 @@ If you prefer to install manually:
 For system-wide access:
 
 ```bash
-ln -s $(pwd)/launcher ~/.local/bin/comfyui-launcher
+ln -s $(pwd)/launcher ~/.local/bin/pumas-library
 ```
 
 Then run from anywhere:
 
 ```bash
-comfyui-launcher
+pumas-library
 ```
 
 ## Usage
 
-### Launcher Arguments
+### Launcher Commands
 
 Run the launcher with different modes:
 
-| Command                  | Description                                                      |
-| ------------------------ | ---------------------------------------------------------------- |
-| `./launcher`             | Launch the application in normal mode                            |
-| `./launcher dev`         | Launch with developer console enabled for debugging              |
-| `./launcher dev-install` | Install dev tooling (requirements-dev.txt)                       |
-| `./launcher build`       | Rebuild the frontend (useful after making UI changes)            |
-| `./launcher test`        | Run pre-commit hooks (formatting, linting, tests, type checking) |
-| `./launcher sbom`        | Generate Software Bill of Materials (SBOM) for dependencies      |
-| `./launcher help`        | Display usage information                                        |
+| Command                      | Description                                                      |
+| ---------------------------- | ---------------------------------------------------------------- |
+| `./launcher`                 | Launch the application (Electron)                                |
+| `./launcher dev`             | Launch with developer tools enabled                              |
+| `./launcher build`           | Rebuild the frontend                                             |
+| `./launcher build-electron`  | Rebuild Electron TypeScript                                      |
+| `./launcher package`         | Package Electron app for distribution                            |
+| `./launcher electron-install`| Install Electron dependencies                                    |
+| `./launcher dev-install`     | Install dev tooling (requirements-dev.txt)                       |
+| `./launcher test`            | Run pre-commit hooks (formatting, linting, tests, type checking) |
+| `./launcher sbom`            | Generate Software Bill of Materials (SBOM) for dependencies      |
+| `./launcher help`            | Display usage information                                        |
 
 ## More Details Later (WIP)

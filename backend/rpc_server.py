@@ -38,6 +38,156 @@ class JSONRPCError(Exception):
         self.data = data
 
 
+def wrap_response(method: str, result: Any) -> Any:
+    """Wrap API responses to match JavaScriptAPI format expected by frontend.
+
+    The frontend expects responses in the format: {success: bool, ...data, error?: string}
+    but ComfyUISetupAPI returns raw data. This function wraps responses appropriately.
+    """
+    # Methods that return lists and need {success, versions/nodes/etc} wrapping
+    list_wrappers = {
+        "get_available_versions": "versions",
+        "get_installed_versions": "versions",
+        "get_custom_nodes": "nodes",
+        "get_release_dependencies": "dependencies",
+    }
+
+    # Methods that return dicts and need {success, ...result} wrapping (result already has the data)
+    dict_wrappers = {
+        "get_version_status": "status",
+        "get_version_info": "info",
+        "get_release_size_info": "info",
+        "get_release_size_breakdown": "breakdown",
+        "get_github_cache_status": "status",
+        "get_version_shortcuts": "state",
+        "get_all_shortcut_states": "states",
+    }
+
+    # Methods that already return {success: bool, ...} format - pass through
+    passthrough_methods = {
+        "get_status",
+        "get_disk_space",
+        "get_system_resources",
+        "get_launcher_version",
+        "check_launcher_updates",
+        "apply_launcher_update",
+        "restart_launcher",
+        "get_network_status",
+        "get_library_status",
+        "get_link_health",
+        "import_model",
+        "download_model_from_hf",
+        "start_model_download_from_hf",
+        "get_model_download_status",
+        "cancel_model_download",
+        "search_hf_models",
+        "search_models_fts",
+        "import_batch",
+        "lookup_hf_metadata_for_file",
+        "detect_sharded_sets",
+        "validate_file_type",
+        "mark_metadata_as_manual",
+        "get_file_link_count",
+        "check_files_writable",
+        "open_path",
+        "open_url",
+        "open_active_install",
+        "preview_model_mapping",
+        "apply_model_mapping",
+        "sync_models_incremental",
+        "sync_with_resolutions",
+        "get_cross_filesystem_warning",
+        "clean_broken_links",
+        "remove_orphaned_links",
+        "get_links_for_model",
+        "delete_model_with_cascade",
+        "get_sandbox_info",
+        "validate_installations",
+    }
+
+    # Methods that return bool and need {success: bool} wrapping
+    bool_methods = {
+        "install_version",
+        "remove_version",
+        "switch_version",
+        "cancel_installation",
+        "install_version_dependencies",
+        "install_custom_node",
+        "update_custom_node",
+        "remove_custom_node",
+        "toggle_patch",
+        "toggle_menu",
+        "toggle_desktop",
+        "refresh_model_index",
+        "set_default_version",
+    }
+
+    # Methods that return Optional[dict] and need null-safe wrapping
+    optional_dict_methods = {
+        "get_installation_progress",
+        "calculate_release_size",
+    }
+
+    if method in passthrough_methods:
+        # Already in correct format
+        return result
+
+    if method in list_wrappers:
+        key = list_wrappers[method]
+        return {"success": True, key: result if result is not None else []}
+
+    if method in dict_wrappers:
+        key = dict_wrappers[method]
+        return {"success": True, key: result if result is not None else {}}
+
+    if method in bool_methods:
+        return {"success": bool(result)}
+
+    if method in optional_dict_methods:
+        # These can return None
+        return result
+
+    # Special cases
+    if method == "get_active_version":
+        return {"success": True, "version": result or ""}
+
+    if method == "get_default_version":
+        return {"success": True, "version": result or ""}
+
+    if method == "get_models":
+        return {"success": True, "models": result if result is not None else {}}
+
+    if method == "refresh_model_mappings":
+        return {"success": True, "results": result if result is not None else {}}
+
+    if method == "get_model_overrides":
+        return {"success": True, "overrides": result if result is not None else {}}
+
+    if method == "update_model_overrides":
+        return {"success": bool(result)}
+
+    if method == "scan_shared_storage":
+        return {"success": True, "result": result if result is not None else {}}
+
+    if method == "check_version_dependencies":
+        return {
+            "success": True,
+            "dependencies": result if result is not None else {"installed": [], "missing": []},
+        }
+
+    if method == "calculate_all_release_sizes":
+        return result if result is not None else {}
+
+    if method == "has_background_fetch_completed":
+        return {"success": True, "completed": bool(result)}
+
+    if method == "reset_background_fetch_flag":
+        return {"success": True}
+
+    # Default: return as-is (for methods not explicitly handled)
+    return result
+
+
 class RPCHandler(BaseHTTPRequestHandler):
     """HTTP request handler for JSON-RPC requests."""
 
@@ -156,7 +306,9 @@ class RPCHandler(BaseHTTPRequestHandler):
         try:
             logger.debug("RPC call: %s(%s)", method, params)
             result = handler(**params) if params else handler()
-            self._send_json_response({"jsonrpc": "2.0", "result": result, "id": request_id})
+            # Wrap response to match JavaScriptAPI format expected by frontend
+            wrapped_result = wrap_response(method, result)
+            self._send_json_response({"jsonrpc": "2.0", "result": wrapped_result, "id": request_id})
         except TypeError as e:
             # Invalid parameters
             logger.warning("RPC parameter error for %s: %s", method, e)

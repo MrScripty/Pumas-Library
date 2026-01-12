@@ -26,6 +26,7 @@ from backend.validators import validate_package_name, validate_url, validate_ver
 
 if TYPE_CHECKING:
     from backend.github_integration import GitHubReleasesFetcher
+    from backend.launcher_updater import LauncherUpdater
     from backend.metadata_manager import MetadataManager
     from backend.release_size_calculator import ReleaseSizeCalculator
     from backend.resources.resource_manager import ResourceManager
@@ -93,6 +94,7 @@ class ComfyUISetupAPI:
         self.version_manager: Optional[VersionManager] = None
         self.release_size_calculator: Optional[ReleaseSizeCalculator] = None
         self.size_calc: Optional[SizeCalculator] = None
+        self.launcher_updater: Optional["LauncherUpdater"] = None
         self._init_version_management()
 
         # Initialize specialized managers
@@ -1833,3 +1835,129 @@ class ComfyUISetupAPI:
             "all_writable": all_writable,
             "details": details,
         }
+
+    # ==================== Launcher Update Methods ====================
+
+    def get_launcher_version(self) -> Dict[str, Any]:
+        """Get current launcher version (git commit).
+
+        Returns:
+            Dict with version info: version, branch, isGitRepo
+        """
+        try:
+            from backend.__version__ import __branch__, __version__, is_git_repo
+
+            return {
+                "success": True,
+                "version": __version__,
+                "branch": __branch__,
+                "isGitRepo": is_git_repo(),
+            }
+        except ImportError as e:
+            logger.error("Failed to get launcher version: %s", e, exc_info=True)
+            return {"success": False, "error": str(e), "version": "unknown"}
+
+    def check_launcher_updates(self, force_refresh: bool = False) -> Dict[str, Any]:
+        """Check if launcher updates are available.
+
+        Args:
+            force_refresh: Force refresh from remote
+
+        Returns:
+            Dict with update info: hasUpdate, currentCommit, latestCommit, etc.
+        """
+        try:
+            if self.metadata_manager is None:
+                return {
+                    "success": False,
+                    "error": "Metadata manager not initialized",
+                    "hasUpdate": False,
+                }
+
+            if self.launcher_updater is None:
+                from backend.launcher_updater import LauncherUpdater
+
+                self.launcher_updater = LauncherUpdater(self.metadata_manager)
+
+            result = self.launcher_updater.check_for_updates(force_refresh)
+            return {"success": True, **result}
+        except ImportError as e:
+            logger.error("Failed to check launcher updates: %s", e, exc_info=True)
+            return {"success": False, "error": str(e), "hasUpdate": False}
+        except OSError as e:
+            logger.error("Failed to check launcher updates: %s", e, exc_info=True)
+            return {"success": False, "error": str(e), "hasUpdate": False}
+        except RuntimeError as e:
+            logger.error("Failed to check launcher updates: %s", e, exc_info=True)
+            return {"success": False, "error": str(e), "hasUpdate": False}
+
+    def apply_launcher_update(self) -> Dict[str, Any]:
+        """Apply launcher update (pull + rebuild).
+
+        Returns:
+            Dict with result: success, message, newCommit
+        """
+        try:
+            if self.metadata_manager is None:
+                return {"success": False, "error": "Metadata manager not initialized"}
+
+            if self.launcher_updater is None:
+                from backend.launcher_updater import LauncherUpdater
+
+                self.launcher_updater = LauncherUpdater(self.metadata_manager)
+
+            result = self.launcher_updater.apply_update()
+            return {"success": result.get("success", False), **result}
+        except ImportError as e:
+            logger.error("Failed to apply launcher update: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+        except OSError as e:
+            logger.error("Failed to apply launcher update: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+        except RuntimeError as e:
+            logger.error("Failed to apply launcher update: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+
+    def restart_launcher(self) -> Dict[str, Any]:
+        """Restart the launcher application.
+
+        Returns:
+            Dict with result: success, message
+        """
+        import os
+        import subprocess
+        import sys
+        import threading
+
+        try:
+            # Get the launcher script path
+            launcher_root = self.script_dir
+            launcher_script = launcher_root / "launcher"
+
+            if launcher_script.exists():
+                # Restart via launcher script
+                subprocess.Popen([str(launcher_script)], start_new_session=True)
+            else:
+                # Restart Python directly
+                python = sys.executable
+                subprocess.Popen(
+                    [python, str(launcher_root / "backend" / "main.py")],
+                    start_new_session=True,
+                )
+
+            # Exit current process after a brief delay
+            def delayed_exit():
+                import time
+
+                time.sleep(1)
+                os._exit(0)
+
+            threading.Thread(target=delayed_exit, daemon=True).start()
+
+            return {"success": True, "message": "Restarting..."}
+        except OSError as e:
+            logger.error("Failed to restart launcher: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}
+        except RuntimeError as e:
+            logger.error("Failed to restart launcher: %s", e, exc_info=True)
+            return {"success": False, "error": str(e)}

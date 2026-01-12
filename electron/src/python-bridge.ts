@@ -28,9 +28,15 @@ export interface PythonBridgeOptions {
   maxRestarts?: number;
 }
 
+interface RPCError {
+  code: number;
+  message: string;
+  data?: unknown;
+}
+
 interface RPCResponse {
   result?: unknown;
-  error?: string;
+  error?: RPCError | string;
 }
 
 export class PythonBridge {
@@ -307,7 +313,11 @@ export class PythonBridge {
           try {
             const response: RPCResponse = JSON.parse(data);
             if (response.error) {
-              reject(new Error(response.error));
+              // Handle both string errors and JSON-RPC error objects
+              const errorMessage = typeof response.error === 'string'
+                ? response.error
+                : response.error.message || JSON.stringify(response.error);
+              reject(new Error(errorMessage));
             } else {
               resolve(response.result);
             }

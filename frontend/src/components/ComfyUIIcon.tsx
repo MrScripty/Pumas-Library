@@ -73,7 +73,7 @@ const RunningIcon: React.FC<{ ramUsage?: number; gpuUsage?: number; isSelected?:
       <div className="w-full aspect-square bg-[hsl(var(--launcher-bg-tertiary)/0.3)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors flex items-center justify-center border-[hsl(var(--launcher-border))] hover:border-[hsl(var(--launcher-border)/0.8)] cursor-pointer relative border-2 rounded-full">
         <div className="absolute inset-0 rounded-full overflow-hidden">
           <img
-            src="/comfyui-icon.png"
+            src="./comfyui-icon.png"
             alt="ComfyUI"
             className="w-full h-full absolute inset-0 object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
@@ -127,7 +127,7 @@ const OfflineIcon: React.FC<{ isSelected?: boolean }> = ({ isSelected = false })
       <div className="w-full aspect-square bg-[hsl(var(--launcher-bg-tertiary)/0.3)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors flex items-center justify-center border-[hsl(var(--launcher-border))] hover:border-[hsl(var(--launcher-border)/0.8)] cursor-pointer relative border-2 rounded-full opacity-80">
         <div className="absolute inset-0 rounded-full overflow-hidden">
           <img
-            src="/comfyui-icon.png"
+            src="./comfyui-icon.png"
             alt="ComfyUI"
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
@@ -145,7 +145,7 @@ const ErrorIcon: React.FC<{ isSelected?: boolean }> = ({ isSelected = false }) =
       <div className="w-full aspect-square bg-[hsl(var(--launcher-bg-tertiary)/0.3)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors flex items-center justify-center border-[hsl(var(--launcher-border))] hover:border-[hsl(var(--launcher-border)/0.8)] cursor-pointer relative border-2 rounded-full opacity-80">
         <div className="absolute inset-0 rounded-full overflow-hidden">
           <img
-            src="/comfyui-icon.png"
+            src="./comfyui-icon.png"
             alt="ComfyUI"
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
@@ -163,7 +163,7 @@ const UninstalledIcon: React.FC<{ isSelected?: boolean }> = ({ isSelected = fals
       <div className="w-full aspect-square bg-[hsl(var(--launcher-bg-tertiary)/0.3)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors flex items-center justify-center border-[hsl(var(--launcher-border))] hover:border-[hsl(var(--launcher-border)/0.8)] cursor-pointer relative border-2 rounded-full opacity-60">
         <div className="absolute inset-0 rounded-full overflow-hidden">
           <img
-            src="/comfyui-icon.png"
+            src="./comfyui-icon.png"
             alt="ComfyUI"
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}

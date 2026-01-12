@@ -354,6 +354,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
       try {
         // First validate file type
         const typeResult = await importAPI.validateFileType(file.path);
+
         updatedFiles[i] = {
           ...updatedFiles[i]!,
           validFileType: typeResult.valid,
@@ -473,14 +474,10 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
     performMetadataLookup();
   }, [performMetadataLookup]);
 
-  // Handle close with confirmation if import in progress
+  // Handle close - closes immediately, async operations will be ignored when component unmounts
   const handleClose = useCallback(() => {
-    if (step === 'importing' || step === 'lookup') {
-      // Don't allow closing during import/lookup
-      return;
-    }
     onClose();
-  }, [step, onClose]);
+  }, [onClose]);
 
   // Count pickle files that need acknowledgment
   const pickleFilesCount = files.filter((f) => f.securityTier === 'pickle').length;
@@ -516,8 +513,8 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
           </div>
           <button
             onClick={handleClose}
-            disabled={step === 'importing' || step === 'lookup'}
-            className="p-1 rounded-md text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="p-1 rounded-md text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-primary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] transition-colors"
+            title={(step === 'importing' || step === 'lookup') ? 'Click to cancel' : 'Close'}
           >
             <X className="w-5 h-5" />
           </button>

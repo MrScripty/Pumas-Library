@@ -1,0 +1,65 @@
+{
+  "name": "pumas-library-electron",
+  "version": "1.0.0",
+  "description": "Electron wrapper for Pumas Library",
+  "main": "dist/main.js",
+  "author": "Pumas Library Team",
+  "license": "MIT",
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc -w",
+    "start": "npm run build && electron .",
+    "dev": "npm run build && electron . --dev",
+    "clean": "rm -rf dist",
+    "lint": "eslint src --ext .ts",
+    "package": "npm run build && electron-builder",
+    "package:linux": "npm run build && electron-builder --linux"
+  },
+  "dependencies": {
+    "electron-log": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "electron": "^38.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "~5.8.0"
+  },
+  "build": {
+    "appId": "com.pumas.library",
+    "productName": "Pumas Library",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../frontend/dist",
+        "to": "frontend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "../backend",
+        "to": "backend",
+        "filter": ["**/*", "!__pycache__", "!**/*.pyc", "!.mypy_cache"]
+      }
+    ],
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        },
+        {
+          "target": "deb",
+          "arch": ["x64"]
+        }
+      ],
+      "category": "Development",
+      "maintainer": "Pumas Library Team",
+      "icon": "../frontend/public/icon.png"
+    }
+  }
+}

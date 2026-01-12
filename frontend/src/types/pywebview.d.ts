@@ -1071,14 +1071,32 @@ export interface PyWebViewAPI {
 }
 
 // ============================================================================
+// Electron-specific API extensions
+// ============================================================================
+
+export interface ElectronWindowAPI {
+  /** Minimize the window (Electron only) */
+  minimizeWindow(): Promise<void>;
+  /** Maximize/restore the window (Electron only) */
+  maximizeWindow(): Promise<void>;
+  /** Get the current theme (Electron only) */
+  getTheme(): Promise<'dark' | 'light'>;
+}
+
+export type ElectronAPI = PyWebViewAPI & ElectronWindowAPI;
+
+// ============================================================================
 // Global Window Extension
 // ============================================================================
 
 declare global {
   interface Window {
+    /** PyWebView API (available when running in PyWebView) */
     pywebview?: {
       api: PyWebViewAPI;
     };
+    /** Electron API (available when running in Electron) */
+    electronAPI?: ElectronAPI;
   }
 }
 

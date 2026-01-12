@@ -681,6 +681,19 @@ class JavaScriptAPI:
             lambda exc: {"success": False, "error": str(exc)},
         )
 
+    def get_embedded_metadata(self, file_path):
+        """Extract embedded metadata from a model file (GGUF or safetensors)"""
+        return self._call_api(
+            "get_embedded_metadata",
+            lambda: self.api.get_embedded_metadata(file_path),
+            lambda exc: {
+                "success": False,
+                "file_type": "unknown",
+                "metadata": None,
+                "error": str(exc),
+            },
+        )
+
     def search_models_fts(self, query, limit=100, offset=0, model_type=None, tags=None):
         """Search local model library using FTS5 full-text search"""
         return self._call_api(

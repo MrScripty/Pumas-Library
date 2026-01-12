@@ -24,6 +24,10 @@ import {
   Eye,
   Folder,
   ExternalLink,
+  ToggleLeft,
+  ToggleRight,
+  FileText,
+  Cloud,
 } from 'lucide-react';
 import { importAPI } from '../api/import';
 import type {
@@ -57,6 +61,10 @@ interface FileImportStatus {
   /** Whether file type is valid */
   validFileType?: boolean;
   detectedFileType?: string;
+  /** Embedded metadata from the file itself (GGUF/safetensors) */
+  embeddedMetadata?: Record<string, unknown>;
+  /** Status of embedded metadata loading */
+  embeddedMetadataStatus?: 'pending' | 'loaded' | 'error' | 'unsupported';
 }
 
 /** Sharded set info for UI display */
@@ -234,10 +242,71 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   const [shardedSets, setShardedSets] = useState<ShardedSetInfo[]>([]);
   const [lookupProgress, setLookupProgress] = useState({ current: 0, total: 0 });
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(new Set());
+  /** Track which files are showing embedded metadata vs HuggingFace metadata */
+  const [showEmbeddedMetadata, setShowEmbeddedMetadata] = useState<Set<string>>(new Set());
 
   /** Toggle expanded state for a file's metadata */
   const toggleMetadataExpand = useCallback((path: string) => {
     setExpandedMetadata((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  /** Toggle between HuggingFace and embedded metadata view for a file */
+  const toggleMetadataSource = useCallback(async (path: string) => {
+    // Check current state using refs to avoid stale closure issues
+    let needsLoad = false;
+    setFiles(prev => {
+      const file = prev.find(f => f.path === path);
+      if (!file) return prev;
+      // Check if we need to load embedded metadata
+      if (!file.embeddedMetadata && file.embeddedMetadataStatus !== 'error' && file.embeddedMetadataStatus !== 'unsupported' && file.embeddedMetadataStatus !== 'pending') {
+        needsLoad = true;
+        // Set loading state
+        return prev.map(f =>
+          f.path === path ? { ...f, embeddedMetadataStatus: 'pending' } : f
+        );
+      }
+      return prev;
+    });
+
+    // Only toggle to embedded view - check if we're currently NOT showing embedded
+    setShowEmbeddedMetadata(prev => {
+      const isCurrentlyShowingEmbedded = prev.has(path);
+
+      // If switching TO embedded and needs to load, trigger the load
+      if (!isCurrentlyShowingEmbedded && needsLoad) {
+        // Fire off the load (don't await in the state update)
+        importAPI.getEmbeddedMetadata(path).then(result => {
+          setFiles(prevFiles => prevFiles.map(f => {
+            if (f.path !== path) return f;
+            if (result.success && result.metadata) {
+              return {
+                ...f,
+                embeddedMetadata: result.metadata,
+                embeddedMetadataStatus: 'loaded',
+              };
+            } else if (result.file_type === 'unsupported') {
+              return { ...f, embeddedMetadataStatus: 'unsupported' };
+            } else {
+              return { ...f, embeddedMetadataStatus: 'error' };
+            }
+          }));
+        }).catch(error => {
+          logger.error('Failed to fetch embedded metadata', { path, error });
+          setFiles(prevFiles => prevFiles.map(f =>
+            f.path === path ? { ...f, embeddedMetadataStatus: 'error' } : f
+          ));
+        });
+      }
+
+      // Toggle the view
       const next = new Set(prev);
       if (next.has(path)) {
         next.delete(path);
@@ -341,59 +410,63 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   // Perform HuggingFace metadata lookup
   const performMetadataLookup = useCallback(async () => {
     setStep('lookup');
-    setLookupProgress({ current: 0, total: files.length });
+    const totalFiles = files.length;
+    setLookupProgress({ current: 0, total: totalFiles });
 
-    const updatedFiles = [...files];
+    // Get paths to process (snapshot at start)
+    const filesToProcess = files.map(f => ({ path: f.path, filename: f.filename }));
 
-    for (let i = 0; i < files.length; i++) {
-      const file = files[i];
+    for (let i = 0; i < filesToProcess.length; i++) {
+      const file = filesToProcess[i];
       if (!file) continue;
 
-      setLookupProgress({ current: i + 1, total: files.length });
+      setLookupProgress({ current: i + 1, total: totalFiles });
 
       try {
         // First validate file type
         const typeResult = await importAPI.validateFileType(file.path);
 
-        updatedFiles[i] = {
-          ...updatedFiles[i]!,
-          validFileType: typeResult.valid,
-          detectedFileType: typeResult.detected_type,
-        };
+        // Update this file incrementally (preserves other state including embedded metadata)
+        setFiles(prev => prev.map(f => {
+          if (f.path !== file.path) return f;
+          return {
+            ...f,
+            validFileType: typeResult.valid,
+            detectedFileType: typeResult.detected_type,
+            metadataStatus: typeResult.valid ? f.metadataStatus : 'error',
+          };
+        }));
 
         if (!typeResult.valid) {
-          updatedFiles[i] = {
-            ...updatedFiles[i]!,
-            metadataStatus: 'error',
-          };
           continue;
         }
 
         // Then lookup HF metadata
         const result = await importAPI.lookupHFMetadata(file.filename, file.path);
 
-        if (result.success && result.found && result.metadata) {
-          updatedFiles[i] = {
-            ...updatedFiles[i]!,
-            hfMetadata: result.metadata,
-            metadataStatus: 'found',
-          };
-        } else {
-          updatedFiles[i] = {
-            ...updatedFiles[i]!,
-            metadataStatus: 'not_found',
-          };
-        }
+        // Update with HF metadata (preserves other state including embedded metadata)
+        setFiles(prev => prev.map(f => {
+          if (f.path !== file.path) return f;
+          if (result.success && result.found && result.metadata) {
+            return {
+              ...f,
+              hfMetadata: result.metadata,
+              metadataStatus: 'found',
+            };
+          } else {
+            return {
+              ...f,
+              metadataStatus: 'not_found',
+            };
+          }
+        }));
       } catch (error) {
         logger.error('Metadata lookup failed', { file: file.filename, error });
-        updatedFiles[i] = {
-          ...updatedFiles[i]!,
-          metadataStatus: 'error',
-        };
+        setFiles(prev => prev.map(f =>
+          f.path === file.path ? { ...f, metadataStatus: 'error' } : f
+        ));
       }
     }
-
-    setFiles(updatedFiles);
   }, [files]);
 
   // Start the import process
@@ -699,9 +772,11 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                   const trustBadge = getTrustBadge(file.hfMetadata);
                   const isExpanded = expandedMetadata.has(file.path);
                   const hasMetadata = file.hfMetadata && file.metadataStatus === 'found';
+                  const isShowingEmbedded = showEmbeddedMetadata.has(file.path);
+                  const canShowEmbedded = file.detectedFileType === 'gguf' || file.detectedFileType === 'safetensors';
 
-                  // Get displayable metadata fields
-                  const metadataEntries = hasMetadata
+                  // Get displayable HuggingFace metadata fields
+                  const hfMetadataEntries = hasMetadata
                     ? sortMetadataFields(
                         Object.keys(file.hfMetadata!).filter(
                           (key) =>
@@ -719,14 +794,29 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                       }))
                     : [];
 
+                  // Get displayable embedded metadata fields
+                  const embeddedMetadataEntries = file.embeddedMetadata
+                    ? Object.entries(file.embeddedMetadata)
+                        .filter(([, value]) => value != null && value !== '')
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([key, value]) => ({
+                          key,
+                          label: formatFieldName(key),
+                          value: formatMetadataValue(key, value),
+                        }))
+                    : [];
+
+                  // Choose which entries to display
+                  const metadataEntries = isShowingEmbedded ? embeddedMetadataEntries : hfMetadataEntries;
+
                   return (
                     <div key={file.path} className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
                       <div
-                        className={`flex items-center gap-3 p-3 ${hasMetadata ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
-                        onClick={hasMetadata ? () => toggleMetadataExpand(file.path) : undefined}
+                        className={`flex items-center gap-3 p-3 ${hasMetadata || canShowEmbedded ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
+                        onClick={(hasMetadata || canShowEmbedded) ? () => toggleMetadataExpand(file.path) : undefined}
                       >
                         {/* Expand/collapse chevron */}
-                        {hasMetadata ? (
+                        {(hasMetadata || canShowEmbedded) ? (
                           <button
                             className="w-4 h-4 flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
                             onClick={(e) => {
@@ -790,18 +880,87 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                       </div>
 
                       {/* Expanded metadata panel */}
-                      {isExpanded && metadataEntries.length > 0 && (
+                      {isExpanded && (
                         <div className="px-3 pb-3 pt-1 ml-8 border-t border-[hsl(var(--launcher-border)/0.5)]">
-                          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
-                            {metadataEntries.map(({ key, label, value }) => (
-                              <div key={key} className="contents">
-                                <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
-                                <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
-                                  {value}
-                                </span>
+                          {/* Metadata source toggle - only show for GGUF/safetensors files */}
+                          {canShowEmbedded && (
+                            <div className="flex items-center justify-between mb-3 pb-2 border-b border-[hsl(var(--launcher-border)/0.3)]">
+                              <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Metadata Source</span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleMetadataSource(file.path);
+                                }}
+                                className="flex items-center gap-2 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-[hsl(var(--launcher-bg-tertiary))]"
+                                title={isShowingEmbedded ? 'Switch to HuggingFace metadata' : 'Switch to embedded file metadata'}
+                              >
+                                {isShowingEmbedded ? (
+                                  <>
+                                    <FileText className="w-3 h-3 text-[hsl(var(--launcher-accent-warning))]" />
+                                    <span className="text-[hsl(var(--launcher-accent-warning))]">Embedded</span>
+                                    <ToggleRight className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))]" />
+                                  </>
+                                ) : (
+                                  <>
+                                    <Cloud className="w-3 h-3 text-[hsl(var(--launcher-accent-primary))]" />
+                                    <span className="text-[hsl(var(--launcher-accent-primary))]">HuggingFace</span>
+                                    <ToggleLeft className="w-4 h-4 text-[hsl(var(--launcher-accent-primary))]" />
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Loading state for embedded metadata */}
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'pending' && (
+                            <div className="flex items-center justify-center py-4">
+                              <Loader2 className="w-5 h-5 text-[hsl(var(--launcher-accent-primary))] animate-spin" />
+                              <span className="ml-2 text-xs text-[hsl(var(--launcher-text-muted))]">Loading embedded metadata...</span>
+                            </div>
+                          )}
+
+                          {/* Error state for embedded metadata */}
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'error' && (
+                            <div className="flex items-center gap-2 py-2 text-xs text-[hsl(var(--launcher-accent-error))]">
+                              <AlertCircle className="w-4 h-4" />
+                              Failed to load embedded metadata
+                            </div>
+                          )}
+
+                          {/* Unsupported state */}
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'unsupported' && (
+                            <div className="flex items-center gap-2 py-2 text-xs text-[hsl(var(--launcher-text-muted))]">
+                              <AlertCircle className="w-4 h-4" />
+                              This file format does not support embedded metadata
+                            </div>
+                          )}
+
+                          {/* Metadata grid */}
+                          {metadataEntries.length > 0 ? (
+                            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs max-h-48 overflow-y-auto">
+                              {metadataEntries.map(({ key, label, value }) => (
+                                <div key={key} className="contents">
+                                  <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
+                                  <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
+                                    {value}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            !isShowingEmbedded && !hasMetadata && (
+                              <div className="text-xs text-[hsl(var(--launcher-text-muted))] py-2">
+                                No metadata available
                               </div>
-                            ))}
-                          </div>
+                            )
+                          )}
+
+                          {/* Empty embedded metadata */}
+                          {isShowingEmbedded && file.embeddedMetadataStatus === 'loaded' && embeddedMetadataEntries.length === 0 && (
+                            <div className="text-xs text-[hsl(var(--launcher-text-muted))] py-2">
+                              No embedded metadata found in file
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>

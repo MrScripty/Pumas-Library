@@ -379,3 +379,85 @@ def _infer_diffusion_family(tensor_names: list, metadata: dict) -> Optional[str]
         return "sd3"
 
     return "stable-diffusion"  # Default diffusion family
+
+
+# ============================================================================
+# GGUF Embedded Metadata Extraction
+# ============================================================================
+
+
+def extract_gguf_metadata(file_path: Path) -> Optional[dict]:
+    """Extract all embedded metadata from a GGUF file.
+
+    This reads the GGUF header and extracts all metadata fields stored
+    in the file, which can include:
+    - general.architecture, general.name, general.author
+    - general.description, general.license
+    - quantization parameters, context length, etc.
+
+    Args:
+        file_path: Path to the GGUF file
+
+    Returns:
+        Dict of metadata key-value pairs, or None if extraction fails
+    """
+    if not HAS_GGUF:
+        logger.warning("gguf library not available, cannot extract metadata from %s", file_path)
+        return None
+
+    try:
+        # Quick magic check
+        with open(file_path, "rb") as f:
+            magic = f.read(4)
+            if magic != b"GGUF":
+                logger.debug("File %s is not a GGUF file (magic: %s)", file_path, magic)
+                return None
+
+        # Use the official gguf library to read metadata
+        reader = GGUFReader(file_path)
+
+        metadata: dict = {}
+
+        # Extract all fields from the reader using the library's built-in method
+        for field in reader.fields.values():
+            try:
+                key = field.name
+
+                # Use the library's built-in contents() method for proper type handling
+                # This correctly handles strings, arrays, and numeric types
+                value = field.contents()
+
+                if value is not None:
+                    # Convert numpy types to Python native types for JSON serialization
+                    if hasattr(value, "tolist"):
+                        value = value.tolist()
+                    elif hasattr(value, "item"):
+                        value = value.item()
+
+                    metadata[key] = value
+
+            except (IndexError, ValueError, TypeError) as e:  # noqa: multi-exception
+                logger.debug("Failed to extract field %s: %s", field.name, e)
+                continue
+            except Exception as e:  # noqa: generic-exception
+                logger.debug("Unexpected error extracting field %s: %s", field.name, e)
+                continue
+
+        logger.info("Extracted %d metadata fields from GGUF file %s", len(metadata), file_path.name)
+        return metadata if metadata else None
+
+    except OSError as e:
+        logger.warning("Failed to read GGUF file %s: %s", file_path, e)
+        return None
+    except ValueError as e:
+        logger.warning("Failed to parse GGUF file %s: %s", file_path, e)
+        return None
+    except struct.error as e:
+        logger.warning("Struct error reading GGUF file %s: %s", file_path, e)
+        return None
+    except UnicodeDecodeError as e:
+        logger.warning("Unicode error reading GGUF file %s: %s", file_path, e)
+        return None
+    except IndexError as e:
+        logger.warning("Index error reading GGUF file %s: %s", file_path, e)
+        return None

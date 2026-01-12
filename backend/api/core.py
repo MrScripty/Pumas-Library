@@ -1702,6 +1702,127 @@ class ComfyUISetupAPI:
             logger.error("Error marking metadata as manual: %s", e, exc_info=True)
             return {"success": False, "error": str(e)}
 
+    def get_embedded_metadata(self, file_path: str) -> Dict[str, Any]:
+        """Extract embedded metadata from a model file (GGUF or safetensors).
+
+        For GGUF files, extracts all metadata fields including:
+        - general.architecture, general.name, general.author
+        - general.description, general.license
+        - quantization parameters, context length, etc.
+
+        For safetensors files, extracts the __metadata__ JSON header.
+
+        Args:
+            file_path: Path to the model file
+
+        Returns:
+            Dict with:
+                - success: Whether extraction succeeded
+                - file_type: 'gguf', 'safetensors', or 'unsupported'
+                - metadata: Dict of extracted metadata fields (if successful)
+                - error: Error message (if unsuccessful)
+        """
+        from backend.model_library.model_identifier import extract_gguf_metadata
+
+        try:
+            path = Path(file_path)
+
+            if not path.exists():
+                return {
+                    "success": False,
+                    "file_type": "unknown",
+                    "metadata": None,
+                    "error": "File not found",
+                }
+
+            suffix = path.suffix.lower()
+
+            if suffix == ".gguf":
+                metadata = extract_gguf_metadata(path)
+                if metadata:
+                    return {
+                        "success": True,
+                        "file_type": "gguf",
+                        "metadata": metadata,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "file_type": "gguf",
+                        "metadata": None,
+                        "error": "Failed to extract GGUF metadata (gguf library may not be installed)",
+                    }
+
+            elif suffix == ".safetensors":
+                # Extract __metadata__ from safetensors header
+                import json
+                import struct
+
+                try:
+                    with open(path, "rb") as f:
+                        header_len_bytes = f.read(8)
+                        if len(header_len_bytes) < 8:
+                            return {
+                                "success": False,
+                                "file_type": "safetensors",
+                                "metadata": None,
+                                "error": "Invalid safetensors file",
+                            }
+
+                        header_len = struct.unpack("<Q", header_len_bytes)[0]
+
+                        if header_len > 100 * 1024 * 1024:  # 100MB max
+                            return {
+                                "success": False,
+                                "file_type": "safetensors",
+                                "metadata": None,
+                                "error": "Header too large",
+                            }
+
+                        header_json = f.read(header_len).decode("utf-8")
+                        header = json.loads(header_json)
+
+                    # Extract __metadata__ key
+                    metadata = header.get("__metadata__", {})
+                    if not isinstance(metadata, dict):
+                        metadata = {}
+
+                    return {
+                        "success": True,
+                        "file_type": "safetensors",
+                        "metadata": metadata,
+                    }
+
+                except (
+                    json.JSONDecodeError,
+                    struct.error,
+                    UnicodeDecodeError,
+                ) as e:  # noqa: multi-exception
+                    logger.warning("Failed to read safetensors header: %s", e)
+                    return {
+                        "success": False,
+                        "file_type": "safetensors",
+                        "metadata": None,
+                        "error": f"Failed to parse safetensors header: {e}",
+                    }
+
+            else:
+                return {
+                    "success": False,
+                    "file_type": "unsupported",
+                    "metadata": None,
+                    "error": f"Unsupported file type: {suffix}",
+                }
+
+        except OSError as e:
+            logger.error("Error reading file for metadata extraction: %s", e, exc_info=True)
+            return {
+                "success": False,
+                "file_type": "unknown",
+                "metadata": None,
+                "error": str(e),
+            }
+
     def get_library_status(self) -> Dict[str, Any]:
         """Get current library status, including indexing state.
 

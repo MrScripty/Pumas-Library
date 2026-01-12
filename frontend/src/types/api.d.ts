@@ -344,6 +344,14 @@ export interface FileTypeValidationResponse extends BaseResponse {
 }
 
 /**
+ * Embedded metadata response (GGUF or safetensors)
+ */
+export interface EmbeddedMetadataResponse extends BaseResponse {
+  file_type: 'gguf' | 'safetensors' | 'unsupported' | 'unknown';
+  metadata: Record<string, unknown> | null;
+}
+
+/**
  * Library status response
  */
 export interface GetLibraryStatusResponse extends BaseResponse {
@@ -929,6 +937,11 @@ export interface PyWebViewAPI {
    * Mark model metadata as manually corrected to protect from auto-updates
    */
   mark_metadata_as_manual(modelId: string): Promise<BaseResponse>;
+
+  /**
+   * Get embedded metadata from a model file (GGUF or safetensors)
+   */
+  get_embedded_metadata(filePath: string): Promise<EmbeddedMetadataResponse>;
 
   /**
    * Get current library status including indexing state

@@ -174,6 +174,8 @@ const electronAPI = {
   get_file_link_count: (filePath: string) => apiCall('get_file_link_count', { file_path: filePath }),
   check_files_writable: (filePaths: string[]) =>
     apiCall('check_files_writable', { file_paths: filePaths }),
+  get_embedded_metadata: (filePath: string) =>
+    apiCall('get_embedded_metadata', { file_path: filePath }),
 
   // ========================================
   // Link Health (Phase 1B)

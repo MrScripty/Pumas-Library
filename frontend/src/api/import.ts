@@ -11,6 +11,7 @@ import type {
   BaseResponse,
   CheckFilesWritableResponse,
   DetectShardedSetsResponse,
+  EmbeddedMetadataResponse,
   FileLinkCountResponse,
   FileTypeValidationResponse,
   FTSSearchResponse,
@@ -125,6 +126,16 @@ class ImportAPI {
   async checkFilesWritable(filePaths: string[]): Promise<CheckFilesWritableResponse> {
     const api = this.getAPI();
     return await api.check_files_writable(filePaths);
+  }
+
+  /**
+   * Get embedded metadata from a model file (GGUF or safetensors).
+   * For GGUF files, extracts all metadata fields from the header.
+   * For safetensors files, extracts the __metadata__ JSON header.
+   */
+  async getEmbeddedMetadata(filePath: string): Promise<EmbeddedMetadataResponse> {
+    const api = this.getAPI();
+    return await api.get_embedded_metadata(filePath);
   }
 }
 

@@ -1,8 +1,9 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Loader2, Download, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
+import { Check, Loader2, Globe, FolderOpen, CheckCircle2, Link2, Anchor, CircleX } from 'lucide-react';
 import { useHover } from '@react-aria/interactions';
+import type { InstallationProgress } from '../hooks/useVersions';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -172,6 +173,7 @@ interface VersionSelectorProps {
   onOpenVersionManager: () => void;
   activeShortcutState?: { menu: boolean; desktop: boolean };
   installingVersion?: string | null;
+  installationProgress?: InstallationProgress | null;
   installNetworkStatus?: 'idle' | 'downloading' | 'stalled' | 'failed';
   defaultVersion?: string | null;
   onMakeDefault?: (tag: string | null) => Promise<boolean>;
@@ -189,6 +191,7 @@ export function VersionSelector({
   onOpenVersionManager,
   activeShortcutState,
   installingVersion,
+  installationProgress,
   installNetworkStatus = 'idle',
   defaultVersion,
   onMakeDefault,
@@ -350,6 +353,23 @@ export function VersionSelector({
   const hasInstalledVersions = installedVersions.length > 0;
   const hasVersionsToShow = combinedVersions.length > 0;
   const emphasizeInstall = !hasInstalledVersions && !isLoading;
+  const hasInstallActivity = Boolean(installingVersion);
+  const isInstallFailed = installNetworkStatus === 'failed';
+  const isInstallPending = hasInstallActivity && !isInstallFailed && (
+    !installationProgress
+    || (
+      installationProgress.stage === 'download'
+      && (installationProgress.downloaded_bytes ?? 0) <= 0
+      && (installationProgress.download_speed ?? 0) <= 0
+      && !installationProgress.error
+    )
+  );
+  const progressPercent = installationProgress?.overall_progress ?? 0;
+  const progressDegrees = Math.min(
+    360,
+    Math.max(0, Math.round((Math.min(100, Math.max(0, progressPercent)) / 100) * 360))
+  );
+  const ringDegrees = isInstallPending ? 60 : progressDegrees;
 
   // Debug logging for new version detection
   React.useEffect(() => {
@@ -442,7 +462,7 @@ export function VersionSelector({
             whileTap={{ scale: 0.9 }}
             title="Install your first version"
           >
-            <Download
+            <Globe
               size={20}
               className="text-[hsl(var(--accent-success))] animate-pulse"
               style={{ filter: 'drop-shadow(0 0 8px hsl(var(--accent-success)))' }}
@@ -554,31 +574,46 @@ export function VersionSelector({
                 whileTap={{ scale: 0.9 }}
                 title={hasNewVersion ? `New version available: ${latestVersion}` : "Install new version"}
               >
-                <Download
-                  size={14}
-                  className={`${
-                    installNetworkStatus === 'downloading'
-                      ? 'download-shimmer text-[hsl(var(--accent-success))]'
-                      : installNetworkStatus === 'stalled'
-                        ? 'animate-pulse text-accent-warning'
-                        : installNetworkStatus === 'failed'
-                          ? 'animate-pulse text-[hsl(var(--accent-error))]'
-                          : hasNewVersion
-                            ? 'text-[hsl(var(--accent-success))]'
-                            : 'text-[hsl(var(--text-tertiary))]'
-                  }`}
-                  style={
-                    installNetworkStatus === 'downloading'
-                      ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' }
-                      : installNetworkStatus === 'stalled'
-                        ? { filter: 'drop-shadow(0 0 6px rgb(251 146 60))' }
-                        : installNetworkStatus === 'failed'
-                          ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
-                          : hasNewVersion
-                            ? { filter: 'drop-shadow(0 0 8px hsl(var(--accent-success)))' }
-                            : undefined
-                  }
-                />
+                <span className="relative flex h-4 w-4 items-center justify-center">
+                  {hasInstallActivity && (
+                    <>
+                      <span
+                        className={`download-progress-ring ${isInstallPending ? 'is-waiting' : ''}`}
+                        style={
+                          {
+                            '--progress': `${ringDegrees}deg`,
+                          } as React.CSSProperties
+                        }
+                      />
+                      {!isInstallPending && !isInstallFailed && <span className="download-scan-ring" />}
+                    </>
+                  )}
+                  <Globe
+                    size={14}
+                    className={`${
+                      installNetworkStatus === 'downloading'
+                        ? 'text-[hsl(var(--accent-success))]'
+                        : installNetworkStatus === 'stalled'
+                          ? 'animate-pulse text-accent-warning'
+                          : installNetworkStatus === 'failed'
+                            ? 'animate-pulse text-[hsl(var(--accent-error))]'
+                            : hasNewVersion
+                              ? 'text-[hsl(var(--accent-success))]'
+                              : 'text-[hsl(var(--text-tertiary))]'
+                    }`}
+                    style={
+                      installNetworkStatus === 'downloading'
+                        ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' }
+                        : installNetworkStatus === 'stalled'
+                          ? { filter: 'drop-shadow(0 0 6px rgb(251 146 60))' }
+                          : installNetworkStatus === 'failed'
+                            ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
+                            : hasNewVersion
+                              ? { filter: 'drop-shadow(0 0 8px hsl(var(--accent-success)))' }
+                              : undefined
+                    }
+                  />
+                </span>
               </motion.button>
 
               {/* Refresh Button moved to manager; dropdown arrow removed for cleaner look */}

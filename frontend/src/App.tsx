@@ -355,7 +355,10 @@ export default function App() {
   const openModelsRoot = async () => {
     if (!isAPIAvailable()) return;
     try {
-      await api.open_path('shared-resources/models');
+      const result = await api.open_path('shared-resources/models');
+      if (!result.success) {
+        throw new APIError(result.error || 'Failed to open models folder', 'open_path');
+      }
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error opening models folder', { error: error.message, endpoint: error.endpoint, path: 'shared-resources/models' });
@@ -485,6 +488,7 @@ export default function App() {
                       openActiveInstall={openActiveInstall}
                       onOpenVersionManager={() => setShowVersionManager(true)}
                       installNetworkStatus={installNetworkStatus}
+                      installationProgress={installationProgress}
                       defaultVersion={defaultVersion}
                       onMakeDefault={handleMakeDefault}
                       installingVersion={installingTag}

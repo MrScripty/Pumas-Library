@@ -92,6 +92,8 @@ const electronAPI = {
   scan_shared_storage: () => apiCall('scan_shared_storage'),
   search_hf_models: (query: string, kind?: string | null, limit?: number) =>
     apiCall('search_hf_models', { query, kind, limit }),
+  get_related_models: (modelId: string, limit?: number) =>
+    apiCall('get_related_models', { model_id: modelId, limit }),
   start_model_download_from_hf: (
     repoId: string,
     family: string,
@@ -245,8 +247,7 @@ const electronAPI = {
   },
 
   open_path: async (path: string) => {
-    await ipcRenderer.invoke('shell:openPath', path);
-    return { success: true };
+    return await apiCall('open_path', { path });
   },
 
   open_active_install: () => apiCall('open_active_install'),

@@ -15,6 +15,7 @@ interface ModelSearchBarProps {
   isCategoryFiltered: boolean;
   onFilterClick: () => void;
   totalModels: number;
+  hasActiveDownloads?: boolean;
   showCategoryMenu: boolean;
   filterList: string[];
   selectedFilter: string;
@@ -32,6 +33,7 @@ export function ModelSearchBar({
   isCategoryFiltered,
   onFilterClick,
   totalModels,
+  hasActiveDownloads = false,
   showCategoryMenu,
   filterList,
   selectedFilter,
@@ -104,7 +106,10 @@ export function ModelSearchBar({
                   aria-label={isDownloadMode ? 'Exit download mode' : 'Search Hugging Face models'}
                   aria-pressed={isDownloadMode}
                 >
-                  <Globe className="w-4 h-4" />
+                  <span className="relative flex h-4 w-4 items-center justify-center">
+                    {hasActiveDownloads && <span className="download-scan-ring" />}
+                    <Globe className="w-4 h-4" />
+                  </span>
                 </button>
               )}
             </div>

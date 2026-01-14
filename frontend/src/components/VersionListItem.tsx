@@ -5,9 +5,11 @@
  * Extracted from InstallDialog.tsx
  */
 
+import type { CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import {
   Download,
+  Pause,
   Check,
   ExternalLink,
   FileText,
@@ -90,7 +92,16 @@ export function VersionListItem({
       ? 'Installing...'
       : 'Downloading...';
 
-  const ringColor = progress?.error ? 'hsl(var(--accent-error))' : 'hsl(var(--accent-success))';
+  const isInstallFailed = installNetworkStatus === 'failed' || Boolean(progress?.error);
+  const isDownloadPending = isInstalling && !isInstallFailed && (
+    !progress || (
+      progress.stage === 'download'
+      && (progress.downloaded_bytes ?? 0) <= 0
+      && (progress.download_speed ?? 0) <= 0
+    )
+  );
+
+  const ringColor = isInstallFailed ? 'hsl(var(--accent-error))' : 'hsl(var(--accent-success))';
 
   const downloadIconClass =
     installNetworkStatus === 'stalled'
@@ -104,6 +115,7 @@ export function VersionListItem({
       : installNetworkStatus === 'failed'
         ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-error)))' }
         : { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' };
+  const StatusIcon = isInstallFailed ? Pause : Download;
 
   const handleButtonClick = () => {
     if (isInstalling) {
@@ -212,6 +224,18 @@ export function VersionListItem({
               <>
                 {isCancelHovered ? (
                   <XCircle size={16} className="text-[hsl(var(--accent-error))]" />
+                ) : isDownloadPending ? (
+                  <span className="relative flex h-[18px] w-[18px] items-center justify-center">
+                    <span
+                      className="download-progress-ring is-waiting"
+                      style={
+                        {
+                          '--progress': '60deg',
+                        } as CSSProperties
+                      }
+                    />
+                    <StatusIcon size={14} className={downloadIconClass} style={downloadIconStyle} />
+                  </span>
                 ) : (
                   <ProgressRing
                     progress={ringPercent ?? 0}
@@ -220,7 +244,7 @@ export function VersionListItem({
                     trackColor="hsl(var(--surface-control))"
                     indicatorColor={ringColor}
                   >
-                    <Download size={14} className={downloadIconClass} style={downloadIconStyle} />
+                    <StatusIcon size={14} className={downloadIconClass} style={downloadIconStyle} />
                   </ProgressRing>
                 )}
                 {isCancelHovered ? (

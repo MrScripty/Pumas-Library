@@ -383,6 +383,25 @@
     pointer-events: none;
   }
 
+  @keyframes download-waiting-pulse {
+    0%, 100% {
+      opacity: 0.35;
+      transform: scale(0.96);
+    }
+    50% {
+      opacity: 0.9;
+      transform: scale(1);
+    }
+  }
+
+  .download-progress-ring.is-waiting {
+    background: conic-gradient(
+      hsl(var(--launcher-accent-primary)/0.7) var(--progress, 60deg),
+      hsl(var(--launcher-border)) 0deg
+    );
+    animation: download-waiting-pulse 1.4s ease-in-out infinite;
+  }
+
   /* Drop zone pulse border animation */
   @keyframes pulse-border {
     0%, 100% {

@@ -78,6 +78,7 @@ export interface ModelData {
   cleanedName?: string;
   size?: number;
   addedDate?: string;
+  relatedAvailable?: boolean;
 }
 
 export interface ModelsResponse extends BaseResponse {
@@ -103,6 +104,10 @@ export interface HuggingFaceModel {
 }
 
 export interface SearchHFModelsResponse extends BaseResponse {
+  models: HuggingFaceModel[];
+}
+
+export interface RelatedModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }
 
@@ -253,6 +258,7 @@ export interface FTSSearchResponse extends BaseResponse {
     security_tier?: SecurityTier;
     added_date?: string;
     last_used?: string;
+    related_available?: boolean;
   }>;
   total_count: number;
   query_time_ms: number;
@@ -869,6 +875,7 @@ export interface PyWebViewAPI {
     kind?: string | null,
     limit?: number
   ): Promise<SearchHFModelsResponse>;
+  get_related_models(modelId: string, limit?: number): Promise<RelatedModelsResponse>;
   start_model_download_from_hf(
     repoId: string,
     family: string,

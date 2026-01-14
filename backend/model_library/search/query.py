@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from backend.logging_config import get_logger
+from backend.model_library.related import has_related_metadata
 
 logger = get_logger(__name__)
 
@@ -220,12 +221,14 @@ def search_models(
             metadata = json.loads(model.get("metadata_json", "{}"))
             model["family"] = metadata.get("family", "")
             model["description"] = metadata.get("description", "")
+            model["related_available"] = has_related_metadata(metadata)
         except (
             json.JSONDecodeError,
             TypeError,
         ):  # noqa: multi-exception  # noqa: no-except-logging
             model["family"] = ""
             model["description"] = ""
+            model["related_available"] = False
 
         models.append(model)
 

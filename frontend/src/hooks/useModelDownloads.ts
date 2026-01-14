@@ -18,6 +18,8 @@ export interface DownloadStatus {
   progress: number;
   downloadedBytes?: number;
   totalBytes?: number;
+  modelName?: string;
+  modelType?: string;
 }
 
 export function useModelDownloads() {
@@ -62,19 +64,35 @@ export function useModelDownloads() {
 
       const updates = await Promise.all(
         entries.map(async ([repoId, status]) => {
-          if (!isAPIAvailable()) return { repoId, status: 'error' as const, error: 'API not available' };
-          const result = await api.get_model_download_status(status.downloadId);
-          if (!result.success) {
-            return { repoId, status: 'error' as const, error: result.error || 'Download failed.' };
+          if (!isAPIAvailable()) {
+            return { repoId, status: status.status, error: 'API not available', transient: true as const };
           }
-          return {
-            repoId,
-            status: (result.status || 'downloading') as DownloadStatus['status'],
-            progress: typeof result.progress === 'number' ? result.progress : 0,
-            downloadedBytes: typeof result.downloaded_bytes === 'number' ? result.downloaded_bytes : undefined,
-            totalBytes: typeof result.total_bytes === 'number' ? result.total_bytes : undefined,
-            error: result.error,
-          };
+          try {
+            const result = await api.get_model_download_status(status.downloadId);
+            if (!result.success) {
+              return { repoId, status: 'error' as const, error: result.error || 'Download failed.' };
+            }
+            return {
+              repoId,
+              status: (result.status || 'downloading') as DownloadStatus['status'],
+              progress: typeof result.progress === 'number' ? result.progress : 0,
+              downloadedBytes: typeof result.downloaded_bytes === 'number' ? result.downloaded_bytes : undefined,
+              totalBytes: typeof result.total_bytes === 'number' ? result.total_bytes : undefined,
+              error: result.error,
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'Unable to fetch download status.';
+            logger.warn('Transient error fetching download status', { error: message, repoId });
+            return {
+              repoId,
+              status: status.status,
+              progress: status.progress,
+              downloadedBytes: status.downloadedBytes,
+              totalBytes: status.totalBytes,
+              error: message,
+              transient: true as const,
+            };
+          }
         })
       );
 
@@ -95,10 +113,26 @@ export function useModelDownloads() {
             downloadedBytes: update.downloadedBytes ?? previous.downloadedBytes,
             totalBytes: update.totalBytes ?? previous.totalBytes,
           };
+          const isTransient = 'transient' in update;
+          if (isTransient) {
+            if (downloadRepoId === update.repoId) {
+              setDownloadError(update.error || 'Download status temporarily unavailable.');
+            }
+            return;
+          }
           if (update.status === 'error') {
             setDownloadRepoId(update.repoId);
             setDownloadError(update.error || 'Download failed.');
-          } else if (update.status === 'completed' || update.status === 'cancelled') {
+            return;
+          }
+          const hasStarted =
+            update.status === 'downloading' ||
+            (typeof update.progress === 'number' && update.progress > 0) ||
+            (typeof update.downloadedBytes === 'number' && update.downloadedBytes > 0);
+          if (downloadRepoId === update.repoId && hasStarted) {
+            setDownloadError(null);
+          }
+          if (update.status === 'completed' || update.status === 'cancelled') {
             if (downloadRepoId === update.repoId) {
               setDownloadError(null);
             }
@@ -116,13 +150,19 @@ export function useModelDownloads() {
     };
   }, [downloadStatusByRepo, downloadRepoId]);
 
-  const startDownload = (repoId: string, downloadId: string) => {
+  const startDownload = (
+    repoId: string,
+    downloadId: string,
+    details?: { modelName?: string; modelType?: string }
+  ) => {
     setDownloadStatusByRepo(prev => ({
       ...prev,
       [repoId]: {
         downloadId,
         status: 'queued',
         progress: 0,
+        modelName: details?.modelName,
+        modelType: details?.modelType,
       },
     }));
     setDownloadRepoId(repoId);

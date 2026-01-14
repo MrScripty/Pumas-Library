@@ -72,6 +72,7 @@ export function useModels() {
             path: path,
             size: modelData.size,
             date: modelData.addedDate,
+            relatedAvailable: Boolean(modelData.relatedAvailable),
           };
 
           if (!categoryMap.has(category)) {
@@ -183,6 +184,7 @@ export function useModels() {
       file_path: string;
       size_bytes?: number;
       added_date?: string;
+      related_available?: boolean;
     }>): ModelCategory[] => {
       const categoryMap = new Map<string, ModelInfo[]>();
 
@@ -195,6 +197,7 @@ export function useModels() {
           path: model.file_path,
           size: model.size_bytes,
           date: model.added_date,
+          relatedAvailable: Boolean(model.related_available),
         };
 
         if (!categoryMap.has(category)) {

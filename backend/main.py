@@ -509,6 +509,14 @@ class JavaScriptAPI:
             lambda exc: {"success": False, "error": str(exc), "models": []},
         )
 
+    def get_related_models(self, model_id, limit=25):
+        """Get related Hugging Face models for a library model"""
+        return self._call_api(
+            "get_related_models",
+            lambda: self.api.get_related_models(model_id, limit),
+            lambda exc: {"success": False, "error": str(exc), "models": []},
+        )
+
     def get_model_overrides(self, rel_path):
         """Get overrides for a model by relative path"""
         return self._call_api(

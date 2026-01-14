@@ -119,7 +119,10 @@ export function RemoteModelsList({
         const isDownloading = downloadStatus
           ? ['queued', 'downloading', 'cancelling'].includes(downloadStatus.status)
           : false;
+        const isQueued = downloadStatus?.status === 'queued';
         const progressValue = downloadStatus?.progress ?? 0;
+        const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
+        const ringDegrees = isQueued ? 60 : progressDegrees;
         const downloadOptions = model.downloadOptions?.length
           ? model.downloadOptions
           : model.quants.map((quant) => ({
@@ -245,14 +248,14 @@ export function RemoteModelsList({
                     {isDownloading && (
                       <>
                         <span
-                          className="download-progress-ring"
+                          className={`download-progress-ring ${isQueued ? 'is-waiting' : ''}`}
                           style={
                             {
-                              '--progress': `${Math.min(360, Math.max(0, Math.round(progressValue * 360)))}deg`,
+                              '--progress': `${ringDegrees}deg`,
                             } as React.CSSProperties
                           }
                         />
-                        <span className="download-scan-ring" />
+                        {!isQueued && <span className="download-scan-ring" />}
                       </>
                     )}
                     <Download

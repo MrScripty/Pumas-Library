@@ -14,6 +14,13 @@ from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.model_library import ModelDownloader, ModelImporter, ModelLibrary, ModelMapper
 from backend.model_library.link_registry import LinkRegistry
+from backend.model_library.naming import normalize_name
+from backend.model_library.related import (
+    extract_base_model_repo_id,
+    extract_repo_id,
+    has_related_metadata,
+    normalize_family_token,
+)
 from backend.model_library.search import SearchResult
 from backend.models import ModelOverrides, RepairReport, ScanResult
 from backend.resources.custom_nodes_manager import CustomNodesManager
@@ -154,6 +161,7 @@ class ResourceManager:
                 "modelType": model_type,
                 "officialName": metadata.get("official_name"),
                 "cleanedName": metadata.get("cleaned_name"),
+                "relatedAvailable": has_related_metadata(metadata),
             }
         return models
 
@@ -259,6 +267,48 @@ class ResourceManager:
     ) -> List[Dict[str, object]]:
         """Search Hugging Face models for download UI."""
         return self.model_downloader.search_models(query=query, kind=kind, limit=limit)
+
+    def get_related_models(self, rel_path: str, limit: int = 25) -> List[Dict[str, object]]:
+        """Get related HuggingFace models based on base model creator and family."""
+        metadata = self.model_library.get_model(rel_path)
+        if not metadata:
+            return []
+
+        family_token = normalize_family_token(metadata.get("family", ""))
+        if not family_token:
+            return []
+
+        base_repo_id = extract_base_model_repo_id(metadata)
+        if not base_repo_id:
+            return []
+
+        base_author = base_repo_id.split("/")[0]
+        if not base_author:
+            return []
+
+        current_repo_id = extract_repo_id(metadata.get("download_url"))
+        candidates = self.model_downloader.search_models(query=base_author, limit=limit)
+        related: List[Dict[str, object]] = []
+
+        for model in candidates:
+            repo_id = model.get("repoId")
+            if not isinstance(repo_id, str) or not repo_id:
+                continue
+            if not repo_id.lower().startswith(f"{base_author.lower()}/"):
+                continue
+
+            name = model.get("name", "")
+            repo_token = normalize_name(repo_id).lower()
+            name_token = normalize_name(str(name)).lower()
+            if family_token not in repo_token and family_token not in name_token:
+                continue
+
+            if current_repo_id and repo_id.lower() == current_repo_id.lower():
+                continue
+
+            related.append(model)
+
+        return related
 
     def search_models_fts(
         self,

@@ -182,8 +182,10 @@ export class PythonBridge {
 
     while (Date.now() - startTime < timeout) {
       try {
-        await this.healthCheck();
-        return;
+        const healthy = await this.healthCheck();
+        if (healthy) {
+          return;
+        }
       } catch {
         await new Promise((resolve) => setTimeout(resolve, 100));
       }

@@ -7,7 +7,8 @@
 
 import React, { useState, useMemo, useCallback } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
-import type { ModelCategory } from '../types/apps';
+import { modelsAPI } from '../api/models';
+import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -56,6 +57,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [selectedKind, setSelectedKind] = useState<string>('all');
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [isDownloadMode, setIsDownloadMode] = useState(false);
+  const [expandedRelated, setExpandedRelated] = useState<Set<string>>(new Set());
+  const [relatedModelsById, setRelatedModelsById] = useState<
+    Record<string, RelatedModelsState>
+  >({});
 
   // Import State
   const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
@@ -82,21 +87,73 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
 
   // Computed Values
+  const downloadingModels = useMemo(() => {
+    return Object.entries(downloadStatusByRepo)
+      .filter(([, status]) => ['queued', 'downloading', 'cancelling'].includes(status.status))
+      .map(([repoId, status]) => {
+        const name = status.modelName || repoId.split('/').pop() || repoId;
+        return {
+          id: `download:${repoId}`,
+          name,
+          category: status.modelType || 'llm',
+          path: repoId,
+          size: status.totalBytes,
+          isDownloading: true,
+          downloadProgress: status.progress,
+          downloadStatus: status.status as ModelInfo['downloadStatus'],
+          downloadRepoId: repoId,
+          downloadTotalBytes: status.totalBytes,
+        } as ModelInfo;
+      });
+  }, [downloadStatusByRepo]);
+
+  const localModelGroups = useMemo(() => {
+    if (downloadingModels.length === 0) {
+      return modelGroups;
+    }
+
+    const groupMap = new Map<string, ModelInfo[]>();
+    modelGroups.forEach((group) => {
+      groupMap.set(group.category, [...group.models]);
+    });
+
+    downloadingModels.forEach((model) => {
+      const existing = groupMap.get(model.category);
+      if (existing) {
+        groupMap.set(model.category, [model, ...existing]);
+      } else {
+        groupMap.set(model.category, [model]);
+      }
+    });
+
+    const orderedCategories = Array.from(
+      new Set([
+        ...modelGroups.map((group) => group.category),
+        ...downloadingModels.map((model) => model.category),
+      ])
+    );
+
+    return orderedCategories.map((category) => ({
+      category,
+      models: groupMap.get(category) || [],
+    }));
+  }, [modelGroups, downloadingModels]);
+
   const categories = useMemo(() => {
-    const cats = modelGroups.map((g: ModelCategory) => g.category);
+    const cats = localModelGroups.map((g: ModelCategory) => g.category);
     return ['all', ...cats];
-  }, [modelGroups]);
+  }, [localModelGroups]);
 
   const totalModels = useMemo(() => {
-    return modelGroups.reduce((sum: number, group: ModelCategory) => sum + group.models.length, 0);
-  }, [modelGroups]);
+    return localModelGroups.reduce((sum: number, group: ModelCategory) => sum + group.models.length, 0);
+  }, [localModelGroups]);
 
   const isCategoryFiltered = isDownloadMode ? selectedKind !== 'all' : selectedCategory !== 'all';
   const hasLocalFilters = Boolean(searchQuery.trim()) || selectedCategory !== 'all';
 
   // Filter local models
   const filteredGroups = useMemo(() => {
-    let groups = modelGroups;
+    let groups = localModelGroups;
 
     // Filter by category
     if (selectedCategory !== 'all') {
@@ -118,7 +175,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
 
     return groups;
-  }, [modelGroups, searchQuery, selectedCategory]);
+  }, [localModelGroups, searchQuery, selectedCategory]);
+
+  const hasActiveDownloads = useMemo(() => {
+    return Object.values(downloadStatusByRepo).some((status) =>
+      ['queued', 'downloading', 'cancelling'].includes(status.status)
+    );
+  }, [downloadStatusByRepo]);
 
   // Filter remote results
   const filteredRemoteResults = useMemo(() => {
@@ -188,7 +251,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         return;
       }
       logger.info('Remote download started successfully', { repoId, downloadId: result.download_id });
-      startDownload(repoId, result.download_id);
+      startDownload(repoId, result.download_id, { modelName: officialName, modelType });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Download failed.';
       if (error instanceof APIError) {
@@ -218,6 +281,102 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setSelectedKind('all');
     setShowCategoryMenu(false);
   };
+
+  const fetchRelatedModels = useCallback(async (modelId: string) => {
+    let shouldFetch = false;
+    setRelatedModelsById((prev) => {
+      const current = prev[modelId];
+      if (current && (current.status === 'loading' || current.status === 'loaded')) {
+        return prev;
+      }
+      shouldFetch = true;
+      return {
+        ...prev,
+        [modelId]: {
+          status: 'loading',
+          models: [],
+        },
+      };
+    });
+
+    if (!shouldFetch) {
+      return;
+    }
+
+    if (!isAPIAvailable()) {
+      setRelatedModelsById((prev) => ({
+        ...prev,
+        [modelId]: {
+          status: 'error',
+          models: [],
+          error: 'Related models unavailable.',
+        },
+      }));
+      return;
+    }
+
+    try {
+      const result = await modelsAPI.getRelatedModels(modelId, 25);
+      if (result.success) {
+        setRelatedModelsById((prev) => ({
+          ...prev,
+          [modelId]: {
+            status: 'loaded',
+            models: result.models ?? [],
+          },
+        }));
+      } else {
+        setRelatedModelsById((prev) => ({
+          ...prev,
+          [modelId]: {
+            status: 'error',
+            models: [],
+            error: result.error || 'Related models unavailable.',
+          },
+        }));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Related models unavailable.';
+      if (error instanceof APIError) {
+        logger.error('API error fetching related models', {
+          error: error.message,
+          endpoint: error.endpoint,
+          modelId,
+        });
+      } else if (error instanceof Error) {
+        logger.error('Failed to fetch related models', { error: error.message, modelId });
+      } else {
+        logger.error('Unknown error fetching related models', { error, modelId });
+      }
+      setRelatedModelsById((prev) => ({
+        ...prev,
+        [modelId]: {
+          status: 'error',
+          models: [],
+          error: message,
+        },
+      }));
+    }
+  }, []);
+
+  const handleToggleRelated = useCallback(
+    (modelId: string) => {
+      const isExpanded = expandedRelated.has(modelId);
+      setExpandedRelated((prev) => {
+        const next = new Set(prev);
+        if (isExpanded) {
+          next.delete(modelId);
+        } else {
+          next.add(modelId);
+        }
+        return next;
+      });
+      if (!isExpanded) {
+        void fetchRelatedModels(modelId);
+      }
+    },
+    [expandedRelated, fetchRelatedModels]
+  );
 
   // Get current filter list
   const filterList = isDownloadMode ? remoteKinds : categories;
@@ -294,6 +453,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         isCategoryFiltered={isCategoryFiltered}
         onFilterClick={() => setShowCategoryMenu((prev) => !prev)}
         totalModels={totalModels}
+        hasActiveDownloads={hasActiveDownloads}
         showCategoryMenu={showCategoryMenu}
         filterList={filterList}
         selectedFilter={selectedFilter}
@@ -334,6 +494,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 totalModels={totalModels}
                 hasFilters={hasLocalFilters}
                 onClearFilters={handleClearLocalFilters}
+                relatedModelsById={relatedModelsById}
+                expandedRelated={expandedRelated}
+                onToggleRelated={handleToggleRelated}
+                onOpenRelatedUrl={openRemoteUrl}
               />
               {/* Link Health Status */}
               <div className="mt-4">

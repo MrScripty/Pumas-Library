@@ -28,6 +28,12 @@ export interface ModelInfo {
   date?: string;
   starred?: boolean;
   linkedApps?: string[]; // App IDs this model is linked to
+  relatedAvailable?: boolean;
+  isDownloading?: boolean;
+  downloadProgress?: number;
+  downloadStatus?: 'queued' | 'downloading' | 'cancelling';
+  downloadRepoId?: string;
+  downloadTotalBytes?: number;
 }
 
 export interface ModelCategory {
@@ -51,6 +57,14 @@ export interface RemoteModelInfo {
   downloads?: number | null;
   totalSizeBytes?: number | null;
   quantSizes?: Record<string, number>;
+}
+
+export type RelatedModelsStatus = 'idle' | 'loading' | 'loaded' | 'error';
+
+export interface RelatedModelsState {
+  status: RelatedModelsStatus;
+  models: RemoteModelInfo[];
+  error?: string;
 }
 
 export interface SystemResources {

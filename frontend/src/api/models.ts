@@ -30,6 +30,11 @@ class ModelsAPI {
     return await api.search_hf_models(query, kind, limit);
   }
 
+  async getRelatedModels(modelId: string, limit?: number) {
+    const api = this.getAPI();
+    return await api.get_related_models(modelId, limit);
+  }
+
   async startModelDownload(
     repoId: string,
     family: string,

@@ -991,6 +991,23 @@ class ComfyUISetupAPI:
             logger.error("Hugging Face search failed: %s", exc, exc_info=True)
             return {"success": False, "error": str(exc), "models": []}
 
+    def get_related_models(self, model_id: str, limit: int = 25) -> Dict[str, Any]:
+        """Get related HuggingFace models for a library model."""
+        if not self.resource_manager:
+            return {"success": False, "error": "Resource manager unavailable", "models": []}
+        try:
+            results = self.resource_manager.get_related_models(rel_path=model_id, limit=limit)
+            return {"success": True, "models": results}
+        except OSError as exc:
+            logger.error("Related model lookup failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+        except RuntimeError as exc:
+            logger.error("Related model lookup failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+        except ValueError as exc:
+            logger.error("Related model lookup failed: %s", exc, exc_info=True)
+            return {"success": False, "error": str(exc), "models": []}
+
     def search_models_fts(
         self,
         query: str,

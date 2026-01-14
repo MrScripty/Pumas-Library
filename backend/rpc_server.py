@@ -81,6 +81,7 @@ def wrap_response(method: str, result: Any) -> Any:
         "get_model_download_status",
         "cancel_model_download",
         "search_hf_models",
+        "get_related_models",
         "search_models_fts",
         "import_batch",
         "lookup_hf_metadata_for_file",

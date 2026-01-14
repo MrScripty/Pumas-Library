@@ -538,9 +538,18 @@ class ModelDownloader:
             path = getattr(item, "path", "") or getattr(item, "rfilename", "") or ""
             if not path:
                 continue
-            item_type = getattr(item, "type", "") or ""
-            if item_type in {"directory", "dir", "folder"} or path.endswith("/"):
+            raw_type = getattr(item, "type", None)
+            item_type = str(raw_type).lower() if raw_type is not None else ""
+            if item_type in {"directory", "dir", "folder", "tree"} or path.endswith("/"):
                 continue
+            if item_type and item_type not in {"file", "blob"}:
+                continue
+            if not item_type:
+                size = getattr(item, "size", None)
+                lfs = getattr(item, "lfs", None)
+                lfs_size = lfs.get("size") if isinstance(lfs, dict) else None
+                if size is None and lfs_size is None:
+                    continue
             lower = path.lower()
             if lower.endswith((".md", ".txt", ".gitattributes")):
                 continue

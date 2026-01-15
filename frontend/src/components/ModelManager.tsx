@@ -24,7 +24,7 @@ import { APIError, NetworkError } from '../errors';
 
 const logger = getLogger('ModelManager');
 
-interface ModelManagerProps {
+export interface ModelManagerProps {
   modelGroups: ModelCategory[];
   starredModels: Set<string>;
   linkedModels: Set<string>;

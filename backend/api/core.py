@@ -21,6 +21,7 @@ from backend.api.version_info import VersionInfoManager
 from backend.logging_config import get_logger
 from backend.model_library.io import detect_sandbox_environment
 from backend.models import DependencyStatus, GitHubRelease, ModelOverrides, ScanResult, VersionInfo
+from backend.ollama_version_manager import OllamaVersionManager
 from backend.rate_limiter import RateLimiter
 from backend.validators import validate_package_name, validate_url, validate_version_tag
 
@@ -90,8 +91,10 @@ class ComfyUISetupAPI:
         # Initialize version management components (Phase 2-4)
         self.metadata_manager: Optional[MetadataManager] = None
         self.github_fetcher: Optional[GitHubReleasesFetcher] = None
+        self.ollama_github_fetcher: Optional[GitHubReleasesFetcher] = None
         self.resource_manager: Optional[ResourceManager] = None
         self.version_manager: Optional[VersionManager] = None
+        self.ollama_version_manager: Optional[OllamaVersionManager] = None
         self.release_size_calculator: Optional[ReleaseSizeCalculator] = None
         self.size_calc: Optional[SizeCalculator] = None
         self.launcher_updater: Optional["LauncherUpdater"] = None
@@ -116,6 +119,25 @@ class ComfyUISetupAPI:
         target = f" for {tag}" if tag else ""
         logger.warning(f"Rate limit exceeded for {action}{target}")
         return True
+
+    def _normalize_app_id(self, app_id: Optional[str]) -> str:
+        return (app_id or "comfyui").lower()
+
+    def _get_version_manager_for_app(self, app_id: Optional[str]):
+        normalized = self._normalize_app_id(app_id)
+        if normalized == "comfyui":
+            return self.version_manager
+        if normalized == "ollama":
+            return self.ollama_version_manager
+        return None
+
+    def _get_github_fetcher_for_app(self, app_id: Optional[str]):
+        normalized = self._normalize_app_id(app_id)
+        if normalized == "comfyui":
+            return self.github_fetcher
+        if normalized == "ollama":
+            return self.ollama_github_fetcher
+        return None
 
     def _find_comfyui_root(self, start_path: Path) -> Path:
         """
@@ -187,6 +209,14 @@ class ComfyUISetupAPI:
                 self.metadata_manager,
                 self.github_fetcher,
                 self.resource_manager,
+            )
+            self.ollama_github_fetcher = GitHubReleasesFetcher(
+                self.metadata_manager, github_repo="ollama/ollama"
+            )
+            self.ollama_version_manager = OllamaVersionManager(
+                self.script_dir,
+                self.metadata_manager,
+                self.ollama_github_fetcher,
             )
 
             # Initialize size calculation components (Phase 6.2.5a)
@@ -357,11 +387,12 @@ class ComfyUISetupAPI:
         """Reset the completion flag (called by frontend after refresh)"""
         self._background_fetch_completed = False
 
-    def get_github_cache_status(self) -> Dict[str, Any]:
+    def get_github_cache_status(self, app_id: Optional[str] = None) -> Dict[str, Any]:
         """Get GitHub releases cache status for UI display"""
-        if not self.github_fetcher:
+        fetcher = self._get_github_fetcher_for_app(app_id)
+        if not fetcher:
             return {"has_cache": False, "is_valid": False, "is_fetching": False}
-        return self.github_fetcher.get_cache_status()
+        return fetcher.get_cache_status()
 
     # ==================== Dependency Checking ====================
 
@@ -523,15 +554,28 @@ class ComfyUISetupAPI:
         """Open a URL in the default system browser."""
         return self.system_utils.open_url(url)
 
-    def open_active_install(self) -> Dict[str, Any]:
-        """Open the active ComfyUI installation directory in the file manager."""
-        return self.system_utils.open_active_install()
+    def open_active_install(self, app_id: Optional[str] = None) -> Dict[str, Any]:
+        """Open the active installation directory for an app."""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
+            return {"success": False, "error": "Version manager not initialized"}
+
+        active_path = manager.get_active_version_path()
+        if not active_path:
+            return {
+                "success": False,
+                "error": "No active version or installation incomplete",
+            }
+
+        return self.system_utils.open_path(str(active_path))
 
     # ==================== Version Management API (Phase 5) ====================
 
-    def get_available_versions(self, force_refresh: bool = False) -> List[Dict[str, Any]]:
+    def get_available_versions(
+        self, force_refresh: bool = False, app_id: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """
-        Get list of available ComfyUI versions from GitHub with size information
+        Get list of available versions from GitHub with size information
 
         Args:
             force_refresh: Force refresh from GitHub API (bypass cache)
@@ -539,7 +583,34 @@ class ComfyUISetupAPI:
         Returns:
             List of release dictionaries with size data
         """
-        if not self.version_manager:
+        normalized_app = self._normalize_app_id(app_id)
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
+            return []
+
+        if normalized_app != "comfyui":
+            try:
+                return manager.get_available_versions(force_refresh)
+            except OSError as e:
+                logger.error(
+                    f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                    exc_info=True,
+                )
+            except RuntimeError as e:
+                logger.error(
+                    f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                    exc_info=True,
+                )
+            except TypeError as e:
+                logger.error(
+                    f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                    exc_info=True,
+                )
+            except ValueError as e:
+                logger.error(
+                    f"Error fetching releases (force_refresh={force_refresh}): {e}",
+                    exc_info=True,
+                )
             return []
 
         releases_source = "cache"
@@ -547,7 +618,7 @@ class ComfyUISetupAPI:
 
         # Try to fetch (optionally forced); on failure, fall back to cached data without clearing it
         try:
-            releases = self.version_manager.get_available_releases(force_refresh)
+            releases = manager.get_available_releases(force_refresh)
             releases_source = "remote" if force_refresh else "cache/remote"
         except OSError as e:
             logger.error(
@@ -603,7 +674,7 @@ class ComfyUISetupAPI:
         installing_tag = None
         active_progress = None
         try:
-            active_progress = self.version_manager.get_installation_progress()
+            active_progress = manager.get_installation_progress()
             if active_progress and not active_progress.get("completed_at"):
                 installing_tag = active_progress.get("tag")
         except OSError as e:
@@ -649,7 +720,7 @@ class ComfyUISetupAPI:
 
         # Kick off background size refresh prioritizing non-installed releases
         try:
-            installed_tags = set(self.get_installed_versions())
+            installed_tags = set(self.get_installed_versions(app_id))
             if self.size_calc:
                 self.size_calc._refresh_release_sizes_async(releases, installed_tags, force_refresh)
         except OSError as e:
@@ -663,100 +734,127 @@ class ComfyUISetupAPI:
 
         return enriched_releases
 
-    def get_installed_versions(self) -> List[str]:
-        """Get list of installed ComfyUI version tags"""
-        if not self.version_manager:
+    def get_installed_versions(self, app_id: Optional[str] = None) -> List[str]:
+        """Get list of installed version tags"""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return []
-        return self.version_manager.get_installed_versions()
+        return manager.get_installed_versions()
 
-    def validate_installations(self) -> Dict[str, Any]:
+    def validate_installations(self, app_id: Optional[str] = None) -> Dict[str, Any]:
         """Validate all installations and clean up incomplete ones"""
-        if not self.version_manager:
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return {"had_invalid": False, "removed": [], "valid": []}
-        return self.version_manager.validate_installations()
+        return manager.validate_installations()
 
-    def get_installation_progress(self) -> Optional[Dict[str, Any]]:
+    def get_installation_progress(self, app_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """Get current installation progress (Phase 6.2.5b)"""
-        if not self.version_manager:
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return None
-        return self.version_manager.get_installation_progress()
+        return manager.get_installation_progress()
 
-    def install_version(self, tag: str, progress_callback: InstallProgressCallback = None) -> bool:
-        """Install a ComfyUI version"""
-        if not self.version_manager:
+    def install_version(
+        self,
+        tag: str,
+        progress_callback: InstallProgressCallback = None,
+        app_id: Optional[str] = None,
+    ) -> bool:
+        """Install a version"""
+        normalized_app = self._normalize_app_id(app_id)
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return False
         if not validate_version_tag(tag):
             logger.warning(f"Rejected install for invalid tag: {tag!r}")
             return False
         if self._is_rate_limited("install", tag):
             return False
-        install_ok = self.version_manager.install_version(tag, progress_callback)
+
+        if normalized_app == "comfyui":
+            install_ok = manager.install_version(tag, progress_callback)
+        else:
+            install_ok = manager.install_version(tag)
         if not install_ok:
             return False
 
-        # Automatically patch the newly installed version so the UI button isn't needed
-        patched = self.patch_mgr.patch_main_py(tag)
-        if not patched and not self.patch_mgr.is_patched(tag):
-            logger.warning(f"Installation succeeded but patching {tag} failed.")
-            return False
+        if normalized_app == "comfyui":
+            # Automatically patch the newly installed version so the UI button isn't needed
+            patched = self.patch_mgr.patch_main_py(tag)
+            if not patched and not self.patch_mgr.is_patched(tag):
+                logger.warning(f"Installation succeeded but patching {tag} failed.")
+                return False
 
         return True
 
-    def cancel_installation(self) -> bool:
+    def cancel_installation(self, app_id: Optional[str] = None) -> bool:
         """Cancel the currently running installation"""
-        if not self.version_manager:
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return False
         if self._is_rate_limited("cancel"):
             return False
-        return self.version_manager.cancel_installation()
+        return manager.cancel_installation()
 
-    def remove_version(self, tag: str) -> bool:
-        """Remove an installed ComfyUI version"""
-        if not self.version_manager:
+    def remove_version(self, tag: str, app_id: Optional[str] = None) -> bool:
+        """Remove an installed version"""
+        normalized_app = self._normalize_app_id(app_id)
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return False
         if not validate_version_tag(tag):
             logger.warning(f"Rejected removal for invalid tag: {tag!r}")
             return False
         if self._is_rate_limited("remove", tag):
             return False
-        removed = self.version_manager.remove_version(tag)
-        if removed:
+        removed = manager.remove_version(tag)
+        if removed and normalized_app == "comfyui":
             # Clean up any version-specific shortcuts and icons
             self.shortcut_mgr.remove_version_shortcuts(tag, remove_menu=True, remove_desktop=True)
         return removed
 
-    def switch_version(self, tag: str) -> bool:
-        """Switch to a different ComfyUI version"""
-        if not self.version_manager:
+    def switch_version(self, tag: str, app_id: Optional[str] = None) -> bool:
+        """Switch to a different version"""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return False
         if not validate_version_tag(tag):
             logger.warning(f"Rejected switch for invalid tag: {tag!r}")
             return False
-        return self.version_manager.set_active_version(tag)
+        return manager.set_active_version(tag)
 
-    def get_active_version(self) -> str:
-        """Get currently active ComfyUI version"""
-        if not self.version_manager:
+    def get_active_version(self, app_id: Optional[str] = None) -> str:
+        """Get currently active version"""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return ""
-        return self.version_manager.get_active_version() or ""
+        return manager.get_active_version() or ""
 
-    def get_default_version(self) -> str:
-        """Get configured default ComfyUI version"""
-        if not self.version_manager:
+    def get_default_version(self, app_id: Optional[str] = None) -> str:
+        """Get configured default version"""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return ""
-        return self.version_manager.get_default_version() or ""
+        return manager.get_default_version() or ""
 
-    def set_default_version(self, tag: Optional[str]) -> bool:
-        """Set the default ComfyUI version (or clear when tag is None)"""
-        if not self.version_manager:
+    def set_default_version(self, tag: Optional[str], app_id: Optional[str] = None) -> bool:
+        """Set the default version (or clear when tag is None)"""
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return False
         if tag is not None and not validate_version_tag(tag):
             logger.warning(f"Rejected default version for invalid tag: {tag!r}")
             return False
-        return self.version_manager.set_default_version(tag)
+        return manager.set_default_version(tag)
 
-    def check_version_dependencies(self, tag: str) -> DependencyStatus:
+    def check_version_dependencies(
+        self, tag: str, app_id: Optional[str] = None
+    ) -> DependencyStatus:
         """Check dependency installation status for a version"""
+        normalized_app = self._normalize_app_id(app_id)
+        if normalized_app != "comfyui":
+            return {"installed": [], "missing": [], "requirementsFile": None}
         if not self.version_manager:
             return {"installed": [], "missing": [], "requirementsFile": None}
         if not validate_version_tag(tag):
@@ -765,9 +863,15 @@ class ComfyUISetupAPI:
         return self.version_manager.check_dependencies(tag)
 
     def install_version_dependencies(
-        self, tag: str, progress_callback: DependencyProgressCallback = None
+        self,
+        tag: str,
+        progress_callback: DependencyProgressCallback = None,
+        app_id: Optional[str] = None,
     ) -> bool:
         """Install dependencies for a ComfyUI version"""
+        normalized_app = self._normalize_app_id(app_id)
+        if normalized_app != "comfyui":
+            return False
         if not self.version_manager:
             return False
         if not validate_version_tag(tag):
@@ -775,23 +879,36 @@ class ComfyUISetupAPI:
             return False
         return self.version_manager.install_dependencies(tag, progress_callback)
 
-    def get_version_status(self) -> Dict[str, Any]:
+    def get_version_status(self, app_id: Optional[str] = None) -> Dict[str, Any]:
         """Get comprehensive status of all versions"""
-        if not self.version_manager:
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return {"installedCount": 0, "activeVersion": None, "versions": {}}
-        return self.version_manager.get_version_status()
+        status = manager.get_version_status()
+        if "installedCount" not in status:
+            status["installedCount"] = len(status.get("versions", {}))
+        return status
 
-    def get_version_info(self, tag: str) -> Optional[VersionInfo]:
+    def get_version_info(self, tag: str, app_id: Optional[str] = None) -> Optional[VersionInfo]:
         """Get detailed information about a specific version"""
-        if not self.version_manager:
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return None
         if not validate_version_tag(tag):
             logger.warning(f"Rejected version info request for invalid tag: {tag!r}")
             return None
-        return self.version_manager.get_version_info(tag)
+        return manager.get_version_info(tag)
 
-    def launch_version(self, tag: str, extra_args: Optional[List[str]] = None) -> Dict[str, Any]:
-        """Launch a specific ComfyUI version"""
+    def launch_version(
+        self,
+        tag: str,
+        extra_args: Optional[List[str]] = None,
+        app_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Launch a specific version"""
+        normalized_app = self._normalize_app_id(app_id)
+        if normalized_app != "comfyui":
+            return {"success": False, "error": "Launch not supported for this app"}
         if not self.version_manager:
             return {"success": False, "error": "Version manager unavailable"}
         if not validate_version_tag(tag):
@@ -810,12 +927,20 @@ class ComfyUISetupAPI:
     # ==================== Size Calculation API ====================
 
     def calculate_release_size(
-        self, tag: str, force_refresh: bool = False
+        self, tag: str, force_refresh: bool = False, app_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """Calculate total download size for a release (Phase 6.2.5c)"""
-        if not self.size_calc:
+        normalized_app = self._normalize_app_id(app_id)
+        if normalized_app == "comfyui":
+            if not self.size_calc:
+                return None
+            return self.size_calc.calculate_release_size(tag, force_refresh)
+        manager = self._get_version_manager_for_app(app_id)
+        if not manager:
             return None
-        return self.size_calc.calculate_release_size(tag, force_refresh)
+        if hasattr(manager, "get_release_size_info"):
+            return manager.get_release_size_info(tag)
+        return None
 
     def calculate_all_release_sizes(
         self, progress_callback: ReleaseSizeProgressCallback = None

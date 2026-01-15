@@ -65,17 +65,18 @@ PACKAGE_WEIGHTS = {
 class InstallationProgressTracker:
     """Thread-safe installation progress tracker"""
 
-    def __init__(self, cache_dir: Path):
+    def __init__(self, cache_dir: Path, state_filename: str = "installation-state.json"):
         """
         Initialize InstallationProgressTracker
 
         Args:
             cache_dir: Directory for progress state storage
+            state_filename: Filename for persisted state
         """
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self.state_file = self.cache_dir / "installation-state.json"
+        self.state_file = self.cache_dir / state_filename
         self._lock = threading.Lock()
         self._file_lock = threading.Lock()
         self._current_state: Optional[Dict] = None

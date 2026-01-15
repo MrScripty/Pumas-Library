@@ -14,6 +14,8 @@ import { APIError } from '../errors';
 const logger = getLogger('useVersionFetching');
 
 interface UseVersionFetchingOptions {
+  appId?: string;
+  enabled?: boolean;
   onInstallingTagUpdate?: (tag: string | null) => void;
 }
 
@@ -36,8 +38,12 @@ interface UseVersionFetchingResult {
 }
 
 export function useVersionFetching({
+  appId,
+  enabled = true,
   onInstallingTagUpdate,
 }: UseVersionFetchingOptions = {}): UseVersionFetchingResult {
+  const resolvedAppId = appId ?? 'comfyui';
+  const isEnabled = enabled;
   const [installedVersions, setInstalledVersions] = useState<string[]>([]);
   const [activeVersion, setActiveVersion] = useState<string | null>(null);
   const [availableVersions, setAvailableVersions] = useState<VersionRelease[]>([]);
@@ -54,14 +60,32 @@ export function useVersionFetching({
   const followupRefreshRef = useRef<NodeJS.Timeout | null>(null);
   const fetchAvailableVersionsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(() => Promise.resolve());
 
+  useEffect(() => {
+    setInstalledVersions([]);
+    setActiveVersion(null);
+    setAvailableVersions([]);
+    setVersionStatus(null);
+    setDefaultVersionState(null);
+    setCacheStatus({
+      has_cache: false,
+      is_valid: false,
+      is_fetching: false,
+    });
+    setError(null);
+    setIsLoading(isEnabled);
+    if (!isEnabled) {
+      setIsLoading(false);
+    }
+  }, [resolvedAppId, isEnabled]);
+
   // Fetch installed versions
   const fetchInstalledVersions = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       return;
     }
 
     try {
-      const result = await api.get_installed_versions();
+      const result = await api.get_installed_versions(resolvedAppId);
       if (result.success) {
         setInstalledVersions(result.versions || []);
       } else {
@@ -79,16 +103,16 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Fetch active version
   const fetchActiveVersion = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       return;
     }
 
     try {
-      const result = await api.get_active_version();
+      const result = await api.get_active_version(resolvedAppId);
       if (result.success) {
         setActiveVersion(result.version || null);
       } else {
@@ -106,16 +130,16 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Fetch default version
   const fetchDefaultVersion = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       return;
     }
 
     try {
-      const result = await api.get_default_version();
+      const result = await api.get_default_version(resolvedAppId);
       if (result.success) {
         setDefaultVersionState(result.version || null);
       }
@@ -129,18 +153,20 @@ export function useVersionFetching({
         logger.warn('Unknown error fetching default version', { error });
       }
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Fetch available versions from GitHub
   const fetchAvailableVersions = useCallback(async (forceRefresh: boolean = false) => {
-    if (!isAPIAvailable()) {
-      logger.error('get_available_versions not available');
+    if (!isAPIAvailable() || !isEnabled) {
+      if (!isAPIAvailable()) {
+        logger.error('get_available_versions not available');
+      }
       return;
     }
 
     try {
       logger.debug('Fetching available versions', { forceRefresh });
-      const result = await api.get_available_versions(forceRefresh);
+      const result = await api.get_available_versions(forceRefresh, resolvedAppId);
       logger.debug('Available versions result received', { versionsCount: result.versions?.length });
       if (result.success) {
         setAvailableVersions(result.versions || []);
@@ -177,19 +203,19 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, [onInstallingTagUpdate]);
+  }, [isEnabled, onInstallingTagUpdate, resolvedAppId]);
 
   // Update ref to latest function
   fetchAvailableVersionsRef.current = fetchAvailableVersions;
 
   // Fetch comprehensive version status
   const fetchVersionStatus = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       return;
     }
 
     try {
-      const result = await api.get_version_status();
+      const result = await api.get_version_status(resolvedAppId);
       if (result.success) {
         setVersionStatus(result.status || null);
         if (result.status?.defaultVersion !== undefined) {
@@ -210,16 +236,16 @@ export function useVersionFetching({
         setError(String(error));
       }
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Set default version
   const setDefaultVersion = useCallback(async (tag: string | null) => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'set_default_version');
     }
 
     try {
-      const result = await api.set_default_version(tag);
+      const result = await api.set_default_version(tag, resolvedAppId);
       if (result.success) {
         setDefaultVersionState(tag);
         await fetchVersionStatus();
@@ -239,10 +265,14 @@ export function useVersionFetching({
       }
       throw error;
     }
-  }, [fetchVersionStatus]);
+  }, [fetchVersionStatus, isEnabled, resolvedAppId]);
 
   // Refresh all version data
   const refreshAll = useCallback(async (forceRefresh: boolean = false) => {
+    if (!isEnabled) {
+      setIsLoading(false);
+      return;
+    }
     setIsLoading(true);
     try {
       await Promise.all([
@@ -263,17 +293,29 @@ export function useVersionFetching({
     } finally {
       setIsLoading(false);
     }
-  }, [fetchInstalledVersions, fetchActiveVersion, fetchDefaultVersion, fetchAvailableVersions, fetchVersionStatus]);
+  }, [
+    fetchInstalledVersions,
+    fetchActiveVersion,
+    fetchDefaultVersion,
+    fetchAvailableVersions,
+    fetchVersionStatus,
+    isEnabled,
+  ]);
 
   // Poll cache status for background GitHub fetches
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
     let waitTimeout: NodeJS.Timeout | null = null;
+    const supportsBackgroundFetch = resolvedAppId === 'comfyui';
+
+    if (!isEnabled) {
+      return () => {};
+    }
 
     const checkBackgroundFetch = async () => {
       try {
         if (!isAPIAvailable()) return;
-        const status = await api.get_github_cache_status();
+        const status = await api.get_github_cache_status(resolvedAppId);
         setCacheStatus(status);
 
         if (status.is_fetching && !status.has_cache) {
@@ -283,7 +325,12 @@ export function useVersionFetching({
         }
 
         if (!isAPIAvailable()) return;
-        if (!status.is_fetching && status.has_cache && await api.should_update_ui_from_background_fetch()) {
+        if (
+          supportsBackgroundFetch
+          && !status.is_fetching
+          && status.has_cache
+          && await api.should_update_ui_from_background_fetch()
+        ) {
           logger.info('Background fetch completed - refreshing UI with new data');
           await api.reset_background_fetch_flag();
           await fetchAvailableVersionsRef.current(false);
@@ -317,7 +364,7 @@ export function useVersionFetching({
       if (waitTimeout) clearTimeout(waitTimeout);
       if (followupRefreshRef.current) clearTimeout(followupRefreshRef.current);
     };
-  }, []);
+  }, [fetchAvailableVersionsRef, isEnabled, resolvedAppId]);
 
   return {
     installedVersions,

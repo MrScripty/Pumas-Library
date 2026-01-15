@@ -216,27 +216,30 @@ class JavaScriptAPI:
 
     # ==================== Version Management Methods (Phase 5) ====================
 
-    def get_available_versions(self, force_refresh=False):
-        """Get list of available ComfyUI versions from GitHub"""
+    def get_available_versions(self, force_refresh=False, app_id=None):
+        """Get list of available versions from GitHub"""
         return self._call_api(
             "get_available_versions",
-            lambda: {"success": True, "versions": self.api.get_available_versions(force_refresh)},
+            lambda: {
+                "success": True,
+                "versions": self.api.get_available_versions(force_refresh, app_id),
+            },
             lambda exc: {"success": False, "error": str(exc), "versions": []},
         )
 
-    def get_installed_versions(self):
-        """Get list of installed ComfyUI version tags"""
+    def get_installed_versions(self, app_id=None):
+        """Get list of installed version tags"""
         return self._call_api(
             "get_installed_versions",
-            lambda: {"success": True, "versions": self.api.get_installed_versions()},
+            lambda: {"success": True, "versions": self.api.get_installed_versions(app_id)},
             lambda exc: {"success": False, "error": str(exc), "versions": []},
         )
 
-    def validate_installations(self):
+    def validate_installations(self, app_id=None):
         """Validate all installations and clean up incomplete ones"""
         return self._call_api(
             "validate_installations",
-            lambda: {"success": True, "result": self.api.validate_installations()},
+            lambda: {"success": True, "result": self.api.validate_installations(app_id)},
             lambda exc: {
                 "success": False,
                 "error": str(exc),
@@ -244,35 +247,35 @@ class JavaScriptAPI:
             },
         )
 
-    def get_installation_progress(self):
+    def get_installation_progress(self, app_id=None):
         """Get current installation progress (Phase 6.2.5b)"""
         return self._call_api(
             "get_installation_progress",
-            self.api.get_installation_progress,
+            lambda: self.api.get_installation_progress(app_id),
             lambda _exc: None,
         )
 
-    def install_version(self, tag):
+    def install_version(self, tag, app_id=None):
         """Install a ComfyUI version"""
         return self._call_api(
             "install_version",
-            lambda: {"success": self.api.install_version(tag)},
+            lambda: {"success": self.api.install_version(tag, app_id=app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def cancel_installation(self):
+    def cancel_installation(self, app_id=None):
         """Cancel the currently running installation"""
         return self._call_api(
             "cancel_installation",
-            lambda: {"success": self.api.cancel_installation()},
+            lambda: {"success": self.api.cancel_installation(app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def calculate_release_size(self, tag, force_refresh=False):
+    def calculate_release_size(self, tag, force_refresh=False, app_id=None):
         """Calculate total download size for a release (Phase 6.2.5c)"""
         return self._call_api(
             "calculate_release_size",
-            lambda: self.api.calculate_release_size(tag, force_refresh) or None,
+            lambda: self.api.calculate_release_size(tag, force_refresh, app_id) or None,
             lambda _exc: None,
         )
 
@@ -284,51 +287,54 @@ class JavaScriptAPI:
             lambda _exc: {},
         )
 
-    def remove_version(self, tag):
+    def remove_version(self, tag, app_id=None):
         """Remove an installed ComfyUI version"""
         return self._call_api(
             "remove_version",
-            lambda: {"success": self.api.remove_version(tag)},
+            lambda: {"success": self.api.remove_version(tag, app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def switch_version(self, tag):
+    def switch_version(self, tag, app_id=None):
         """Switch to a different ComfyUI version"""
         return self._call_api(
             "switch_version",
-            lambda: {"success": self.api.switch_version(tag)},
+            lambda: {"success": self.api.switch_version(tag, app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def get_active_version(self):
+    def get_active_version(self, app_id=None):
         """Get currently active ComfyUI version"""
         return self._call_api(
             "get_active_version",
-            lambda: {"success": True, "version": self.api.get_active_version()},
+            lambda: {"success": True, "version": self.api.get_active_version(app_id)},
             lambda exc: {"success": False, "error": str(exc), "version": ""},
         )
 
-    def get_default_version(self):
+    def get_default_version(self, app_id=None):
         """Get configured default ComfyUI version"""
         return self._call_api(
             "get_default_version",
-            lambda: {"success": True, "version": self.api.get_default_version()},
+            lambda: {"success": True, "version": self.api.get_default_version(app_id)},
             lambda exc: {"success": False, "error": str(exc), "version": ""},
         )
 
-    def set_default_version(self, tag=None):
+    def set_default_version(self, tag=None, app_id=None):
         """Set the default ComfyUI version (pass None to clear)"""
         return self._call_api(
             "set_default_version",
-            lambda: {"success": self.api.set_default_version(tag)},
+            lambda: {"success": self.api.set_default_version(tag, app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def check_version_dependencies(self, tag):
+    def check_version_dependencies(self, tag, app_id=None):
         """Check dependency installation status for a version"""
         return self._call_api(
             "check_version_dependencies",
-            lambda: {"success": True, "dependencies": self.api.check_version_dependencies(tag)},
+            lambda: {
+                "success": True,
+                "dependencies": self.api.check_version_dependencies(tag, app_id),
+            },
             lambda exc: {
                 "success": False,
                 "error": str(exc),
@@ -336,27 +342,27 @@ class JavaScriptAPI:
             },
         )
 
-    def install_version_dependencies(self, tag):
+    def install_version_dependencies(self, tag, app_id=None):
         """Install dependencies for a ComfyUI version"""
         return self._call_api(
             "install_version_dependencies",
-            lambda: {"success": self.api.install_version_dependencies(tag)},
+            lambda: {"success": self.api.install_version_dependencies(tag, app_id=app_id)},
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def get_version_status(self):
+    def get_version_status(self, app_id=None):
         """Get comprehensive status of all versions"""
         return self._call_api(
             "get_version_status",
-            lambda: {"success": True, "status": self.api.get_version_status()},
+            lambda: {"success": True, "status": self.api.get_version_status(app_id)},
             lambda exc: {"success": False, "error": str(exc), "status": {}},
         )
 
-    def get_version_info(self, tag):
+    def get_version_info(self, tag, app_id=None):
         """Get detailed information about a specific version"""
         return self._call_api(
             "get_version_info",
-            lambda: {"success": True, "info": self.api.get_version_info(tag)},
+            lambda: {"success": True, "info": self.api.get_version_info(tag, app_id)},
             lambda exc: {"success": False, "error": str(exc), "info": {}},
         )
 
@@ -368,11 +374,11 @@ class JavaScriptAPI:
             lambda exc: {"success": False, "error": str(exc)},
         )
 
-    def open_active_install(self):
+    def open_active_install(self, app_id=None):
         """Open the active ComfyUI installation directory"""
         return self._call_api(
             "open_active_install",
-            self.api.open_active_install,
+            lambda: self.api.open_active_install(app_id),
             lambda exc: {"success": False, "error": str(exc)},
         )
 
@@ -399,11 +405,11 @@ class JavaScriptAPI:
             "paths": [],
         }
 
-    def launch_version(self, tag, extra_args=None):
+    def launch_version(self, tag, extra_args=None, app_id=None):
         """Launch a specific ComfyUI version"""
 
         def _do():
-            result = self.api.launch_version(tag, extra_args)
+            result = self.api.launch_version(tag, extra_args, app_id)
             return {
                 "success": result.get("success", False),
                 "log_path": result.get("log_path"),
@@ -748,12 +754,12 @@ class JavaScriptAPI:
 
     # ==================== Cache Status Methods ====================
 
-    def get_github_cache_status(self):
+    def get_github_cache_status(self, app_id=None):
         """Get GitHub releases cache status"""
         return self._call_api(
             "get_github_cache_status",
-            lambda: {"success": True, "status": self.api.get_github_cache_status()},
-            lambda exc: {"success": False, "error": str(exc)},
+            lambda: {"success": True, "status": self.api.get_github_cache_status(app_id)},
+            lambda exc: {"success": False, "error": str(exc), "status": {}},
         )
 
     def has_background_fetch_completed(self):

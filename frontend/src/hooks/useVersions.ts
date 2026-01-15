@@ -22,7 +22,7 @@ import type {
   CacheStatus,
 } from '../types/versions';
 
-interface UseVersionsResult {
+export interface UseVersionsResult {
   // State
   installedVersions: string[];
   activeVersion: string | null;
@@ -49,7 +49,14 @@ interface UseVersionsResult {
   setDefaultVersion: (tag: string | null) => Promise<void>;
 }
 
-export function useVersions(): UseVersionsResult {
+export interface UseVersionsOptions {
+  appId?: string;
+  enabled?: boolean;
+}
+
+export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}): UseVersionsResult {
+  const resolvedAppId = appId ?? 'comfyui';
+  const isEnabled = enabled;
   const [localInstallingTag, setLocalInstallingTag] = useState<string | null>(null);
 
   // Version fetching hook
@@ -69,6 +76,8 @@ export function useVersions(): UseVersionsResult {
     fetchAvailableVersions,
     setDefaultVersion,
   } = useVersionFetching({
+    appId: resolvedAppId,
+    enabled: isEnabled,
     onInstallingTagUpdate: setLocalInstallingTag,
   });
 
@@ -85,6 +94,8 @@ export function useVersions(): UseVersionsResult {
     openActiveInstall,
     fetchInstallationProgress,
   } = useInstallationManager({
+    appId: resolvedAppId,
+    enabled: isEnabled,
     availableVersions,
     onRefreshVersions: async () => {
       await Promise.all([
@@ -103,6 +114,9 @@ export function useVersions(): UseVersionsResult {
     let waitTimeout: NodeJS.Timeout | null = null;
 
     const waitForApi = () => {
+      if (!isEnabled) {
+        return;
+      }
       if (isAPIAvailable()) {
         void refreshAll();
         return;
@@ -115,7 +129,7 @@ export function useVersions(): UseVersionsResult {
     return () => {
       if (waitTimeout) clearTimeout(waitTimeout);
     };
-  }, [refreshAll]);
+  }, [isEnabled, refreshAll, resolvedAppId]);
 
   return {
     // State

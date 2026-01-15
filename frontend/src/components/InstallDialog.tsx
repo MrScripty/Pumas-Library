@@ -1,7 +1,7 @@
 /**
  * Install Dialog Component (Refactored)
  *
- * Modal/page for installing ComfyUI versions with progress tracking.
+ * Modal/page for installing app versions with progress tracking.
  * Reduced from 939 lines to orchestrator component by extracting:
  * - useInstallationProgress hook (progress polling)
  * - useInstallationState hook (UI state management)
@@ -38,6 +38,8 @@ interface InstallDialogProps {
   installationProgress?: InstallationProgress | null;
   installNetworkStatus?: 'idle' | 'downloading' | 'stalled' | 'failed';
   onRefreshProgress?: () => Promise<void>;
+  appDisplayName?: string;
+  appId?: string;
 }
 
 export function InstallDialog({
@@ -54,6 +56,8 @@ export function InstallDialog({
   installationProgress,
   installNetworkStatus = 'idle',
   onRefreshProgress,
+  appDisplayName = 'ComfyUI',
+  appId,
 }: InstallDialogProps) {
   logger.debug('Component rendered', { isOpen, availableVersionsCount: availableVersions.length, displayMode });
 
@@ -71,6 +75,7 @@ export function InstallDialog({
     setFailedInstall,
     showCancellationNotice,
   } = useInstallationProgress({
+    appId,
     installingVersion,
     externalProgress: installationProgress,
     onRefreshProgress,
@@ -146,7 +151,7 @@ export function InstallDialog({
 
       for (const release of releasesNeedingSize) {
         try {
-          await api.calculate_release_size(release.tag_name, false);
+          await api.calculate_release_size(release.tag_name, false, appId);
         } catch (error) {
           if (error instanceof APIError) {
             logger.error('API error calculating release size', { error: error.message, endpoint: error.endpoint, tag: release.tag_name });
@@ -171,7 +176,7 @@ export function InstallDialog({
         logger.error('Unknown error during background size calculation', { error });
       }
     });
-  }, [isOpen, availableVersions, onRefreshAll]);
+  }, [appId, isOpen, availableVersions, onRefreshAll]);
 
   // Filter versions based on user preferences
   const filteredVersions = availableVersions.filter((release) => {
@@ -328,7 +333,7 @@ export function InstallDialog({
         <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
           <div className="flex items-center gap-3">
             <h2 className="text-xl font-semibold text-[hsl(var(--text-primary))]">
-              {installingVersion ? `Installing ${installingVersion}` : 'Install ComfyUI Version'}
+              {installingVersion ? `Installing ${installingVersion}` : `Install ${appDisplayName} Version`}
             </h2>
           </div>
           <div className="flex items-center gap-2">

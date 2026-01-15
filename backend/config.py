@@ -61,6 +61,10 @@ class NetworkConfig:
     REQUEST_TIMEOUT_SEC: int = 15
     QUICK_REQUEST_TIMEOUT_SEC: int = 3
     MAX_RETRIES: int = 3
+    DOWNLOAD_REQUEST_TIMEOUT_SEC: int = 30
+    DOWNLOAD_CHUNK_SIZE_BYTES: int = 8192
+    DOWNLOAD_PROGRESS_INTERVAL_SEC: float = 0.5
+    DOWNLOAD_TEMP_SUFFIX: str = ".part"
     GITHUB_API_BASE: str = "https://api.github.com"
     GITHUB_RELEASES_PER_PAGE: int = 100
     GITHUB_RELEASES_MAX_PAGES: int = 10

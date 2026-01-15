@@ -51,6 +51,7 @@ const IconWrapper: React.FC<IconWrapperProps> = ({ isSelected, children }) => {
 const getIconPath = (appId: string): string => {
   const iconMap: Record<string, string> = {
     'openwebui': './openwebui-icon.png',
+    'ollama': './ollama-icon.png',
     'invoke': './invoke-icon.png',
     'krita-diffusion': './krita-diffusion-icon.png',
   };

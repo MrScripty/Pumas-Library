@@ -287,6 +287,8 @@ class InstallationMixin(MixinBase, InstallationContext):
                 )
 
                 if not success:
+                    if downloader.was_cancelled():
+                        raise InterruptedError("Installation cancelled during download")
                     error_msg = "Download failed"
                     logger.error(error_msg)
                     self._log_install(error_msg)

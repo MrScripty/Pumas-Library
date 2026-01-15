@@ -13,6 +13,7 @@ export interface AppConfig {
   installPath?: string;
   version?: string;
   description?: string;
+  connectionUrl?: string;
   starred?: boolean;
   linked?: boolean;
   ramUsage?: number;      // RAM usage percentage (0-100)

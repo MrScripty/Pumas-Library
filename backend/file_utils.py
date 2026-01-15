@@ -24,7 +24,8 @@ def atomic_write_json(
     keep_backup: bool = True,
 ) -> None:
     """Write JSON atomically, validating the payload and keeping an optional backup."""
-    temp_path = _with_suffix(path, ".tmp")
+    unique_suffix = f".{os.getpid()}.{threading.get_ident()}.tmp"
+    temp_path = _with_suffix(path, unique_suffix)
     backup_path = _with_suffix(path, ".bak")
     if lock:
         lock.acquire()

@@ -620,8 +620,10 @@ export interface GetVersionInfoResponse extends BaseResponse {
   info: {
     path: string;
     installedDate: string;
-    pythonVersion: string;
     releaseTag: string;
+    pythonVersion?: string;
+    downloadUrl?: string;
+    size?: number;
   } | null;
 }
 
@@ -831,31 +833,34 @@ export interface PyWebViewAPI {
   // ========================================
   // Version Management
   // ========================================
-  get_available_versions(forceRefresh?: boolean): Promise<GetAvailableVersionsResponse>;
-  get_installed_versions(): Promise<GetInstalledVersionsResponse>;
-  get_active_version(): Promise<GetActiveVersionResponse>;
-  install_version(tag: string): Promise<VersionActionResponse>;
-  remove_version(tag: string): Promise<VersionActionResponse>;
-  switch_version(tag: string): Promise<VersionActionResponse>;
-  validate_installations(): Promise<ValidateInstallationsResponse>;
-  get_version_info(tag: string): Promise<GetVersionInfoResponse>;
-  get_default_version(): Promise<GetDefaultVersionResponse>;
-  set_default_version(tag?: string | null): Promise<SetDefaultVersionResponse>;
-  get_version_status(): Promise<VersionStatusResponse>;
-  launch_version(tag: string, extraArgs?: string[]): Promise<LaunchResponse>;
-  check_version_dependencies(tag: string): Promise<BaseResponse>;
-  install_version_dependencies(tag: string): Promise<BaseResponse>;
+  get_available_versions(
+    forceRefresh?: boolean,
+    appId?: string
+  ): Promise<GetAvailableVersionsResponse>;
+  get_installed_versions(appId?: string): Promise<GetInstalledVersionsResponse>;
+  get_active_version(appId?: string): Promise<GetActiveVersionResponse>;
+  install_version(tag: string, appId?: string): Promise<VersionActionResponse>;
+  remove_version(tag: string, appId?: string): Promise<VersionActionResponse>;
+  switch_version(tag: string, appId?: string): Promise<VersionActionResponse>;
+  validate_installations(appId?: string): Promise<ValidateInstallationsResponse>;
+  get_version_info(tag: string, appId?: string): Promise<GetVersionInfoResponse>;
+  get_default_version(appId?: string): Promise<GetDefaultVersionResponse>;
+  set_default_version(tag?: string | null, appId?: string): Promise<SetDefaultVersionResponse>;
+  get_version_status(appId?: string): Promise<VersionStatusResponse>;
+  launch_version(tag: string, extraArgs?: string[], appId?: string): Promise<LaunchResponse>;
+  check_version_dependencies(tag: string, appId?: string): Promise<BaseResponse>;
+  install_version_dependencies(tag: string, appId?: string): Promise<BaseResponse>;
 
   // ========================================
   // Installation & Progress
   // ========================================
-  get_installation_progress(): Promise<InstallationProgressResponse | null>;
-  cancel_installation(): Promise<CancelInstallationResponse>;
+  get_installation_progress(appId?: string): Promise<InstallationProgressResponse | null>;
+  cancel_installation(appId?: string): Promise<CancelInstallationResponse>;
 
   // ========================================
   // Cache & Background Fetch
   // ========================================
-  get_github_cache_status(): Promise<CacheStatusResponse>;
+  get_github_cache_status(appId?: string): Promise<CacheStatusResponse>;
   should_update_ui_from_background_fetch(): Promise<boolean>;
   reset_background_fetch_flag(): Promise<ResetBackgroundFetchFlagResponse>;
 
@@ -1056,7 +1061,8 @@ export interface PyWebViewAPI {
   // ========================================
   calculate_release_size(
     tag: string,
-    forceRefresh?: boolean
+    forceRefresh?: boolean,
+    appId?: string
   ): Promise<{
     success: boolean;
     total_bytes?: number;
@@ -1081,7 +1087,7 @@ export interface PyWebViewAPI {
   // ========================================
   open_url(url: string): Promise<OpenUrlResponse>;
   open_path(path: string): Promise<OpenPathResponse>;
-  open_active_install(): Promise<OpenActiveInstallResponse>;
+  open_active_install(appId?: string): Promise<OpenActiveInstallResponse>;
   close_window(): Promise<CloseWindowResponse>;
 
   // Model Import

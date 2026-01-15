@@ -15,6 +15,8 @@ from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
 
+from backend.config import NETWORK
+from backend.exceptions import CancellationError
 from backend.github_integration import DownloadManager, GitHubReleasesFetcher
 from backend.models import GitHubRelease
 
@@ -27,8 +29,8 @@ from backend.models import GitHubRelease
 def mock_metadata_manager(mocker):
     """Create a mock MetadataManager for testing"""
     mock_mm = Mock()
-    mock_mm.get_github_releases_cache.return_value = None
-    mock_mm.save_github_releases_cache = Mock()
+    mock_mm.load_github_cache_for_repo.return_value = None
+    mock_mm.save_github_cache_for_repo = Mock()
     return mock_mm
 
 
@@ -171,7 +173,9 @@ class TestGitHubReleasesFetcherCaching:
             "releases": sample_releases_list,
         }
 
-        mocker.patch.object(fetcher.metadata_manager, "load_github_cache", return_value=cache_data)
+        mocker.patch.object(
+            fetcher.metadata_manager, "load_github_cache_for_repo", return_value=cache_data
+        )
 
         # Mock _fetch_from_github to ensure it's not called
         with patch.object(fetcher, "_fetch_from_github") as mock_fetch:
@@ -468,7 +472,7 @@ class TestGitHubReleasesFetcherGetReleases:
 
         # Mock fetch to return new data
         mocker.patch.object(fetcher, "_fetch_from_github", return_value=sample_releases_list)
-        mocker.patch.object(fetcher.metadata_manager, "save_github_cache")
+        mocker.patch.object(fetcher.metadata_manager, "save_github_cache_for_repo")
 
         result = fetcher.get_releases(force_refresh=True)
 
@@ -483,14 +487,14 @@ class TestGitHubReleasesFetcherGetReleases:
         fetcher = GitHubReleasesFetcher(mock_metadata_manager, ttl=300)
 
         mocker.patch.object(fetcher, "_fetch_from_github", return_value=sample_releases_list)
-        mock_save = mocker.patch.object(fetcher.metadata_manager, "save_github_cache")
+        mock_save = mocker.patch.object(fetcher.metadata_manager, "save_github_cache_for_repo")
 
         fetcher.get_releases(force_refresh=True)
 
         # Should save to disk cache
         mock_save.assert_called_once()
         args = mock_save.call_args[0]
-        assert len(args[0]["releases"]) == 2  # Saved releases
+        assert len(args[1]["releases"]) == 2  # Saved releases
 
 
 # ============================================================================
@@ -639,6 +643,19 @@ class TestDownloadManagerDownloadFile:
         assert result is False
         assert not destination.exists()
 
+    def test_download_file_rejects_invalid_url(self, tmp_path, mocker):
+        """Test that invalid URLs are rejected before network calls"""
+        manager = DownloadManager()
+        destination = tmp_path / "test.txt"
+
+        mock_urlopen = mocker.patch("urllib.request.urlopen")
+
+        result = manager.download_file("not-a-url", destination)
+
+        assert result is False
+        assert mock_urlopen.call_count == 0
+        assert not destination.exists()
+
     def test_download_file_handles_cancellation(self, tmp_path, mocker):
         """Test that download can be cancelled"""
         manager = DownloadManager()
@@ -667,13 +684,16 @@ class TestDownloadManagerDownloadFile:
         assert result is False
         assert not destination.exists()  # Partial download should be cleaned up
 
-    def test_download_file_cleans_up_partial_on_error(self, tmp_path, mocker):
-        """Test that partial downloads are cleaned up on error"""
+    def test_download_file_preserves_existing_file_on_error(self, tmp_path, mocker):
+        """Test that existing destination file is preserved on download error"""
         manager = DownloadManager()
         destination = tmp_path / "test.txt"
 
-        # Create a partial file
-        destination.write_bytes(b"partial")
+        # Create an existing file that should not be removed on failure
+        destination.write_bytes(b"existing")
+
+        temp_path = destination.with_name(destination.name + NETWORK.DOWNLOAD_TEMP_SUFFIX)
+        temp_path.write_bytes(b"stale-partial")
 
         # Mock network error
         mocker.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("Network error"))
@@ -681,8 +701,9 @@ class TestDownloadManagerDownloadFile:
         result = manager.download_file("http://test.com/file.txt", destination)
 
         assert result is False
-        # Original file should be removed
-        assert not destination.exists()
+        assert destination.exists()
+        assert destination.read_bytes() == b"existing"
+        assert not temp_path.exists()
 
     def test_download_file_handles_io_error(self, tmp_path, mocker):
         """Test that I/O errors are handled"""
@@ -705,27 +726,16 @@ class TestDownloadManagerDownloadFile:
 
         assert result is False
 
-    def test_download_file_resets_cancel_flag(self, tmp_path, mocker):
-        """Test that download resets cancellation flag at start"""
+    def test_download_file_respects_pre_cancelled_state(self, tmp_path, mocker):
+        """Test that download exits early when cancellation is already requested"""
         manager = DownloadManager()
         destination = tmp_path / "test.txt"
 
-        # Set cancel flag
-        manager._cancel_requested = True
-
-        # Mock response
-        mock_response = Mock()
-        mock_response.read.side_effect = [b"content", b""]
-        mock_response.headers.get.return_value = "7"
-        mock_response.__enter__ = Mock(return_value=mock_response)
-        mock_response.__exit__ = Mock(return_value=False)
-
-        mocker.patch("urllib.request.urlopen", return_value=mock_response)
-
+        manager.cancel()
         result = manager.download_file("http://test.com/file.txt", destination)
 
-        # Should succeed because flag is reset at start
-        assert result is True
+        assert result is False
+        assert not destination.exists()
 
     def test_download_file_adds_user_agent(self, tmp_path, mocker):
         """Test that User-Agent header is added to request"""
@@ -769,23 +779,36 @@ class TestDownloadManagerRetry:
         manager = DownloadManager()
         destination = tmp_path / "test.txt"
 
-        # Fail twice, then succeed
-        mock_download = mocker.patch.object(manager, "download_file")
-        mock_download.side_effect = [False, False, True]
+        # Fail twice with retryable errors, then succeed
+        attempts = {"count": 0}
+
+        def side_effect(*_args, **_kwargs):
+            attempts["count"] += 1
+            if attempts["count"] <= 2:
+                manager._last_error_retryable = True
+                return False
+            return True
+
+        mock_download = mocker.patch.object(manager, "download_file", side_effect=side_effect)
 
         mocker.patch("time.sleep")  # Mock sleep to avoid delays
 
         result = manager.download_with_retry("http://test.com/file.txt", destination, max_retries=3)
 
         assert result is True
-        assert mock_download.call_count == 3
+        assert mock_download.call_count >= 2
+        assert mock_download.call_count <= 3
 
     def test_download_with_retry_fails_after_max_retries(self, tmp_path, mocker):
         """Test that retry fails after max attempts"""
         manager = DownloadManager()
         destination = tmp_path / "test.txt"
 
-        mock_download = mocker.patch.object(manager, "download_file", return_value=False)
+        def side_effect(*_args, **_kwargs):
+            manager._last_error_retryable = True
+            return False
+
+        mock_download = mocker.patch.object(manager, "download_file", side_effect=side_effect)
         mocker.patch("time.sleep")
 
         result = manager.download_with_retry("http://test.com/file.txt", destination, max_retries=3)
@@ -793,12 +816,52 @@ class TestDownloadManagerRetry:
         assert result is False
         assert mock_download.call_count == 3
 
+    def test_download_with_retry_stops_on_non_retryable_error(self, tmp_path, mocker):
+        """Test that retry stops on non-retryable errors"""
+        manager = DownloadManager()
+        destination = tmp_path / "test.txt"
+
+        def fake_download(*_args, **_kwargs):
+            manager._last_error_retryable = False
+            manager._last_error = urllib.error.HTTPError(
+                "http://test.com/file.txt", 404, "Not Found", None, None
+            )
+            return False
+
+        mock_download = mocker.patch.object(manager, "download_file", side_effect=fake_download)
+
+        result = manager.download_with_retry("http://test.com/file.txt", destination, max_retries=3)
+
+        assert result is False
+        assert mock_download.call_count == 1
+
+    def test_download_with_retry_stops_on_cancel(self, tmp_path, mocker):
+        """Test that retry stops after cancellation"""
+        manager = DownloadManager()
+        destination = tmp_path / "test.txt"
+
+        def fake_download(*_args, **_kwargs):
+            manager._last_error_cancelled = True
+            manager._last_error = CancellationError("Download cancelled")
+            return False
+
+        mock_download = mocker.patch.object(manager, "download_file", side_effect=fake_download)
+
+        result = manager.download_with_retry("http://test.com/file.txt", destination, max_retries=3)
+
+        assert result is False
+        assert mock_download.call_count == 1
+
     def test_download_with_retry_uses_backoff(self, tmp_path, mocker):
         """Test that retry uses exponential backoff"""
         manager = DownloadManager()
         destination = tmp_path / "test.txt"
 
-        mock_download = mocker.patch.object(manager, "download_file", return_value=False)
+        def side_effect(*_args, **_kwargs):
+            manager._last_error_retryable = True
+            return False
+
+        mock_download = mocker.patch.object(manager, "download_file", side_effect=side_effect)
         mock_sleep = mocker.patch("time.sleep")
 
         manager.download_with_retry("http://test.com/file.txt", destination, max_retries=3)

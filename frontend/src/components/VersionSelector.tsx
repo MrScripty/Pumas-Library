@@ -18,9 +18,10 @@ interface VersionDropdownItemProps {
   isLoading: boolean;
   isDefault: boolean;
   isEnabled: boolean;
+  supportsShortcuts: boolean;
   onMakeDefault?: (tag: string | null) => Promise<boolean>;
   onSwitchVersion: (tag: string) => void;
-  onToggleShortcuts: (version: string, enabled: boolean) => Promise<void>;
+  onToggleShortcuts?: (version: string, enabled: boolean) => Promise<void>;
 }
 
 const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
@@ -31,6 +32,7 @@ const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
   isLoading,
   isDefault,
   isEnabled,
+  supportsShortcuts,
   onMakeDefault,
   onSwitchVersion,
   onToggleShortcuts,
@@ -135,7 +137,7 @@ const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
         )}
       </div>
       <div className="flex items-center gap-2 pr-12">
-        {!isInstalling && (isRowHovered || isEnabled) && (
+        {supportsShortcuts && !isInstalling && (isRowHovered || isEnabled) && onToggleShortcuts && (
           <button
             onClick={async (e) => {
               e.stopPropagation();
@@ -180,6 +182,7 @@ interface VersionSelectorProps {
   diskSpacePercent?: number;
   hasNewVersion?: boolean;
   latestVersion?: string | null;
+  supportsShortcuts?: boolean;
 }
 
 export function VersionSelector({
@@ -198,6 +201,7 @@ export function VersionSelector({
   diskSpacePercent = 0,
   hasNewVersion = false,
   latestVersion = null,
+  supportsShortcuts = true,
 }: VersionSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -211,7 +215,7 @@ export function VersionSelector({
   const { hoverProps: selectorAnchorHoverProps, isHovered: isSelectorAnchorHovered } = useHover({});
 
   const refreshShortcutStates = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !supportsShortcuts) {
       return;
     }
 
@@ -239,7 +243,7 @@ export function VersionSelector({
         logger.error('Unknown error fetching shortcut states', { error });
       }
     }
-  }, []);
+  }, [supportsShortcuts]);
 
   const handleVersionSwitch = async (tag: string) => {
     if (tag === activeVersion) {
@@ -267,7 +271,7 @@ export function VersionSelector({
   };
 
   const handleToggleShortcuts = async (version: string, next: boolean) => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !supportsShortcuts) {
       logger.warn('Shortcut API not available');
       return;
     }
@@ -403,15 +407,22 @@ export function VersionSelector({
 
   // Refresh shortcut states when installed versions change
   useEffect(() => {
+    if (!supportsShortcuts) {
+      setShortcutState({});
+      return;
+    }
     if (!installedVersions.length) {
       setShortcutState({});
       return;
     }
     refreshShortcutStates();
-  }, [installedVersions, refreshShortcutStates]);
+  }, [installedVersions, refreshShortcutStates, supportsShortcuts]);
 
   // Keep active version shortcut in sync with main toggle state
   useEffect(() => {
+    if (!supportsShortcuts) {
+      return;
+    }
     if (activeVersion && activeShortcutState) {
       setShortcutState((prev) => ({
         ...prev,
@@ -421,7 +432,7 @@ export function VersionSelector({
         },
       }));
     }
-  }, [activeVersion, activeShortcutState?.menu, activeShortcutState?.desktop]);
+  }, [activeVersion, activeShortcutState?.menu, activeShortcutState?.desktop, supportsShortcuts]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -636,7 +647,7 @@ export function VersionSelector({
               {combinedVersions.map((version) => {
                 const isActive = version === activeVersion;
                 const toggles = shortcutState[version] || { menu: false, desktop: false };
-                const isEnabled = toggles.menu && toggles.desktop;
+                const isEnabled = supportsShortcuts && toggles.menu && toggles.desktop;
                 const isInstalling = installingVersion === version && !installedVersions.includes(version);
                 const isDefault = defaultVersion === version;
                 return (
@@ -649,6 +660,7 @@ export function VersionSelector({
                     isLoading={isLoading}
                     isDefault={isDefault}
                     isEnabled={isEnabled}
+                    supportsShortcuts={supportsShortcuts}
                     onMakeDefault={onMakeDefault}
                     onSwitchVersion={handleVersionSwitch}
                     onToggleShortcuts={handleToggleShortcuts}

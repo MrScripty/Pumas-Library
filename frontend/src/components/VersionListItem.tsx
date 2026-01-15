@@ -66,7 +66,7 @@ export function VersionListItem({
   onCancelMouseLeave,
 }: VersionListItemProps) {
   const displayTag = release.tag_name?.replace(/^v/i, '') || release.tag_name;
-  const releaseUrl = release.html_url || `https://github.com/comfyanonymous/ComfyUI/releases/tag/${release.tag_name}`;
+  const releaseUrl = release.html_url;
   const showUninstall = isInstalled && !isInstalling && isHovered;
   const totalBytes = (progress ? progress.total_size : null) ?? release.total_size ?? null;
   const isComplete = isInstalled || (isInstalling && progress?.success && !!progress?.completed_at);
@@ -146,16 +146,18 @@ export function VersionListItem({
                 <h3 className="text-[hsl(var(--text-primary))] font-medium truncate">
                   {displayTag}
                 </h3>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onOpenUrl(releaseUrl);
-                  }}
-                  className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
-                  title="Open release notes"
-                >
-                  <ExternalLink size={14} className="text-[hsl(var(--text-secondary))]" />
-                </button>
+                {releaseUrl && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenUrl(releaseUrl);
+                    }}
+                    className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
+                    title="Open release notes"
+                  >
+                    <ExternalLink size={14} className="text-[hsl(var(--text-secondary))]" />
+                  </button>
+                )}
                 {failedLogPath && (
                   <button
                     onClick={(e) => {

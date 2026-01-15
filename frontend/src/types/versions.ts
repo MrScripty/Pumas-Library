@@ -36,8 +36,10 @@ export interface VersionStatus {
 export interface VersionInfo {
   path: string;
   installedDate: string;
-  pythonVersion: string;
   releaseTag: string;
+  pythonVersion?: string;
+  downloadUrl?: string;
+  size?: number;
 }
 
 export interface InstallationProgress {

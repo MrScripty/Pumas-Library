@@ -22,6 +22,8 @@ import { APIError } from '../errors';
 const logger = getLogger('useInstallationManager');
 
 interface UseInstallationManagerOptions {
+  appId?: string;
+  enabled?: boolean;
   availableVersions: VersionRelease[];
   onRefreshVersions: () => Promise<void>;
 }
@@ -40,9 +42,13 @@ interface UseInstallationManagerResult {
 }
 
 export function useInstallationManager({
+  appId,
+  enabled = true,
   availableVersions,
   onRefreshVersions,
 }: UseInstallationManagerOptions): UseInstallationManagerResult {
+  const resolvedAppId = appId ?? 'comfyui';
+  const isEnabled = enabled;
   const [installingTag, setInstallingTag] = useState<string | null>(null);
   const [installationProgress, setInstallationProgress] = useState<InstallationProgress | null>(null);
   const [installNetworkStatus, setInstallNetworkStatus] = useState<InstallNetworkStatus>('idle');
@@ -52,14 +58,31 @@ export function useInstallationManager({
   const lastStageRef = useRef<InstallationProgress['stage'] | null>(null);
   const networkStateRef = useRef<NetworkStatusState>(createNetworkStatusState());
 
+  const resetInstallState = useCallback(() => {
+    setInstallingTag(null);
+    setInstallationProgress(null);
+    setInstallNetworkStatus('idle');
+    resetNetworkStatusState(networkStateRef.current);
+    lastDownloadTagRef.current = null;
+    lastStageRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (installPollRef.current) {
+      clearInterval(installPollRef.current);
+      installPollRef.current = null;
+    }
+    resetInstallState();
+  }, [resolvedAppId, isEnabled, resetInstallState]);
+
   // Fetch current installation progress
   const fetchInstallationProgress = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       return null;
     }
 
     try {
-      const progress = await api.get_installation_progress();
+      const progress = await api.get_installation_progress(resolvedAppId);
 
       if (progress && !progress.completed_at) {
         setInstallingTag(progress.tag || null);
@@ -137,14 +160,14 @@ export function useInstallationManager({
         return adjustedProgress;
       } else {
         if (!progress && installingTag) {
-          return null;
-        }
-        setInstallingTag(null);
-        setInstallationProgress(null);
-        setInstallNetworkStatus('idle');
-        resetNetworkStatusState(networkStateRef.current);
-        lastDownloadTagRef.current = null;
-        lastStageRef.current = null;
+        return null;
+      }
+      setInstallingTag(null);
+      setInstallationProgress(null);
+      setInstallNetworkStatus('idle');
+      resetNetworkStatusState(networkStateRef.current);
+      lastDownloadTagRef.current = null;
+      lastStageRef.current = null;
       }
 
       return null;
@@ -159,16 +182,16 @@ export function useInstallationManager({
       setInstallNetworkStatus('failed');
       return null;
     }
-  }, [availableVersions, installingTag]);
+  }, [availableVersions, installingTag, isEnabled, resolvedAppId]);
 
   // Switch to a different installed version
   const switchVersion = useCallback(async (tag: string) => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'switch_version');
     }
 
     try {
-      const result = await api.switch_version(tag);
+      const result = await api.switch_version(tag, resolvedAppId);
       if (result.success) {
         await onRefreshVersions();
         return true;
@@ -185,18 +208,18 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, [onRefreshVersions]);
+  }, [isEnabled, onRefreshVersions, resolvedAppId]);
 
   // Install a new version
   const installVersion = useCallback(async (tag: string) => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'install_version');
     }
 
     setInstallingTag(tag);
 
     try {
-      const result = await api.install_version(tag);
+      const result = await api.install_version(tag, resolvedAppId);
       if (result.success) {
         // Start polling for installation progress
         if (installPollRef.current) {
@@ -222,16 +245,16 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, [fetchInstallationProgress, onRefreshVersions]);
+  }, [fetchInstallationProgress, isEnabled, onRefreshVersions, resolvedAppId]);
 
   // Remove a version
   const removeVersion = useCallback(async (tag: string) => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'remove_version');
     }
 
     try {
-      const result = await api.remove_version(tag);
+      const result = await api.remove_version(tag, resolvedAppId);
       if (result.success) {
         await onRefreshVersions();
         return true;
@@ -248,7 +271,7 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, [onRefreshVersions]);
+  }, [isEnabled, onRefreshVersions, resolvedAppId]);
 
   // Open arbitrary path in the system file manager
   const openPath = useCallback(async (path: string) => {
@@ -277,12 +300,12 @@ export function useInstallationManager({
 
   // Open the active installation directory
   const openActiveInstall = useCallback(async () => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'open_active_install');
     }
 
     try {
-      const result = await api.open_active_install();
+      const result = await api.open_active_install(resolvedAppId);
       if (!result.success) {
         const message = result.error || 'Failed to open active installation';
         throw new APIError(message, 'open_active_install');
@@ -298,16 +321,16 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Get version info
   const getVersionInfo = useCallback(async (tag: string): Promise<VersionInfo | null> => {
-    if (!isAPIAvailable()) {
+    if (!isAPIAvailable() || !isEnabled) {
       throw new APIError('API not available', 'get_version_info');
     }
 
     try {
-      const result = await api.get_version_info(tag);
+      const result = await api.get_version_info(tag, resolvedAppId);
       if (result.success) {
         return result.info || null;
       } else {
@@ -323,7 +346,7 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, []);
+  }, [isEnabled, resolvedAppId]);
 
   // Cleanup polling on unmount
   useEffect(() => {

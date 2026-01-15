@@ -15,74 +15,74 @@ class VersionsAPI {
     return api;
   }
 
-  async getAvailableVersions(forceRefresh = false) {
+  async getAvailableVersions(forceRefresh = false, appId?: string) {
     const api = this.getAPI();
-    return await api.get_available_versions(forceRefresh);
+    return await api.get_available_versions(forceRefresh, appId);
   }
 
-  async getInstalledVersions() {
+  async getInstalledVersions(appId?: string) {
     const api = this.getAPI();
-    return await api.get_installed_versions();
+    return await api.get_installed_versions(appId);
   }
 
-  async getActiveVersion() {
+  async getActiveVersion(appId?: string) {
     const api = this.getAPI();
-    return await api.get_active_version();
+    return await api.get_active_version(appId);
   }
 
-  async installVersion(tag: string) {
+  async installVersion(tag: string, appId?: string) {
     const api = this.getAPI();
-    return await api.install_version(tag);
+    return await api.install_version(tag, appId);
   }
 
-  async removeVersion(tag: string) {
+  async removeVersion(tag: string, appId?: string) {
     const api = this.getAPI();
-    return await api.remove_version(tag);
+    return await api.remove_version(tag, appId);
   }
 
-  async switchVersion(tag: string) {
+  async switchVersion(tag: string, appId?: string) {
     const api = this.getAPI();
-    return await api.switch_version(tag);
+    return await api.switch_version(tag, appId);
   }
 
-  async getInstallationProgress() {
+  async getInstallationProgress(appId?: string) {
     const api = this.getAPI();
-    return await api.get_installation_progress();
+    return await api.get_installation_progress(appId);
   }
 
-  async cancelInstallation() {
+  async cancelInstallation(appId?: string) {
     const api = this.getAPI();
-    return await api.cancel_installation();
+    return await api.cancel_installation(appId);
   }
 
-  async validateInstallations() {
+  async validateInstallations(appId?: string) {
     const api = this.getAPI();
-    return await api.validate_installations();
+    return await api.validate_installations(appId);
   }
 
-  async getDefaultVersion() {
+  async getDefaultVersion(appId?: string) {
     const api = this.getAPI();
-    return await api.get_default_version();
+    return await api.get_default_version(appId);
   }
 
-  async setDefaultVersion(tag?: string | null) {
+  async setDefaultVersion(tag?: string | null, appId?: string) {
     const api = this.getAPI();
-    return await api.set_default_version(tag);
+    return await api.set_default_version(tag, appId);
   }
 
-  async getVersionInfo(tag: string) {
+  async getVersionInfo(tag: string, appId?: string) {
     const api = this.getAPI();
-    return await api.get_version_info(tag);
+    return await api.get_version_info(tag, appId);
   }
 
-  async launchVersion(tag: string, extraArgs?: string[]) {
+  async launchVersion(tag: string, extraArgs?: string[], appId?: string) {
     const api = this.getAPI();
-    return await api.launch_version(tag, extraArgs);
+    return await api.launch_version(tag, extraArgs, appId);
   }
 
-  async getCacheStatus() {
+  async getCacheStatus(appId?: string) {
     const api = this.getAPI();
-    return await api.get_github_cache_status();
+    return await api.get_github_cache_status(appId);
   }
 }
 

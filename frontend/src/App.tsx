@@ -1,25 +1,23 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { motion } from 'framer-motion';
-import { ArrowLeft, RefreshCw, Box } from 'lucide-react';
-import { VersionSelector } from './components/VersionSelector';
-import { InstallDialog } from './components/InstallDialog';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { Box } from 'lucide-react';
 import { Header } from './components/Header';
 import { AppSidebar } from './components/AppSidebar';
-import { ModelManager } from './components/ModelManager';
 import { ModelImportDropZone } from './components/ModelImportDropZone';
 import { ModelImportDialog } from './components/ModelImportDialog';
-import { DependencySection } from './components/DependencySection';
-import { StatusDisplay } from './components/StatusDisplay';
+import { AppPanelRenderer } from './components/app-panels/AppPanelRenderer';
+import type { ModelManagerProps } from './components/ModelManager';
 import { useVersions } from './hooks/useVersions';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
 import { useModels } from './hooks/useModels';
+import { useAppPanelState } from './hooks/useAppPanelState';
 import { api, isAPIAvailable } from './api/adapter';
 import { DEFAULT_APPS } from './config/apps';
 import type { AppConfig } from './types/apps';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
+import { getAppVersionState } from './utils/appVersionState';
 
 const logger = getLogger('App');
 
@@ -28,11 +26,11 @@ export default function App() {
   // --- Multi-App State ---
   const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
   const [selectedAppId, setSelectedAppId] = useState<string | null>('comfyui');
+  const appIds = useMemo(() => apps.map(app => app.id), [apps]);
+  const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
 
   // --- UI State ---
   const [isInstalling, setIsInstalling] = useState(false);
-  const [showVersionManager, setShowVersionManager] = useState(false);
-  const [isRefreshingVersions, setIsRefreshingVersions] = useState(false);
   const [launcherUpdateAvailable, setLauncherUpdateAvailable] = useState(false);
 
   // Model Manager State
@@ -49,50 +47,31 @@ export default function App() {
   const { launchError, launchLogPath, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess();
   const { modelGroups, scanModels, fetchModels } = useModels();
 
-  const {
-    installedVersions,
-    activeVersion,
-    availableVersions,
-    isLoading: isVersionLoading,
-    switchVersion,
-    installVersion,
-    removeVersion,
-    refreshAll,
-    openActiveInstall,
-    installingTag,
-    installationProgress,
-    fetchInstallationProgress,
-    installNetworkStatus,
-    defaultVersion,
-    setDefaultVersion,
-    cacheStatus,
-  } = useVersions();
+  const comfyVersions = useVersions({ appId: 'comfyui' });
+  const ollamaVersions = useVersions({ appId: 'ollama' });
+  const activeVersions =
+    selectedAppId === 'comfyui'
+      ? comfyVersions
+      : selectedAppId === 'ollama'
+        ? ollamaVersions
+        : comfyVersions;
+  const appVersions = getAppVersionState(selectedAppId, activeVersions);
 
-  // --- Computed Values ---
-  const computeHasNewVersion = useCallback((available: any[], installed: string[]) => {
-    if (!available || available.length === 0 || !installed) {
-      return false;
-    }
-    const latestAvailable = available[0]?.tag_name;
-    if (!latestAvailable) {
-      return false;
-    }
-    return !installed.includes(latestAvailable);
-  }, []);
-
-  const hasUpdate = React.useMemo(() => {
-    return computeHasNewVersion(availableVersions, installedVersions);
-  }, [availableVersions, installedVersions, computeHasNewVersion]);
-
-  const latestVersion = React.useMemo(() => {
-    return availableVersions && availableVersions.length > 0 ? availableVersions[0]?.tag_name : null;
-  }, [availableVersions]);
+  const { installedVersions: comfyInstalledVersions, activeVersion: comfyActiveVersion } =
+    comfyVersions;
+  const installationProgress = appVersions.installationProgress;
+  const cacheStatus = appVersions.cacheStatus;
 
   const comfyUIRunning = status?.comfyui_running || false;
   const depsInstalled = status?.deps_ready ?? null;
   const isPatched = status?.patched ?? false;
   const menuShortcut = status?.menu_shortcut ?? false;
   const desktopShortcut = status?.desktop_shortcut ?? false;
+  const selectedApp = apps.find(app => app.id === selectedAppId) ?? null;
+  const appDisplayName = selectedApp?.displayName ?? 'App';
+  const panelState = getPanelState(selectedAppId);
+  const activeShortcutState =
+    selectedAppId === 'comfyui' ? { menu: menuShortcut, desktop: desktopShortcut } : undefined;
 
   // --- API Helpers ---
   const checkLauncherVersion = async (forceRefresh = false) => {
@@ -182,7 +161,7 @@ export default function App() {
     }));
   }, [status, systemResources, comfyUIRunning, depsInstalled, launchError]);
 
-  // Manage iconState based on installedVersions
+  // Manage iconState based on ComfyUI installed versions
   useEffect(() => {
     setApps(prevApps => prevApps.map(app => {
       if (app.id === 'comfyui') {
@@ -192,7 +171,7 @@ export default function App() {
           newState = 'running';
         } else if (launchError) {
           newState = 'error';
-        } else if (installedVersions.length > 0) {
+        } else if (comfyInstalledVersions.length > 0) {
           newState = 'offline';
         } else {
           newState = 'uninstalled';
@@ -204,27 +183,18 @@ export default function App() {
       }
       return app;
     }));
-  }, [installedVersions, comfyUIRunning, launchError]);
+  }, [comfyInstalledVersions, comfyUIRunning, launchError]);
 
   // Launch error flash effect is handled by AppIndicator component
 
   // Refetch status when active version changes
   useEffect(() => {
-    if (activeVersion && isAPIAvailable()) {
+    if (comfyActiveVersion && isAPIAvailable()) {
       void refetchStatus(false);
     }
-  }, [activeVersion]);
+  }, [comfyActiveVersion]);
 
   // --- Handlers ---
-  const handleRefreshProgress = async () => {
-    await fetchInstallationProgress();
-  };
-
-  const handleMakeDefault = async (tag: string | null) => {
-    await setDefaultVersion(tag);
-    return true;
-  };
-
   const handleInstallDeps = async () => {
     if (!isAPIAvailable()) return;
 
@@ -352,6 +322,13 @@ export default function App() {
     fetchModels();
   }, [fetchModels]);
 
+  const handleShowVersionManager = (show: boolean) => {
+    if (!selectedAppId) {
+      return;
+    }
+    setShowVersionManager(selectedAppId, show);
+  };
+
   const openModelsRoot = async () => {
     if (!isAPIAvailable()) return;
     try {
@@ -383,6 +360,18 @@ export default function App() {
   const statusMessage = status?.message || '';
   const defaultReadyText = statusMessage?.trim().toLowerCase() === 'system ready. configure options below';
   const displayStatus = statusMessage === 'Setup complete – everything is ready' || defaultReadyText ? '' : statusMessage;
+  const modelManagerProps: ModelManagerProps = {
+    modelGroups,
+    starredModels,
+    linkedModels,
+    onToggleStar: handleToggleStar,
+    onToggleLink: handleToggleLink,
+    selectedAppId,
+    onAddModels: scanModels,
+    onOpenModelsRoot: openModelsRoot,
+    onModelsImported: fetchModels,
+    activeVersion: appVersions.activeVersion,
+  };
 
   return (
     <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
@@ -421,135 +410,38 @@ export default function App() {
         />
 
         <div className="flex-1 flex flex-col overflow-hidden">
-          {selectedAppId === 'comfyui' ? (
-            <div className="flex-1 p-6 flex flex-col items-center overflow-auto">
-              {isCheckingDeps || depsInstalled === null ? (
-                <div className="w-full flex items-center justify-center gap-2 text-[hsl(var(--text-secondary))]">
-                  <span className="text-sm">Checking Dependencies...</span>
-                </div>
-              ) : showVersionManager ? (
-                <div className="w-full flex-1 flex flex-col gap-4 min-h-0">
-                  <div className="w-full flex items-center justify-between flex-shrink-0">
-                    <button
-                      onClick={() => setShowVersionManager(false)}
-                      className="flex items-center gap-2 px-3 py-2 rounded border border-[hsl(var(--border-control))] bg-[hsl(var(--surface-interactive))] hover:bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--text-primary))] text-sm transition-colors"
-                    >
-                      <ArrowLeft size={14} />
-                      <span>Back to setup</span>
-                    </button>
-                    <div className="flex items-center gap-3 text-xs text-[hsl(var(--text-secondary))]">
-                      <span>{installedVersions.length} installed</span>
-                      <motion.button
-                        onClick={async () => {
-                          if (isRefreshingVersions) return;
-                          setIsRefreshingVersions(true);
-                          try {
-                            await refreshAll(true);
-                          } finally {
-                            setIsRefreshingVersions(false);
-                          }
-                        }}
-                        disabled={isRefreshingVersions || isVersionLoading}
-                        className="p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors disabled:opacity-50"
-                        whileHover={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 1.05 }}
-                        whileTap={{ scale: isRefreshingVersions || isVersionLoading ? 1 : 0.96 }}
-                        title="Refresh versions"
-                      >
-                        <RefreshCw size={14} className={isRefreshingVersions ? 'animate-spin text-[hsl(var(--text-tertiary))]' : 'text-[hsl(var(--text-secondary))]'} />
-                      </motion.button>
-                    </div>
-                  </div>
-                  <div className="w-full flex-1 min-h-0 overflow-hidden">
-                    <InstallDialog
-                      isOpen={showVersionManager}
-                      onClose={() => setShowVersionManager(false)}
-                      availableVersions={availableVersions}
-                      installedVersions={installedVersions}
-                      isLoading={isVersionLoading}
-                      onInstallVersion={installVersion}
-                      onRemoveVersion={removeVersion}
-                      onRefreshAll={refreshAll}
-                      installingTag={installingTag}
-                      installationProgress={installationProgress}
-                      installNetworkStatus={installNetworkStatus}
-                      onRefreshProgress={handleRefreshProgress}
-                      displayMode="page"
-                    />
-                  </div>
-                </div>
-              ) : (
-                <>
-                  <div className="w-full mb-4">
-                    <VersionSelector
-                      installedVersions={installedVersions}
-                      activeVersion={activeVersion}
-                      isLoading={isVersionLoading}
-                      switchVersion={switchVersion}
-                      openActiveInstall={openActiveInstall}
-                      onOpenVersionManager={() => setShowVersionManager(true)}
-                      installNetworkStatus={installNetworkStatus}
-                      installationProgress={installationProgress}
-                      defaultVersion={defaultVersion}
-                      onMakeDefault={handleMakeDefault}
-                      installingVersion={installingTag}
-                      activeShortcutState={{ menu: menuShortcut, desktop: desktopShortcut }}
-                      diskSpacePercent={diskSpacePercent}
-                      hasNewVersion={hasUpdate}
-                      latestVersion={latestVersion}
-                    />
-                  </div>
-
-                  <DependencySection
-                    depsInstalled={depsInstalled}
-                    isInstalling={isInstalling}
-                    comfyUIRunning={comfyUIRunning}
-                    onInstall={handleInstallDeps}
-                  />
-
-                  <motion.div
-                    className="w-full flex flex-col items-center gap-6"
-                    animate={{
-                      opacity: depsInstalled ? 1 : 0.3,
-                      filter: depsInstalled ? 'blur(0px)' : 'blur(1px)',
-                      pointerEvents: depsInstalled ? 'auto' : 'none'
-                    }}
-                    transition={{ duration: 0.4 }}
-                  >
-                    {displayStatus && (
-                      <StatusDisplay
-                        message={displayStatus}
-                        isRunning={comfyUIRunning}
-                        isSetupComplete={isSetupComplete}
-                      />
-                    )}
-                  </motion.div>
-                </>
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col gap-4 p-8 px-0 mx-2 py-1 overflow-hidden">
-              {selectedAppId && (
-                <div className="text-center py-4">
-                  <p className="text-[hsl(var(--launcher-text-secondary))] text-sm">
-                    {`${apps.find(a => a.id === selectedAppId)?.displayName} - Coming Soon`}
-                  </p>
-                </div>
-              )}
-
-              <ModelManager
-                modelGroups={modelGroups}
-                starredModels={starredModels}
-                linkedModels={linkedModels}
-                onToggleStar={handleToggleStar}
-                onToggleLink={handleToggleLink}
-                selectedAppId={selectedAppId}
-                onAddModels={scanModels}
-                onOpenModelsRoot={openModelsRoot}
-                onModelsImported={fetchModels}
-                activeVersion={activeVersion}
-              />
-            </div>
-          )}
+          <AppPanelRenderer
+            selectedAppId={selectedAppId}
+            comfyUI={{
+              appDisplayName,
+              versions: appVersions,
+              showVersionManager: panelState.showVersionManager,
+              onShowVersionManager: handleShowVersionManager,
+              activeShortcutState,
+              diskSpacePercent,
+              isCheckingDeps,
+              depsInstalled,
+              isInstallingDeps: isInstalling,
+              comfyUIRunning,
+              onInstallDeps: handleInstallDeps,
+              displayStatus,
+              isSetupComplete,
+            }}
+            ollama={{
+              appDisplayName,
+              connectionUrl: selectedApp?.connectionUrl,
+              versions: appVersions,
+              showVersionManager: panelState.showVersionManager,
+              onShowVersionManager: handleShowVersionManager,
+              activeShortcutState,
+              diskSpacePercent,
+              modelManagerProps,
+            }}
+            fallback={{
+              appDisplayName,
+              modelManagerProps,
+            }}
+          />
         </div>
       </div>
     </div>

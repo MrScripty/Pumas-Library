@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Optional, cast
 
+from backend.config import APP
 from backend.exceptions import MetadataError, ResourceError
 from backend.file_utils import atomic_write_json
 from backend.logging_config import get_logger
@@ -20,6 +21,7 @@ from backend.models import (
     VersionsMetadata,
     WorkflowsMetadata,
 )
+from backend.utils import safe_filename
 
 logger = get_logger(__name__)
 
@@ -152,6 +154,35 @@ class MetadataManager:
             True if successful
         """
         return self._write_json(self.versions_file, data)
+
+    def _get_versions_file_for_app(self, app_id: str) -> Path:
+        if app_id == "comfyui":
+            return self.versions_file
+        safe_app = safe_filename(app_id)
+        return self.metadata_dir / f"versions-{safe_app}.json"
+
+    def load_versions_for_app(self, app_id: str) -> VersionsMetadata:
+        """
+        Load versions metadata for a specific app.
+        """
+        if app_id == "comfyui":
+            return self.load_versions()
+        default: VersionsMetadata = {
+            "installed": {},
+            "lastSelectedVersion": None,
+            "defaultVersion": None,
+        }
+        file_path = self._get_versions_file_for_app(app_id)
+        return cast(VersionsMetadata, self._read_json(file_path, default))
+
+    def save_versions_for_app(self, app_id: str, data: VersionsMetadata) -> bool:
+        """
+        Save versions metadata for a specific app.
+        """
+        if app_id == "comfyui":
+            return self.save_versions(data)
+        file_path = self._get_versions_file_for_app(app_id)
+        return self._write_json(file_path, data)
 
     # ==================== Version Config ====================
 
@@ -293,6 +324,28 @@ class MetadataManager:
             True if successful
         """
         return self._write_json(self.github_cache_file, data)
+
+    def _get_github_cache_file_for_repo(self, repo: str) -> Path:
+        if repo == APP.GITHUB_REPO:
+            return self.github_cache_file
+        safe_repo = safe_filename(repo.replace("/", "-"))
+        return self.cache_dir / f"github-releases-{safe_repo}.json"
+
+    def load_github_cache_for_repo(self, repo: str) -> Optional[GitHubReleasesCache]:
+        """
+        Load repo-specific GitHub releases cache.
+        """
+        cache_file = self._get_github_cache_file_for_repo(repo)
+        if not cache_file.exists():
+            return None
+        return cast(GitHubReleasesCache, self._read_json(cache_file))
+
+    def save_github_cache_for_repo(self, repo: str, data: GitHubReleasesCache) -> bool:
+        """
+        Save repo-specific GitHub releases cache.
+        """
+        cache_file = self._get_github_cache_file_for_repo(repo)
+        return self._write_json(cache_file, data)
 
     # ==================== Utility Methods ====================
 

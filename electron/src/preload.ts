@@ -47,33 +47,43 @@ const electronAPI = {
   // ========================================
   // Version Management
   // ========================================
-  get_available_versions: (forceRefresh?: boolean) =>
-    apiCall('get_available_versions', { force_refresh: forceRefresh }),
-  get_installed_versions: () => apiCall('get_installed_versions'),
-  get_active_version: () => apiCall('get_active_version'),
-  install_version: (tag: string) => apiCall('install_version', { tag }),
-  remove_version: (tag: string) => apiCall('remove_version', { tag }),
-  switch_version: (tag: string) => apiCall('switch_version', { tag }),
-  validate_installations: () => apiCall('validate_installations'),
-  get_version_info: (tag: string) => apiCall('get_version_info', { tag }),
-  get_default_version: () => apiCall('get_default_version'),
-  set_default_version: (tag?: string | null) => apiCall('set_default_version', { tag }),
-  get_version_status: () => apiCall('get_version_status'),
-  launch_version: (tag: string, extraArgs?: string[]) =>
-    apiCall('launch_version', { tag, extra_args: extraArgs }),
-  check_version_dependencies: (tag: string) => apiCall('check_version_dependencies', { tag }),
-  install_version_dependencies: (tag: string) => apiCall('install_version_dependencies', { tag }),
+  get_available_versions: (forceRefresh?: boolean, appId?: string) =>
+    apiCall('get_available_versions', { force_refresh: forceRefresh, app_id: appId }),
+  get_installed_versions: (appId?: string) => apiCall('get_installed_versions', { app_id: appId }),
+  get_active_version: (appId?: string) => apiCall('get_active_version', { app_id: appId }),
+  install_version: (tag: string, appId?: string) =>
+    apiCall('install_version', { tag, app_id: appId }),
+  remove_version: (tag: string, appId?: string) =>
+    apiCall('remove_version', { tag, app_id: appId }),
+  switch_version: (tag: string, appId?: string) =>
+    apiCall('switch_version', { tag, app_id: appId }),
+  validate_installations: (appId?: string) =>
+    apiCall('validate_installations', { app_id: appId }),
+  get_version_info: (tag: string, appId?: string) =>
+    apiCall('get_version_info', { tag, app_id: appId }),
+  get_default_version: (appId?: string) => apiCall('get_default_version', { app_id: appId }),
+  set_default_version: (tag?: string | null, appId?: string) =>
+    apiCall('set_default_version', { tag, app_id: appId }),
+  get_version_status: (appId?: string) => apiCall('get_version_status', { app_id: appId }),
+  launch_version: (tag: string, extraArgs?: string[], appId?: string) =>
+    apiCall('launch_version', { tag, extra_args: extraArgs, app_id: appId }),
+  check_version_dependencies: (tag: string, appId?: string) =>
+    apiCall('check_version_dependencies', { tag, app_id: appId }),
+  install_version_dependencies: (tag: string, appId?: string) =>
+    apiCall('install_version_dependencies', { tag, app_id: appId }),
 
   // ========================================
   // Installation & Progress
   // ========================================
-  get_installation_progress: () => apiCall('get_installation_progress'),
-  cancel_installation: () => apiCall('cancel_installation'),
+  get_installation_progress: (appId?: string) =>
+    apiCall('get_installation_progress', { app_id: appId }),
+  cancel_installation: (appId?: string) => apiCall('cancel_installation', { app_id: appId }),
 
   // ========================================
   // Cache & Background Fetch
   // ========================================
-  get_github_cache_status: () => apiCall('get_github_cache_status'),
+  get_github_cache_status: (appId?: string) =>
+    apiCall('get_github_cache_status', { app_id: appId }),
   should_update_ui_from_background_fetch: () => apiCall('has_background_fetch_completed'),
   reset_background_fetch_flag: () => apiCall('reset_background_fetch_flag'),
 
@@ -220,8 +230,8 @@ const electronAPI = {
   // ========================================
   // Size Calculation
   // ========================================
-  calculate_release_size: (tag: string, forceRefresh?: boolean) =>
-    apiCall('calculate_release_size', { tag, force_refresh: forceRefresh }),
+  calculate_release_size: (tag: string, forceRefresh?: boolean, appId?: string) =>
+    apiCall('calculate_release_size', { tag, force_refresh: forceRefresh, app_id: appId }),
   calculate_all_release_sizes: () => apiCall('calculate_all_release_sizes'),
   get_release_size_info: (tag: string, archiveSize: number) =>
     apiCall('get_release_size_info', { tag, archive_size: archiveSize }),
@@ -250,7 +260,7 @@ const electronAPI = {
     return await apiCall('open_path', { path });
   },
 
-  open_active_install: () => apiCall('open_active_install'),
+  open_active_install: (appId?: string) => apiCall('open_active_install', { app_id: appId }),
 
   close_window: async () => {
     await ipcRenderer.invoke('window:close');

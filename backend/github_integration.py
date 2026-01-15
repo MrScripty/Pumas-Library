@@ -17,11 +17,12 @@ from cachetools import TTLCache
 from packaging.version import InvalidVersion, Version
 
 from backend.config import APP, NETWORK
-from backend.exceptions import MetadataError, NetworkError
+from backend.exceptions import CancellationError, MetadataError, NetworkError, ValidationError
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
 from backend.models import GitHubRelease, GitHubReleasesCache, Release, get_iso_timestamp
 from backend.retry_utils import calculate_backoff_delay
+from backend.validators import validate_url
 
 logger = get_logger(__name__)
 
@@ -33,6 +34,8 @@ class GitHubReleasesFetcher:
         self,
         metadata_manager: MetadataManager,
         ttl: int = NETWORK.GITHUB_RELEASES_TTL_SEC,
+        github_repo: Optional[str] = None,
+        cache_key: Optional[str] = None,
     ):
         """
         Initialize GitHub releases fetcher
@@ -44,14 +47,14 @@ class GitHubReleasesFetcher:
         self.metadata_manager = metadata_manager
         self.ttl = ttl
         self.github_api_base = NETWORK.GITHUB_API_BASE
-        self.github_repo = APP.GITHUB_REPO
+        self.github_repo = github_repo or APP.GITHUB_REPO
         self.per_page = NETWORK.GITHUB_RELEASES_PER_PAGE
         self.max_pages = NETWORK.GITHUB_RELEASES_MAX_PAGES
 
         # In-memory cache with TTL and thread lock
         self._memory_cache: TTLCache[str, List[GitHubRelease]] = TTLCache(maxsize=1, ttl=ttl)
         self._cache_lock = threading.Lock()
-        self._CACHE_KEY = "github_releases"
+        self._CACHE_KEY = cache_key or f"github_releases::{self.github_repo}"
 
     def _fetch_page(self, page: int, max_retries: int = 3) -> List[GitHubRelease]:
         """
@@ -213,7 +216,7 @@ class GitHubReleasesFetcher:
 
             # Check disk cache
             if not force_refresh:
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
 
                 # Valid cache - load into memory
                 if disk_cache and self._is_cache_valid(disk_cache):
@@ -246,7 +249,7 @@ class GitHubReleasesFetcher:
                     "ttl": self.ttl,
                     "releases": releases,
                 }
-                self.metadata_manager.save_github_cache(cache_data)
+                self._save_disk_cache(cache_data)
                 self._memory_cache[self._CACHE_KEY] = releases
 
                 logger.info(f"Fetched {len(releases)} releases from GitHub")
@@ -261,7 +264,7 @@ class GitHubReleasesFetcher:
                     logger.debug(f"Network unavailable: {e}")
 
                 # Return stale cache if available
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
                 if disk_cache and disk_cache.get("releases"):
                     stale_releases = disk_cache["releases"]
                     parsed = self._parse_release_list(stale_releases)
@@ -286,7 +289,7 @@ class GitHubReleasesFetcher:
                 logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
 
                 # Try stale cache
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
                 if disk_cache and disk_cache.get("releases"):
                     logger.info("Using stale disk cache (parse error)")
                     return self._parse_release_list(disk_cache["releases"])
@@ -298,7 +301,7 @@ class GitHubReleasesFetcher:
                 logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
 
                 # Try stale cache
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
                 if disk_cache and disk_cache.get("releases"):
                     logger.info("Using stale disk cache (parse error)")
                     return self._parse_release_list(disk_cache["releases"])
@@ -310,7 +313,7 @@ class GitHubReleasesFetcher:
                 logger.error(f"Error parsing GitHub response: {e}", exc_info=True)
 
                 # Try stale cache
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
                 if disk_cache and disk_cache.get("releases"):
                     logger.info("Using stale disk cache (parse error)")
                     return self._parse_release_list(disk_cache["releases"])
@@ -354,7 +357,7 @@ class GitHubReleasesFetcher:
             status["releases_count"] = len(releases)
             # Try to get age from disk cache for display
             try:
-                disk_cache = self.metadata_manager.load_github_cache()
+                disk_cache = self._load_disk_cache()
                 if disk_cache and disk_cache.get("lastFetched"):
                     from backend.models import parse_iso_timestamp
 
@@ -371,7 +374,7 @@ class GitHubReleasesFetcher:
             return status
 
         # Check disk cache
-        disk_cache = self.metadata_manager.load_github_cache()
+        disk_cache = self._load_disk_cache()
         if disk_cache and disk_cache.get("releases"):
             status["has_cache"] = True
             status["releases_count"] = len(disk_cache["releases"])
@@ -536,6 +539,12 @@ class GitHubReleasesFetcher:
 
         return collapsed
 
+    def _load_disk_cache(self) -> Optional[GitHubReleasesCache]:
+        return self.metadata_manager.load_github_cache_for_repo(self.github_repo)
+
+    def _save_disk_cache(self, data: GitHubReleasesCache) -> bool:
+        return self.metadata_manager.save_github_cache_for_repo(self.github_repo, data)
+
 
 class DownloadManager:
     """Handles downloading files with progress tracking"""
@@ -544,13 +553,42 @@ class DownloadManager:
         """Initialize download manager"""
         self.last_progress_time = 0
         self.last_progress_bytes = 0
-        self.progress_update_interval = 0.5  # Update progress every 500ms
-        self._cancel_requested = False  # Cancellation flag
+        self.progress_update_interval = NETWORK.DOWNLOAD_PROGRESS_INTERVAL_SEC
+        self._cancel_requested = False
+        self._last_error: Optional[Exception] = None
+        self._last_error_retryable = False
+        self._last_error_cancelled = False
+
+    @property
+    def last_error(self) -> Optional[Exception]:
+        """Return the last error encountered by the downloader, if any."""
+        return self._last_error
+
+    def was_cancelled(self) -> bool:
+        """Return True if the last download attempt was cancelled."""
+        return self._last_error_cancelled
 
     def cancel(self):
         """Request cancellation of current download"""
         self._cancel_requested = True
         logger.info("Download cancellation requested")
+
+    def _reset_state(self) -> None:
+        self._last_error = None
+        self._last_error_retryable = False
+        self._last_error_cancelled = False
+        self.last_progress_time = time.time()
+        self.last_progress_bytes = 0
+
+    def _record_failure(self, error: Exception, retryable: bool, cancelled: bool = False) -> None:
+        self._last_error = error
+        self._last_error_retryable = retryable
+        self._last_error_cancelled = cancelled
+
+    @staticmethod
+    def _is_retryable_http_status(status_code: int) -> bool:
+        retryable_statuses = {408, 429, 500, 502, 503, 504}
+        return status_code in retryable_statuses
 
     def download_file(
         self,
@@ -569,10 +607,20 @@ class DownloadManager:
         Returns:
             True if successful, False otherwise
         """
-        # Reset cancellation flag at start of download
-        self._cancel_requested = False
-        self.last_progress_time = time.time()
-        self.last_progress_bytes = 0
+        self._reset_state()
+        if self._cancel_requested:
+            error = CancellationError("Download cancelled")
+            self._record_failure(error, retryable=False, cancelled=True)
+            self._cancel_requested = False
+            return False
+
+        if not validate_url(url):
+            error = ValidationError("Invalid download URL", field_name="url", invalid_value=url)
+            logger.error("Invalid download URL: %s", url)
+            self._record_failure(error, retryable=False)
+            return False
+
+        temp_path = destination.with_name(destination.name + NETWORK.DOWNLOAD_TEMP_SUFFIX)
 
         try:
             # Create parent directory if needed
@@ -582,8 +630,13 @@ class DownloadManager:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", "ComfyUI-Version-Manager/1.0")
 
+            if temp_path.exists():
+                temp_path.unlink()
+
             # Download with progress tracking
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(
+                req, timeout=NETWORK.DOWNLOAD_REQUEST_TIMEOUT_SEC
+            ) as response:
                 total_size = int(response.headers.get("Content-Length", 0))
                 downloaded = 0
 
@@ -591,14 +644,14 @@ class DownloadManager:
                 if progress_callback:
                     progress_callback(downloaded, total_size, None)
 
-                with open(destination, "wb") as f:
+                with open(temp_path, "wb") as f:
                     while True:
                         # Check for cancellation before reading next chunk
                         if self._cancel_requested:
                             logger.info("Download cancelled by user")
-                            raise InterruptedError("Download cancelled")
+                            raise CancellationError("Download cancelled")
 
-                        chunk = response.read(8192)  # 8KB chunks
+                        chunk = response.read(NETWORK.DOWNLOAD_CHUNK_SIZE_BYTES)
                         if not chunk:
                             break
 
@@ -634,34 +687,49 @@ class DownloadManager:
 
                     progress_callback(downloaded, total_size, speed)
 
+                temp_path.replace(destination)
                 return True
 
+        except urllib.error.HTTPError as e:
+            logger.error("Download HTTP error %s: %s", e.code, e.reason)
+            retryable = self._is_retryable_http_status(e.code)
+            self._record_failure(e, retryable=retryable)
+            if temp_path.exists():
+                temp_path.unlink()
+            return False
+        except TimeoutError as e:
+            logger.warning("Download timeout: %s", e)
+            self._record_failure(e, retryable=True)
+            if temp_path.exists():
+                temp_path.unlink()
+            return False
         except urllib.error.URLError as e:
             logger.error(f"Download error: {e}")
-            # Clean up partial download
-            if destination.exists():
-                destination.unlink()
+            self._record_failure(e, retryable=True)
+            if temp_path.exists():
+                temp_path.unlink()
             return False
-        except InterruptedError as e:
+        except CancellationError as e:
             # User cancelled download
             logger.info(f"Download interrupted: {e}")
-            # Clean up partial download
-            if destination.exists():
-                destination.unlink()
+            self._record_failure(e, retryable=False, cancelled=True)
+            self._cancel_requested = False
+            if temp_path.exists():
+                temp_path.unlink()
             return False
         except OSError as e:
             # File I/O errors (permissions, disk full, etc.)
             logger.error(f"File system error during download: {e}", exc_info=True)
-            # Clean up partial download
-            if destination.exists():
-                destination.unlink()
+            self._record_failure(e, retryable=False)
+            if temp_path.exists():
+                temp_path.unlink()
             return False
 
     def download_with_retry(
         self,
         url: str,
         destination: Path,
-        max_retries: int = 3,
+        max_retries: int = NETWORK.MAX_RETRIES,
         progress_callback: Optional[Callable[[int, int, Optional[float]], None]] = None,
     ) -> bool:
         """
@@ -680,6 +748,13 @@ class DownloadManager:
             True if successful, False otherwise
         """
         for attempt in range(max_retries):
+            if self._cancel_requested:
+                error = CancellationError("Download cancelled")
+                self._record_failure(error, retryable=False, cancelled=True)
+                self._cancel_requested = False
+                logger.info("Download cancelled before retry attempt")
+                return False
+
             if attempt > 0:
                 # Calculate exponential backoff with jitter
                 delay = calculate_backoff_delay(attempt - 1, base_delay=2.0, max_delay=60.0)
@@ -688,6 +763,14 @@ class DownloadManager:
 
             if self.download_file(url, destination, progress_callback):
                 return True
+
+            if self._last_error_cancelled:
+                logger.info("Download cancelled; skipping remaining retries.")
+                return False
+
+            if not self._last_error_retryable:
+                logger.error("Download failed with non-retryable error: %s", self._last_error)
+                return False
 
         logger.error(f"Download failed after {max_retries} attempts")
         return False

@@ -1,4 +1,4 @@
-import { Zap, MessageSquare, Palette, Image } from 'lucide-react';
+import { Zap, MessageSquare, Palette, Image, Cpu } from 'lucide-react';
 import type { AppConfig } from '../types/apps';
 
 /**
@@ -25,6 +25,18 @@ export const DEFAULT_APPS: AppConfig[] = [
     status: 'idle',
     iconState: 'uninstalled',
     description: 'User-friendly WebUI for LLMs',
+    starred: false,
+    linked: false,
+  },
+  {
+    id: 'ollama',
+    name: 'ollama',
+    displayName: 'Ollama',
+    icon: Cpu,
+    status: 'idle',
+    iconState: 'uninstalled',
+    description: 'Local LLM runtime and model server',
+    connectionUrl: 'http://localhost:11434',
     starred: false,
     linked: false,
   },

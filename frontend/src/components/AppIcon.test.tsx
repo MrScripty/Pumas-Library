@@ -172,6 +172,12 @@ describe('AppIcon', () => {
       expect(button).toBeInTheDocument();
     });
 
+    it('uses correct icon path for ollama', () => {
+      render(<AppIcon {...defaultProps} appId="ollama" />);
+      const button = screen.getByRole('button');
+      expect(button).toBeInTheDocument();
+    });
+
     it('uses correct icon path for invoke', () => {
       render(<AppIcon {...defaultProps} appId="invoke" />);
       const button = screen.getByRole('button');

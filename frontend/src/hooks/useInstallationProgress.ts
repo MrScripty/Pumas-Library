@@ -14,6 +14,7 @@ import { APIError } from '../errors';
 const logger = getLogger('useInstallationProgress');
 
 interface UseInstallationProgressOptions {
+  appId?: string;
   installingVersion: string | null;
   externalProgress?: InstallationProgress | null;
   onRefreshProgress?: () => Promise<void>;
@@ -28,10 +29,12 @@ interface UseInstallationProgressResult {
 }
 
 export function useInstallationProgress({
+  appId,
   installingVersion,
   externalProgress,
   onRefreshProgress,
 }: UseInstallationProgressOptions): UseInstallationProgressResult {
+  const resolvedAppId = appId ?? 'comfyui';
   const [progress, setProgress] = useState<InstallationProgress | null>(externalProgress || null);
   const [cancellationNotice, setCancellationNotice] = useState<string | null>(null);
   const [noticeTimeout, setNoticeTimeout] = useState<NodeJS.Timeout | null>(null);
@@ -85,7 +88,7 @@ export function useInstallationProgress({
 
     const fetchProgress = async () => {
       try {
-        const result = await api.get_installation_progress();
+        const result = await api.get_installation_progress(resolvedAppId);
         setProgress(result);
 
         // Stop polling if installation is complete
@@ -123,7 +126,7 @@ export function useInstallationProgress({
     return () => {
       clearInterval(interval);
     };
-  }, [installingVersion, onRefreshProgress]);
+  }, [installingVersion, onRefreshProgress, resolvedAppId]);
 
   // Cleanup notice timeout
   useEffect(() => {

@@ -67,5 +67,5 @@ export function formatVersionDate(dateString: string): string {
  * Get GitHub release URL for a version
  */
 export function getReleaseUrl(release: { html_url?: string; tag_name: string }): string {
-  return release.html_url || `https://github.com/comfyanonymous/ComfyUI/releases/tag/${release.tag_name}`;
+  return release.html_url || '';
 }

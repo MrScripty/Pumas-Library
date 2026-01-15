@@ -556,8 +556,8 @@ class DownloadManager:
         self.progress_update_interval = NETWORK.DOWNLOAD_PROGRESS_INTERVAL_SEC
         self._cancel_requested = False
         self._last_error: Optional[Exception] = None
-        self._last_error_retryable = False
-        self._last_error_cancelled = False
+        self._last_error_retryable: bool = False
+        self._last_error_cancelled: bool = False
 
     @property
     def last_error(self) -> Optional[Exception]:
@@ -615,9 +615,11 @@ class DownloadManager:
             return False
 
         if not validate_url(url):
-            error = ValidationError("Invalid download URL", field_name="url", invalid_value=url)
+            validation_error = ValidationError(
+                "Invalid download URL", field_name="url", invalid_value=url
+            )
             logger.error("Invalid download URL: %s", url)
-            self._record_failure(error, retryable=False)
+            self._record_failure(validation_error, retryable=False)
             return False
 
         temp_path = destination.with_name(destination.name + NETWORK.DOWNLOAD_TEMP_SUFFIX)

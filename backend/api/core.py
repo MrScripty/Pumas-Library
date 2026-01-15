@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import tomllib
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
 
 from backend.api.dependency_manager import DependencyManager
 from backend.api.patch_manager import PatchManager
@@ -123,7 +123,9 @@ class ComfyUISetupAPI:
     def _normalize_app_id(self, app_id: Optional[str]) -> str:
         return (app_id or "comfyui").lower()
 
-    def _get_version_manager_for_app(self, app_id: Optional[str]):
+    def _get_version_manager_for_app(
+        self, app_id: Optional[str]
+    ) -> Union[VersionManager, OllamaVersionManager, None]:
         normalized = self._normalize_app_id(app_id)
         if normalized == "comfyui":
             return self.version_manager
@@ -131,7 +133,7 @@ class ComfyUISetupAPI:
             return self.ollama_version_manager
         return None
 
-    def _get_github_fetcher_for_app(self, app_id: Optional[str]):
+    def _get_github_fetcher_for_app(self, app_id: Optional[str]) -> Optional[GitHubReleasesFetcher]:
         normalized = self._normalize_app_id(app_id)
         if normalized == "comfyui":
             return self.github_fetcher
@@ -588,7 +590,7 @@ class ComfyUISetupAPI:
         if not manager:
             return []
 
-        if normalized_app != "comfyui":
+        if isinstance(manager, OllamaVersionManager):
             try:
                 return manager.get_available_versions(force_refresh)
             except OSError as e:
@@ -772,10 +774,10 @@ class ComfyUISetupAPI:
         if self._is_rate_limited("install", tag):
             return False
 
-        if normalized_app == "comfyui":
-            install_ok = manager.install_version(tag, progress_callback)
-        else:
+        if isinstance(manager, OllamaVersionManager):
             install_ok = manager.install_version(tag)
+        else:
+            install_ok = manager.install_version(tag, progress_callback)
         if not install_ok:
             return False
 

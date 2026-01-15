@@ -15,13 +15,13 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import IO, Any, Dict, List, Optional
+from typing import IO, Any, Dict, List, Optional, cast
 
 from backend.github_integration import DownloadManager, GitHubReleasesFetcher
 from backend.installation_progress_tracker import InstallationProgressTracker, InstallationStage
 from backend.logging_config import get_logger
 from backend.metadata_manager import MetadataManager
-from backend.models import GitHubRelease, VersionInfo
+from backend.models import GitHubRelease, VersionInfo, VersionsMetadata
 from backend.utils import ensure_directory, safe_filename
 from backend.validators import validate_version_tag
 
@@ -92,16 +92,16 @@ class OllamaVersionManager:
             except OSError as exc:
                 logger.warning("Failed to write to install log: %s", exc)
 
-    def _load_versions_metadata(self) -> Dict[str, Any]:
+    def _load_versions_metadata(self) -> VersionsMetadata:
         return self.metadata_manager.load_versions_for_app(self.app_id)
 
-    def _save_versions_metadata(self, data: Dict[str, Any]) -> bool:
+    def _save_versions_metadata(self, data: VersionsMetadata) -> bool:
         return self.metadata_manager.save_versions_for_app(self.app_id, data)
 
     def _write_active_version_file(self, tag: Optional[str]) -> bool:
         try:
             if tag:
-                self.active_version_file.write_text(tag)
+                self.active_version_file.write_text(tag + "\n")
             elif self.active_version_file.exists():
                 self.active_version_file.unlink()
             return True
@@ -132,7 +132,7 @@ class OllamaVersionManager:
         for candidate in candidates:
             if candidate and candidate in installed_versions:
                 self._set_active_version_state(candidate, update_last_selected=False)
-                return candidate
+                return cast(str, candidate)
 
         newest = sorted(installed_versions, reverse=True)[0]
         self._set_active_version_state(newest, update_last_selected=False)
@@ -514,7 +514,7 @@ class OllamaVersionManager:
             logger.warning("Invalid version tag for info lookup: %r", tag)
             return None
         versions_metadata = self._load_versions_metadata()
-        return versions_metadata.get("installed", {}).get(tag)
+        return versions_metadata["installed"].get(tag)
 
     def get_version_path(self, tag: str) -> Optional[Path]:
         if not validate_version_tag(tag):

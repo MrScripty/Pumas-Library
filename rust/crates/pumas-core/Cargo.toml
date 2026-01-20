@@ -38,6 +38,10 @@ tempfile = { workspace = true }
 walkdir = { workspace = true }
 fs2 = { workspace = true }
 
+# Platform-specific
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # Archive extraction
 zip = { workspace = true }
 flate2 = { workspace = true }
@@ -56,6 +60,9 @@ url = { workspace = true }
 
 # Semver parsing
 semver = { workspace = true }
+
+# Regex
+regex = { workspace = true }
 
 # Time handling
 chrono = { workspace = true }

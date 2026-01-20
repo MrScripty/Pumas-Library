@@ -66,6 +66,9 @@ url = "2"
 # Semver parsing
 semver = "1"
 
+# Regex
+regex = "1"
+
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
 

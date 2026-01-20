@@ -23,11 +23,15 @@
 
 pub mod config;
 pub mod error;
+pub mod index;
+pub mod metadata;
 pub mod models;
 
 // Re-export commonly used types
 pub use config::AppId;
 pub use error::{PumasError, Result};
+pub use index::{ModelIndex, ModelRecord, SearchResult};
+pub use metadata::MetadataManager;
 
 use std::path::PathBuf;
 use std::sync::Arc;

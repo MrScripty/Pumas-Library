@@ -288,7 +288,7 @@ impl DownloadManager {
                 self.set_error(message.clone(), true);
                 PumasError::Network {
                     message,
-                    source: Some(e),
+                    cause: Some(e.to_string()),
                 }
             })?;
 

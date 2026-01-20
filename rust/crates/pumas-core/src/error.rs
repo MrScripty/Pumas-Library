@@ -13,8 +13,8 @@ pub enum PumasError {
     #[error("Network error: {message}")]
     Network {
         message: String,
-        #[source]
-        source: Option<reqwest::Error>,
+        /// Optional cause description
+        cause: Option<String>,
     },
 
     #[error("Request timeout after {0:?}")]
@@ -85,6 +85,9 @@ pub enum PumasError {
 
     #[error("Dependency installation failed: {message}")]
     DependencyFailed { message: String },
+
+    #[error("Dependency installation failed: {message}")]
+    DependencyInstallFailed { message: String },
 
     #[error("Process launch failed for {app}: {message}")]
     LaunchFailed { app: String, message: String },
@@ -177,7 +180,7 @@ impl From<reqwest::Error> for PumasError {
         } else {
             PumasError::Network {
                 message: err.to_string(),
-                source: Some(err),
+                cause: Some(err.to_string()),
             }
         }
     }
@@ -222,6 +225,7 @@ impl PumasError {
 
             PumasError::InstallationFailed { .. }
             | PumasError::DependencyFailed { .. }
+            | PumasError::DependencyInstallFailed { .. }
             | PumasError::LaunchFailed { .. }
             | PumasError::ImportFailed { .. }
             | PumasError::DownloadFailed { .. } => -32003,

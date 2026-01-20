@@ -81,7 +81,7 @@ impl HttpClient {
             .build()
             .map_err(|e| PumasError::Network {
                 message: format!("Failed to create HTTP client: {}", e),
-                source: Some(e),
+                cause: Some(e.to_string()),
             })?;
 
         Ok(Self {
@@ -138,7 +138,7 @@ impl HttpClient {
             .await
             .map_err(|e| PumasError::Network {
                 message: format!("GET {} failed: {}", url, e),
-                source: Some(e),
+                cause: Some(e.to_string()),
             })?;
 
         self.update_rate_limits(&response);
@@ -160,7 +160,7 @@ impl HttpClient {
 
         let response = request.send().await.map_err(|e| PumasError::Network {
             message: format!("GET {} failed: {}", url, e),
-            source: Some(e),
+            cause: Some(e.to_string()),
         })?;
 
         self.update_rate_limits(&response);
@@ -178,7 +178,7 @@ impl HttpClient {
             .await
             .map_err(|e| PumasError::Network {
                 message: format!("HEAD {} failed: {}", url, e),
-                source: Some(e),
+                cause: Some(e.to_string()),
             })?;
 
         self.update_rate_limits(&response);
@@ -197,7 +197,7 @@ impl HttpClient {
             .await
             .map_err(|e| PumasError::Network {
                 message: format!("POST {} failed: {}", url, e),
-                source: Some(e),
+                cause: Some(e.to_string()),
             })?;
 
         self.update_rate_limits(&response);

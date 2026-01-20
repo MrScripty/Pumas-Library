@@ -27,16 +27,19 @@ pub mod index;
 pub mod metadata;
 pub mod models;
 pub mod network;
+pub mod version_manager;
 
 // Re-export commonly used types
 pub use config::AppId;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
 pub use metadata::MetadataManager;
+pub use version_manager::VersionManager;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use version_manager::VersionManager as VersionMgr;
 
 /// Main API struct for Pumas operations.
 ///
@@ -47,6 +50,8 @@ pub struct PumasApi {
     launcher_root: PathBuf,
     /// Shared state (will be expanded as we implement more features)
     _state: Arc<RwLock<ApiState>>,
+    /// Version manager for ComfyUI
+    version_manager: Arc<RwLock<Option<VersionMgr>>>,
 }
 
 /// Internal state for the API.
@@ -75,9 +80,19 @@ impl PumasApi {
             background_fetch_completed: false,
         }));
 
+        // Initialize version manager
+        let version_manager = match VersionMgr::new(&launcher_root, AppId::ComfyUI).await {
+            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
+            Err(e) => {
+                tracing::warn!("Failed to initialize version manager: {}", e);
+                Arc::new(RwLock::new(None))
+            }
+        };
+
         Ok(Self {
             launcher_root,
             _state: state,
+            version_manager,
         })
     }
 
@@ -254,17 +269,29 @@ impl PumasApi {
     }
 
     // ========================================
-    // Version Management Methods (stubs)
+    // Version Management Methods
     // ========================================
+
+    /// Get the version manager for an app.
+    pub async fn get_version_manager(&self, _app_id: Option<AppId>) -> Result<Arc<RwLock<Option<VersionMgr>>>> {
+        // For now, return the ComfyUI version manager
+        // In the future, we could have separate managers per app
+        Ok(self.version_manager.clone())
+    }
 
     /// Get available versions from GitHub.
     pub async fn get_available_versions(
         &self,
-        _force_refresh: bool,
+        force_refresh: bool,
         _app_id: Option<AppId>,
     ) -> Result<Vec<models::VersionReleaseInfo>> {
-        // TODO: Implement GitHub release fetching
-        Ok(vec![])
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            let releases = mgr.get_available_releases(force_refresh).await?;
+            Ok(releases.into_iter().map(models::VersionReleaseInfo::from).collect())
+        } else {
+            Ok(vec![])
+        }
     }
 
     /// Get installed versions.
@@ -272,8 +299,12 @@ impl PumasApi {
         &self,
         _app_id: Option<AppId>,
     ) -> Result<Vec<String>> {
-        // TODO: Implement version scanning
-        Ok(vec![])
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.get_installed_versions().await
+        } else {
+            Ok(vec![])
+        }
     }
 
     /// Get the active (currently selected) version.
@@ -281,8 +312,116 @@ impl PumasApi {
         &self,
         _app_id: Option<AppId>,
     ) -> Result<Option<String>> {
-        // TODO: Implement active version lookup
-        Ok(None)
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.get_active_version().await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get the default version.
+    pub async fn get_default_version(
+        &self,
+        _app_id: Option<AppId>,
+    ) -> Result<Option<String>> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.get_default_version().await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Set the active version.
+    pub async fn set_active_version(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<bool> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.set_active_version(tag).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Set the default version.
+    pub async fn set_default_version(
+        &self,
+        tag: Option<&str>,
+        _app_id: Option<AppId>,
+    ) -> Result<bool> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.set_default_version(tag).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Get installation progress.
+    pub async fn get_installation_progress(
+        &self,
+        _app_id: Option<AppId>,
+    ) -> Option<models::InstallationProgress> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.get_installation_progress().await
+        } else {
+            None
+        }
+    }
+
+    /// Cancel the current installation.
+    pub async fn cancel_installation(
+        &self,
+        _app_id: Option<AppId>,
+    ) -> Result<bool> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.cancel_installation().await
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Remove an installed version.
+    pub async fn remove_version(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<bool> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.remove_version(tag).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Validate all installations.
+    pub async fn validate_installations(
+        &self,
+        _app_id: Option<AppId>,
+    ) -> Result<version_manager::ValidationResult> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.validate_installations().await
+        } else {
+            Ok(version_manager::ValidationResult {
+                removed_tags: vec![],
+                orphaned_dirs: vec![],
+                valid_count: 0,
+            })
+        }
     }
 
     // ========================================

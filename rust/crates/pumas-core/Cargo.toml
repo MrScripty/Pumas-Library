@@ -76,6 +76,9 @@ governor = { workspace = true }
 # UUID generation
 uuid = { workspace = true }
 
+# Random number generation
+rand = "0.9"
+
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 

@@ -26,6 +26,7 @@ pub mod error;
 pub mod index;
 pub mod metadata;
 pub mod models;
+pub mod network;
 
 // Re-export commonly used types
 pub use config::AppId;

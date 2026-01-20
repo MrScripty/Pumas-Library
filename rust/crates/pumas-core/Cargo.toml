@@ -51,6 +51,10 @@ zstd = { workspace = true }
 # Hashing
 sha2 = { workspace = true }
 blake3 = { workspace = true }
+hex = { workspace = true }
+
+# URL encoding
+urlencoding = { workspace = true }
 
 # Async utilities
 futures = { workspace = true }

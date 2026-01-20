@@ -56,6 +56,10 @@ zstd = "0.13"
 # Hashing
 sha2 = "0.10"
 blake3 = "1"
+hex = "0.4"
+
+# URL encoding
+urlencoding = "2"
 
 # Async utilities
 futures = "0.3"

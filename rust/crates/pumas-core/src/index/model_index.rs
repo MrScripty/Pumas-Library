@@ -535,7 +535,8 @@ impl ModelIndex {
             }
         })?;
 
-        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)", [])?;
+        // Use query_row since PRAGMA wal_checkpoint returns results
+        let _: i32 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
         debug!("Checkpointed WAL");
         Ok(())
     }
@@ -549,7 +550,11 @@ impl ModelIndex {
             }
         })?;
 
-        conn.execute("DELETE FROM models", [])?;
+        // Delete from FTS5 table first, then models table.
+        // This avoids "Execute returned results" error from FTS5 triggers since the
+        // AFTER DELETE trigger will find nothing to delete from the FTS5 table.
+        let fts_table = &self.fts5_config.table_name;
+        conn.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
         debug!("Cleared model index");
         Ok(())
     }

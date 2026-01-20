@@ -25,6 +25,7 @@ pub mod config;
 pub mod error;
 pub mod index;
 pub mod metadata;
+pub mod model_library;
 pub mod models;
 pub mod network;
 pub mod version_manager;

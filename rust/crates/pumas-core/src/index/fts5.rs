@@ -151,8 +151,8 @@ impl<'a> FTS5Manager<'a> {
     pub fn populate_from_models(&self, conn: &Connection) -> Result<()> {
         let table = &self.config.table_name;
 
-        // Clear existing FTS5 data
-        conn.execute(&format!("DELETE FROM {}", table), [])?;
+        // Clear existing FTS5 data using execute_batch to avoid "returns results" error
+        conn.execute_batch(&format!("DELETE FROM {};", table))?;
 
         // Populate from models
         let sql = format!(

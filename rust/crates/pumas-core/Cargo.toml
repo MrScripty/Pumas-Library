@@ -1,0 +1,76 @@
+[package]
+name = "pumas-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Headless library for Pumas model and version management"
+
+[dependencies]
+# Async runtime
+tokio = { workspace = true }
+
+# HTTP client
+reqwest = { workspace = true }
+
+# Database
+rusqlite = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# System information
+sysinfo = { workspace = true }
+
+# Process management (Unix)
+nix = { workspace = true }
+
+# File operations
+tempfile = { workspace = true }
+walkdir = { workspace = true }
+fs2 = { workspace = true }
+
+# Archive extraction
+zip = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+
+# Hashing
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+
+# Async utilities
+futures = { workspace = true }
+async-trait = { workspace = true }
+
+# URL handling
+url = { workspace = true }
+
+# Semver parsing
+semver = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# TTL Cache
+mini-moka = { workspace = true }
+
+# Rate limiting
+governor = { workspace = true }
+
+# UUID generation
+uuid = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }
+
+[features]
+default = []

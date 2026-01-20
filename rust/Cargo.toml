@@ -1,0 +1,87 @@
+[workspace]
+resolver = "2"
+members = ["crates/pumas-core", "crates/pumas-rpc"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+authors = ["Jeremy"]
+license = "MIT"
+repository = "https://github.com/jeremy/pumas-library"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP server
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Database (bundled SQLite includes FTS5 by default)
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# System information
+sysinfo = "0.32"
+
+# Process management (Unix)
+nix = { version = "0.29", features = ["signal", "process"] }
+
+# File operations
+tempfile = "3"
+walkdir = "2"
+fs2 = "0.4"
+
+# Archive extraction
+zip = "2"
+flate2 = "1"
+tar = "0.4"
+
+# Hashing
+sha2 = "0.10"
+blake3 = "1"
+
+# Async utilities
+futures = "0.3"
+async-trait = "0.1"
+
+# URL and path handling
+url = "2"
+
+# Semver parsing
+semver = "1"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# TTL Cache
+mini-moka = "0.10"
+
+# Rate limiting
+governor = "0.7"
+
+# UUID generation
+uuid = { version = "1", features = ["v4"] }
+
+# Internal crates
+pumas-core = { path = "crates/pumas-core" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

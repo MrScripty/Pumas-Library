@@ -1,0 +1,394 @@
+//! API response types matching the frontend TypeScript interfaces.
+
+use super::*;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+
+/// Base response with success flag.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BaseResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl BaseResponse {
+    pub fn success() -> Self {
+        Self {
+            success: true,
+            error: None,
+        }
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self {
+            success: false,
+            error: Some(message.into()),
+        }
+    }
+}
+
+/// Disk space response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskSpaceResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub total: u64,
+    pub used: u64,
+    pub free: u64,
+    pub percent: f32,
+}
+
+/// CPU resources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CpuResources {
+    pub usage: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp: Option<f32>,
+}
+
+/// GPU resources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuResources {
+    pub usage: f32,
+    pub memory: u64,
+    pub memory_total: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temp: Option<f32>,
+}
+
+/// RAM resources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RamResources {
+    pub usage: f32,
+    pub total: u64,
+}
+
+/// Disk resources.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DiskResources {
+    pub usage: f32,
+    pub total: u64,
+    pub free: u64,
+}
+
+/// System resources container.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemResources {
+    pub cpu: CpuResources,
+    pub gpu: GpuResources,
+    pub ram: RamResources,
+    pub disk: DiskResources,
+}
+
+/// System resources response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SystemResourcesResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub resources: SystemResources,
+}
+
+/// App-specific resource usage.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppResourceUsage {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gpu_memory: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ram_memory: Option<u64>,
+}
+
+/// App resources container.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct AppResources {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comfyui: Option<AppResourceUsage>,
+}
+
+/// Status response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StatusResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub version: String,
+    pub deps_ready: bool,
+    pub patched: bool,
+    pub menu_shortcut: bool,
+    pub desktop_shortcut: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shortcut_version: Option<String>,
+    pub message: String,
+    pub comfyui_running: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_launch_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_launch_log: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_resources: Option<AppResources>,
+}
+
+/// Models response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelsResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub models: HashMap<String, ModelData>,
+}
+
+/// Search HF models response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchHfModelsResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub models: Vec<HuggingFaceModel>,
+}
+
+/// Model download response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelDownloadResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<String>,
+}
+
+/// FTS search response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct FtsSearchResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub models: Vec<FtsSearchModel>,
+    pub total_count: u32,
+    pub query_time_ms: u64,
+    pub query: String,
+}
+
+/// Import batch response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ImportBatchResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub imported: u32,
+    pub failed: u32,
+    pub results: Vec<ModelImportResult>,
+}
+
+/// Network status response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct NetworkStatusResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub total_requests: u64,
+    pub successful_requests: u64,
+    pub failed_requests: u64,
+    pub circuit_breaker_rejections: u64,
+    pub retries: u64,
+    pub success_rate: f64,
+    pub circuit_states: HashMap<String, String>,
+    pub is_offline: bool,
+}
+
+/// Library status response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LibraryStatusResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub indexing: bool,
+    pub deep_scan_in_progress: bool,
+    pub model_count: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_lookups: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deep_scan_progress: Option<DeepScanProgress>,
+}
+
+/// Deep scan progress.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeepScanProgress {
+    pub current: u32,
+    pub total: u32,
+    pub stage: String,
+}
+
+/// Link health status.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum HealthStatus {
+    Healthy,
+    Warnings,
+    Errors,
+}
+
+/// Link type.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkType {
+    Symlink,
+    Hardlink,
+    Copy,
+}
+
+/// Broken link information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BrokenLinkInfo {
+    pub link_id: i64,
+    pub target_path: String,
+    pub expected_source: String,
+    pub model_id: String,
+    pub reason: String,
+}
+
+/// Link health response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LinkHealthResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub status: HealthStatus,
+    pub total_links: u32,
+    pub healthy_links: u32,
+    pub broken_links: Vec<BrokenLinkInfo>,
+    pub orphaned_links: Vec<String>,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Shortcut state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ShortcutState {
+    pub menu: bool,
+    pub desktop: bool,
+    pub tag: String,
+}
+
+/// Launcher version response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LauncherVersionResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub version: String,
+    pub branch: String,
+    pub is_git_repo: bool,
+}
+
+/// Check launcher updates response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckLauncherUpdatesResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub has_update: bool,
+    pub current_commit: String,
+    pub latest_commit: String,
+    pub commits_behind: u32,
+    pub commits: Vec<CommitInfo>,
+}
+
+/// Commit information.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitInfo {
+    pub hash: String,
+    pub message: String,
+    pub author: String,
+    pub date: String,
+}
+
+/// Launch response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LaunchResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub log_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ready: Option<bool>,
+}
+
+/// Sandbox type.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxType {
+    Flatpak,
+    Snap,
+    Docker,
+    Appimage,
+    None,
+    Unknown,
+}
+
+/// Sandbox info response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SandboxInfoResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub is_sandboxed: bool,
+    pub sandbox_type: SandboxType,
+    pub limitations: Vec<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_base_response() {
+        let success = BaseResponse::success();
+        assert!(success.success);
+        assert!(success.error.is_none());
+
+        let error = BaseResponse::error("Something went wrong");
+        assert!(!error.success);
+        assert_eq!(error.error, Some("Something went wrong".into()));
+    }
+
+    #[test]
+    fn test_status_response_serialization() {
+        let response = StatusResponse {
+            success: true,
+            error: None,
+            version: "v1.0.0".into(),
+            deps_ready: true,
+            patched: false,
+            menu_shortcut: true,
+            desktop_shortcut: false,
+            shortcut_version: Some("v1.0.0".into()),
+            message: "Ready".into(),
+            comfyui_running: false,
+            last_launch_error: None,
+            last_launch_log: None,
+            app_resources: None,
+        };
+
+        let json = serde_json::to_string(&response).unwrap();
+        assert!(json.contains("\"success\":true"));
+        assert!(json.contains("\"deps_ready\":true"));
+    }
+}

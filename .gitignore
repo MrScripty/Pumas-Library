@@ -73,3 +73,7 @@ htmlcov/
 
 # Security audit reports
 security-audit-*.json
+
+# Rust
+rust/target/
+rust/Cargo.lock

@@ -138,6 +138,9 @@ pub enum PumasError {
     #[error("Invalid version tag: {tag}")]
     InvalidVersionTag { tag: String },
 
+    #[error("Invalid parameters: {message}")]
+    InvalidParams { message: String },
+
     // Generic errors
     #[error("{0}")]
     Other(String),
@@ -249,6 +252,8 @@ impl PumasError {
             | PumasError::InvalidAppId(_)
             | PumasError::InvalidFileType { .. }
             | PumasError::HashMismatch { .. } => -32005,
+
+            PumasError::InvalidParams { .. } => -32602, // Standard JSON-RPC invalid params
 
             // All other errors are internal errors
             _ => -32603,

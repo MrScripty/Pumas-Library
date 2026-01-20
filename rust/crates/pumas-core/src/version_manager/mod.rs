@@ -546,7 +546,7 @@ pub struct VersionStatusEntry {
 }
 
 /// Result of version validation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ValidationResult {
     pub removed_tags: Vec<String>,
     pub orphaned_dirs: Vec<PathBuf>,

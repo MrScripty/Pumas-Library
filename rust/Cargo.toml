@@ -86,6 +86,9 @@ governor = "0.7"
 # UUID generation
 uuid = { version = "1", features = ["v4"] }
 
+# Directory utilities
+dirs = "5"
+
 # Internal crates
 pumas-core = { path = "crates/pumas-core" }
 

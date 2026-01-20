@@ -49,6 +49,9 @@ pub enum PumasError {
     #[error("File not found: {0}")]
     FileNotFound(PathBuf),
 
+    #[error("Resource not found: {resource}")]
+    NotFound { resource: String },
+
     #[error("Permission denied: {0}")]
     PermissionDenied(PathBuf),
 
@@ -187,6 +190,15 @@ impl From<reqwest::Error> for PumasError {
 }
 
 impl PumasError {
+    /// Create an IO error with path and operation context.
+    pub fn io(operation: impl Into<String>, path: impl Into<PathBuf>, err: std::io::Error) -> Self {
+        PumasError::Io {
+            message: format!("{}: {}", operation.into(), err),
+            path: Some(path.into()),
+            source: Some(err),
+        }
+    }
+
     /// Create an IO error with path context.
     pub fn io_with_path(err: std::io::Error, path: impl Into<PathBuf>) -> Self {
         PumasError::Io {

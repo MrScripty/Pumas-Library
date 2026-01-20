@@ -28,6 +28,9 @@ pub mod metadata;
 pub mod model_library;
 pub mod models;
 pub mod network;
+pub mod process;
+pub mod shortcut;
+pub mod system;
 pub mod version_manager;
 
 // Re-export commonly used types
@@ -35,12 +38,14 @@ pub use config::AppId;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
 pub use metadata::MetadataManager;
+pub use process::{ProcessManager, ProcessInfo};
+pub use shortcut::{ShortcutManager, ShortcutState, ShortcutResult};
+pub use system::{GpuInfo, GpuMonitor, ProcessResources, ResourceTracker, SystemResourceSnapshot, SystemUtils};
 pub use version_manager::VersionManager;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use version_manager::VersionManager as VersionMgr;
 
 /// Main API struct for Pumas operations.
 ///
@@ -52,7 +57,13 @@ pub struct PumasApi {
     /// Shared state (will be expanded as we implement more features)
     _state: Arc<RwLock<ApiState>>,
     /// Version manager for ComfyUI
-    version_manager: Arc<RwLock<Option<VersionMgr>>>,
+    version_manager: Arc<RwLock<Option<version_manager::VersionManager>>>,
+    /// Process manager for managing running processes
+    process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
+    /// Shortcut manager for desktop/menu shortcuts
+    shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
+    /// System utilities
+    system_utils: Arc<system::SystemUtils>,
 }
 
 /// Internal state for the API.
@@ -82,7 +93,7 @@ impl PumasApi {
         }));
 
         // Initialize version manager
-        let version_manager = match VersionMgr::new(&launcher_root, AppId::ComfyUI).await {
+        let version_manager = match version_manager::VersionManager::new(&launcher_root, AppId::ComfyUI).await {
             Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
             Err(e) => {
                 tracing::warn!("Failed to initialize version manager: {}", e);
@@ -90,10 +101,34 @@ impl PumasApi {
             }
         };
 
+        // Initialize process manager
+        let process_manager = match process::ProcessManager::new(&launcher_root, None) {
+            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
+            Err(e) => {
+                tracing::warn!("Failed to initialize process manager: {}", e);
+                Arc::new(RwLock::new(None))
+            }
+        };
+
+        // Initialize shortcut manager
+        let shortcut_manager = match shortcut::ShortcutManager::new(&launcher_root) {
+            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
+            Err(e) => {
+                tracing::warn!("Failed to initialize shortcut manager: {}", e);
+                Arc::new(RwLock::new(None))
+            }
+        };
+
+        // Initialize system utilities
+        let system_utils = Arc::new(system::SystemUtils::new(&launcher_root));
+
         Ok(Self {
             launcher_root,
             _state: state,
             version_manager,
+            process_manager,
+            shortcut_manager,
+            system_utils,
         })
     }
 
@@ -274,7 +309,7 @@ impl PumasApi {
     // ========================================
 
     /// Get the version manager for an app.
-    pub async fn get_version_manager(&self, _app_id: Option<AppId>) -> Result<Arc<RwLock<Option<VersionMgr>>>> {
+    pub async fn get_version_manager(&self, _app_id: Option<AppId>) -> Result<Arc<RwLock<Option<version_manager::VersionManager>>>> {
         // For now, return the ComfyUI version manager
         // In the future, we could have separate managers per app
         Ok(self.version_manager.clone())
@@ -423,6 +458,276 @@ impl PumasApi {
                 valid_count: 0,
             })
         }
+    }
+
+    // ========================================
+    // Process Management Methods
+    // ========================================
+
+    /// Check if ComfyUI is currently running.
+    pub async fn is_comfyui_running(&self) -> bool {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.is_running()
+        } else {
+            false
+        }
+    }
+
+    /// Get running processes with resource information.
+    pub async fn get_running_processes(&self) -> Vec<process::ProcessInfo> {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.get_processes_with_resources()
+        } else {
+            vec![]
+        }
+    }
+
+    /// Stop all running ComfyUI processes.
+    pub async fn stop_comfyui(&self) -> Result<bool> {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.stop_all()
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Launch a specific version.
+    pub async fn launch_version(&self, tag: &str, _app_id: Option<AppId>) -> Result<models::LaunchResponse> {
+        let version_mgr_lock = self.version_manager.read().await;
+        let proc_mgr_lock = self.process_manager.read().await;
+
+        let version_dir = if let Some(ref vm) = *version_mgr_lock {
+            let path = vm.version_path(tag);
+            if !path.exists() {
+                return Ok(models::LaunchResponse {
+                    success: false,
+                    error: Some(format!("Version {} not installed", tag)),
+                    log_path: None,
+                    ready: None,
+                });
+            }
+            path
+        } else {
+            return Ok(models::LaunchResponse {
+                success: false,
+                error: Some("Version manager not initialized".to_string()),
+                log_path: None,
+                ready: None,
+            });
+        };
+
+        if let Some(ref pm) = *proc_mgr_lock {
+            let log_dir = self.launcher_data_dir().join("logs");
+            let result = pm.launch_version(tag, &version_dir, Some(&log_dir));
+
+            Ok(models::LaunchResponse {
+                success: result.success,
+                error: result.error,
+                log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+                ready: Some(result.ready),
+            })
+        } else {
+            Ok(models::LaunchResponse {
+                success: false,
+                error: Some("Process manager not initialized".to_string()),
+                log_path: None,
+                ready: None,
+            })
+        }
+    }
+
+    /// Get the last launch log path.
+    pub async fn get_last_launch_log(&self) -> Option<String> {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.last_launch_log().map(|p| p.to_string_lossy().to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Get the last launch error.
+    pub async fn get_last_launch_error(&self) -> Option<String> {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.last_launch_error()
+        } else {
+            None
+        }
+    }
+
+    // ========================================
+    // Shortcut Management Methods
+    // ========================================
+
+    /// Get shortcut state for a version.
+    pub async fn get_version_shortcut_state(&self, tag: &str) -> models::ShortcutState {
+        let mgr_lock = self.shortcut_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            let state = mgr.get_version_shortcut_state(tag);
+            models::ShortcutState {
+                tag: state.tag,
+                menu: state.menu,
+                desktop: state.desktop,
+            }
+        } else {
+            models::ShortcutState {
+                tag: tag.to_string(),
+                menu: false,
+                desktop: false,
+            }
+        }
+    }
+
+    /// Create shortcuts for a version.
+    pub async fn create_version_shortcuts(
+        &self,
+        tag: &str,
+        create_menu: bool,
+        create_desktop: bool,
+    ) -> Result<models::ShortcutState> {
+        let version_mgr_lock = self.version_manager.read().await;
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
+
+        let version_dir = if let Some(ref vm) = *version_mgr_lock {
+            let path = vm.version_path(tag);
+            if !path.exists() {
+                return Err(PumasError::NotFound {
+                    resource: format!("Version: {}", tag),
+                });
+            }
+            path
+        } else {
+            return Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            });
+        };
+
+        if let Some(ref sm) = *shortcut_mgr_lock {
+            let result = sm.create_version_shortcuts(tag, &version_dir, create_menu, create_desktop)?;
+            Ok(models::ShortcutState {
+                tag: result.state.tag,
+                menu: result.state.menu,
+                desktop: result.state.desktop,
+            })
+        } else {
+            Err(PumasError::Config {
+                message: "Shortcut manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Remove shortcuts for a version.
+    pub async fn remove_version_shortcuts(
+        &self,
+        tag: &str,
+        remove_menu: bool,
+        remove_desktop: bool,
+    ) -> Result<models::ShortcutState> {
+        let mgr_lock = self.shortcut_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            let result = mgr.remove_version_shortcuts(tag, remove_menu, remove_desktop)?;
+            Ok(models::ShortcutState {
+                tag: result.state.tag,
+                menu: result.state.menu,
+                desktop: result.state.desktop,
+            })
+        } else {
+            Err(PumasError::Config {
+                message: "Shortcut manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Toggle menu shortcut for a version.
+    pub async fn toggle_menu_shortcut(&self, tag: &str) -> Result<bool> {
+        let version_mgr_lock = self.version_manager.read().await;
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
+
+        let version_dir = if let Some(ref vm) = *version_mgr_lock {
+            let path = vm.version_path(tag);
+            if !path.exists() {
+                return Err(PumasError::NotFound {
+                    resource: format!("Version: {}", tag),
+                });
+            }
+            path
+        } else {
+            return Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            });
+        };
+
+        if let Some(ref sm) = *shortcut_mgr_lock {
+            let result = sm.toggle_menu_shortcut(tag, &version_dir)?;
+            Ok(result.success)
+        } else {
+            Err(PumasError::Config {
+                message: "Shortcut manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Toggle desktop shortcut for a version.
+    pub async fn toggle_desktop_shortcut(&self, tag: &str) -> Result<bool> {
+        let version_mgr_lock = self.version_manager.read().await;
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
+
+        let version_dir = if let Some(ref vm) = *version_mgr_lock {
+            let path = vm.version_path(tag);
+            if !path.exists() {
+                return Err(PumasError::NotFound {
+                    resource: format!("Version: {}", tag),
+                });
+            }
+            path
+        } else {
+            return Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            });
+        };
+
+        if let Some(ref sm) = *shortcut_mgr_lock {
+            let result = sm.toggle_desktop_shortcut(tag, &version_dir)?;
+            Ok(result.success)
+        } else {
+            Err(PumasError::Config {
+                message: "Shortcut manager not initialized".to_string(),
+            })
+        }
+    }
+
+    // ========================================
+    // System Utility Methods
+    // ========================================
+
+    /// Open a path in the file manager.
+    pub fn open_path(&self, path: &str) -> Result<()> {
+        self.system_utils.open_path(path)
+    }
+
+    /// Open a URL in the default browser.
+    pub fn open_url(&self, url: &str) -> Result<()> {
+        self.system_utils.open_url(url)
+    }
+
+    /// Open the active version's installation directory.
+    pub async fn open_active_install(&self) -> Result<()> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            if let Some(tag) = mgr.get_active_version().await? {
+                let path = mgr.version_path(&tag);
+                if path.exists() {
+                    return self.system_utils.open_path(&path.to_string_lossy());
+                }
+            }
+        }
+        Err(PumasError::NotFound {
+            resource: "Active version".to_string(),
+        })
     }
 
     // ========================================

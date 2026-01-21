@@ -261,12 +261,17 @@ impl PumasError {
     }
 
     /// Check if this error should trigger a retry.
+    ///
+    /// Note: RateLimited errors are NOT retryable because:
+    /// 1. The API won't work until the rate limit window resets
+    /// 2. Retrying immediately wastes quota and extends the rate limit
+    /// 3. The caller should use cached data or wait for the retry_after period
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
             PumasError::Network { .. }
                 | PumasError::Timeout(_)
-                | PumasError::RateLimited { .. }
+            // RateLimited is intentionally NOT retryable - see doc comment above
         )
     }
 }
@@ -428,7 +433,11 @@ mod tests {
             cause: None
         }
         .is_retryable());
-        assert!(PumasError::RateLimited {
+
+        // Not retryable - RateLimited should NOT be retryable because:
+        // 1. The API won't work until the rate limit window resets
+        // 2. Retrying immediately wastes quota
+        assert!(!PumasError::RateLimited {
             service: "GitHub".into(),
             retry_after_secs: Some(60)
         }

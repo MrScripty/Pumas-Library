@@ -14,11 +14,12 @@ use crate::{PumasError, Result};
 use chrono::{DateTime, Utc};
 use mini_moka::sync::Cache;
 use reqwest::StatusCode;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::RwLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::sync::{watch, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 // Re-export for convenience
@@ -160,6 +161,9 @@ impl ReleasesCache {
     }
 }
 
+/// Result type for pending fetch operations (cloneable for broadcast).
+type FetchResult = std::result::Result<Vec<GitHubRelease>, String>;
+
 /// GitHub API client.
 pub struct GitHubClient {
     http: Arc<HttpClient>,
@@ -168,6 +172,9 @@ pub struct GitHubClient {
     is_fetching: AtomicBool,
     /// Lock for coordinating fetches.
     fetch_lock: RwLock<()>,
+    /// Pending fetch operations - allows request coalescing.
+    /// When a fetch is in progress, other callers subscribe to receive the same result.
+    pending_fetches: Mutex<HashMap<String, watch::Receiver<Option<FetchResult>>>>,
 }
 
 impl GitHubClient {
@@ -179,6 +186,7 @@ impl GitHubClient {
             cache: ReleasesCache::new(cache_dir, NetworkConfig::GITHUB_RELEASES_TTL),
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
+            pending_fetches: Mutex::new(HashMap::new()),
         })
     }
 
@@ -190,6 +198,7 @@ impl GitHubClient {
             cache: ReleasesCache::new(cache_dir, ttl),
             is_fetching: AtomicBool::new(false),
             fetch_lock: RwLock::new(()),
+            pending_fetches: Mutex::new(HashMap::new()),
         })
     }
 
@@ -297,14 +306,72 @@ impl GitHubClient {
 
     // Internal methods
 
+    /// Fetch releases from network with request coalescing.
+    ///
+    /// If a fetch is already in progress for this repo, wait for and return
+    /// the same result instead of making a duplicate request.
     async fn fetch_releases_from_network(&self, repo: &str) -> Result<Vec<GitHubRelease>> {
-        // Acquire fetch lock to prevent concurrent fetches for the same repo
+        let cache_key = repo.to_string();
+
+        // Check if there's already a pending fetch for this repo
+        {
+            let pending = self.pending_fetches.lock().await;
+            if let Some(receiver) = pending.get(&cache_key) {
+                // Clone the receiver to wait for the result
+                let mut rx = receiver.clone();
+                drop(pending); // Release the lock while waiting
+
+                debug!("Coalescing request for {} - waiting for in-flight fetch", repo);
+
+                // Wait for the result
+                loop {
+                    if let Some(result) = rx.borrow().as_ref() {
+                        return result.clone().map_err(|e| PumasError::Network {
+                            message: e,
+                            cause: None,
+                        });
+                    }
+                    // Wait for change
+                    if rx.changed().await.is_err() {
+                        // Sender dropped without sending - fall through to make our own request
+                        break;
+                    }
+                }
+            }
+        }
+
+        // No pending fetch - we'll do the fetch ourselves
+        // Create a channel to broadcast the result
+        let (tx, rx) = watch::channel(None);
+
+        {
+            let mut pending = self.pending_fetches.lock().await;
+            pending.insert(cache_key.clone(), rx);
+        }
+
+        // Acquire fetch lock and do the actual fetch
         let _lock = self.fetch_lock.write().await;
         self.is_fetching.store(true, Ordering::SeqCst);
 
         let result = self.do_fetch_releases(repo).await;
 
         self.is_fetching.store(false, Ordering::SeqCst);
+
+        // Convert result to FetchResult and broadcast
+        let fetch_result: FetchResult = result
+            .as_ref()
+            .map(|r| r.clone())
+            .map_err(|e| e.to_string());
+
+        // Broadcast the result to any waiting callers
+        let _ = tx.send(Some(fetch_result));
+
+        // Clean up the pending entry
+        {
+            let mut pending = self.pending_fetches.lock().await;
+            pending.remove(&cache_key);
+        }
+
         result
     }
 
@@ -355,11 +422,37 @@ impl GitHubClient {
             let response = result?;
             let status = response.status();
 
-            if status == StatusCode::FORBIDDEN {
-                // Rate limited - check if we have stale cache
+            if status == StatusCode::FORBIDDEN || status == StatusCode::TOO_MANY_REQUESTS {
+                // Rate limited - extract retry information from headers
+                let retry_after = response
+                    .headers()
+                    .get("Retry-After")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    // Also check X-RateLimit-Reset as fallback
+                    .or_else(|| {
+                        response
+                            .headers()
+                            .get("X-RateLimit-Reset")
+                            .and_then(|v| v.to_str().ok())
+                            .and_then(|s| s.parse::<u64>().ok())
+                            .and_then(|reset| {
+                                let now = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .ok()?
+                                    .as_secs();
+                                Some(reset.saturating_sub(now))
+                            })
+                    });
+
+                warn!(
+                    "GitHub rate limited ({}), retry after: {:?} seconds",
+                    status, retry_after
+                );
+
                 return Err(PumasError::RateLimited {
                     service: "GitHub".to_string(),
-                    retry_after_secs: None,
+                    retry_after_secs: retry_after,
                 });
             }
 

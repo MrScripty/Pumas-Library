@@ -263,8 +263,23 @@ async fn dispatch_method(
             let force_refresh = get_bool_param!(params, "force_refresh", "forceRefresh").unwrap_or(false);
             let app_id = get_app_id!(params);
 
-            let versions = api.get_available_versions(force_refresh, app_id).await?;
-            Ok(serde_json::to_value(versions)?)
+            // Handle rate limit errors specially to return structured response
+            match api.get_available_versions(force_refresh, app_id).await {
+                Ok(versions) => Ok(json!({
+                    "success": true,
+                    "versions": versions
+                })),
+                Err(pumas_core::PumasError::RateLimited { service, retry_after_secs }) => {
+                    warn!("Rate limited by {} when fetching versions", service);
+                    Ok(json!({
+                        "success": false,
+                        "error": format!("Rate limited by {}", service),
+                        "rate_limited": true,
+                        "retry_after_secs": retry_after_secs
+                    }))
+                },
+                Err(e) => Err(e)
+            }
         }
 
         "get_installed_versions" => {

@@ -30,12 +30,17 @@ impl RateLimitState {
     pub fn should_throttle(&self) -> bool {
         match (self.remaining, self.limit) {
             (Some(remaining), Some(limit)) if limit > 0 => {
-                // Throttle when below 10% of limit
-                let threshold = (limit as f64 * 0.1) as u64;
-                remaining < threshold.max(1)
+                // Throttle when below 20% of limit (more conservative than before)
+                let threshold = (limit as f64 * 0.2) as u64;
+                remaining < threshold.max(2)
             }
             _ => false,
         }
+    }
+
+    /// Check if we are completely rate limited (no remaining requests).
+    pub fn is_exhausted(&self) -> bool {
+        matches!(self.remaining, Some(0))
     }
 
     /// Get time until rate limit resets.
@@ -90,7 +95,7 @@ impl HttpClient {
             rate_limit_limit: AtomicU64::new(0),
             rate_limit_reset: AtomicU64::new(0),
             default_timeout: timeout,
-            throttle_delay: Duration::from_millis(500),
+            throttle_delay: Duration::from_secs(2), // Increased from 500ms for more effective throttling
         })
     }
 
@@ -221,6 +226,22 @@ impl HttpClient {
 
     async fn maybe_throttle(&self) {
         let state = self.rate_limit_state();
+
+        // If rate limit is exhausted (remaining=0), wait until reset
+        if state.is_exhausted() {
+            if let Some(wait_time) = state.time_until_reset() {
+                // Cap wait time to 60 seconds to avoid blocking too long
+                let capped_wait = wait_time.min(Duration::from_secs(60));
+                warn!(
+                    "Rate limit exhausted, waiting {:?} until reset (full reset in {:?})",
+                    capped_wait, wait_time
+                );
+                tokio::time::sleep(capped_wait).await;
+                return;
+            }
+        }
+
+        // Standard throttle for low remaining
         if state.should_throttle() {
             warn!(
                 "Rate limit approaching (remaining: {:?}/{:?}), throttling for {:?}",
@@ -337,18 +358,35 @@ mod tests {
     #[test]
     fn test_rate_limit_state_throttle() {
         let state = RateLimitState {
-            remaining: Some(5),
+            remaining: Some(15),
             limit: Some(100),
             reset: None,
         };
-        assert!(state.should_throttle()); // 5 < 10% of 100
+        assert!(state.should_throttle()); // 15 < 20% of 100
 
         let state = RateLimitState {
-            remaining: Some(50),
+            remaining: Some(25),
             limit: Some(100),
             reset: None,
         };
-        assert!(!state.should_throttle()); // 50 >= 10% of 100
+        assert!(!state.should_throttle()); // 25 >= 20% of 100
+    }
+
+    #[test]
+    fn test_rate_limit_state_exhausted() {
+        let state = RateLimitState {
+            remaining: Some(0),
+            limit: Some(60),
+            reset: None,
+        };
+        assert!(state.is_exhausted());
+
+        let state = RateLimitState {
+            remaining: Some(1),
+            limit: Some(60),
+            reset: None,
+        };
+        assert!(!state.is_exhausted());
     }
 
     #[test]

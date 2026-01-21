@@ -40,10 +40,11 @@ pub use custom_nodes::CustomNodesManager;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
 pub use metadata::MetadataManager;
+pub use model_library::sharding::{self, ShardValidation};
 pub use process::{ProcessManager, ProcessInfo};
 pub use shortcut::{ShortcutManager, ShortcutState, ShortcutResult};
 pub use system::{GpuInfo, GpuMonitor, ProcessResources, ResourceTracker, SystemResourceSnapshot, SystemUtils};
-pub use version_manager::VersionManager;
+pub use version_manager::{VersionManager, SizeCalculator, ReleaseSize, SizeBreakdown};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -66,6 +67,10 @@ pub struct PumasApi {
     shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
     /// System utilities
     system_utils: Arc<system::SystemUtils>,
+    /// Custom nodes manager for managing custom nodes in versions
+    custom_nodes_manager: Arc<custom_nodes::CustomNodesManager>,
+    /// Size calculator for estimating release sizes
+    size_calculator: Arc<RwLock<version_manager::SizeCalculator>>,
 }
 
 /// Internal state for the API.
@@ -124,6 +129,16 @@ impl PumasApi {
         // Initialize system utilities
         let system_utils = Arc::new(system::SystemUtils::new(&launcher_root));
 
+        // Initialize custom nodes manager (for ComfyUI versions)
+        let versions_dir = launcher_root.join(AppId::ComfyUI.versions_dir_name());
+        let custom_nodes_manager = Arc::new(custom_nodes::CustomNodesManager::new(versions_dir));
+
+        // Initialize size calculator
+        let cache_dir = launcher_root
+            .join("launcher-data")
+            .join(config::PathsConfig::CACHE_DIR_NAME);
+        let size_calculator = Arc::new(RwLock::new(version_manager::SizeCalculator::new(cache_dir)));
+
         Ok(Self {
             launcher_root,
             _state: state,
@@ -131,6 +146,8 @@ impl PumasApi {
             process_manager,
             shortcut_manager,
             system_utils,
+            custom_nodes_manager,
+            size_calculator,
         })
     }
 
@@ -744,6 +761,57 @@ impl PumasApi {
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
         self._state.write().await.background_fetch_completed = false;
+    }
+
+    // ========================================
+    // Custom Nodes Management
+    // ========================================
+
+    /// List all custom nodes for a specific version.
+    pub fn list_custom_nodes(&self, tag: &str) -> Result<Vec<custom_nodes::types::InstalledCustomNode>> {
+        self.custom_nodes_manager.list_custom_nodes(tag)
+    }
+
+    /// Install a custom node from a git URL.
+    pub async fn install_custom_node(&self, git_url: &str, tag: &str) -> Result<custom_nodes::types::InstallResult> {
+        self.custom_nodes_manager.install_from_git(git_url, tag).await
+    }
+
+    /// Update a custom node to the latest version.
+    pub async fn update_custom_node(&self, node_name: &str, tag: &str) -> Result<custom_nodes::types::UpdateResult> {
+        self.custom_nodes_manager.update(node_name, tag).await
+    }
+
+    /// Remove a custom node from a specific version.
+    pub fn remove_custom_node(&self, node_name: &str, tag: &str) -> Result<bool> {
+        self.custom_nodes_manager.remove(node_name, tag)
+    }
+
+    // ========================================
+    // Size Calculator
+    // ========================================
+
+    /// Calculate size for a release.
+    pub async fn calculate_release_size(
+        &self,
+        tag: &str,
+        archive_size: u64,
+        requirements: Option<&[String]>,
+    ) -> Result<version_manager::ReleaseSize> {
+        let mut calc = self.size_calculator.write().await;
+        calc.calculate_release_size(tag, archive_size, requirements).await
+    }
+
+    /// Get cached size for a release.
+    pub async fn get_cached_release_size(&self, tag: &str) -> Option<version_manager::ReleaseSize> {
+        let calc = self.size_calculator.read().await;
+        calc.get_cached_size(tag).cloned()
+    }
+
+    /// Get detailed size breakdown for a release.
+    pub async fn get_release_size_breakdown(&self, tag: &str) -> Option<version_manager::SizeBreakdown> {
+        let calc = self.size_calculator.read().await;
+        calc.get_size_breakdown(tag)
     }
 }
 

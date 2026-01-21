@@ -358,34 +358,60 @@ async fn dispatch_method(
 
         "get_release_size_info" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let archive_size = get_i64_param!(params, "archive_size", "archiveSize").unwrap_or(0);
-            // TODO: Implement release size calculation
-            Ok(json!({
-                "tag": tag,
-                "archive_size": archive_size,
-                "total_size": null,
-                "dependencies_size": null
-            }))
+            let archive_size = get_i64_param!(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
+
+            // Calculate release size
+            let result = api.calculate_release_size(&tag, archive_size, None).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "get_release_size_breakdown" => {
             let tag = require_str_param!(params, "tag", "tag");
-            // TODO: Implement release size breakdown
-            Ok(json!({
-                "tag": tag,
-                "breakdown": {}
-            }))
+
+            // Get cached size breakdown
+            if let Some(breakdown) = api.get_release_size_breakdown(&tag).await {
+                Ok(serde_json::to_value(breakdown)?)
+            } else {
+                Ok(json!({
+                    "tag": tag,
+                    "error": "No cached size data available"
+                }))
+            }
         }
 
         "calculate_release_size" => {
             let tag = require_str_param!(params, "tag", "tag");
-            // TODO: Implement release size calculation
-            Ok(json!(null))
+            let archive_size = get_i64_param!(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
+
+            // Parse optional requirements array
+            let requirements: Option<Vec<String>> = params
+                .get("requirements")
+                .and_then(|v| serde_json::from_value(v.clone()).ok());
+
+            let result = api.calculate_release_size(
+                &tag,
+                archive_size,
+                requirements.as_deref(),
+            ).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "calculate_all_release_sizes" => {
-            // TODO: Implement batch release size calculation
-            Ok(json!({}))
+            // Get all available versions and calculate sizes
+            let versions = api.get_available_versions(false, None).await?;
+            let mut results = serde_json::Map::new();
+
+            for version in versions.iter().take(20) {
+                // Limit to avoid too many calculations
+                let archive_size = version.archive_size.unwrap_or(0);
+                if let Ok(size_info) = api.calculate_release_size(&version.tag_name, archive_size, None).await {
+                    if let Ok(value) = serde_json::to_value(&size_info) {
+                        results.insert(version.tag_name.clone(), value);
+                    }
+                }
+            }
+
+            Ok(json!(results))
         }
 
         // ====================================================================
@@ -699,10 +725,27 @@ async fn dispatch_method(
         }
 
         "detect_sharded_sets" => {
-            // TODO: Implement sharded set detection
+            // Get files array from params
+            let files: Vec<String> = params
+                .get("files")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            // Convert to PathBuf
+            let paths: Vec<std::path::PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
+
+            // Detect sharded sets
+            let sets = pumas_core::sharding::detect_sharded_sets(&paths);
+
+            // Convert to serializable format
+            let result: std::collections::HashMap<String, Vec<String>> = sets
+                .into_iter()
+                .map(|(k, v)| (k, v.into_iter().map(|p| p.to_string_lossy().to_string()).collect()))
+                .collect();
+
             Ok(json!({
                 "success": true,
-                "sets": []
+                "sets": result
             }))
         }
 
@@ -917,29 +960,29 @@ async fn dispatch_method(
         // ====================================================================
         "get_custom_nodes" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement custom node listing
-            Ok(json!([]))
+            let nodes = api.list_custom_nodes(&version_tag)?;
+            Ok(serde_json::to_value(nodes)?)
         }
 
         "install_custom_node" => {
             let repo_url = require_str_param!(params, "repo_url", "repoUrl");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement custom node installation
-            Ok(json!(false))
+            let result = api.install_custom_node(&repo_url, &version_tag).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "update_custom_node" => {
             let node_name = require_str_param!(params, "node_name", "nodeName");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement custom node update
-            Ok(json!(false))
+            let result = api.update_custom_node(&node_name, &version_tag).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "remove_custom_node" => {
             let node_name = require_str_param!(params, "node_name", "nodeName");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement custom node removal
-            Ok(json!(false))
+            let result = api.remove_custom_node(&node_name, &version_tag)?;
+            Ok(json!({"success": result}))
         }
 
         // ====================================================================

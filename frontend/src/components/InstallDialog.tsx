@@ -40,6 +40,10 @@ interface InstallDialogProps {
   onRefreshProgress?: () => Promise<void>;
   appDisplayName?: string;
   appId?: string;
+  /** True when GitHub API rate limit was hit */
+  isRateLimited?: boolean;
+  /** Seconds until rate limit resets (if known) */
+  rateLimitRetryAfter?: number | null;
 }
 
 export function InstallDialog({
@@ -58,6 +62,8 @@ export function InstallDialog({
   onRefreshProgress,
   appDisplayName = 'ComfyUI',
   appId,
+  isRateLimited = false,
+  rateLimitRetryAfter,
 }: InstallDialogProps) {
   logger.debug('Component rendered', { isOpen, availableVersionsCount: availableVersions.length, displayMode });
 
@@ -360,6 +366,31 @@ export function InstallDialog({
               <div className="flex items-center gap-2">
                 <AlertCircle size={14} />
                 <span>{cancellationNotice}</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Rate limit banner */}
+        <AnimatePresence>
+          {isRateLimited && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              className="mb-3 mx-4 rounded border border-[hsl(var(--accent-warning))]/30 bg-[hsl(var(--accent-warning))]/10 px-3 py-2 text-sm text-[hsl(var(--accent-warning))]"
+            >
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center gap-2 font-medium">
+                  <AlertCircle size={14} />
+                  <span>GitHub Rate Limit Reached</span>
+                </div>
+                <p className="text-xs opacity-80 ml-5">
+                  Showing cached version data.
+                  {rateLimitRetryAfter != null && rateLimitRetryAfter > 0 && (
+                    <> Rate limit resets in {Math.ceil(rateLimitRetryAfter / 60)} minute{Math.ceil(rateLimitRetryAfter / 60) !== 1 ? 's' : ''}.</>
+                  )}
+                </p>
               </div>
             </motion.div>
           )}

@@ -28,6 +28,10 @@ interface UseVersionFetchingResult {
   cacheStatus: CacheStatus;
   isLoading: boolean;
   error: string | null;
+  /** True when GitHub API rate limit was hit */
+  isRateLimited: boolean;
+  /** Seconds until rate limit resets (if known) */
+  rateLimitRetryAfter: number | null;
   fetchInstalledVersions: () => Promise<void>;
   fetchActiveVersion: () => Promise<void>;
   fetchAvailableVersions: (forceRefresh?: boolean) => Promise<void>;
@@ -56,6 +60,8 @@ export function useVersionFetching({
   });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isRateLimited, setIsRateLimited] = useState(false);
+  const [rateLimitRetryAfter, setRateLimitRetryAfter] = useState<number | null>(null);
 
   const followupRefreshRef = useRef<NodeJS.Timeout | null>(null);
   const fetchAvailableVersionsRef = useRef<(forceRefresh?: boolean) => Promise<void>>(() => Promise.resolve());
@@ -72,6 +78,8 @@ export function useVersionFetching({
       is_fetching: false,
     });
     setError(null);
+    setIsRateLimited(false);
+    setRateLimitRetryAfter(null);
     setIsLoading(isEnabled);
     if (!isEnabled) {
       setIsLoading(false);
@@ -170,6 +178,8 @@ export function useVersionFetching({
       logger.debug('Available versions result received', { versionsCount: result.versions?.length });
       if (result.success) {
         setAvailableVersions(result.versions || []);
+        setIsRateLimited(false);
+        setRateLimitRetryAfter(null);
         logger.debug('Set available versions', { count: result.versions?.length });
 
         // If backend flags an installing release, update local state
@@ -187,6 +197,12 @@ export function useVersionFetching({
             void fetchAvailableVersionsRef.current(false);
           }, 1500) as any;
         }
+      } else if (result.rate_limited) {
+        // Handle rate limit gracefully - show cached data if available
+        logger.warn('GitHub API rate limited', { retryAfter: result.retry_after_secs });
+        setIsRateLimited(true);
+        setRateLimitRetryAfter(result.retry_after_secs ?? null);
+        // Don't set error - we want to show the rate limit banner instead
       } else {
         logger.error('Failed to fetch available versions', { error: result.error });
         setError(result.error || 'Failed to fetch available versions');
@@ -375,6 +391,8 @@ export function useVersionFetching({
     cacheStatus,
     isLoading,
     error,
+    isRateLimited,
+    rateLimitRetryAfter,
     fetchInstalledVersions,
     fetchActiveVersion,
     fetchAvailableVersions,

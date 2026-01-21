@@ -30,6 +30,10 @@ export interface UseVersionsResult {
   versionStatus: VersionStatus | null;
   isLoading: boolean;
   error: string | null;
+  /** True when GitHub API rate limit was hit */
+  isRateLimited: boolean;
+  /** Seconds until rate limit resets (if known) */
+  rateLimitRetryAfter: number | null;
   installingTag: string | null;
   installationProgress: InstallationProgress | null;
   defaultVersion: string | null;
@@ -69,6 +73,8 @@ export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}):
     cacheStatus,
     isLoading,
     error,
+    isRateLimited,
+    rateLimitRetryAfter,
     fetchInstalledVersions,
     fetchActiveVersion,
     fetchVersionStatus,
@@ -139,6 +145,8 @@ export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}):
     versionStatus,
     isLoading,
     error,
+    isRateLimited,
+    rateLimitRetryAfter,
     installingTag,
     installationProgress,
     defaultVersion,

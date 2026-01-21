@@ -100,6 +100,8 @@ export function VersionManagementPanel({
             displayMode="page"
             appDisplayName={appDisplayName}
             appId={versions.appId ?? undefined}
+            isRateLimited={versions.isRateLimited}
+            rateLimitRetryAfter={versions.rateLimitRetryAfter}
           />
         </div>
       </div>

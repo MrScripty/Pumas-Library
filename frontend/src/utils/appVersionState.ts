@@ -20,6 +20,8 @@ export const UNSUPPORTED_VERSION_STATE: AppVersionState = {
   versionStatus: null,
   isLoading: false,
   error: null,
+  isRateLimited: false,
+  rateLimitRetryAfter: null,
   installingTag: null,
   installationProgress: null,
   defaultVersion: null,

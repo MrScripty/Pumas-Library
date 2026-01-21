@@ -594,6 +594,10 @@ export interface VersionReleaseInfo {
 
 export interface GetAvailableVersionsResponse extends BaseResponse {
   versions: VersionReleaseInfo[];
+  /** True when the request was rate limited by the API provider (e.g., GitHub) */
+  rate_limited?: boolean;
+  /** Seconds until the rate limit resets (if known) */
+  retry_after_secs?: number | null;
 }
 
 export interface GetInstalledVersionsResponse extends BaseResponse {

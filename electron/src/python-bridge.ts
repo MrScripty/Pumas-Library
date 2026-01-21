@@ -149,7 +149,7 @@ export class PythonBridge {
         cmd: this.options.rustBinaryPath,
         args: [
           '--port', String(this.port),
-          '--launcher_root', this.options.launcherRoot,
+          '--launcher-root', this.options.launcherRoot,
           ...(this.options.debug ? ['--debug'] : []),
         ],
         cwd: projectRoot,

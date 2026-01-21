@@ -1,6 +1,7 @@
 # Pumas Library
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
+![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
 ![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
@@ -20,19 +21,20 @@ Easy to use AI model library that links your models to other apps in the launche
 
 ## Architecture
 
-Pumas Library uses a modern **Electron + Python sidecar** architecture:
+Pumas Library uses a modern **Electron + Rust backend** architecture:
 
 - **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
 - **Desktop Shell**: Electron 38+ with native Wayland support
-- **Backend**: Python 3.12+ running as a sidecar process
-- **IPC**: JSON-RPC communication between Electron and Python
+- **Backend**: Rust (default) or Python 3.12+ running as a sidecar process
+- **IPC**: JSON-RPC communication between Electron and backend
 
 ## Installation
 
 ### System Requirements
 
 - **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
-- **Python**: 3.12+
+- **Rust**: 1.75+ (for building the backend)
+- **Python**: 3.12+ (optional, for Python backend fallback)
 - **Node.js**: 24+ LTS
 
 ### Quick Install (Recommended)
@@ -128,15 +130,28 @@ Run the launcher with different modes:
 
 | Command                      | Description                                                      |
 | ---------------------------- | ---------------------------------------------------------------- |
-| `./launcher`                 | Launch the application (Electron)                                |
-| `./launcher dev`             | Launch with developer tools enabled                              |
-| `./launcher build`           | Rebuild the frontend                                             |
-| `./launcher build-electron`  | Rebuild Electron TypeScript                                      |
+| `./launcher`                 | Launch the application (Rust backend, default)                   |
+| `./launcher python`          | Launch with Python backend                                       |
+| `./launcher dev`             | Launch with developer tools (Rust backend)                       |
+| `./launcher dev-python`      | Launch with developer tools (Python backend)                     |
+| `./launcher build`           | Build all components (Rust, frontend, Electron)                  |
+| `./launcher build-rust`      | Build Rust backend only                                          |
+| `./launcher build-electron`  | Build Electron TypeScript only                                   |
 | `./launcher package`         | Package Electron app for distribution                            |
 | `./launcher electron-install`| Install Electron dependencies                                    |
 | `./launcher dev-install`     | Install dev tooling (requirements-dev.txt)                       |
 | `./launcher test`            | Run pre-commit hooks (formatting, linting, tests, type checking) |
 | `./launcher sbom`            | Generate Software Bill of Materials (SBOM) for dependencies      |
 | `./launcher help`            | Display usage information                                        |
+
+### Backend Selection
+
+The Rust backend is used by default for better performance. If the Rust binary hasn't been built yet, the launcher will automatically build it on first run.
+
+To use the Python backend instead (useful for debugging or if Rust isn't available):
+
+```bash
+./launcher python
+```
 
 ## More Details Later (WIP)

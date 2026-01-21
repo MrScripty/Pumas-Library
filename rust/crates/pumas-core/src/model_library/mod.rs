@@ -30,6 +30,7 @@ mod identifier;
 mod naming;
 mod hashing;
 mod link_registry;
+pub mod sharding;
 
 pub use types::*;
 pub use library::ModelLibrary;

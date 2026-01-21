@@ -2,21 +2,25 @@
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
-![Python](https://img.shields.io/badge/python-3.12+-blue.svg)
+![Python (depreciated)](https://img.shields.io/badge/python-3.12+-blue.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
 
-Easy to use AI model library that links your models to other apps in the launcher, and other QOL improvements.
+Availible as a desktop GUI for end-users, and as a headless Rust crate for embedabble API use.
+
+Pumas Library is an easy to use AI model library that downloads, organizes, and serves AI model weights and metadata to other apps. Instead of having models duplicated or scattered accross applicaitons, Pumas Library provides a standardized central source that is automaticly maintained. When integrated into other software via the Rust crate, it eliminates the need for a slew of file, network, and remote API boilerplate and smart logic.
+
+Please note: The python backend is depreciated and will be removed soon. It is being fully replaced by the new Rust backend as Rust was proven to be much cleaner and easier to maintain for Pumas Library. 
 
 ## Features
 
 - A single portable model library with rich metadata
-- Links your apps to your library, no manual setup required
-- System and per-app resource monitoring
+- Links your apps to your library, no manual setup required (GUI only, use API for direct integration with the Rust crate)
+- System and per-app resource monitoring (partial Rust crate integration)
 - Search and download new models into your library
-- Install and run different app versions with ease
-- Smart system shortcuts that don't require the launcher to work
-- Ghost bust the background servers when closing apps
+- Install and run different app versions with ease (GUI only)
+- Smart system shortcuts that don't require the launcher to work (GUI only)
+- Ghost bust the background servers when closing apps (GUI only)
 - And other technical mumbo-jumbo
 
 ## Architecture
@@ -25,7 +29,7 @@ Pumas Library uses a modern **Electron + Rust backend** architecture:
 
 - **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
 - **Desktop Shell**: Electron 38+ with native Wayland support
-- **Backend**: Rust (default) or Python 3.12+ running as a sidecar process
+- **Backend**: Rust (default) or Python 3.12+ (depreciated) running as a sidecar process
 - **IPC**: JSON-RPC communication between Electron and backend
 
 ## Installation
@@ -34,7 +38,7 @@ Pumas Library uses a modern **Electron + Rust backend** architecture:
 
 - **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
 - **Rust**: 1.75+ (for building the backend)
-- **Python**: 3.12+ (optional, for Python backend fallback)
+- **Python**: 3.12+ (optional)
 - **Node.js**: 24+ LTS
 
 ### Quick Install (Recommended)
@@ -143,13 +147,6 @@ Run the launcher with different modes:
 | `./launcher test`            | Run pre-commit hooks (formatting, linting, tests, type checking) |
 | `./launcher sbom`            | Generate Software Bill of Materials (SBOM) for dependencies      |
 | `./launcher help`            | Display usage information                                        |
-
-### Backend Selection
-
-The Rust backend is used by default for better performance. If the Rust binary hasn't been built yet, the launcher will automatically build it on first run.
-
-To use the Python backend instead (useful for debugging or if Rust isn't available):
-
 ```bash
 ./launcher python
 ```

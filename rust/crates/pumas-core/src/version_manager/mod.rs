@@ -48,6 +48,7 @@ mod installer;
 mod launcher;
 pub mod ollama;
 mod progress;
+pub mod size_calculator;
 mod state;
 
 pub use constraints::ConstraintsManager;
@@ -56,6 +57,7 @@ pub use installer::VersionInstaller;
 pub use launcher::VersionLauncher;
 pub use ollama::OllamaVersionManager;
 pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
+pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
 
 use crate::config::{AppId, PathsConfig};

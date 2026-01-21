@@ -187,21 +187,45 @@ impl PumasApi {
 
     /// Get overall system status.
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
-        // TODO: Implement actual status gathering
+        // Get actual running status
+        let comfyui_running = self.is_comfyui_running().await;
+        let last_launch_error = self.get_last_launch_error().await;
+        let last_launch_log = self.get_last_launch_log().await;
+
+        // Get shortcut state for active version (if any)
+        let (menu_shortcut, desktop_shortcut, shortcut_version) = {
+            let vm_lock = self.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                match vm.get_active_version().await {
+                    Ok(Some(active)) => {
+                        let state = self.get_version_shortcut_state(&active).await;
+                        (state.menu, state.desktop, Some(active))
+                    }
+                    _ => (false, false, None),
+                }
+            } else {
+                (false, false, None)
+            }
+        };
+
         Ok(models::StatusResponse {
             success: true,
             error: None,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            deps_ready: true,
-            patched: false,
-            menu_shortcut: false,
-            desktop_shortcut: false,
-            shortcut_version: None,
-            message: "Rust backend running".to_string(),
-            comfyui_running: false,
-            last_launch_error: None,
-            last_launch_log: None,
-            app_resources: None,
+            deps_ready: true,  // TODO: implement real check
+            patched: false,    // TODO: implement real check
+            menu_shortcut,
+            desktop_shortcut,
+            shortcut_version,
+            message: if comfyui_running {
+                "ComfyUI running".to_string()
+            } else {
+                "Ready".to_string()
+            },
+            comfyui_running,
+            last_launch_error,
+            last_launch_log,
+            app_resources: None, // TODO: implement resource gathering
         })
     }
 

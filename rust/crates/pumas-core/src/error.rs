@@ -284,6 +284,35 @@ mod tests {
     }
 
     #[test]
+    fn test_error_display_network() {
+        let err = PumasError::Network {
+            message: "Connection refused".into(),
+            cause: Some("tcp error".into()),
+        };
+        assert_eq!(err.to_string(), "Network error: Connection refused");
+    }
+
+    #[test]
+    fn test_error_display_rate_limited() {
+        let err = PumasError::RateLimited {
+            service: "GitHub".into(),
+            retry_after_secs: Some(60),
+        };
+        assert!(err.to_string().contains("Rate limited"));
+        assert!(err.to_string().contains("GitHub"));
+    }
+
+    #[test]
+    fn test_error_display_hash_mismatch() {
+        let err = PumasError::HashMismatch {
+            expected: "abc123".into(),
+            actual: "def456".into(),
+        };
+        assert!(err.to_string().contains("abc123"));
+        assert!(err.to_string().contains("def456"));
+    }
+
+    #[test]
     fn test_rpc_error_codes() {
         assert_eq!(
             PumasError::VersionNotFound {
@@ -299,11 +328,172 @@ mod tests {
     }
 
     #[test]
+    fn test_rpc_error_codes_all_categories() {
+        // Network errors -> -32000
+        assert_eq!(
+            PumasError::Network {
+                message: "test".into(),
+                cause: None
+            }
+            .to_rpc_error_code(),
+            -32000
+        );
+        assert_eq!(
+            PumasError::CircuitBreakerOpen {
+                domain: "api.example.com".into()
+            }
+            .to_rpc_error_code(),
+            -32000
+        );
+
+        // Version/release not found -> -32001
+        assert_eq!(
+            PumasError::ReleaseNotFound { tag: "v1.0".into() }.to_rpc_error_code(),
+            -32001
+        );
+
+        // Model not found -> -32002
+        assert_eq!(
+            PumasError::ModelNotFound {
+                model_id: "model123".into()
+            }
+            .to_rpc_error_code(),
+            -32002
+        );
+
+        // Installation/download failures -> -32003
+        assert_eq!(
+            PumasError::InstallationFailed {
+                message: "test".into()
+            }
+            .to_rpc_error_code(),
+            -32003
+        );
+        assert_eq!(
+            PumasError::DownloadFailed {
+                url: "http://example.com".into(),
+                message: "failed".into()
+            }
+            .to_rpc_error_code(),
+            -32003
+        );
+
+        // Cancelled -> -32004
+        assert_eq!(PumasError::DownloadCancelled.to_rpc_error_code(), -32004);
+
+        // Validation errors -> -32005
+        assert_eq!(
+            PumasError::Validation {
+                field: "tag".into(),
+                message: "invalid".into()
+            }
+            .to_rpc_error_code(),
+            -32005
+        );
+        assert_eq!(
+            PumasError::InvalidAppId("unknown".into()).to_rpc_error_code(),
+            -32005
+        );
+
+        // Invalid params (JSON-RPC standard) -> -32602
+        assert_eq!(
+            PumasError::InvalidParams {
+                message: "missing field".into()
+            }
+            .to_rpc_error_code(),
+            -32602
+        );
+
+        // Internal errors -> -32603
+        assert_eq!(
+            PumasError::Other("unknown error".into()).to_rpc_error_code(),
+            -32603
+        );
+    }
+
+    #[test]
     fn test_retryable_errors() {
         assert!(PumasError::Timeout(std::time::Duration::from_secs(5)).is_retryable());
         assert!(!PumasError::VersionNotFound {
             tag: "v1.0.0".into()
         }
         .is_retryable());
+    }
+
+    #[test]
+    fn test_retryable_errors_comprehensive() {
+        // Retryable
+        assert!(PumasError::Network {
+            message: "test".into(),
+            cause: None
+        }
+        .is_retryable());
+        assert!(PumasError::RateLimited {
+            service: "GitHub".into(),
+            retry_after_secs: Some(60)
+        }
+        .is_retryable());
+
+        // Not retryable
+        assert!(!PumasError::CircuitBreakerOpen {
+            domain: "api.example.com".into()
+        }
+        .is_retryable());
+        assert!(!PumasError::InstallationCancelled.is_retryable());
+        assert!(!PumasError::ModelNotFound {
+            model_id: "test".into()
+        }
+        .is_retryable());
+        assert!(!PumasError::PermissionDenied(PathBuf::from("/test")).is_retryable());
+    }
+
+    #[test]
+    fn test_io_error_helper() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "file not found");
+        let pumas_err = PumasError::io("reading file", "/test/path", io_err);
+
+        assert!(pumas_err.to_string().contains("reading file"));
+    }
+
+    #[test]
+    fn test_io_with_path_helper() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "access denied");
+        let pumas_err = PumasError::io_with_path(io_err, "/restricted/path");
+
+        match pumas_err {
+            PumasError::Io { path, .. } => {
+                assert_eq!(path, Some(PathBuf::from("/restricted/path")));
+            }
+            _ => panic!("Expected Io error variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_io_error() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::NotFound, "not found");
+        let pumas_err: PumasError = io_err.into();
+
+        match pumas_err {
+            PumasError::Io { path, source, .. } => {
+                assert!(path.is_none());
+                assert!(source.is_some());
+            }
+            _ => panic!("Expected Io error variant"),
+        }
+    }
+
+    #[test]
+    fn test_from_json_error() {
+        let json_str = "{ invalid json }";
+        let json_err = serde_json::from_str::<serde_json::Value>(json_str).unwrap_err();
+        let pumas_err: PumasError = json_err.into();
+
+        match pumas_err {
+            PumasError::Json { message, source } => {
+                assert!(!message.is_empty());
+                assert!(source.is_some());
+            }
+            _ => panic!("Expected Json error variant"),
+        }
     }
 }

@@ -1,18 +1,26 @@
 /**
- * Python Sidecar Bridge
+ * Backend Sidecar Bridge
  *
- * Manages the Python backend process and provides RPC communication.
+ * Manages the backend process (Python or Rust) and provides RPC communication.
  * Handles process lifecycle, health checks, and automatic restarts.
+ *
+ * Backend Selection:
+ * - Set PUMAS_RUST_BACKEND=1 to use the Rust backend
+ * - Default is Python backend for backward compatibility
  */
 
 import { spawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
 import * as http from 'http';
 import * as net from 'net';
 import log from 'electron-log';
 
+/** Backend type selection */
+export type BackendType = 'python' | 'rust';
+
 export interface PythonBridgeOptions {
-  /** Path to the backend directory */
+  /** Path to the backend directory (for Python) or project root */
   backendPath: string;
   /** Port for the RPC server (0 = auto-assign) */
   port: number;
@@ -26,6 +34,12 @@ export interface PythonBridgeOptions {
   autoRestart?: boolean;
   /** Maximum restart attempts */
   maxRestarts?: number;
+  /** Backend type to use (defaults to 'python', or 'rust' if PUMAS_RUST_BACKEND=1) */
+  backendType?: BackendType;
+  /** Path to Rust binary (defaults to rust/target/release/pumas-rpc) */
+  rustBinaryPath?: string;
+  /** Launcher root directory for Rust backend */
+  launcherRoot?: string;
 }
 
 interface RPCError {
@@ -39,6 +53,24 @@ interface RPCResponse {
   error?: RPCError | string;
 }
 
+/**
+ * Detect which backend type to use based on environment and availability
+ */
+function detectBackendType(projectRoot: string): BackendType {
+  // Check environment variable first
+  if (process.env.PUMAS_RUST_BACKEND === '1') {
+    const rustBinary = path.join(projectRoot, 'rust', 'target', 'release', 'pumas-rpc');
+    if (fs.existsSync(rustBinary)) {
+      log.info('Using Rust backend (PUMAS_RUST_BACKEND=1)');
+      return 'rust';
+    } else {
+      log.warn(`PUMAS_RUST_BACKEND=1 but Rust binary not found at ${rustBinary}, falling back to Python`);
+      return 'python';
+    }
+  }
+  return 'python';
+}
+
 export class PythonBridge {
   private options: Required<PythonBridgeOptions>;
   private process: ChildProcess | null = null;
@@ -46,6 +78,7 @@ export class PythonBridge {
   private restartCount: number = 0;
   private isShuttingDown: boolean = false;
   private healthCheckInterval: NodeJS.Timeout | null = null;
+  private backendType: BackendType;
 
   constructor(options: PythonBridgeOptions) {
     // Resolve venv path - defaults to ../venv relative to backendPath (project root/venv)
@@ -56,13 +89,34 @@ export class PythonBridge {
     // Use venv Python by default
     const defaultPythonPath = path.join(venvPath, 'bin', 'python');
 
+    // Detect backend type
+    this.backendType = options.backendType || detectBackendType(projectRoot);
+
+    // Default Rust binary path
+    const defaultRustBinaryPath = path.join(projectRoot, 'rust', 'target', 'release', 'pumas-rpc');
+
+    // Default launcher root (project root for development)
+    const defaultLauncherRoot = projectRoot;
+
     this.options = {
       pythonPath: defaultPythonPath,
       venvPath: venvPath,
       autoRestart: true,
       maxRestarts: 3,
+      backendType: this.backendType,
+      rustBinaryPath: defaultRustBinaryPath,
+      launcherRoot: defaultLauncherRoot,
       ...options,
     };
+
+    log.info(`Backend bridge initialized with ${this.backendType} backend`);
+  }
+
+  /**
+   * Get the current backend type
+   */
+  getBackendType(): BackendType {
+    return this.backendType;
   }
 
   /**
@@ -85,50 +139,81 @@ export class PythonBridge {
   }
 
   /**
-   * Start the Python sidecar process
+   * Get the command and arguments for the selected backend
+   */
+  private getBackendCommand(): { cmd: string; args: string[]; cwd: string; env: NodeJS.ProcessEnv } {
+    const projectRoot = path.resolve(this.options.backendPath, '..');
+
+    if (this.backendType === 'rust') {
+      return {
+        cmd: this.options.rustBinaryPath,
+        args: [
+          '--port', String(this.port),
+          '--launcher_root', this.options.launcherRoot,
+          ...(this.options.debug ? ['--debug'] : []),
+        ],
+        cwd: projectRoot,
+        env: {
+          ...process.env,
+          RUST_LOG: this.options.debug ? 'debug' : 'info',
+        },
+      };
+    } else {
+      // Python backend
+      const rpcServerPath = path.join(this.options.backendPath, 'rpc_server.py');
+      return {
+        cmd: this.options.pythonPath,
+        args: [
+          rpcServerPath,
+          '--port', String(this.port),
+          ...(this.options.debug ? ['--debug'] : []),
+        ],
+        cwd: this.options.backendPath,
+        env: {
+          ...process.env,
+          PYTHONUNBUFFERED: '1',
+          PYTHONPATH: projectRoot,
+          VIRTUAL_ENV: this.options.venvPath,
+        },
+      };
+    }
+  }
+
+  /**
+   * Start the backend sidecar process
    */
   async start(): Promise<void> {
     if (this.process) {
-      log.warn('Python process already running');
+      log.warn(`${this.backendType} process already running`);
       return;
     }
 
     // Find available port
     this.port = this.options.port || await this.findAvailablePort();
-    log.info(`Starting Python bridge on port ${this.port}`);
+    log.info(`Starting ${this.backendType} backend bridge on port ${this.port}`);
 
-    // Build command arguments
-    const rpcServerPath = path.join(this.options.backendPath, 'rpc_server.py');
-    const args = [
-      rpcServerPath,
-      '--port', String(this.port),
-    ];
+    // Get command configuration for selected backend
+    const { cmd, args, cwd, env } = this.getBackendCommand();
 
-    if (this.options.debug) {
-      args.push('--debug');
+    // Verify binary exists for Rust backend
+    if (this.backendType === 'rust' && !fs.existsSync(cmd)) {
+      throw new Error(`Rust backend binary not found at ${cmd}. Run 'cargo build --release' in the rust/ directory.`);
     }
 
-    // Project root for PYTHONPATH
-    const projectRoot = path.resolve(this.options.backendPath, '..');
-
-    // Spawn Python process
-    this.process = spawn(this.options.pythonPath, args, {
-      cwd: this.options.backendPath,
-      env: {
-        ...process.env,
-        PYTHONUNBUFFERED: '1',
-        PYTHONPATH: projectRoot,
-        // Ensure venv is recognized
-        VIRTUAL_ENV: this.options.venvPath,
-      },
+    // Spawn process
+    this.process = spawn(cmd, args, {
+      cwd,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
+
+    const backendLabel = this.backendType === 'rust' ? 'Rust' : 'Python';
 
     // Handle stdout
     this.process.stdout?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
-        log.info(`[Python] ${output}`);
+        log.info(`[${backendLabel}] ${output}`);
       }
     });
 
@@ -136,13 +221,18 @@ export class PythonBridge {
     this.process.stderr?.on('data', (data: Buffer) => {
       const output = data.toString().trim();
       if (output) {
-        log.warn(`[Python] ${output}`);
+        // Rust backend uses stderr for tracing logs, which is normal
+        if (this.backendType === 'rust') {
+          log.info(`[${backendLabel}] ${output}`);
+        } else {
+          log.warn(`[${backendLabel}] ${output}`);
+        }
       }
     });
 
     // Handle process exit
     this.process.on('exit', (code, signal) => {
-      log.info(`Python process exited: code=${code}, signal=${signal}`);
+      log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.process = null;
 
       // Auto-restart if enabled and not shutting down
@@ -152,14 +242,14 @@ export class PythonBridge {
         this.restartCount < this.options.maxRestarts
       ) {
         this.restartCount++;
-        log.info(`Restarting Python process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
+        log.info(`Restarting ${backendLabel} process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
         setTimeout(() => this.start(), 1000 * this.restartCount); // Exponential backoff
       }
     });
 
     // Handle process error
     this.process.on('error', (error) => {
-      log.error('Python process error:', error);
+      log.error(`${backendLabel} process error:`, error);
     });
 
     // Wait for the server to be ready
@@ -171,7 +261,7 @@ export class PythonBridge {
     // Reset restart counter on successful start
     this.restartCount = 0;
 
-    log.info('Python bridge started successfully');
+    log.info(`${backendLabel} backend bridge started successfully`);
   }
 
   /**
@@ -191,7 +281,7 @@ export class PythonBridge {
       }
     }
 
-    throw new Error('Python RPC server failed to start within timeout');
+    throw new Error(`${this.backendType} RPC server failed to start within timeout`);
   }
 
   /**
@@ -210,18 +300,19 @@ export class PythonBridge {
    * Start periodic health checks
    */
   private startHealthCheck(): void {
+    const backendLabel = this.backendType === 'rust' ? 'Rust' : 'Python';
     this.healthCheckInterval = setInterval(async () => {
       if (this.isShuttingDown) return;
 
       const healthy = await this.healthCheck();
       if (!healthy && !this.isShuttingDown) {
-        log.warn('Python health check failed');
+        log.warn(`${backendLabel} health check failed`);
       }
     }, 30000); // Check every 30 seconds
   }
 
   /**
-   * Stop the Python sidecar process
+   * Stop the backend sidecar process
    */
   async stop(): Promise<void> {
     this.isShuttingDown = true;
@@ -236,7 +327,8 @@ export class PythonBridge {
       return;
     }
 
-    log.info('Stopping Python bridge...');
+    const backendLabel = this.backendType === 'rust' ? 'Rust' : 'Python';
+    log.info(`Stopping ${backendLabel} backend bridge...`);
 
     // Try graceful shutdown first
     try {
@@ -254,7 +346,7 @@ export class PythonBridge {
       await new Promise<void>((resolve) => {
         const timeout = setTimeout(() => {
           if (this.process) {
-            log.warn('Force killing Python process');
+            log.warn(`Force killing ${backendLabel} process`);
             this.process.kill('SIGKILL');
           }
           resolve();
@@ -273,15 +365,15 @@ export class PythonBridge {
     }
 
     this.process = null;
-    log.info('Python bridge stopped');
+    log.info(`${backendLabel} backend bridge stopped`);
   }
 
   /**
-   * Make an RPC call to the Python backend
+   * Make an RPC call to the backend
    */
   async call(method: string, params: Record<string, unknown>): Promise<unknown> {
     if (!this.process) {
-      throw new Error('Python bridge not running');
+      throw new Error(`${this.backendType} backend bridge not running`);
     }
 
     return new Promise((resolve, reject) => {

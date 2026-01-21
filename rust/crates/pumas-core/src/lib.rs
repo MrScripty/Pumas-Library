@@ -22,6 +22,7 @@
 //! ```
 
 pub mod config;
+pub mod custom_nodes;
 pub mod error;
 pub mod index;
 pub mod metadata;
@@ -35,6 +36,7 @@ pub mod version_manager;
 
 // Re-export commonly used types
 pub use config::AppId;
+pub use custom_nodes::CustomNodesManager;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
 pub use metadata::MetadataManager;

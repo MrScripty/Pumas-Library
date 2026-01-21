@@ -8,7 +8,7 @@
 
 Availible as a desktop GUI for end-users, and as a headless Rust crate for embedabble API use.
 
-Pumas Library is an easy to use AI model library that downloads, organizes, and serves AI model weights and metadata to other apps. Instead of having models duplicated or scattered accross applicaitons, Pumas Library provides a standardized central source that is automaticly maintained. When integrated into other software via the Rust crate, it eliminates the need for a slew of file, network, and remote API boilerplate and smart logic.
+Pumas Library is an easy to use AI model library that downloads, organizes, and serves AI model weights and metadata to other apps. Instead of having models duplicated or scattered accross applications, Pumas Library provides a standardized central source that is automaticly maintained. When integrated into other software via the Rust crate, it eliminates the need for a slew of file, network, and remote API boilerplate and smart logic.
 
 Please note: The python backend is depreciated and will be removed soon. It is being fully replaced by the new Rust backend as Rust was proven to be much cleaner and easier to maintain for Pumas Library. 
 

@@ -44,7 +44,7 @@ temp/
 *.xcf
 
 # Generated scripts
-launcher
+/launcher
 
 # ComfyUI runtime files
 comfyui.pid

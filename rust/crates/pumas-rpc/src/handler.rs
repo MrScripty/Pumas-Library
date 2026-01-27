@@ -208,41 +208,31 @@ async fn dispatch_method(
         }
 
         "get_launcher_version" => {
-            // TODO: Implement when launcher updater is ported
-            Ok(json!({
-                "success": true,
-                "version": env!("CARGO_PKG_VERSION"),
-                "branch": "main",
-                "isGitRepo": false
-            }))
+            let version_info = api.get_launcher_version();
+            Ok(version_info)
         }
 
         "check_launcher_updates" => {
-            // TODO: Implement when launcher updater is ported
-            Ok(json!({
-                "success": true,
-                "hasUpdate": false,
-                "currentCommit": "",
-                "latestCommit": "",
-                "commitsBehind": 0,
-                "commits": []
-            }))
+            let force_refresh = get_bool_param!(params, "force_refresh", "forceRefresh").unwrap_or(false);
+            let result = api.check_launcher_updates(force_refresh).await;
+            Ok(serde_json::to_value(result)?)
         }
 
         "apply_launcher_update" => {
-            // TODO: Implement when launcher updater is ported
-            Ok(json!({
-                "success": false,
-                "error": "Not implemented in Rust backend"
-            }))
+            let result = api.apply_launcher_update().await;
+            Ok(serde_json::to_value(result)?)
         }
 
         "restart_launcher" => {
-            // TODO: Implement launcher restart
-            Ok(json!({
-                "success": false,
-                "error": "Not implemented in Rust backend"
-            }))
+            match api.restart_launcher() {
+                Ok(success) => Ok(json!({
+                    "success": success
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                }))
+            }
         }
 
         "get_sandbox_info" => {
@@ -497,13 +487,19 @@ async fn dispatch_method(
         // ====================================================================
         "is_patched" => {
             let tag = get_str_param!(params, "tag", "tag");
-            // TODO: Implement patch checking
-            Ok(json!(false))
+            let is_patched = api.is_patched(tag);
+            Ok(json!(is_patched))
         }
 
         "toggle_patch" => {
-            // TODO: Implement patch toggle
-            Ok(json!(false))
+            let tag = get_str_param!(params, "tag", "tag");
+            match api.toggle_patch(tag) {
+                Ok(is_now_patched) => Ok(json!(is_now_patched)),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                }))
+            }
         }
 
         // ====================================================================
@@ -666,7 +662,7 @@ async fn dispatch_method(
             let subtype = get_str_param!(params, "subtype", "subtype").map(String::from);
             let security_acknowledged = get_bool_param!(params, "security_acknowledged", "securityAcknowledged");
 
-            let spec = pumas_core::model_library::types::ModelImportSpec {
+            let spec = pumas_core::model_library::ModelImportSpec {
                 path: local_path,
                 family,
                 official_name,
@@ -823,7 +819,7 @@ async fn dispatch_method(
 
         "import_batch" => {
             // Parse the imports array from params
-            let imports: Vec<pumas_core::model_library::types::ModelImportSpec> = params
+            let imports: Vec<pumas_core::model_library::ModelImportSpec> = params
                 .get("imports")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
@@ -1138,6 +1134,24 @@ async fn dispatch_method(
                 "pending_lookups": null,
                 "deep_scan_progress": null
             }))
+        }
+
+        // ====================================================================
+        // System Checks
+        // ====================================================================
+        "check_git" => {
+            let result = api.check_git();
+            Ok(serde_json::to_value(result)?)
+        }
+
+        "check_brave" => {
+            let result = api.check_brave();
+            Ok(serde_json::to_value(result)?)
+        }
+
+        "check_setproctitle" => {
+            let result = api.check_setproctitle();
+            Ok(serde_json::to_value(result)?)
         }
 
         // ====================================================================

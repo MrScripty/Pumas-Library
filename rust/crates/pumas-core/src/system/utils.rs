@@ -371,10 +371,192 @@ impl SystemUtils {
     }
 }
 
+// ============================================================================
+// System Binary Detection
+// ============================================================================
+
+/// Check if a command exists in PATH.
+fn command_exists(cmd: &str) -> bool {
+    Command::new("which")
+        .arg(cmd)
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
+/// Result of a system check.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct SystemCheckResult {
+    /// Whether the check passed.
+    pub available: bool,
+    /// Path to the binary if found.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// Additional info about the check.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub info: Option<String>,
+}
+
+/// Check if git is available on the system.
+pub fn check_git() -> SystemCheckResult {
+    let available = command_exists("git");
+    let path = if available {
+        Command::new("which")
+            .arg("git")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+    } else {
+        None
+    };
+
+    let info = if available {
+        Command::new("git")
+            .arg("--version")
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+    } else {
+        None
+    };
+
+    SystemCheckResult {
+        available,
+        path,
+        info,
+    }
+}
+
+/// Check if Brave browser is available on the system.
+pub fn check_brave() -> SystemCheckResult {
+    // Check common Brave binary names
+    let brave_names = ["brave", "brave-browser", "brave-browser-stable"];
+
+    for name in &brave_names {
+        if command_exists(name) {
+            let path = Command::new("which")
+                .arg(name)
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string());
+
+            return SystemCheckResult {
+                available: true,
+                path,
+                info: Some(format!("Found as: {}", name)),
+            };
+        }
+    }
+
+    // Also check common installation paths on Linux
+    #[cfg(target_os = "linux")]
+    {
+        let brave_paths = [
+            "/usr/bin/brave-browser",
+            "/usr/bin/brave",
+            "/opt/brave.com/brave/brave",
+            "/snap/bin/brave",
+        ];
+
+        for path in &brave_paths {
+            if std::path::Path::new(path).exists() {
+                return SystemCheckResult {
+                    available: true,
+                    path: Some(path.to_string()),
+                    info: Some("Found at known path".to_string()),
+                };
+            }
+        }
+    }
+
+    SystemCheckResult {
+        available: false,
+        path: None,
+        info: None,
+    }
+}
+
+/// Check if setproctitle Python package is available.
+pub fn check_setproctitle() -> SystemCheckResult {
+    // Try to import setproctitle in Python
+    let result = Command::new("python3")
+        .args(["-c", "import setproctitle; print(setproctitle.__file__)"])
+        .output();
+
+    match result {
+        Ok(output) if output.status.success() => {
+            let path = String::from_utf8(output.stdout)
+                .ok()
+                .map(|s| s.trim().to_string());
+
+            SystemCheckResult {
+                available: true,
+                path,
+                info: Some("Python package available".to_string()),
+            }
+        }
+        _ => {
+            // Try with python instead of python3
+            let result = Command::new("python")
+                .args(["-c", "import setproctitle; print(setproctitle.__file__)"])
+                .output();
+
+            match result {
+                Ok(output) if output.status.success() => {
+                    let path = String::from_utf8(output.stdout)
+                        .ok()
+                        .map(|s| s.trim().to_string());
+
+                    SystemCheckResult {
+                        available: true,
+                        path,
+                        info: Some("Python package available".to_string()),
+                    }
+                }
+                _ => SystemCheckResult {
+                    available: false,
+                    path: None,
+                    info: Some("setproctitle package not installed".to_string()),
+                },
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn test_check_git() {
+        let result = check_git();
+        // Git should generally be available in development environments
+        // but we don't want to fail the test if it's not
+        if result.available {
+            assert!(result.path.is_some());
+            assert!(result.info.is_some());
+        }
+    }
+
+    #[test]
+    fn test_check_brave() {
+        let result = check_brave();
+        // Brave may or may not be installed
+        // Just verify the function runs without error
+        assert!(result.available == result.path.is_some() || !result.available);
+    }
+
+    #[test]
+    fn test_check_setproctitle() {
+        let result = check_setproctitle();
+        // setproctitle may or may not be installed
+        // Just verify the function runs without error
+        assert!(result.info.is_some() || result.available);
+    }
 
     #[test]
     fn test_disk_space() {

@@ -265,12 +265,94 @@ pub struct LinkHealthResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    pub status: HealthStatus,
-    pub total_links: u32,
-    pub healthy_links: u32,
-    pub broken_links: Vec<BrokenLinkInfo>,
+    pub status: String,
+    pub total_links: usize,
+    pub healthy_links: usize,
+    pub broken_links: Vec<String>,
     pub orphaned_links: Vec<String>,
     pub warnings: Vec<String>,
+    pub errors: Vec<String>,
+}
+
+/// Clean broken links response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CleanBrokenLinksResponse {
+    pub success: bool,
+    pub cleaned: usize,
+}
+
+/// Link information for a model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LinkInfo {
+    pub source: String,
+    pub target: String,
+    pub link_type: String,
+    pub app_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_version: Option<String>,
+    pub created_at: String,
+}
+
+/// Links for model response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LinksForModelResponse {
+    pub success: bool,
+    pub links: Vec<LinkInfo>,
+}
+
+/// Delete model response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DeleteModelResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Mapping preview data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MappingPreviewData {
+    pub creates: usize,
+    pub skips: usize,
+    pub conflicts: usize,
+    pub broken: usize,
+}
+
+/// Mapping preview response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MappingPreviewResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<MappingPreviewData>,
+}
+
+/// Mapping apply response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct MappingApplyResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub created: usize,
+    pub updated: usize,
+    pub errors: Vec<String>,
+}
+
+/// Sync models response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SyncModelsResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub synced: usize,
     pub errors: Vec<String>,
 }
 

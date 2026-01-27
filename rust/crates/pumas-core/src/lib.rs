@@ -25,6 +25,7 @@ pub mod config;
 pub mod custom_nodes;
 pub mod error;
 pub mod index;
+pub mod launcher;
 pub mod metadata;
 pub mod model_library;
 pub mod models;
@@ -41,9 +42,14 @@ pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
 pub use metadata::MetadataManager;
 pub use model_library::sharding::{self, ShardValidation};
+pub use model_library::{
+    HuggingFaceClient, ModelImporter, ModelLibrary, ModelMapper,
+    HfSearchParams, DownloadRequest, BatchImportProgress,
+};
 pub use process::{ProcessManager, ProcessInfo};
 pub use shortcut::{ShortcutManager, ShortcutState, ShortcutResult};
-pub use system::{GpuInfo, GpuMonitor, ProcessResources, ResourceTracker, SystemResourceSnapshot, SystemUtils};
+pub use system::{GpuInfo, GpuMonitor, ProcessResources, ResourceTracker, SystemResourceSnapshot, SystemUtils, SystemCheckResult, check_git, check_brave, check_setproctitle};
+pub use launcher::{LauncherUpdater, PatchManager, UpdateCheckResult, UpdateApplyResult, CommitInfo};
 pub use version_manager::{VersionManager, SizeCalculator, ReleaseSize, SizeBreakdown};
 
 use std::path::PathBuf;
@@ -71,6 +77,14 @@ pub struct PumasApi {
     custom_nodes_manager: Arc<custom_nodes::CustomNodesManager>,
     /// Size calculator for estimating release sizes
     size_calculator: Arc<RwLock<version_manager::SizeCalculator>>,
+    /// Model library for managing AI models
+    model_library: Arc<RwLock<Option<Arc<model_library::ModelLibrary>>>>,
+    /// Model mapper for linking models to application directories
+    model_mapper: Arc<RwLock<Option<model_library::ModelMapper>>>,
+    /// HuggingFace client for model search and download
+    hf_client: Arc<RwLock<Option<model_library::HuggingFaceClient>>>,
+    /// Model importer for importing local models
+    model_importer: Arc<RwLock<Option<model_library::ModelImporter>>>,
 }
 
 /// Internal state for the API.
@@ -137,7 +151,46 @@ impl PumasApi {
         let cache_dir = launcher_root
             .join("launcher-data")
             .join(config::PathsConfig::CACHE_DIR_NAME);
-        let size_calculator = Arc::new(RwLock::new(version_manager::SizeCalculator::new(cache_dir)));
+        let size_calculator = Arc::new(RwLock::new(version_manager::SizeCalculator::new(cache_dir.clone())));
+
+        // Initialize model library for AI model management
+        let model_library_dir = launcher_root
+            .join("launcher-data")
+            .join("model-library");
+        let mapping_config_dir = launcher_root
+            .join("launcher-data")
+            .join("mapping-configs");
+
+        // Initialize HuggingFace client for model search/download
+        let hf_cache_dir = cache_dir.join("hf");
+        let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
+            Ok(client) => Arc::new(RwLock::new(Some(client))),
+            Err(e) => {
+                tracing::warn!("Failed to initialize HuggingFace client: {}", e);
+                Arc::new(RwLock::new(None))
+            }
+        };
+
+        let (model_library, model_mapper, model_importer) = match model_library::ModelLibrary::new(&model_library_dir).await {
+            Ok(library) => {
+                let lib_arc = Arc::new(library);
+                let mapper = model_library::ModelMapper::new(lib_arc.clone(), &mapping_config_dir);
+                let importer = model_library::ModelImporter::new(lib_arc.clone());
+                (
+                    Arc::new(RwLock::new(Some(lib_arc))),
+                    Arc::new(RwLock::new(Some(mapper))),
+                    Arc::new(RwLock::new(Some(importer))),
+                )
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize model library: {}", e);
+                (
+                    Arc::new(RwLock::new(None)),
+                    Arc::new(RwLock::new(None)),
+                    Arc::new(RwLock::new(None)),
+                )
+            }
+        };
 
         Ok(Self {
             launcher_root,
@@ -148,6 +201,10 @@ impl PumasApi {
             system_utils,
             custom_nodes_manager,
             size_calculator,
+            model_library,
+            model_mapper,
+            hf_client,
+            model_importer,
         })
     }
 
@@ -503,6 +560,107 @@ impl PumasApi {
         }
     }
 
+    /// Install a version from GitHub.
+    ///
+    /// Returns a receiver for progress updates.
+    pub async fn install_version(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<tokio::sync::mpsc::Receiver<version_manager::ProgressUpdate>> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.install_version(tag).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Check dependencies for a version.
+    pub async fn check_version_dependencies(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<models::DependencyStatus> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.check_dependencies(tag).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Install dependencies for a version.
+    pub async fn install_version_dependencies(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<bool> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.install_dependencies(tag, None).await
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Get release dependencies (requirements.txt packages) for a version.
+    pub async fn get_release_dependencies(
+        &self,
+        tag: &str,
+        _app_id: Option<AppId>,
+    ) -> Result<Vec<String>> {
+        let mgr_lock = self.version_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            let version_path = mgr.version_path(tag);
+            let requirements_path = version_path.join("requirements.txt");
+
+            if !requirements_path.exists() {
+                return Ok(vec![]);
+            }
+
+            let content = std::fs::read_to_string(&requirements_path).map_err(|e| {
+                PumasError::Io {
+                    message: format!("Failed to read requirements.txt: {}", e),
+                    path: Some(requirements_path),
+                    source: Some(e),
+                }
+            })?;
+
+            // Parse requirements (simple extraction of package names)
+            let packages: Vec<String> = content
+                .lines()
+                .filter(|line| {
+                    let line = line.trim();
+                    !line.is_empty() && !line.starts_with('#') && !line.starts_with('-')
+                })
+                .filter_map(|line| {
+                    let name = line
+                        .split(|c| c == '=' || c == '>' || c == '<' || c == '[' || c == ';')
+                        .next()?
+                        .trim();
+                    if !name.is_empty() {
+                        Some(name.to_string())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            Ok(packages)
+        } else {
+            Err(PumasError::Config {
+                message: "Version manager not initialized".to_string(),
+            })
+        }
+    }
+
     // ========================================
     // Process Management Methods
     // ========================================
@@ -836,6 +994,514 @@ impl PumasApi {
     pub async fn get_release_size_breakdown(&self, tag: &str) -> Option<version_manager::SizeBreakdown> {
         let calc = self.size_calculator.read().await;
         calc.get_size_breakdown(tag)
+    }
+
+    // ========================================
+    // Model Library Methods
+    // ========================================
+
+    /// List all models in the library.
+    pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref lib) = *lib_lock {
+            lib.list_models().await
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// Search models using full-text search.
+    pub async fn search_models(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+    ) -> Result<SearchResult> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref lib) = *lib_lock {
+            lib.search_models(query, limit, offset).await
+        } else {
+            Ok(SearchResult {
+                models: vec![],
+                total_count: 0,
+                query_time_ms: 0.0,
+                query: query.to_string(),
+            })
+        }
+    }
+
+    /// Rebuild the model index from metadata files.
+    pub async fn rebuild_model_index(&self) -> Result<usize> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref lib) = *lib_lock {
+            lib.rebuild_index().await
+        } else {
+            Ok(0)
+        }
+    }
+
+    /// Get a single model by ID.
+    pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref lib) = *lib_lock {
+            lib.get_model(model_id).await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Mark a model's metadata as manually set (protected from auto-updates).
+    pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref lib) = *lib_lock {
+            lib.mark_metadata_as_manual(model_id).await
+        } else {
+            Err(PumasError::Config {
+                message: "Model library not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Import a model from a local path.
+    pub async fn import_model(
+        &self,
+        spec: &model_library::ModelImportSpec,
+    ) -> Result<model_library::ModelImportResult> {
+        let importer_lock = self.model_importer.read().await;
+        if let Some(ref importer) = *importer_lock {
+            importer.import(spec).await
+        } else {
+            Ok(model_library::ModelImportResult {
+                path: spec.path.clone(),
+                success: false,
+                model_path: None,
+                error: Some("Model importer not initialized".to_string()),
+                security_tier: None,
+            })
+        }
+    }
+
+    /// Import multiple models in batch.
+    pub async fn import_models_batch(
+        &self,
+        specs: Vec<model_library::ModelImportSpec>,
+    ) -> Vec<model_library::ModelImportResult> {
+        let importer_lock = self.model_importer.read().await;
+        if let Some(ref importer) = *importer_lock {
+            importer.batch_import(specs, None).await
+        } else {
+            specs
+                .into_iter()
+                .map(|spec| model_library::ModelImportResult {
+                    path: spec.path.clone(),
+                    success: false,
+                    model_path: None,
+                    error: Some("Model importer not initialized".to_string()),
+                    security_tier: None,
+                })
+                .collect()
+        }
+    }
+
+    /// Search for models on HuggingFace.
+    pub async fn search_hf_models(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<models::HuggingFaceModel>> {
+        let hf_lock = self.hf_client.read().await;
+        if let Some(ref client) = *hf_lock {
+            let params = model_library::HfSearchParams {
+                query: query.to_string(),
+                kind: kind.map(String::from),
+                limit: Some(limit),
+                ..Default::default()
+            };
+            client.search(&params).await
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// Start downloading a model from HuggingFace.
+    pub async fn start_hf_download(
+        &self,
+        request: &model_library::DownloadRequest,
+    ) -> Result<String> {
+        let hf_lock = self.hf_client.read().await;
+        let lib_lock = self.model_library.read().await;
+
+        if let (Some(ref client), Some(ref lib)) = (&*hf_lock, &*lib_lock) {
+            // Determine destination directory
+            let model_type = request.model_type.as_deref().unwrap_or("unknown");
+            let dest_dir = lib.build_model_path(
+                model_type,
+                &request.family,
+                &model_library::normalize_name(&request.official_name),
+            );
+            client.start_download(request, &dest_dir).await
+        } else {
+            Err(PumasError::Config {
+                message: "HuggingFace client or model library not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Get download progress for a HuggingFace download.
+    pub async fn get_hf_download_progress(
+        &self,
+        download_id: &str,
+    ) -> Option<models::ModelDownloadProgress> {
+        let hf_lock = self.hf_client.read().await;
+        if let Some(ref client) = *hf_lock {
+            client.get_download_progress(download_id).await
+        } else {
+            None
+        }
+    }
+
+    /// Cancel a HuggingFace download.
+    pub async fn cancel_hf_download(&self, download_id: &str) -> Result<bool> {
+        let hf_lock = self.hf_client.read().await;
+        if let Some(ref client) = *hf_lock {
+            client.cancel_download(download_id).await
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Look up HuggingFace metadata for a local file.
+    pub async fn lookup_hf_metadata_for_file(
+        &self,
+        file_path: &str,
+    ) -> Result<Option<model_library::HfMetadataResult>> {
+        let hf_lock = self.hf_client.read().await;
+        if let Some(ref client) = *hf_lock {
+            let path = std::path::Path::new(file_path);
+            let filename = path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(file_path);
+            client.lookup_metadata(filename, Some(path), None).await
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Get repository file tree from HuggingFace.
+    pub async fn get_hf_repo_files(
+        &self,
+        repo_id: &str,
+    ) -> Result<model_library::RepoFileTree> {
+        let hf_lock = self.hf_client.read().await;
+        if let Some(ref client) = *hf_lock {
+            client.get_repo_files(repo_id).await
+        } else {
+            Err(PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })
+        }
+    }
+
+    // ========================================
+    // Link Management
+    // ========================================
+
+    /// Get the health status of model links for a version.
+    ///
+    /// Returns information about total links, healthy links, broken links, etc.
+    pub async fn get_link_health(&self, _version_tag: Option<&str>) -> Result<models::LinkHealthResponse> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref library) = *lib_lock {
+            let registry = library.link_registry().read().await;
+            let all_links = registry.get_all().await;
+
+            let mut healthy = 0;
+            let mut broken: Vec<String> = Vec::new();
+
+            for link in &all_links {
+                // Check if symlink target exists
+                if link.target.is_symlink() {
+                    if link.source.exists() {
+                        healthy += 1;
+                    } else {
+                        broken.push(link.target.to_string_lossy().to_string());
+                    }
+                } else if link.target.exists() {
+                    // Hardlink or copy - just check if target exists
+                    healthy += 1;
+                } else {
+                    broken.push(link.target.to_string_lossy().to_string());
+                }
+            }
+
+            Ok(models::LinkHealthResponse {
+                success: true,
+                error: None,
+                status: if broken.is_empty() { "healthy".to_string() } else { "degraded".to_string() },
+                total_links: all_links.len(),
+                healthy_links: healthy,
+                broken_links: broken,
+                orphaned_links: vec![],
+                warnings: vec![],
+                errors: vec![],
+            })
+        } else {
+            Ok(models::LinkHealthResponse {
+                success: true,
+                error: None,
+                status: "unknown".to_string(),
+                total_links: 0,
+                healthy_links: 0,
+                broken_links: vec![],
+                orphaned_links: vec![],
+                warnings: vec!["Model library not initialized".to_string()],
+                errors: vec![],
+            })
+        }
+    }
+
+    /// Clean up broken model links.
+    ///
+    /// Returns the number of broken links that were removed.
+    pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref library) = *lib_lock {
+            let registry = library.link_registry().write().await;
+            let broken = registry.cleanup_broken().await?;
+
+            // Also remove the actual broken symlinks from the filesystem
+            for entry in &broken {
+                if entry.target.exists() || entry.target.is_symlink() {
+                    let _ = std::fs::remove_file(&entry.target);
+                }
+            }
+
+            Ok(models::CleanBrokenLinksResponse {
+                success: true,
+                cleaned: broken.len(),
+            })
+        } else {
+            Ok(models::CleanBrokenLinksResponse {
+                success: false,
+                cleaned: 0,
+            })
+        }
+    }
+
+    /// Get all links for a specific model.
+    pub async fn get_links_for_model(&self, model_id: &str) -> Result<models::LinksForModelResponse> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref library) = *lib_lock {
+            let registry = library.link_registry().read().await;
+            let links = registry.get_links_for_model(model_id).await;
+
+            let link_info: Vec<models::LinkInfo> = links
+                .into_iter()
+                .map(|l| models::LinkInfo {
+                    source: l.source.to_string_lossy().to_string(),
+                    target: l.target.to_string_lossy().to_string(),
+                    link_type: format!("{:?}", l.link_type).to_lowercase(),
+                    app_id: l.app_id,
+                    app_version: l.app_version,
+                    created_at: l.created_at,
+                })
+                .collect();
+
+            Ok(models::LinksForModelResponse {
+                success: true,
+                links: link_info,
+            })
+        } else {
+            Ok(models::LinksForModelResponse {
+                success: false,
+                links: vec![],
+            })
+        }
+    }
+
+    /// Delete a model and cascade delete all its links.
+    pub async fn delete_model_with_cascade(&self, model_id: &str) -> Result<models::DeleteModelResponse> {
+        let lib_lock = self.model_library.read().await;
+        if let Some(ref library) = *lib_lock {
+            library.delete_model(model_id, true).await?;
+            Ok(models::DeleteModelResponse {
+                success: true,
+                error: None,
+            })
+        } else {
+            Ok(models::DeleteModelResponse {
+                success: false,
+                error: Some("Model library not initialized".to_string()),
+            })
+        }
+    }
+
+    /// Preview model mapping for a version without applying it.
+    pub async fn preview_model_mapping(
+        &self,
+        version_tag: &str,
+    ) -> Result<models::MappingPreviewResponse> {
+        let mapper_lock = self.model_mapper.read().await;
+        let vm_lock = self.version_manager.read().await;
+
+        if let (Some(ref mapper), Some(ref vm)) = (&*mapper_lock, &*vm_lock) {
+            let version_path = vm.version_path(version_tag);
+            let models_path = version_path.join("models");
+
+            if !models_path.exists() {
+                return Ok(models::MappingPreviewResponse {
+                    success: false,
+                    error: Some(format!("Version models directory not found: {}", models_path.display())),
+                    preview: None,
+                });
+            }
+
+            let preview = mapper.preview_mapping("comfyui", Some(version_tag), &models_path).await?;
+
+            Ok(models::MappingPreviewResponse {
+                success: true,
+                error: None,
+                preview: Some(models::MappingPreviewData {
+                    creates: preview.creates.len(),
+                    skips: preview.skips.len(),
+                    conflicts: preview.conflicts.len(),
+                    broken: preview.broken.len(),
+                }),
+            })
+        } else {
+            Ok(models::MappingPreviewResponse {
+                success: false,
+                error: Some("Model mapper or version manager not initialized".to_string()),
+                preview: None,
+            })
+        }
+    }
+
+    /// Apply model mapping for a version.
+    pub async fn apply_model_mapping(
+        &self,
+        version_tag: &str,
+    ) -> Result<models::MappingApplyResponse> {
+        let mapper_lock = self.model_mapper.read().await;
+        let vm_lock = self.version_manager.read().await;
+
+        if let (Some(ref mapper), Some(ref vm)) = (&*mapper_lock, &*vm_lock) {
+            let version_path = vm.version_path(version_tag);
+            let models_path = version_path.join("models");
+
+            if !models_path.exists() {
+                std::fs::create_dir_all(&models_path)?;
+            }
+
+            let result = mapper.apply_mapping("comfyui", Some(version_tag), &models_path).await?;
+
+            Ok(models::MappingApplyResponse {
+                success: true,
+                error: None,
+                created: result.created,
+                updated: 0,
+                errors: result.errors.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect(),
+            })
+        } else {
+            Ok(models::MappingApplyResponse {
+                success: false,
+                error: Some("Model mapper or version manager not initialized".to_string()),
+                created: 0,
+                updated: 0,
+                errors: vec![],
+            })
+        }
+    }
+
+    /// Perform incremental sync of models for a version.
+    pub async fn sync_models_incremental(
+        &self,
+        version_tag: &str,
+    ) -> Result<models::SyncModelsResponse> {
+        // Incremental sync is essentially the same as apply_mapping
+        // but we could add additional logic here for detecting changes
+        let result = self.apply_model_mapping(version_tag).await?;
+
+        Ok(models::SyncModelsResponse {
+            success: result.success,
+            error: result.error,
+            synced: result.created,
+            errors: result.errors,
+        })
+    }
+
+    // ========================================
+    // Launcher Updater Methods
+    // ========================================
+
+    /// Get launcher version information.
+    pub fn get_launcher_version(&self) -> serde_json::Value {
+        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
+        updater.get_version_info()
+    }
+
+    /// Check for launcher updates via GitHub.
+    pub async fn check_launcher_updates(&self, force_refresh: bool) -> launcher::UpdateCheckResult {
+        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
+        updater.check_for_updates(force_refresh).await
+    }
+
+    /// Apply launcher update by pulling latest changes and rebuilding.
+    pub async fn apply_launcher_update(&self) -> launcher::UpdateApplyResult {
+        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
+        updater.apply_update().await
+    }
+
+    /// Restart the launcher by spawning a new process.
+    pub fn restart_launcher(&self) -> Result<bool> {
+        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
+        updater.restart_launcher()
+    }
+
+    // ========================================
+    // Patch Manager Methods
+    // ========================================
+
+    /// Check if ComfyUI main.py is patched with setproctitle.
+    pub fn is_patched(&self, tag: Option<&str>) -> bool {
+        let comfyui_dir = self.launcher_root.join("ComfyUI");
+        let main_py = comfyui_dir.join("main.py");
+        let versions_dir = Some(self.versions_dir(AppId::ComfyUI));
+
+        let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
+        patch_mgr.is_patched(tag)
+    }
+
+    /// Toggle the setproctitle patch for a ComfyUI version.
+    ///
+    /// Returns `true` if now patched, `false` if now unpatched.
+    pub fn toggle_patch(&self, tag: Option<&str>) -> Result<bool> {
+        let comfyui_dir = self.launcher_root.join("ComfyUI");
+        let main_py = comfyui_dir.join("main.py");
+        let versions_dir = Some(self.versions_dir(AppId::ComfyUI));
+
+        let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
+        patch_mgr.toggle_patch(tag)
+    }
+
+    // ========================================
+    // System Check Methods
+    // ========================================
+
+    /// Check if git is available on the system.
+    pub fn check_git(&self) -> system::SystemCheckResult {
+        system::check_git()
+    }
+
+    /// Check if Brave browser is available on the system.
+    pub fn check_brave(&self) -> system::SystemCheckResult {
+        system::check_brave()
+    }
+
+    /// Check if setproctitle Python package is available.
+    pub fn check_setproctitle(&self) -> system::SystemCheckResult {
+        system::check_setproctitle()
     }
 }
 

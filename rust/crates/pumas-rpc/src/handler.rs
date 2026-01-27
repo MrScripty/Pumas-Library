@@ -317,9 +317,25 @@ async fn dispatch_method(
         "install_version" => {
             let tag = require_str_param!(params, "tag", "tag");
             let app_id = get_app_id!(params);
-            // TODO: Implement install_version when version installer is ported
-            warn!("install_version not yet fully implemented for tag: {}", tag);
-            Ok(json!(false))
+
+            // Start the installation (returns a progress receiver)
+            match api.install_version(&tag, app_id).await {
+                Ok(_rx) => {
+                    // Installation started successfully
+                    // Progress can be monitored via get_installation_progress
+                    Ok(json!({
+                        "success": true,
+                        "message": format!("Installation of {} started", tag)
+                    }))
+                }
+                Err(e) => {
+                    warn!("Failed to start installation of {}: {}", tag, e);
+                    Ok(json!({
+                        "success": false,
+                        "error": e.to_string()
+                    }))
+                }
+            }
         }
 
         "remove_version" => {
@@ -457,23 +473,23 @@ async fn dispatch_method(
         // ====================================================================
         "check_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            // TODO: Implement dependency checking
-            Ok(json!({
-                "installed": [],
-                "missing": []
-            }))
+            let app_id = get_app_id!(params);
+            let status = api.check_version_dependencies(&tag, app_id).await?;
+            Ok(serde_json::to_value(status)?)
         }
 
         "install_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            // TODO: Implement dependency installation
-            Ok(json!(false))
+            let app_id = get_app_id!(params);
+            let result = api.install_version_dependencies(&tag, app_id).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "get_release_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            // TODO: Implement dependency listing
-            Ok(json!([]))
+            let app_id = get_app_id!(params);
+            let deps = api.get_release_dependencies(&tag, app_id).await?;
+            Ok(serde_json::to_value(deps)?)
         }
 
         // ====================================================================
@@ -618,13 +634,21 @@ async fn dispatch_method(
         // Model Library
         // ====================================================================
         "get_models" => {
-            // TODO: Implement model library
-            Ok(json!({}))
+            let models = api.list_models().await?;
+            // Convert to a format with model_id as keys for frontend compatibility
+            let mut result = serde_json::Map::new();
+            for model in models {
+                result.insert(model.id.clone(), serde_json::to_value(&model)?);
+            }
+            Ok(json!(result))
         }
 
         "refresh_model_index" => {
-            // TODO: Implement model index refresh
-            Ok(json!(false))
+            let count = api.rebuild_model_index().await?;
+            Ok(json!({
+                "success": true,
+                "indexed_count": count
+            }))
         }
 
         "refresh_model_mappings" => {
@@ -637,72 +661,139 @@ async fn dispatch_method(
             let local_path = require_str_param!(params, "local_path", "localPath");
             let family = require_str_param!(params, "family", "family");
             let official_name = require_str_param!(params, "official_name", "officialName");
-            let _repo_id = get_str_param!(params, "repo_id", "repoId");
-            // TODO: Implement model import
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented in Rust backend"
-            }))
+            let repo_id = get_str_param!(params, "repo_id", "repoId").map(String::from);
+            let model_type = get_str_param!(params, "model_type", "modelType").map(String::from);
+            let subtype = get_str_param!(params, "subtype", "subtype").map(String::from);
+            let security_acknowledged = get_bool_param!(params, "security_acknowledged", "securityAcknowledged");
+
+            let spec = pumas_core::model_library::types::ModelImportSpec {
+                path: local_path,
+                family,
+                official_name,
+                repo_id,
+                model_type,
+                subtype,
+                tags: None,
+                security_acknowledged,
+            };
+
+            let result = api.import_model(&spec).await?;
+            Ok(serde_json::to_value(result)?)
         }
 
         "download_model_from_hf" => {
             let repo_id = require_str_param!(params, "repo_id", "repoId");
             let family = require_str_param!(params, "family", "family");
             let official_name = require_str_param!(params, "official_name", "officialName");
-            // TODO: Implement HuggingFace model download
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented in Rust backend"
-            }))
+            let model_type = get_str_param!(params, "model_type", "modelType").map(String::from);
+            let quant = get_str_param!(params, "quant", "quant").map(String::from);
+            let filename = get_str_param!(params, "filename", "filename").map(String::from);
+
+            let request = pumas_core::DownloadRequest {
+                repo_id,
+                family,
+                official_name,
+                model_type,
+                quant,
+                filename,
+            };
+
+            match api.start_hf_download(&request).await {
+                Ok(download_id) => Ok(json!({
+                    "success": true,
+                    "download_id": download_id
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "start_model_download_from_hf" => {
             let repo_id = require_str_param!(params, "repo_id", "repoId");
             let family = require_str_param!(params, "family", "family");
             let official_name = require_str_param!(params, "official_name", "officialName");
-            // TODO: Implement async HuggingFace model download
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented in Rust backend"
-            }))
+            let model_type = get_str_param!(params, "model_type", "modelType").map(String::from);
+            let quant = get_str_param!(params, "quant", "quant").map(String::from);
+            let filename = get_str_param!(params, "filename", "filename").map(String::from);
+
+            let request = pumas_core::DownloadRequest {
+                repo_id,
+                family,
+                official_name,
+                model_type,
+                quant,
+                filename,
+            };
+
+            match api.start_hf_download(&request).await {
+                Ok(download_id) => Ok(json!({
+                    "success": true,
+                    "download_id": download_id
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "get_model_download_status" => {
             let download_id = require_str_param!(params, "download_id", "downloadId");
-            // TODO: Implement download status
-            Ok(json!({
-                "success": false,
-                "error": "Download not found"
-            }))
+            match api.get_hf_download_progress(&download_id).await {
+                Some(progress) => Ok(serde_json::to_value(progress)?),
+                None => Ok(json!({
+                    "success": false,
+                    "error": "Download not found"
+                })),
+            }
         }
 
         "cancel_model_download" => {
             let download_id = require_str_param!(params, "download_id", "downloadId");
-            // TODO: Implement download cancellation
-            Ok(json!({
-                "success": false,
-                "error": "Download not found"
-            }))
+            match api.cancel_hf_download(&download_id).await {
+                Ok(cancelled) => Ok(json!({
+                    "success": cancelled
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "search_hf_models" => {
             let query = require_str_param!(params, "query", "query");
             let kind = get_str_param!(params, "kind", "kind");
             let limit = get_i64_param!(params, "limit", "limit").unwrap_or(25) as usize;
-            // TODO: Implement HuggingFace search
-            Ok(json!({
-                "success": true,
-                "models": []
-            }))
+
+            match api.search_hf_models(&query, kind, limit).await {
+                Ok(models) => Ok(json!({
+                    "success": true,
+                    "models": models
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "models": [],
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "get_related_models" => {
             let model_id = require_str_param!(params, "model_id", "modelId");
             let limit = get_i64_param!(params, "limit", "limit").unwrap_or(25) as usize;
-            // TODO: Implement related models
+            // Use the model's name to search for related models on HuggingFace
+            let models = match api.get_model(&model_id).await {
+                Ok(Some(model)) => {
+                    api.search_hf_models(&model.official_name, None, limit).await.unwrap_or_default()
+                }
+                _ => vec![],
+            };
             Ok(json!({
                 "success": true,
-                "models": []
+                "models": models
             }))
         }
 
@@ -710,33 +801,62 @@ async fn dispatch_method(
             let query = require_str_param!(params, "query", "query");
             let limit = get_i64_param!(params, "limit", "limit").unwrap_or(100) as usize;
             let offset = get_i64_param!(params, "offset", "offset").unwrap_or(0) as usize;
-            // TODO: Implement FTS search
-            Ok(json!({
-                "success": true,
-                "models": [],
-                "total_count": 0,
-                "query_time_ms": 0,
-                "query": query
-            }))
+
+            match api.search_models(&query, limit, offset).await {
+                Ok(result) => Ok(json!({
+                    "success": true,
+                    "models": result.models,
+                    "total_count": result.total_count,
+                    "query_time_ms": result.query_time_ms,
+                    "query": result.query
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "models": [],
+                    "total_count": 0,
+                    "query_time_ms": 0,
+                    "query": query,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "import_batch" => {
-            // TODO: Implement batch import
+            // Parse the imports array from params
+            let imports: Vec<pumas_core::model_library::types::ModelImportSpec> = params
+                .get("imports")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            let results = api.import_models_batch(imports).await;
+            let imported = results.iter().filter(|r| r.success).count();
+            let failed = results.iter().filter(|r| !r.success).count();
+
             Ok(json!({
                 "success": true,
-                "imported": 0,
-                "failed": 0,
-                "results": []
+                "imported": imported,
+                "failed": failed,
+                "results": results
             }))
         }
 
         "lookup_hf_metadata_for_file" => {
             let file_path = require_str_param!(params, "file_path", "filePath");
-            // TODO: Implement metadata lookup
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented"
-            }))
+
+            match api.lookup_hf_metadata_for_file(&file_path).await {
+                Ok(Some(metadata)) => Ok(json!({
+                    "success": true,
+                    "metadata": metadata
+                })),
+                Ok(None) => Ok(json!({
+                    "success": false,
+                    "error": "No metadata found"
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "detect_sharded_sets" => {
@@ -776,11 +896,15 @@ async fn dispatch_method(
 
         "mark_metadata_as_manual" => {
             let model_id = require_str_param!(params, "model_id", "modelId");
-            // TODO: Implement metadata marking
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented"
-            }))
+            match api.mark_model_metadata_as_manual(&model_id).await {
+                Ok(()) => Ok(json!({
+                    "success": true
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
         }
 
         "get_embedded_metadata" => {
@@ -812,83 +936,53 @@ async fn dispatch_method(
         // ====================================================================
         "get_link_health" => {
             let version_tag = get_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement link health check
-            Ok(json!({
-                "success": true,
-                "status": "healthy",
-                "total_links": 0,
-                "healthy_links": 0,
-                "broken_links": [],
-                "orphaned_links": [],
-                "warnings": [],
-                "errors": []
-            }))
+            let response = api.get_link_health(version_tag).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "clean_broken_links" => {
-            // TODO: Implement broken link cleanup
-            Ok(json!({
-                "success": true,
-                "cleaned": 0
-            }))
+            let response = api.clean_broken_links().await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "remove_orphaned_links" => {
-            let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement orphaned link removal
+            let _version_tag = require_str_param!(params, "version_tag", "versionTag");
+            // Orphaned links are handled as part of clean_broken_links
+            let response = api.clean_broken_links().await?;
             Ok(json!({
-                "success": true,
-                "removed": 0
+                "success": response.success,
+                "removed": response.cleaned
             }))
         }
 
         "get_links_for_model" => {
             let model_id = require_str_param!(params, "model_id", "modelId");
-            // TODO: Implement link listing
-            Ok(json!({
-                "success": true,
-                "links": []
-            }))
+            let response = api.get_links_for_model(&model_id).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "delete_model_with_cascade" => {
             let model_id = require_str_param!(params, "model_id", "modelId");
-            // TODO: Implement cascading delete
-            Ok(json!({
-                "success": false,
-                "error": "Not yet implemented"
-            }))
+            let response = api.delete_model_with_cascade(&model_id).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "preview_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement mapping preview
-            Ok(json!({
-                "success": true,
-                "mappings": [],
-                "warnings": []
-            }))
+            let response = api.preview_model_mapping(&version_tag).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "apply_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement mapping application
-            Ok(json!({
-                "success": true,
-                "created": 0,
-                "updated": 0,
-                "errors": []
-            }))
+            let response = api.apply_model_mapping(&version_tag).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "sync_models_incremental" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // TODO: Implement incremental sync
-            Ok(json!({
-                "success": true,
-                "synced": 0,
-                "errors": []
-            }))
+            let response = api.sync_models_incremental(&version_tag).await?;
+            Ok(serde_json::to_value(response)?)
         }
 
         "sync_with_resolutions" => {

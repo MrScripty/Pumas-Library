@@ -47,6 +47,8 @@ pub struct ModelLibrary {
 impl ModelLibrary {
     /// Create a new ModelLibrary instance.
     ///
+    /// Automatically rebuilds the index from existing metadata files on disk.
+    ///
     /// # Arguments
     ///
     /// * `library_root` - Root directory for the model library
@@ -65,12 +67,20 @@ impl ModelLibrary {
         let link_registry = LinkRegistry::new(registry_path);
         link_registry.load().await?;
 
-        Ok(Self {
+        let library = Self {
             library_root,
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
             write_lock: Arc::new(RwLock::new(())),
-        })
+        };
+
+        // Rebuild index from existing metadata files on disk
+        // This ensures models are available immediately on startup
+        if let Err(e) = library.rebuild_index().await {
+            tracing::warn!("Failed to rebuild model index on startup: {}", e);
+        }
+
+        Ok(library)
     }
 
     /// Get the library root directory.
@@ -120,15 +130,14 @@ impl ModelLibrary {
     /// Iterate over all model directories in the library.
     ///
     /// Yields paths to model directories (directories containing metadata.json).
+    /// Recursively searches all depths to match Python backend behavior.
     pub fn model_dirs(&self) -> impl Iterator<Item = PathBuf> + '_ {
         WalkDir::new(&self.library_root)
-            .min_depth(3) // {type}/{family}/{name}
-            .max_depth(3)
+            .min_depth(1)
             .into_iter()
             .filter_map(|e| e.ok())
-            .filter(|e| e.file_type().is_dir())
-            .filter(|e| e.path().join(METADATA_FILENAME).exists())
-            .map(|e| e.path().to_path_buf())
+            .filter(|e| e.file_type().is_file() && e.file_name() == METADATA_FILENAME)
+            .map(|e| e.path().parent().unwrap().to_path_buf())
     }
 
     /// Get the relative path from library root for a model directory.
@@ -479,7 +488,7 @@ impl ModelLibrary {
             metadata.subtype = Some(subtype.clone());
         }
         if let Some(ref base_model) = hf_metadata.base_model {
-            metadata.base_model = Some(base_model.clone());
+            metadata.base_model = Some(vec![base_model.clone()]);
         }
         if !hf_metadata.tags.is_empty() {
             metadata.tags = Some(hf_metadata.tags.clone());

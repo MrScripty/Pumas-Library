@@ -1094,12 +1094,12 @@ async fn dispatch_method(
         // Scan & Discovery
         // ====================================================================
         "scan_shared_storage" => {
-            // TODO: Implement shared storage scan
+            // Rebuild the model index from metadata files on disk
+            let count = api.rebuild_model_index().await?;
             Ok(json!({
-                "success": true,
-                "scanned": 0,
-                "new_models": 0,
-                "updated_models": 0
+                "modelsFound": count,
+                "scanned": count,
+                "indexed": count
             }))
         }
 

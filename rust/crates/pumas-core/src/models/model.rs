@@ -1,6 +1,6 @@
 //! Model metadata types.
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
 /// Hashes for a model's primary file.
@@ -10,6 +10,70 @@ pub struct ModelHashes {
     pub sha256: Option<String>,
     #[serde(default)]
     pub blake3: Option<String>,
+}
+
+/// Custom deserializer that accepts either a string or array of strings for base_model.
+/// Returns the first element if array, or the string itself.
+fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Option<Vec<String>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de;
+
+    struct StringOrVec;
+
+    impl<'de> de::Visitor<'de> for StringOrVec {
+        type Value = Option<Vec<String>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("null, a string, or an array of strings")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(vec![value.to_string()]))
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(Some(vec![value]))
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let mut vec = Vec::new();
+            while let Some(item) = seq.next_element::<String>()? {
+                vec.push(item);
+            }
+            if vec.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(vec))
+            }
+        }
+    }
+
+    deserializer.deserialize_any(StringOrVec)
 }
 
 /// Metadata about an individual file in a model directory.
@@ -44,8 +108,8 @@ pub struct ModelMetadata {
     pub cleaned_name: Option<String>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
-    #[serde(default)]
-    pub base_model: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_string_or_vec")]
+    pub base_model: Option<Vec<String>>,
     #[serde(default)]
     pub preview_image: Option<String>,
     #[serde(default)]

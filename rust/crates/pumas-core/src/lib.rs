@@ -154,9 +154,10 @@ impl PumasApi {
         let size_calculator = Arc::new(RwLock::new(version_manager::SizeCalculator::new(cache_dir.clone())));
 
         // Initialize model library for AI model management
+        // Uses shared-resources/models to match Python backend path
         let model_library_dir = launcher_root
-            .join("launcher-data")
-            .join("model-library");
+            .join("shared-resources")
+            .join("models");
         let mapping_config_dir = launcher_root
             .join("launcher-data")
             .join("mapping-configs");

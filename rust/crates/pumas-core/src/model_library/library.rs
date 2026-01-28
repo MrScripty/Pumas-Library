@@ -10,6 +10,7 @@
 use crate::error::{PumasError, Result};
 use crate::index::{ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{ModelMetadata, ModelOverrides};
 use crate::model_library::LinkRegistry;
@@ -18,6 +19,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
+
+/// Model file extensions to consider for hash verification.
+const MODEL_EXTENSIONS: &[&str] = &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
 
 /// Filename for model metadata in each model directory.
 const METADATA_FILENAME: &str = "metadata.json";
@@ -319,8 +323,26 @@ impl ModelLibrary {
 
             // Optionally verify hashes
             if verify_hashes {
-                // TODO: Implement hash verification when we have the primary file path
-                result.hash_verified += 1;
+                match verify_model_hash(model_dir, &metadata) {
+                    Ok(true) => {
+                        result.hash_verified += 1;
+                    }
+                    Ok(false) => {
+                        // Hash mismatch - record it
+                        let model_name = metadata
+                            .official_name
+                            .clone()
+                            .unwrap_or_else(|| model_dir.display().to_string());
+                        result.hash_mismatches.push((
+                            model_dir.clone(),
+                            format!("Hash mismatch for {}", model_name),
+                        ));
+                    }
+                    Err(e) => {
+                        // Verification error - record as error but continue
+                        result.errors.push((model_dir.clone(), e));
+                    }
+                }
             }
 
             // Index the model
@@ -606,6 +628,113 @@ impl ModelLibrary {
 
         Ok(stats)
     }
+}
+
+/// Find the primary model file in a directory (the largest model file).
+///
+/// This is used for hash verification - the hashes in metadata correspond to the
+/// primary (largest) model file in the directory.
+fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
+    let mut largest: Option<(PathBuf, u64)> = None;
+
+    for entry in WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(2) // Allow one level of nesting
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+
+        let filename = entry.file_name().to_string_lossy();
+        // Skip metadata files
+        if filename == METADATA_FILENAME || filename == OVERRIDES_FILENAME {
+            continue;
+        }
+
+        let ext = entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        // Only consider model files
+        if !MODEL_EXTENSIONS.contains(&ext.as_str()) {
+            continue;
+        }
+
+        if let Ok(meta) = entry.metadata() {
+            let size = meta.len();
+            if largest.as_ref().map_or(true, |(_, s)| size > *s) {
+                largest = Some((entry.path().to_path_buf(), size));
+            }
+        }
+    }
+
+    largest.map(|(path, _)| path)
+}
+
+/// Verify the hash of a model file against stored metadata.
+///
+/// Returns Ok(true) if hash matches or no hash stored, Ok(false) if mismatch,
+/// or Err if verification failed due to I/O error.
+fn verify_model_hash(
+    model_dir: &Path,
+    metadata: &ModelMetadata,
+) -> std::result::Result<bool, String> {
+    // Find the primary model file
+    let primary_file = match find_primary_model_file(model_dir) {
+        Some(path) => path,
+        None => return Ok(true), // No model file found, nothing to verify
+    };
+
+    // Get stored hashes from metadata
+    let hashes = match &metadata.hashes {
+        Some(h) => h,
+        None => return Ok(true), // No hashes stored, nothing to verify
+    };
+
+    // Prefer SHA256 if available, fall back to BLAKE3
+    if let Some(ref expected_sha256) = hashes.sha256 {
+        if !expected_sha256.is_empty() {
+            return match verify_sha256(&primary_file, expected_sha256) {
+                Ok(()) => Ok(true),
+                Err(PumasError::HashMismatch { expected, actual }) => {
+                    tracing::warn!(
+                        "SHA256 mismatch for {:?}: expected {}, got {}",
+                        primary_file,
+                        expected,
+                        actual
+                    );
+                    Ok(false)
+                }
+                Err(e) => Err(format!("Failed to verify SHA256: {}", e)),
+            };
+        }
+    }
+
+    if let Some(ref expected_blake3) = hashes.blake3 {
+        if !expected_blake3.is_empty() {
+            return match verify_blake3(&primary_file, expected_blake3) {
+                Ok(()) => Ok(true),
+                Err(PumasError::HashMismatch { expected, actual }) => {
+                    tracing::warn!(
+                        "BLAKE3 mismatch for {:?}: expected {}, got {}",
+                        primary_file,
+                        expected,
+                        actual
+                    );
+                    Ok(false)
+                }
+                Err(e) => Err(format!("Failed to verify BLAKE3: {}", e)),
+            };
+        }
+    }
+
+    // No hashes to verify
+    Ok(true)
 }
 
 /// Convert ModelMetadata to ModelRecord for indexing.

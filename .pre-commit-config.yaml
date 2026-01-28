@@ -4,28 +4,7 @@
 # Update hooks: pre-commit autoupdate
 
 repos:
-  # Black: Code formatting
-  - repo: https://github.com/psf/black
-    rev: 24.1.1
-    hooks:
-      - id: black
-        language_version: python3.12
-        args: [--line-length=100]
-        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
-
-  # isort: Import sorting
-  - repo: https://github.com/pycqa/isort
-    rev: 5.13.2
-    hooks:
-      - id: isort
-        args: [--profile=black, --line-length=100]
-        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
-
-  # flake8: Disabled - replaced by Ruff for faster, more granular linting
-  # Ruff provides better performance and fine-grained control
-  # Currently only checking for undefined names (see ruff-undefined hook below)
-
-  # Custom hooks: Enforce logging system usage and type checking
+  # Custom hooks for frontend
   - repo: local
     hooks:
       - id: check-hardcoded-colors
@@ -34,47 +13,6 @@ repos:
         language: system
         types_or: [ts, tsx, javascript, jsx]
         files: ^frontend/src/
-      - id: check-print-statements
-        name: Check for print statements in Python files
-        entry: python3 .pre-commit-hooks/check_print_statements.py
-        language: system
-        types: [python]
-        files: \.py$
-        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
-      - id: check-generic-exceptions
-        name: Check for generic exception handlers in Python files
-        entry: python3 .pre-commit-hooks/check_generic_exceptions.py
-        language: system
-        types: [python]
-        files: \.py$
-        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
-      - id: pytest
-        name: pytest (full test suite)
-        entry: ./venv/bin/python -m pytest
-        language: system
-        pass_filenames: false
-        always_run: true
-      - id: coverage-incremental
-        name: coverage (incremental - new files ≥80%)
-        entry: python3 .pre-commit-hooks/check_coverage_incremental.py
-        language: system
-        pass_filenames: false
-        always_run: true
-      - id: ruff-undefined
-        name: ruff (undefined names)
-        entry: ./venv/bin/python -m ruff check --select F821,F822,F823
-        language: system
-        types: [python]
-        exclude: ^(venv/|\.venv/|env/|\.env/|model-manager-mockup/)
-      - id: mypy
-        name: mypy (type checking)
-        entry: ./venv/bin/python -m mypy
-        args: [backend]
-        language: system
-        types: [python]
-        files: ^backend/
-        exclude: ^(venv/|\.venv/|env/|\.env/|tests/|manual-tests/)
-        pass_filenames: false
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

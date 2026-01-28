@@ -1,1 +1,0 @@
-"""Components supporting VersionManager behavior."""

@@ -6,6 +6,8 @@
   "author": "Pumas Library Team",
   "license": "MIT",
   "scripts": {
+    "validate": "tsc --noEmit",
+    "prebuild": "npm run validate",
     "build": "tsc",
     "watch": "tsc -w",
     "start": "npm run build && electron .",
@@ -37,11 +39,6 @@
         "from": "../frontend/dist",
         "to": "frontend",
         "filter": ["**/*"]
-      },
-      {
-        "from": "../backend",
-        "to": "backend",
-        "filter": ["**/*", "!__pycache__", "!**/*.pyc", "!.mypy_cache"]
       }
     ],
     "linux": {

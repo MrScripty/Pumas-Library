@@ -23,9 +23,6 @@ serde_json = { workspace = true }
 # Logging
 tracing = { workspace = true }
 
-# Process management (Unix)
-nix = { workspace = true }
-
 # File operations
 tempfile = { workspace = true }
 walkdir = { workspace = true }
@@ -47,6 +44,10 @@ regex = { workspace = true }
 
 # Async utilities
 futures = { workspace = true }
+
+# Platform-specific: Unix
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

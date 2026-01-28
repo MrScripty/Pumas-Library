@@ -1,14 +1,15 @@
 //! Desktop entry (.desktop file) generation.
 //!
 //! Implements the XDG Desktop Entry Specification.
+//! Note: This module is Linux-specific. Windows uses .lnk files instead.
 
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::error::{PumasError, Result};
+use crate::platform;
 use tracing::debug;
 
 /// A desktop entry representation.
@@ -126,21 +127,9 @@ impl DesktopEntry {
             source: Some(e),
         })?;
 
-        // Make executable (required for desktop files to be trusted)
-        let metadata = fs::metadata(path).map_err(|e| PumasError::Io {
-            message: "get file metadata".to_string(),
-            path: Some(path.to_path_buf()),
-            source: Some(e),
-        })?;
-
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(0o755);
-
-        fs::set_permissions(path, permissions).map_err(|e| PumasError::Io {
-            message: "set permissions".to_string(),
-            path: Some(path.to_path_buf()),
-            source: Some(e),
-        })?;
+        // Make executable (required for desktop files to be trusted on Linux)
+        // Uses platform module which handles cross-platform differences
+        platform::set_executable(path)?;
 
         debug!("Wrote desktop entry to {:?}", path);
 
@@ -304,9 +293,13 @@ mod tests {
         let content = fs::read_to_string(&file_path).unwrap();
         assert!(content.contains("Name=Test"));
 
-        // Check permissions
-        let metadata = fs::metadata(&file_path).unwrap();
-        let mode = metadata.permissions().mode();
-        assert_eq!(mode & 0o755, 0o755);
+        // Check permissions (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = fs::metadata(&file_path).unwrap();
+            let mode = metadata.permissions().mode();
+            assert_eq!(mode & 0o755, 0o755);
+        }
     }
 }

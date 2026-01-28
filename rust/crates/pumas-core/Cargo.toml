@@ -30,17 +30,16 @@ tracing = { workspace = true }
 # System information
 sysinfo = { workspace = true }
 
-# Process management (Unix)
-nix = { workspace = true }
+# Cross-platform signal handling
+ctrlc = { workspace = true }
+
+# Windows shortcut files
+lnk = { workspace = true }
 
 # File operations
 tempfile = { workspace = true }
 walkdir = { workspace = true }
 fs2 = { workspace = true }
-
-# Platform-specific
-[target.'cfg(unix)'.dependencies]
-libc = "0.2"
 
 # Archive extraction
 zip = { workspace = true }
@@ -86,6 +85,15 @@ rand = "0.9"
 
 # Directory utilities (home dir, etc.)
 dirs = { workspace = true }
+
+# Platform-specific: Unix
+[target.'cfg(unix)'.dependencies]
+nix = { workspace = true }
+libc = { workspace = true }
+
+# Platform-specific: Windows
+[target.'cfg(windows)'.dependencies]
+windows-sys = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }

@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux-green.svg)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-green.svg)
 
 Available as a desktop GUI for end-users, and as a headless Rust crate for embeddable API use.
 
@@ -25,17 +25,38 @@ Pumas Library is an easy to use AI model library that downloads, organizes, and 
 Pumas Library uses a modern **Electron + Rust backend** architecture:
 
 - **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
-- **Desktop Shell**: Electron 38+ with native Wayland support
+- **Desktop Shell**: Electron 38+ (with native Wayland support on Linux)
 - **Backend**: Rust running as a sidecar process
 - **IPC**: JSON-RPC communication between Electron and backend
+
+## Supported Platforms
+
+| Platform      | Status            | Notes                                                    |
+| ------------- | ----------------- | -------------------------------------------------------- |
+| Linux (x64)   | Full support      | Debian/Ubuntu recommended, AppImage and .deb packages    |
+| Windows (x64) | Full support      | NSIS installer and portable versions                     |
+| macOS         | Theoreticly Works | Architecture ready, builds available via CI. Not tested. |
 
 ## Installation
 
 ### System Requirements
 
+#### Linux
+
 - **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
-- **Rust**: 1.75+ (for building the backend)
-- **Node.js**: 24+ LTS
+- **Rust**: 1.75+
+- **Node.js**: 22+ LTS
+
+#### Windows
+
+- **Operating System**: Windows 11 (x64)
+- **Rust**: 1.75+ (install via [rustup](https://rustup.rs/))
+- **Node.js**: 22+ LTS (install via [nodejs.org](https://nodejs.org/))
+- **Build Tools**: Visual Studio Build Tools with C++ workload
+
+---
+
+## Linux Installation
 
 ### Quick Install (Recommended)
 
@@ -53,9 +74,7 @@ The installer will:
 4. Install and build Electron
 5. Create the launcher script
 
-### Manual Installation
-
-If you prefer to install manually:
+### Manual Installation (Linux)
 
 1. **Install system dependencies** (Debian/Ubuntu):
 
@@ -96,7 +115,7 @@ If you prefer to install manually:
    chmod +x launcher
    ```
 
-### Optional: Add to PATH
+### Optional: Add to PATH (Linux)
 
 For system-wide access:
 
@@ -110,21 +129,170 @@ Then run from anywhere:
 pumas-library
 ```
 
+---
+
+## Windows Installation
+
+### Prerequisites
+
+1. **Install Rust** via [rustup](https://rustup.rs/):
+
+   - Download and run `rustup-init.exe`
+   - Follow the prompts to install
+
+2. **Install Node.js** from [nodejs.org](https://nodejs.org/):
+
+   - Download the LTS version (22+)
+   - Run the installer
+
+3. **Install Visual Studio Build Tools** (if not already installed):
+
+   - Download from [Visual Studio Downloads](https://visualstudio.microsoft.com/downloads/)
+   - Select "Desktop development with C++" workload
+
+### Manual Installation (Windows)
+
+Open PowerShell and run:
+
+1. **Build Rust backend**:
+
+   ```powershell
+   cd rust
+   cargo build --release
+   cd ..
+   ```
+
+2. **Install and build frontend**:
+
+   ```powershell
+   cd frontend
+   npm install
+   npm run build
+   cd ..
+   ```
+
+3. **Install and build Electron**:
+
+   ```powershell
+   cd electron
+   npm install
+   npm run build
+   cd ..
+   ```
+
+4. **Run the application**:
+
+   ```powershell
+   cd electron
+   npm start
+   ```
+
+### Building Windows Installer
+
+To create a distributable Windows installer:
+
+```powershell
+cd electron
+npm run package:win
+```
+
+This creates:
+
+- NSIS installer (`.exe`) in `electron/release/`
+- Portable version (`.exe`) in `electron/release/`
+
+---
+
 ## Usage
 
-### Launcher Commands
+### Linux Launcher Commands
 
 Run the launcher with different modes:
 
-| Command                       | Description                             |
-| ----------------------------- | --------------------------------------- |
-| `./launcher`                  | Launch the application                  |
-| `./launcher dev`              | Launch with developer tools             |
+| Command                       | Description                                     |
+| ----------------------------- | ----------------------------------------------- |
+| `./launcher`                  | Launch the application                          |
+| `./launcher dev`              | Launch with developer tools                     |
 | `./launcher build`            | Build all components (Rust, frontend, Electron) |
-| `./launcher build-rust`       | Build Rust backend only                 |
-| `./launcher build-electron`   | Build Electron TypeScript only          |
-| `./launcher package`          | Package Electron app for distribution   |
-| `./launcher electron-install` | Install Electron dependencies           |
-| `./launcher help`             | Display usage information               |
+| `./launcher build-rust`       | Build Rust backend only                         |
+| `./launcher build-electron`   | Build Electron TypeScript only                  |
+| `./launcher package`          | Package Electron app for distribution           |
+| `./launcher electron-install` | Install Electron dependencies                   |
+| `./launcher help`             | Display usage information                       |
+
+### Windows Commands
+
+On Windows, use npm scripts directly:
+
+| Command                              | Description                      |
+| ------------------------------------ | -------------------------------- |
+| `npm start` (in electron/)           | Launch the application           |
+| `npm run dev` (in electron/)         | Launch with developer tools      |
+| `npm run package:win` (in electron/) | Package for Windows distribution |
+
+---
+
+## Building from Source
+
+### All Platforms
+
+```bash
+# Build Rust backend
+cd rust
+cargo build --release
+
+# Build frontend
+cd ../frontend
+npm ci
+npm run build
+
+# Build and run Electron
+cd ../electron
+npm ci
+npm run build
+npm start
+```
+
+### Creating Distribution Packages
+
+| Platform | Command                 | Output                   |
+| -------- | ----------------------- | ------------------------ |
+| Linux    | `npm run package:linux` | AppImage, .deb           |
+| Windows  | `npm run package:win`   | NSIS installer, portable |
+| macOS    | `npm run package:mac`   | DMG                      |
+
+---
+
+## Development
+
+### Project Structure
+
+```
+Pumas-Library/
+├── rust/                    # Rust backend
+│   └── crates/
+│       ├── pumas-core/      # Core library (headless)
+│       ├── pumas-app-manager/  # Version management
+│       └── pumas-rpc/       # JSON-RPC server
+├── frontend/                # React frontend
+├── electron/                # Electron shell
+└── .github/workflows/       # CI/CD
+```
+
+### Platform-Specific Code
+
+All platform-specific code is centralized in `rust/crates/pumas-core/src/platform/`:
+
+- `paths.rs` - Platform-specific directories
+- `permissions.rs` - File permission handling
+- `process.rs` - Process management
+
+To find platform code:
+
+```bash
+grep -rn "cfg(.*os\|unix\|windows)" rust/crates/*/src/ --include="*.rs"
+```
+
+---
 
 ## More Details Later (WIP)

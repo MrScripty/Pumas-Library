@@ -1,13 +1,17 @@
 //! High-level shortcut management.
+//!
+//! Note: Currently implements Linux-specific shortcuts (.desktop files).
+//! Windows support would require implementing .lnk file creation.
 
 use super::desktop_entry::DesktopEntry;
 use super::icon::IconManager;
 use super::launch_script::LaunchScriptGenerator;
 use crate::error::{PumasError, Result};
+use crate::platform;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 /// Shortcut state for a version.
 #[derive(Debug, Clone)]
@@ -69,13 +73,9 @@ impl ShortcutManager {
         let scripts_dir = launcher_data.join("shortcut-scripts");
         let profiles_dir = launcher_data.join("profiles");
 
-        // XDG directories
-        let home = dirs::home_dir().ok_or_else(|| PumasError::Config {
-            message: "Could not determine home directory".to_string(),
-        })?;
-
-        let apps_dir = home.join(".local").join("share").join("applications");
-        let desktop_dir = home.join("Desktop");
+        // Platform-specific directories (uses centralized platform module)
+        let apps_dir = platform::apps_dir()?;
+        let desktop_dir = platform::desktop_dir()?;
 
         Ok(Self {
             script_dir,

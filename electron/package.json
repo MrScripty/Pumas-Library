@@ -15,7 +15,9 @@
     "clean": "rm -rf dist",
     "lint": "eslint src --ext .ts",
     "package": "npm run build && electron-builder",
-    "package:linux": "npm run build && electron-builder --linux"
+    "package:linux": "npm run build && electron-builder --linux",
+    "package:win": "npm run build && electron-builder --win",
+    "package:mac": "npm run build && electron-builder --mac"
   },
   "dependencies": {
     "electron-log": "^5.0.0"
@@ -55,6 +57,37 @@
       "category": "Development",
       "maintainer": "Pumas Library Team",
       "icon": "../frontend/public/icon.png"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "../frontend/public/icon.ico",
+      "publisherName": "Pumas Library Team"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Pumas Library"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "icon": "../frontend/public/icon.icns",
+      "category": "public.app-category.developer-tools"
     }
   }
 }

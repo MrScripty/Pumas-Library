@@ -36,6 +36,7 @@ pub mod metadata;
 pub mod model_library;
 pub mod models;
 pub mod network;
+pub mod platform;
 pub mod process;
 pub mod shortcut;
 pub mod system;

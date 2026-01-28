@@ -1,11 +1,10 @@
 //! Process detection for ComfyUI and other managed applications.
 
-use crate::error::{PumasError, Result};
+use crate::platform;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// How the process was detected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -143,72 +142,23 @@ impl ProcessDetector {
     }
 
     /// Detect processes by scanning the process table.
+    /// Uses the centralized platform module for cross-platform process scanning.
     fn detect_from_process_scan(
         &self,
         processes: &mut Vec<DetectedProcess>,
         seen_pids: &mut HashSet<u32>,
     ) {
-        #[cfg(unix)]
-        {
-            self.detect_from_process_scan_unix(processes, seen_pids);
-        }
+        // Use platform module to find processes matching ComfyUI patterns
+        let comfyui_processes = platform::process::find_processes_by_cmdline("comfyui");
 
-        #[cfg(windows)]
-        {
-            self.detect_from_process_scan_windows(processes, seen_pids);
-        }
-    }
-
-    #[cfg(unix)]
-    fn detect_from_process_scan_unix(
-        &self,
-        processes: &mut Vec<DetectedProcess>,
-        seen_pids: &mut HashSet<u32>,
-    ) {
-        // Use `ps` to scan for ComfyUI processes
-        let output = match Command::new("ps")
-            .args(["-eo", "pid=,args="])
-            .output()
-        {
-            Ok(o) => o,
-            Err(e) => {
-                debug!("Failed to run ps: {}", e);
-                return;
-            }
-        };
-
-        if !output.status.success() {
-            debug!("ps command failed");
-            return;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        for line in stdout.lines() {
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // Parse "PID ARGS" format
-            let parts: Vec<&str> = line.splitn(2, char::is_whitespace).collect();
-            if parts.len() != 2 {
-                continue;
-            }
-
-            let pid: u32 = match parts[0].trim().parse() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
+        for (pid, cmdline) in comfyui_processes {
             if seen_pids.contains(&pid) {
                 continue;
             }
 
-            let cmdline = parts[1].trim();
             let cmdline_lower = cmdline.to_lowercase();
 
-            // Check for ComfyUI indicators
+            // Additional validation: check for specific ComfyUI indicators
             let is_comfyui = cmdline_lower.contains("comfyui server")
                 || (cmdline.contains("main.py") && cmdline_lower.contains("comfyui"));
 
@@ -217,7 +167,7 @@ impl ProcessDetector {
             }
 
             // Try to infer version tag from command line
-            let inferred_tag = self.infer_tag_from_cmdline(cmdline);
+            let inferred_tag = self.infer_tag_from_cmdline(&cmdline);
 
             seen_pids.insert(pid);
             processes.push(DetectedProcess {
@@ -225,78 +175,7 @@ impl ProcessDetector {
                 source: ProcessSource::ProcessScan,
                 tag: inferred_tag,
                 pid_file: None,
-                cmdline: Some(cmdline.to_string()),
-            });
-        }
-    }
-
-    #[cfg(windows)]
-    fn detect_from_process_scan_windows(
-        &self,
-        processes: &mut Vec<DetectedProcess>,
-        seen_pids: &mut HashSet<u32>,
-    ) {
-        // Use WMIC or PowerShell to scan for processes
-        let output = match Command::new("wmic")
-            .args(["process", "get", "processid,commandline", "/format:csv"])
-            .output()
-        {
-            Ok(o) => o,
-            Err(e) => {
-                debug!("Failed to run wmic: {}", e);
-                return;
-            }
-        };
-
-        if !output.status.success() {
-            debug!("wmic command failed");
-            return;
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-
-        for line in stdout.lines().skip(1) {
-            // Skip header
-            let line = line.trim();
-            if line.is_empty() {
-                continue;
-            }
-
-            // CSV format: Node,CommandLine,ProcessId
-            let parts: Vec<&str> = line.split(',').collect();
-            if parts.len() < 3 {
-                continue;
-            }
-
-            let cmdline = parts[1];
-            let pid: u32 = match parts[2].trim().parse() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
-            if seen_pids.contains(&pid) {
-                continue;
-            }
-
-            let cmdline_lower = cmdline.to_lowercase();
-
-            // Check for ComfyUI indicators
-            let is_comfyui = cmdline_lower.contains("comfyui server")
-                || (cmdline.contains("main.py") && cmdline_lower.contains("comfyui"));
-
-            if !is_comfyui {
-                continue;
-            }
-
-            let inferred_tag = self.infer_tag_from_cmdline(cmdline);
-
-            seen_pids.insert(pid);
-            processes.push(DetectedProcess {
-                pid,
-                source: ProcessSource::ProcessScan,
-                tag: inferred_tag,
-                pid_file: None,
-                cmdline: Some(cmdline.to_string()),
+                cmdline: Some(cmdline),
             });
         }
     }
@@ -313,36 +192,9 @@ impl ProcessDetector {
     }
 
     /// Check if a process is alive.
+    /// Uses the centralized platform module for cross-platform implementation.
     fn is_process_alive(&self, pid: u32) -> bool {
-        #[cfg(unix)]
-        {
-            // Use kill(pid, 0) to check if process exists
-            unsafe { libc::kill(pid as i32, 0) == 0 }
-        }
-
-        #[cfg(windows)]
-        {
-            // On Windows, try to open the process
-            use std::ptr::null_mut;
-            use windows_sys::Win32::Foundation::CloseHandle;
-            use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-
-            unsafe {
-                let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-                if handle != null_mut() {
-                    CloseHandle(handle);
-                    true
-                } else {
-                    false
-                }
-            }
-        }
-
-        #[cfg(not(any(unix, windows)))]
-        {
-            // Fallback: assume it exists
-            true
-        }
+        platform::is_process_alive(pid)
     }
 }
 

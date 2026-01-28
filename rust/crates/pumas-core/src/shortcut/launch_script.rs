@@ -1,9 +1,12 @@
 //! Launch script generation for version-specific shortcuts.
+//!
+//! Currently generates bash scripts for Linux. Windows support (PowerShell scripts)
+//! can be added by implementing platform-specific script generation.
 
 use crate::error::{PumasError, Result};
+use crate::platform;
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
@@ -80,21 +83,8 @@ impl LaunchScriptGenerator {
             source: Some(e),
         })?;
 
-        // Make executable
-        let metadata = fs::metadata(&script_path).map_err(|e| PumasError::Io {
-            message: "get script metadata".to_string(),
-            path: Some(script_path.clone()),
-            source: Some(e),
-        })?;
-
-        let mut permissions = metadata.permissions();
-        permissions.set_mode(0o755);
-
-        fs::set_permissions(&script_path, permissions).map_err(|e| PumasError::Io {
-            message: "set script permissions".to_string(),
-            path: Some(script_path.clone()),
-            source: Some(e),
-        })?;
+        // Make executable (uses platform module for cross-platform handling)
+        platform::set_executable(&script_path)?;
 
         debug!("Generated launch script at {:?}", script_path);
 
@@ -255,10 +245,14 @@ mod tests {
         assert!(content.contains("ComfyUI v1.0.0"));
         assert!(content.contains("SERVER_START_DELAY=3"));
 
-        // Check permissions
-        let metadata = fs::metadata(&script_path).unwrap();
-        let mode = metadata.permissions().mode();
-        assert_eq!(mode & 0o755, 0o755);
+        // Check permissions (Unix only)
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let metadata = fs::metadata(&script_path).unwrap();
+            let mode = metadata.permissions().mode();
+            assert_eq!(mode & 0o755, 0o755);
+        }
     }
 
     #[test]

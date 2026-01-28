@@ -194,7 +194,36 @@ async fn dispatch_method(
         // Status & System
         // ====================================================================
         "get_status" => {
-            let response = api.get_status().await?;
+            let mut response = api.get_status().await?;
+
+            // Enrich with version-specific data from version manager
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                // Get active version
+                let active_version = vm.get_active_version().await.ok().flatten();
+
+                // Check dependencies for active version
+                if let Some(ref tag) = active_version {
+                    if let Ok(deps) = vm.check_dependencies(tag).await {
+                        response.deps_ready = deps.missing.is_empty();
+                    }
+                }
+
+                // Check if active version is patched
+                if let Some(ref tag) = active_version {
+                    response.patched = api.is_patched(Some(tag));
+                }
+
+                // Get shortcut states for active version
+                if let Some(ref tag) = active_version {
+                    response.shortcut_version = Some(tag.clone());
+                    let shortcut_state = api.get_version_shortcut_state(tag).await;
+                    response.menu_shortcut = shortcut_state.menu;
+                    response.desktop_shortcut = shortcut_state.desktop;
+                }
+            }
+            drop(vm_lock);
+
             Ok(serde_json::to_value(response)?)
         }
 

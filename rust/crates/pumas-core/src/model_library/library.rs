@@ -16,7 +16,7 @@ use crate::model_library::LinkRegistry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
 /// Filename for model metadata in each model directory.
@@ -40,8 +40,8 @@ pub struct ModelLibrary {
     index: ModelIndex,
     /// Link registry for tracking symlinks
     link_registry: Arc<RwLock<LinkRegistry>>,
-    /// Write lock for metadata operations
-    write_lock: Arc<RwLock<()>>,
+    /// Write lock for metadata operations (exclusive access only)
+    write_lock: Arc<Mutex<()>>,
 }
 
 impl ModelLibrary {
@@ -71,7 +71,7 @@ impl ModelLibrary {
             library_root,
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
-            write_lock: Arc::new(RwLock::new(())),
+            write_lock: Arc::new(Mutex::new(())),
         };
 
         // Rebuild index from existing metadata files on disk
@@ -177,7 +177,7 @@ impl ModelLibrary {
     /// * `model_dir` - Path to the model directory
     /// * `metadata` - Metadata to save
     pub async fn save_metadata(&self, model_dir: &Path, metadata: &ModelMetadata) -> Result<()> {
-        let _lock = self.write_lock.write().await;
+        let _lock = self.write_lock.lock().await;
         let path = model_dir.join(METADATA_FILENAME);
         atomic_write_json(&path, metadata, true)
     }
@@ -190,7 +190,7 @@ impl ModelLibrary {
 
     /// Save user overrides to a model directory.
     pub async fn save_overrides(&self, model_dir: &Path, overrides: &ModelOverrides) -> Result<()> {
-        let _lock = self.write_lock.write().await;
+        let _lock = self.write_lock.lock().await;
         let path = model_dir.join(OVERRIDES_FILENAME);
         atomic_write_json(&path, overrides, false)
     }

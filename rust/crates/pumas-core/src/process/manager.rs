@@ -5,9 +5,8 @@ use super::launcher::{LaunchConfig, LaunchResult, ProcessLauncher};
 use crate::error::{PumasError, Result};
 use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 use tracing::{debug, error, info, warn};
 
@@ -38,10 +37,10 @@ pub struct ProcessManager {
     detector: Arc<RwLock<ProcessDetector>>,
     /// Resource tracker.
     resource_tracker: Arc<ResourceTracker>,
-    /// Last launch log path.
-    last_launch_log: Arc<RwLock<Option<PathBuf>>>,
-    /// Last launch error message.
-    last_launch_error: Arc<RwLock<Option<String>>>,
+    /// Last launch log path (exclusive access only).
+    last_launch_log: Arc<Mutex<Option<PathBuf>>>,
+    /// Last launch error message (exclusive access only).
+    last_launch_error: Arc<Mutex<Option<String>>>,
 }
 
 impl ProcessManager {
@@ -64,8 +63,8 @@ impl ProcessManager {
                 version_paths.unwrap_or_default(),
             ))),
             resource_tracker: Arc::new(ResourceTracker::default()),
-            last_launch_log: Arc::new(RwLock::new(None)),
-            last_launch_error: Arc::new(RwLock::new(None)),
+            last_launch_log: Arc::new(Mutex::new(None)),
+            last_launch_error: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -128,7 +127,7 @@ impl ProcessManager {
     ) -> LaunchResult {
         // Clear previous error
         {
-            let mut error = self.last_launch_error.write().unwrap();
+            let mut error = self.last_launch_error.lock().unwrap();
             *error = None;
         }
 
@@ -151,7 +150,7 @@ impl ProcessManager {
                 let error_msg = format!("Launch error: {}", e);
                 error!("{}", error_msg);
 
-                let mut last_error = self.last_launch_error.write().unwrap();
+                let mut last_error = self.last_launch_error.lock().unwrap();
                 *last_error = Some(error_msg.clone());
 
                 return LaunchResult {
@@ -166,10 +165,10 @@ impl ProcessManager {
 
         // Update state
         if result.success {
-            let mut log = self.last_launch_log.write().unwrap();
+            let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
         } else if let Some(ref error) = result.error {
-            let mut last_error = self.last_launch_error.write().unwrap();
+            let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
         }
 
@@ -237,12 +236,12 @@ impl ProcessManager {
 
     /// Get the last launch log path.
     pub fn last_launch_log(&self) -> Option<PathBuf> {
-        self.last_launch_log.read().unwrap().clone()
+        self.last_launch_log.lock().unwrap().clone()
     }
 
     /// Get the last launch error message.
     pub fn last_launch_error(&self) -> Option<String> {
-        self.last_launch_error.read().unwrap().clone()
+        self.last_launch_error.lock().unwrap().clone()
     }
 
     /// Get the resource tracker.

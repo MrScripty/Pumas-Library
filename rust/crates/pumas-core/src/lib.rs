@@ -83,14 +83,14 @@ pub struct PumasApi {
     shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
     /// System utilities
     system_utils: Arc<system::SystemUtils>,
-    /// Model library for managing AI models
-    model_library: Arc<RwLock<Option<Arc<model_library::ModelLibrary>>>>,
-    /// Model mapper for linking models to application directories
-    model_mapper: Arc<RwLock<Option<model_library::ModelMapper>>>,
-    /// HuggingFace client for model search and download
-    hf_client: Arc<RwLock<Option<model_library::HuggingFaceClient>>>,
-    /// Model importer for importing local models
-    model_importer: Arc<RwLock<Option<model_library::ModelImporter>>>,
+    /// Model library for managing AI models (immutable after init)
+    model_library: Option<Arc<model_library::ModelLibrary>>,
+    /// Model mapper for linking models to application directories (immutable after init)
+    model_mapper: Option<model_library::ModelMapper>,
+    /// HuggingFace client for model search and download (has internal mutability)
+    hf_client: Option<model_library::HuggingFaceClient>,
+    /// Model importer for importing local models (immutable after init)
+    model_importer: Option<model_library::ModelImporter>,
 }
 
 /// Internal state for the API.
@@ -155,10 +155,10 @@ impl PumasApi {
             .join(config::PathsConfig::CACHE_DIR_NAME);
         let hf_cache_dir = cache_dir.join("hf");
         let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
-            Ok(client) => Arc::new(RwLock::new(Some(client))),
+            Ok(client) => Some(client),
             Err(e) => {
                 tracing::warn!("Failed to initialize HuggingFace client: {}", e);
-                Arc::new(RwLock::new(None))
+                None
             }
         };
 
@@ -167,19 +167,11 @@ impl PumasApi {
                 let lib_arc = Arc::new(library);
                 let mapper = model_library::ModelMapper::new(lib_arc.clone(), &mapping_config_dir);
                 let importer = model_library::ModelImporter::new(lib_arc.clone());
-                (
-                    Arc::new(RwLock::new(Some(lib_arc))),
-                    Arc::new(RwLock::new(Some(mapper))),
-                    Arc::new(RwLock::new(Some(importer))),
-                )
+                (Some(lib_arc), Some(mapper), Some(importer))
             }
             Err(e) => {
                 tracing::warn!("Failed to initialize model library: {}", e);
-                (
-                    Arc::new(RwLock::new(None)),
-                    Arc::new(RwLock::new(None)),
-                    Arc::new(RwLock::new(None)),
-                )
+                (None, None, None)
             }
         };
 
@@ -633,8 +625,7 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref lib) = *lib_lock {
+        if let Some(ref lib) = self.model_library {
             lib.list_models().await
         } else {
             Ok(vec![])
@@ -648,8 +639,7 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref lib) = *lib_lock {
+        if let Some(ref lib) = self.model_library {
             lib.search_models(query, limit, offset).await
         } else {
             Ok(SearchResult {
@@ -663,8 +653,7 @@ impl PumasApi {
 
     /// Rebuild the model index from metadata files.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref lib) = *lib_lock {
+        if let Some(ref lib) = self.model_library {
             lib.rebuild_index().await
         } else {
             Ok(0)
@@ -673,8 +662,7 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref lib) = *lib_lock {
+        if let Some(ref lib) = self.model_library {
             lib.get_model(model_id).await
         } else {
             Ok(None)
@@ -683,8 +671,7 @@ impl PumasApi {
 
     /// Mark a model's metadata as manually set (protected from auto-updates).
     pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref lib) = *lib_lock {
+        if let Some(ref lib) = self.model_library {
             lib.mark_metadata_as_manual(model_id).await
         } else {
             Err(PumasError::Config {
@@ -698,8 +685,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
-        let importer_lock = self.model_importer.read().await;
-        if let Some(ref importer) = *importer_lock {
+        if let Some(ref importer) = self.model_importer {
             importer.import(spec).await
         } else {
             Ok(model_library::ModelImportResult {
@@ -717,8 +703,7 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
-        let importer_lock = self.model_importer.read().await;
-        if let Some(ref importer) = *importer_lock {
+        if let Some(ref importer) = self.model_importer {
             importer.batch_import(specs, None).await
         } else {
             specs
@@ -741,8 +726,7 @@ impl PumasApi {
         kind: Option<&str>,
         limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
-        let hf_lock = self.hf_client.read().await;
-        if let Some(ref client) = *hf_lock {
+        if let Some(ref client) = self.hf_client {
             let params = model_library::HfSearchParams {
                 query: query.to_string(),
                 kind: kind.map(String::from),
@@ -760,10 +744,7 @@ impl PumasApi {
         &self,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
-        let hf_lock = self.hf_client.read().await;
-        let lib_lock = self.model_library.read().await;
-
-        if let (Some(ref client), Some(ref lib)) = (&*hf_lock, &*lib_lock) {
+        if let (Some(ref client), Some(ref lib)) = (&self.hf_client, &self.model_library) {
             // Determine destination directory
             let model_type = request.model_type.as_deref().unwrap_or("unknown");
             let dest_dir = lib.build_model_path(
@@ -784,8 +765,7 @@ impl PumasApi {
         &self,
         download_id: &str,
     ) -> Option<models::ModelDownloadProgress> {
-        let hf_lock = self.hf_client.read().await;
-        if let Some(ref client) = *hf_lock {
+        if let Some(ref client) = self.hf_client {
             client.get_download_progress(download_id).await
         } else {
             None
@@ -794,8 +774,7 @@ impl PumasApi {
 
     /// Cancel a HuggingFace download.
     pub async fn cancel_hf_download(&self, download_id: &str) -> Result<bool> {
-        let hf_lock = self.hf_client.read().await;
-        if let Some(ref client) = *hf_lock {
+        if let Some(ref client) = self.hf_client {
             client.cancel_download(download_id).await
         } else {
             Ok(false)
@@ -807,8 +786,7 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
-        let hf_lock = self.hf_client.read().await;
-        if let Some(ref client) = *hf_lock {
+        if let Some(ref client) = self.hf_client {
             let path = std::path::Path::new(file_path);
             let filename = path.file_name()
                 .and_then(|n| n.to_str())
@@ -824,8 +802,7 @@ impl PumasApi {
         &self,
         repo_id: &str,
     ) -> Result<model_library::RepoFileTree> {
-        let hf_lock = self.hf_client.read().await;
-        if let Some(ref client) = *hf_lock {
+        if let Some(ref client) = self.hf_client {
             client.get_repo_files(repo_id).await
         } else {
             Err(PumasError::Config {
@@ -842,8 +819,7 @@ impl PumasApi {
     ///
     /// Returns information about total links, healthy links, broken links, etc.
     pub async fn get_link_health(&self, _version_tag: Option<&str>) -> Result<models::LinkHealthResponse> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref library) = *lib_lock {
+        if let Some(ref library) = self.model_library {
             let registry = library.link_registry().read().await;
             let all_links = registry.get_all().await;
 
@@ -896,8 +872,7 @@ impl PumasApi {
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref library) = *lib_lock {
+        if let Some(ref library) = self.model_library {
             let registry = library.link_registry().write().await;
             let broken = registry.cleanup_broken().await?;
 
@@ -922,8 +897,7 @@ impl PumasApi {
 
     /// Get all links for a specific model.
     pub async fn get_links_for_model(&self, model_id: &str) -> Result<models::LinksForModelResponse> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref library) = *lib_lock {
+        if let Some(ref library) = self.model_library {
             let registry = library.link_registry().read().await;
             let links = registry.get_links_for_model(model_id).await;
 
@@ -953,8 +927,7 @@ impl PumasApi {
 
     /// Delete a model and cascade delete all its links.
     pub async fn delete_model_with_cascade(&self, model_id: &str) -> Result<models::DeleteModelResponse> {
-        let lib_lock = self.model_library.read().await;
-        if let Some(ref library) = *lib_lock {
+        if let Some(ref library) = self.model_library {
             library.delete_model(model_id, true).await?;
             Ok(models::DeleteModelResponse {
                 success: true,
@@ -977,9 +950,7 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingPreviewResponse> {
-        let mapper_lock = self.model_mapper.read().await;
-
-        if let Some(ref mapper) = *mapper_lock {
+        if let Some(ref mapper) = self.model_mapper {
             if !models_path.exists() {
                 return Ok(models::MappingPreviewResponse {
                     success: false,
@@ -1018,9 +989,7 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingApplyResponse> {
-        let mapper_lock = self.model_mapper.read().await;
-
-        if let Some(ref mapper) = *mapper_lock {
+        if let Some(ref mapper) = self.model_mapper {
             if !models_path.exists() {
                 std::fs::create_dir_all(models_path)?;
             }

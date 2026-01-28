@@ -89,8 +89,8 @@ pub struct VersionManager {
     cancel_flag: Arc<AtomicBool>,
     /// Lock for serializing installations.
     install_lock: Arc<Mutex<()>>,
-    /// Currently installing tag.
-    installing_tag: Arc<RwLock<Option<String>>>,
+    /// Currently installing tag (exclusive access only).
+    installing_tag: Arc<Mutex<Option<String>>>,
 }
 
 impl VersionManager {
@@ -136,7 +136,7 @@ impl VersionManager {
             progress_tracker,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             install_lock: Arc::new(Mutex::new(())),
-            installing_tag: Arc::new(RwLock::new(None)),
+            installing_tag: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -299,12 +299,12 @@ impl VersionManager {
 
     /// Check if a version is currently being installed.
     pub async fn is_installing(&self) -> bool {
-        self.installing_tag.read().await.is_some()
+        self.installing_tag.lock().await.is_some()
     }
 
     /// Get the tag of the version currently being installed.
     pub async fn get_installing_tag(&self) -> Option<String> {
-        self.installing_tag.read().await.clone()
+        self.installing_tag.lock().await.clone()
     }
 
     /// Get current installation progress.
@@ -356,7 +356,7 @@ impl VersionManager {
 
         // Set installing tag
         {
-            let mut installing = self.installing_tag.write().await;
+            let mut installing = self.installing_tag.lock().await;
             *installing = Some(tag.to_string());
         }
 
@@ -390,7 +390,7 @@ impl VersionManager {
 
             // Clear installing tag
             {
-                let mut installing = installing_tag.write().await;
+                let mut installing = installing_tag.lock().await;
                 *installing = None;
             }
 

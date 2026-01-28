@@ -292,15 +292,10 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let versions = vm.get_installed_versions().await?;
-                Ok(json!({
-                    "success": true,
-                    "versions": versions
-                }))
+                // Return raw array - wrapper.rs will add {success, versions} wrapper
+                Ok(serde_json::to_value(versions)?)
             } else {
-                Ok(json!({
-                    "success": true,
-                    "versions": []
-                }))
+                Ok(json!([]))
             }
         }
 
@@ -309,15 +304,10 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let version = vm.get_active_version().await?;
-                Ok(json!({
-                    "success": true,
-                    "version": version
-                }))
+                // Return raw value - wrapper.rs will add {success, version} wrapper
+                Ok(serde_json::to_value(version)?)
             } else {
-                Ok(json!({
-                    "success": true,
-                    "version": null
-                }))
+                Ok(Value::Null)
             }
         }
 
@@ -326,15 +316,10 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let version = vm.get_default_version().await?;
-                Ok(json!({
-                    "success": true,
-                    "version": version
-                }))
+                // Return raw value - wrapper.rs will add {success, version} wrapper
+                Ok(serde_json::to_value(version)?)
             } else {
-                Ok(json!({
-                    "success": true,
-                    "version": null
-                }))
+                Ok(Value::Null)
             }
         }
 
@@ -457,22 +442,35 @@ async fn dispatch_method(
                 let active = vm.get_active_version().await?;
                 let default = vm.get_default_version().await?;
                 let installed = vm.get_installed_versions().await?;
+
+                // Build versions map with isActive and dependencies for each installed version
+                let mut versions_map = serde_json::Map::new();
+                for tag in &installed {
+                    let is_active = active.as_ref() == Some(tag);
+                    // Get dependency status if available
+                    let deps = vm.check_dependencies(tag).await.ok();
+                    versions_map.insert(tag.clone(), json!({
+                        "isActive": is_active,
+                        "dependencies": {
+                            "installed": deps.as_ref().map(|d| &d.installed).unwrap_or(&vec![]),
+                            "missing": deps.as_ref().map(|d| &d.missing).unwrap_or(&vec![])
+                        }
+                    }));
+                }
+
+                // Return raw status object - wrapper.rs will add {success, status} wrapper
                 Ok(json!({
-                    "success": true,
-                    "status": {
-                        "activeVersion": active,
-                        "defaultVersion": default,
-                        "installedVersions": installed
-                    }
+                    "installedCount": installed.len(),
+                    "activeVersion": active,
+                    "defaultVersion": default,
+                    "versions": versions_map
                 }))
             } else {
                 Ok(json!({
-                    "success": true,
-                    "status": {
-                        "activeVersion": null,
-                        "defaultVersion": null,
-                        "installedVersions": []
-                    }
+                    "installedCount": 0,
+                    "activeVersion": null,
+                    "defaultVersion": null,
+                    "versions": {}
                 }))
             }
         }
@@ -586,12 +584,26 @@ async fn dispatch_method(
 
         "get_github_cache_status" => {
             let _app_id = get_app_id!(params);
-            // TODO: Implement cache status
-            Ok(json!({
-                "cached": false,
-                "last_fetch": null,
-                "cache_age_seconds": null
-            }))
+            // Return cache status in format expected by frontend
+            // CacheStatusResponse expects: has_cache, is_valid, is_fetching, age_seconds?, last_fetched?, releases_count?
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let cache_status = vm.get_github_cache_status();
+                Ok(json!({
+                    "has_cache": cache_status.has_cache,
+                    "is_valid": cache_status.is_valid,
+                    "is_fetching": cache_status.is_fetching,
+                    "age_seconds": cache_status.age_seconds,
+                    "last_fetched": cache_status.last_fetched,
+                    "releases_count": cache_status.releases_count
+                }))
+            } else {
+                Ok(json!({
+                    "has_cache": false,
+                    "is_valid": false,
+                    "is_fetching": false
+                }))
+            }
         }
 
         // ====================================================================

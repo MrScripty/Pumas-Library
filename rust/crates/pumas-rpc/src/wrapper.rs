@@ -14,12 +14,15 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
     // Methods that return lists and need {success, versions/nodes/etc} wrapping
     match method {
         // List wrappers
-        "get_available_versions" | "get_installed_versions" => {
+        "get_installed_versions" => {
             json!({
                 "success": true,
                 "versions": if result.is_null() { json!([]) } else { result }
             })
         }
+
+        // get_available_versions is handled entirely by handler due to rate limit complexity
+        "get_available_versions" => result,
 
         "get_custom_nodes" => {
             json!({
@@ -64,12 +67,8 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
             })
         }
 
-        "get_github_cache_status" => {
-            json!({
-                "success": true,
-                "status": if result.is_null() { json!({}) } else { result }
-            })
-        }
+        // get_github_cache_status returns CacheStatusResponse which doesn't need wrapping
+        "get_github_cache_status" => result,
 
         "get_version_shortcuts" => {
             json!({
@@ -240,14 +239,23 @@ mod tests {
 
     #[test]
     fn test_wrap_versions() {
+        // get_installed_versions gets wrapped
         let versions = json!(["v1.0.0", "v1.1.0"]);
-        let wrapped = wrap_response("get_available_versions", versions);
+        let wrapped = wrap_response("get_installed_versions", versions);
 
         assert!(wrapped.get("success").unwrap().as_bool().unwrap());
         assert_eq!(
             wrapped.get("versions").unwrap(),
             &json!(["v1.0.0", "v1.1.0"])
         );
+    }
+
+    #[test]
+    fn test_available_versions_passthrough() {
+        // get_available_versions is passed through (handler handles wrapping)
+        let data = json!({"success": true, "versions": ["v1.0.0"]});
+        let wrapped = wrap_response("get_available_versions", data.clone());
+        assert_eq!(wrapped, data);
     }
 
     #[test]

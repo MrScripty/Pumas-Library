@@ -2,9 +2,9 @@
 //!
 //! Handles launching ComfyUI instances and detecting when they're ready.
 
-use crate::config::{AppId, InstallationConfig};
+use pumas_core::config::{AppId, InstallationConfig};
 use crate::version_manager::LaunchResult;
-use crate::{PumasError, Result};
+use pumas_core::{PumasError, Result};
 use chrono::Utc;
 use std::path::PathBuf;
 use std::process::Stdio;

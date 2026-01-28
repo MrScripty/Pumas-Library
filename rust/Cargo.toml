@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/pumas-core", "crates/pumas-rpc"]
+members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc"]
 
 [workspace.package]
 version = "0.1.0"
@@ -91,6 +91,7 @@ dirs = "5"
 
 # Internal crates
 pumas-core = { path = "crates/pumas-core" }
+pumas-app-manager = { path = "crates/pumas-app-manager" }
 
 [profile.release]
 lto = true

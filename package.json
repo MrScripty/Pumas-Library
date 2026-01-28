@@ -1,0 +1,13 @@
+{
+  "name": "pumas-library-workspace",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "frontend",
+    "electron"
+  ],
+  "devDependencies": {
+    "typescript": "~5.8.2",
+    "@types/node": "^22.14.0"
+  }
+}

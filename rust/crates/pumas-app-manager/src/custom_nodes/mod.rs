@@ -5,12 +5,14 @@
 
 pub mod types;
 
+// Re-export types for public API
+pub use types::{InstallResult, InstalledCustomNode, UpdateResult};
+
 use std::path::PathBuf;
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
-use crate::error::{PumasError, Result};
-use types::{InstallResult, InstalledCustomNode, UpdateResult};
+use pumas_core::error::{PumasError, Result};
 
 /// Manager for custom nodes in ComfyUI versions.
 pub struct CustomNodesManager {

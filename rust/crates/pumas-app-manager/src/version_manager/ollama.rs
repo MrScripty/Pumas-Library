@@ -3,13 +3,13 @@
 //! Handles Ollama binary downloads and installation - simpler than ComfyUI
 //! since Ollama is a pre-built binary with no Python dependencies.
 
-use crate::config::{AppId, InstallationConfig};
-use crate::metadata::{InstalledVersionMetadata, MetadataManager};
-use crate::models::InstallationStage;
-use crate::network::{GitHubAsset, GitHubClient, GitHubRelease};
+use pumas_core::config::{AppId, InstallationConfig};
+use pumas_core::metadata::{InstalledVersionMetadata, MetadataManager};
+use pumas_core::models::InstallationStage;
+use pumas_core::network::{GitHubAsset, GitHubClient, GitHubRelease};
 use crate::version_manager::progress::ProgressUpdate;
 use crate::version_manager::state::VersionState;
-use crate::{PumasError, Result};
+use pumas_core::{PumasError, Result};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;

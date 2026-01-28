@@ -1,0 +1,52 @@
+[package]
+name = "pumas-app-manager"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Application version and custom node management for Pumas Library"
+
+[dependencies]
+# Internal crates
+pumas-core = { workspace = true }
+
+# Async runtime
+tokio = { workspace = true }
+
+# HTTP client (for GitHub API)
+reqwest = { workspace = true }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Process management (Unix)
+nix = { workspace = true }
+
+# File operations
+tempfile = { workspace = true }
+walkdir = { workspace = true }
+
+# Archive extraction
+zip = { workspace = true }
+flate2 = { workspace = true }
+tar = { workspace = true }
+zstd = { workspace = true }
+
+# Time handling
+chrono = { workspace = true }
+
+# Semver parsing
+semver = { workspace = true }
+
+# Regex
+regex = { workspace = true }
+
+# Async utilities
+futures = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util", "macros"] }

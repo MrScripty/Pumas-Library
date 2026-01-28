@@ -9,4 +9,4 @@ mod patch;
 mod updater;
 
 pub use patch::PatchManager;
-pub use updater::{LauncherUpdater, UpdateCheckResult, UpdateApplyResult, CommitInfo};
+pub use updater::{LauncherUpdater, UpdateCheckResult, UpdateApplyResult};

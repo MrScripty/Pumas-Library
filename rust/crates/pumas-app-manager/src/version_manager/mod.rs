@@ -21,12 +21,12 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use pumas_core::version_manager::VersionManager;
-//! use pumas_core::config::AppId;
+//! ```rust,ignore
+//! use pumas_app_manager::VersionManager;
+//! use pumas_core::AppId;
 //!
 //! #[tokio::main]
-//! async fn main() -> anyhow::Result<()> {
+//! async fn main() -> pumas_core::Result<()> {
 //!     let manager = VersionManager::new("/path/to/pumas", AppId::ComfyUI).await?;
 //!
 //!     // Get installed versions
@@ -60,11 +60,11 @@ pub use progress::{InstallationProgressTracker, PackageWeights, ProgressUpdate};
 pub use size_calculator::{ReleaseSize, SizeBreakdown, SizeCalculator};
 pub use state::VersionState;
 
-use crate::config::{AppId, PathsConfig};
-use crate::metadata::MetadataManager;
-use crate::models::InstallationProgress;
-use crate::network::GitHubClient;
-use crate::{PumasError, Result};
+use pumas_core::config::{AppId, PathsConfig};
+use pumas_core::metadata::MetadataManager;
+use pumas_core::models::InstallationProgress;
+use pumas_core::network::GitHubClient;
+use pumas_core::{PumasError, Result};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -221,7 +221,7 @@ impl VersionManager {
     pub async fn get_version_info(
         &self,
         tag: &str,
-    ) -> Result<Option<crate::metadata::InstalledVersionMetadata>> {
+    ) -> Result<Option<pumas_core::metadata::InstalledVersionMetadata>> {
         self.metadata_manager
             .get_installed_version(tag, Some(self.app_id))
     }
@@ -270,7 +270,7 @@ impl VersionManager {
     pub async fn get_available_releases(
         &self,
         force_refresh: bool,
-    ) -> Result<Vec<crate::network::GitHubRelease>> {
+    ) -> Result<Vec<pumas_core::network::GitHubRelease>> {
         self.github_client
             .get_releases_for_app(self.app_id, force_refresh)
             .await
@@ -281,14 +281,14 @@ impl VersionManager {
         &self,
         tag: &str,
         force_refresh: bool,
-    ) -> Result<Option<crate::network::GitHubRelease>> {
+    ) -> Result<Option<pumas_core::network::GitHubRelease>> {
         self.github_client
             .get_release_by_tag(self.app_id.github_repo(), tag, force_refresh)
             .await
     }
 
     /// Get cache status for GitHub releases.
-    pub fn get_github_cache_status(&self) -> crate::models::CacheStatus {
+    pub fn get_github_cache_status(&self) -> pumas_core::models::CacheStatus {
         self.github_client
             .get_cache_status(self.app_id.github_repo())
     }
@@ -465,7 +465,7 @@ impl VersionManager {
     // ========================================
 
     /// Check dependencies for a version.
-    pub async fn check_dependencies(&self, tag: &str) -> Result<crate::models::DependencyStatus> {
+    pub async fn check_dependencies(&self, tag: &str) -> Result<pumas_core::models::DependencyStatus> {
         let dep_manager = DependencyManager::new(
             self.launcher_root.clone(),
             self.app_id,

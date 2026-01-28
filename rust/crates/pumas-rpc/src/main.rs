@@ -9,8 +9,10 @@ mod wrapper;
 
 use anyhow::Result;
 use clap::Parser;
+use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
+use pumas_core::AppId;
 use std::path::PathBuf;
-use tracing::{info, Level};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[derive(Parser, Debug)]
@@ -75,11 +77,44 @@ async fn main() -> Result<()> {
 
     info!("Launcher root: {}", launcher_root.display());
 
-    // Create the API instance
+    // Create the core API instance (model library, system utilities)
     let api = pumas_core::PumasApi::new(&launcher_root).await?;
 
+    // Initialize version manager for ComfyUI (from pumas-app-manager)
+    let version_manager = match VersionManager::new(&launcher_root, AppId::ComfyUI).await {
+        Ok(mgr) => {
+            info!("Version manager initialized successfully");
+            Some(mgr)
+        }
+        Err(e) => {
+            warn!("Failed to initialize version manager: {}", e);
+            None
+        }
+    };
+
+    // Initialize custom nodes manager
+    let versions_dir = launcher_root.join(AppId::ComfyUI.versions_dir_name());
+    let custom_nodes_manager = CustomNodesManager::new(versions_dir);
+    info!("Custom nodes manager initialized");
+
+    // Initialize size calculator
+    let cache_dir = launcher_root
+        .join("launcher-data")
+        .join("cache");
+    let size_calculator = SizeCalculator::new(cache_dir);
+    info!("Size calculator initialized");
+
     // Start the server
-    let addr = server::start_server(api, &args.host, args.port).await?;
+    let addr = server::start_server(
+        api,
+        version_manager,
+        custom_nodes_manager,
+        size_calculator,
+        launcher_root,
+        &args.host,
+        args.port,
+    )
+    .await?;
 
     // Print port for Electron to read (intentional stdout for IPC)
     // This format must match what python-bridge.ts expects

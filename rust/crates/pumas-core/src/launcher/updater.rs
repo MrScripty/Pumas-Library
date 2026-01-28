@@ -3,24 +3,12 @@
 //! Manages launcher updates via git, checking for new commits and applying updates.
 
 use crate::error::{PumasError, Result};
+use crate::models::CommitInfo;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, error, info, warn};
-
-/// Information about a single commit.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CommitInfo {
-    /// Short SHA (7 characters).
-    pub sha: String,
-    /// First line of commit message.
-    pub message: String,
-    /// Author name.
-    pub author: String,
-    /// Commit date (ISO 8601).
-    pub date: String,
-}
 
 /// Result of checking for launcher updates.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,15 +304,15 @@ impl LauncherUpdater {
         let mut commit_list = Vec::new();
 
         for commit in &commits {
-            let sha = commit.sha[..7].to_string();
+            let short_hash = commit.sha[..7].to_string();
             commit_list.push(CommitInfo {
-                sha: sha.clone(),
+                hash: short_hash.clone(),
                 message: commit.commit.message.lines().next().unwrap_or("").to_string(),
                 author: commit.commit.author.name.clone(),
                 date: commit.commit.author.date.clone(),
             });
 
-            if sha == current_commit {
+            if short_hash == current_commit {
                 break;
             }
             commits_behind += 1;

@@ -3,7 +3,7 @@
 //! This module defines comprehensive error types that map to the Python exceptions
 //! and provide meaningful error messages for the frontend.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Main error type for the Pumas library.
@@ -88,9 +88,6 @@ pub enum PumasError {
 
     #[error("Dependency installation failed: {message}")]
     DependencyFailed { message: String },
-
-    #[error("Dependency installation failed: {message}")]
-    DependencyInstallFailed { message: String },
 
     #[error("Process launch failed for {app}: {message}")]
     LaunchFailed { app: String, message: String },
@@ -240,7 +237,6 @@ impl PumasError {
 
             PumasError::InstallationFailed { .. }
             | PumasError::DependencyFailed { .. }
-            | PumasError::DependencyInstallFailed { .. }
             | PumasError::LaunchFailed { .. }
             | PumasError::ImportFailed { .. }
             | PumasError::DownloadFailed { .. } => -32003,
@@ -274,6 +270,73 @@ impl PumasError {
             // RateLimited is intentionally NOT retryable - see doc comment above
         )
     }
+}
+
+/// Extension trait for `Result<T, std::io::Error>` to easily add path context.
+///
+/// This trait reduces the boilerplate of mapping IO errors to `PumasError::Io`
+/// with path information, replacing 110+ repetitive `.map_err()` calls.
+///
+/// # Example
+///
+/// ```ignore
+/// use pumas_core::error::IoResultExt;
+///
+/// // Before (verbose):
+/// std::fs::read_to_string(&path).map_err(|e| PumasError::Io {
+///     message: format!("Failed to read file: {}", e),
+///     path: Some(path.clone()),
+///     source: Some(e),
+/// })?;
+///
+/// // After (concise):
+/// std::fs::read_to_string(&path).with_path(&path)?;
+///
+/// // With operation context:
+/// std::fs::read_to_string(&path).with_context("reading config", &path)?;
+/// ```
+pub trait IoResultExt<T> {
+    /// Add path context to an IO error.
+    fn with_path(self, path: impl AsRef<Path>) -> Result<T>;
+
+    /// Add operation and path context to an IO error.
+    fn with_context(self, operation: impl Into<String>, path: impl AsRef<Path>) -> Result<T>;
+}
+
+impl<T> IoResultExt<T> for std::result::Result<T, std::io::Error> {
+    fn with_path(self, path: impl AsRef<Path>) -> Result<T> {
+        self.map_err(|e| PumasError::io_with_path(e, path.as_ref()))
+    }
+
+    fn with_context(self, operation: impl Into<String>, path: impl AsRef<Path>) -> Result<T> {
+        self.map_err(|e| PumasError::io(operation, path.as_ref(), e))
+    }
+}
+
+/// Macro for creating IO error mappers inline.
+///
+/// This is useful when you need a closure for `.map_err()` but want
+/// concise syntax.
+///
+/// # Example
+///
+/// ```ignore
+/// use pumas_core::io_err;
+///
+/// // Create an error mapper with just path:
+/// std::fs::read(&path).map_err(io_err!(&path))?;
+///
+/// // Create an error mapper with operation and path:
+/// std::fs::write(&path, data).map_err(io_err!("writing data", &path))?;
+/// ```
+#[macro_export]
+macro_rules! io_err {
+    ($path:expr) => {
+        |e: std::io::Error| $crate::error::PumasError::io_with_path(e, $path)
+    };
+    ($op:expr, $path:expr) => {
+        |e: std::io::Error| $crate::error::PumasError::io($op, $path, e)
+    };
 }
 
 #[cfg(test)]

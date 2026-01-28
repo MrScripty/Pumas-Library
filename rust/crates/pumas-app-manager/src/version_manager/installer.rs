@@ -2,12 +2,12 @@
 //!
 //! Handles downloading, extracting, and setting up new versions.
 
-use crate::config::{AppId, InstallationConfig, PathsConfig};
-use crate::metadata::{InstalledVersionMetadata, MetadataManager};
-use crate::models::InstallationStage;
-use crate::network::GitHubRelease;
+use pumas_core::config::{AppId, InstallationConfig, PathsConfig};
+use pumas_core::metadata::{InstalledVersionMetadata, MetadataManager};
+use pumas_core::models::InstallationStage;
+use pumas_core::network::GitHubRelease;
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
-use crate::{PumasError, Result};
+use pumas_core::{PumasError, Result};
 use chrono::Utc;
 use std::fs::File;
 use std::io::{BufReader, Write};
@@ -683,7 +683,7 @@ impl VersionInstaller {
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             error!("Dependency installation failed: {}", stderr);
-            return Err(PumasError::DependencyInstallFailed {
+            return Err(PumasError::DependencyFailed {
                 message: stderr.to_string(),
             });
         }

@@ -2,11 +2,11 @@
 //!
 //! Handles checking and installing dependencies using pip/uv.
 
-use crate::config::AppId;
-use crate::models::DependencyStatus;
+use pumas_core::config::AppId;
+use pumas_core::models::DependencyStatus;
 use crate::version_manager::constraints::ConstraintsManager;
 use crate::version_manager::progress::ProgressUpdate;
-use crate::{PumasError, Result};
+use pumas_core::{PumasError, Result};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -385,7 +385,7 @@ impl DependencyManager {
         }
 
         if !status.success() {
-            return Err(PumasError::DependencyInstallFailed {
+            return Err(PumasError::DependencyFailed {
                 message: format!("pip install failed with status {}", status),
             });
         }

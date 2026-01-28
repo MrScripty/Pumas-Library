@@ -10,7 +10,7 @@
 //! This approach is more reliable than Python's pip-based method which
 //! often fails or returns inconsistent results.
 
-use crate::{PumasError, Result};
+use pumas_core::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;

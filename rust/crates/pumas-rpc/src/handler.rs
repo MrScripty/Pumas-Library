@@ -101,7 +101,7 @@ pub async fn handle_rpc(
     }
 
     // Dispatch to API methods
-    let result = dispatch_method(&state.api, method, &params).await;
+    let result = dispatch_method(&state, method, &params).await;
 
     match result {
         Ok(value) => {
@@ -184,10 +184,11 @@ macro_rules! get_app_id {
 
 /// Dispatch a method call to the appropriate API handler.
 async fn dispatch_method(
-    api: &pumas_core::PumasApi,
+    state: &AppState,
     method: &str,
     params: &Value,
 ) -> pumas_core::Result<Value> {
+    let api = &state.api;
     match method {
         // ====================================================================
         // Status & System
@@ -247,142 +248,239 @@ async fn dispatch_method(
         }
 
         // ====================================================================
-        // Version Management
+        // Version Management (uses pumas-app-manager)
         // ====================================================================
         "get_available_versions" => {
             let force_refresh = get_bool_param!(params, "force_refresh", "forceRefresh").unwrap_or(false);
-            let app_id = get_app_id!(params);
+            let _app_id = get_app_id!(params);
 
-            // Handle rate limit errors specially to return structured response
-            match api.get_available_versions(force_refresh, app_id).await {
-                Ok(versions) => Ok(json!({
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                // Handle rate limit errors specially to return structured response
+                match vm.get_available_releases(force_refresh).await {
+                    Ok(releases) => {
+                        let versions: Vec<pumas_core::models::VersionReleaseInfo> = releases
+                            .into_iter()
+                            .map(pumas_core::models::VersionReleaseInfo::from)
+                            .collect();
+                        Ok(json!({
+                            "success": true,
+                            "versions": versions
+                        }))
+                    }
+                    Err(pumas_core::PumasError::RateLimited { service, retry_after_secs }) => {
+                        warn!("Rate limited by {} when fetching versions", service);
+                        Ok(json!({
+                            "success": false,
+                            "error": format!("Rate limited by {}", service),
+                            "rate_limited": true,
+                            "retry_after_secs": retry_after_secs
+                        }))
+                    },
+                    Err(e) => Err(e)
+                }
+            } else {
+                Ok(json!({
                     "success": true,
-                    "versions": versions
-                })),
-                Err(pumas_core::PumasError::RateLimited { service, retry_after_secs }) => {
-                    warn!("Rate limited by {} when fetching versions", service);
-                    Ok(json!({
-                        "success": false,
-                        "error": format!("Rate limited by {}", service),
-                        "rate_limited": true,
-                        "retry_after_secs": retry_after_secs
-                    }))
-                },
-                Err(e) => Err(e)
+                    "versions": []
+                }))
             }
         }
 
         "get_installed_versions" => {
-            let app_id = get_app_id!(params);
-            let versions = api.get_installed_versions(app_id).await?;
-            Ok(serde_json::to_value(versions)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let versions = vm.get_installed_versions().await?;
+                Ok(serde_json::to_value(versions)?)
+            } else {
+                Ok(serde_json::to_value::<Vec<String>>(vec![])?)
+            }
         }
 
         "get_active_version" => {
-            let app_id = get_app_id!(params);
-            let version = api.get_active_version(app_id).await?;
-            Ok(serde_json::to_value(version)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version = vm.get_active_version().await?;
+                Ok(serde_json::to_value(version)?)
+            } else {
+                Ok(serde_json::to_value::<Option<String>>(None)?)
+            }
         }
 
         "get_default_version" => {
-            let app_id = get_app_id!(params);
-            let version = api.get_default_version(app_id).await?;
-            Ok(serde_json::to_value(version)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version = vm.get_default_version().await?;
+                Ok(serde_json::to_value(version)?)
+            } else {
+                Ok(serde_json::to_value::<Option<String>>(None)?)
+            }
         }
 
         "set_default_version" => {
             let tag = get_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let result = api.set_default_version(tag, app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.set_default_version(tag).await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         "switch_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let result = api.set_active_version(&tag, app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.set_active_version(&tag).await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         "install_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
+            let _app_id = get_app_id!(params);
 
-            // Start the installation (returns a progress receiver)
-            match api.install_version(&tag, app_id).await {
-                Ok(_rx) => {
-                    // Installation started successfully
-                    // Progress can be monitored via get_installation_progress
-                    Ok(json!({
-                        "success": true,
-                        "message": format!("Installation of {} started", tag)
-                    }))
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                // Start the installation (returns a progress receiver)
+                match vm.install_version(&tag).await {
+                    Ok(_rx) => {
+                        // Installation started successfully
+                        // Progress can be monitored via get_installation_progress
+                        Ok(json!({
+                            "success": true,
+                            "message": format!("Installation of {} started", tag)
+                        }))
+                    }
+                    Err(e) => {
+                        warn!("Failed to start installation of {}: {}", tag, e);
+                        Ok(json!({
+                            "success": false,
+                            "error": e.to_string()
+                        }))
+                    }
                 }
-                Err(e) => {
-                    warn!("Failed to start installation of {}: {}", tag, e);
-                    Ok(json!({
-                        "success": false,
-                        "error": e.to_string()
-                    }))
-                }
+            } else {
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized"
+                }))
             }
         }
 
         "remove_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let result = api.remove_version(&tag, app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.remove_version(&tag).await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         "cancel_installation" => {
-            let app_id = get_app_id!(params);
-            let result = api.cancel_installation(app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.cancel_installation().await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Ok(serde_json::to_value(false)?)
+            }
         }
 
         "get_installation_progress" => {
-            let app_id = get_app_id!(params);
-            let progress = api.get_installation_progress(app_id).await;
-            Ok(serde_json::to_value(progress)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let progress = vm.get_installation_progress().await;
+                Ok(serde_json::to_value(progress)?)
+            } else {
+                Ok(serde_json::to_value::<Option<pumas_core::models::InstallationProgress>>(None)?)
+            }
         }
 
         "validate_installations" => {
-            let app_id = get_app_id!(params);
-            let result = api.validate_installations(app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.validate_installations().await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Ok(json!({
+                    "removed_tags": [],
+                    "orphaned_dirs": [],
+                    "valid_count": 0
+                }))
+            }
         }
 
         "get_version_status" => {
-            let app_id = get_app_id!(params);
-            // Return version status combining active/default/installed
-            let active = api.get_active_version(app_id).await?;
-            let default = api.get_default_version(app_id).await?;
-            let installed = api.get_installed_versions(app_id).await?;
-            Ok(json!({
-                "active": active,
-                "default": default,
-                "installed": installed
-            }))
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                // Return version status combining active/default/installed
+                let active = vm.get_active_version().await?;
+                let default = vm.get_default_version().await?;
+                let installed = vm.get_installed_versions().await?;
+                Ok(json!({
+                    "active": active,
+                    "default": default,
+                    "installed": installed
+                }))
+            } else {
+                Ok(json!({
+                    "active": null,
+                    "default": null,
+                    "installed": []
+                }))
+            }
         }
 
         "get_version_info" => {
             let tag = require_str_param!(params, "tag", "tag");
             let _app_id = get_app_id!(params);
-            // TODO: Implement detailed version info
-            Ok(json!({
-                "tag": tag,
-                "installed": false,
-                "size": null
-            }))
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let installed = vm.get_installed_versions().await?;
+                let is_installed = installed.contains(&tag);
+                Ok(json!({
+                    "tag": tag,
+                    "installed": is_installed,
+                    "size": null
+                }))
+            } else {
+                Ok(json!({
+                    "tag": tag,
+                    "installed": false,
+                    "size": null
+                }))
+            }
         }
 
         "get_release_size_info" => {
             let tag = require_str_param!(params, "tag", "tag");
             let archive_size = get_i64_param!(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
 
-            // Calculate release size
-            let result = api.calculate_release_size(&tag, archive_size, None).await?;
+            // Calculate release size using size_calculator from state
+            let mut calc = state.size_calculator.write().await;
+            let result = calc.calculate_release_size(&tag, archive_size, None).await?;
             Ok(serde_json::to_value(result)?)
         }
 
@@ -390,7 +488,8 @@ async fn dispatch_method(
             let tag = require_str_param!(params, "tag", "tag");
 
             // Get cached size breakdown
-            if let Some(breakdown) = api.get_release_size_breakdown(&tag).await {
+            let calc = state.size_calculator.read().await;
+            if let Some(breakdown) = calc.get_size_breakdown(&tag) {
                 Ok(serde_json::to_value(breakdown)?)
             } else {
                 Ok(json!({
@@ -409,7 +508,8 @@ async fn dispatch_method(
                 .get("requirements")
                 .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-            let result = api.calculate_release_size(
+            let mut calc = state.size_calculator.write().await;
+            let result = calc.calculate_release_size(
                 &tag,
                 archive_size,
                 requirements.as_deref(),
@@ -419,13 +519,25 @@ async fn dispatch_method(
 
         "calculate_all_release_sizes" => {
             // Get all available versions and calculate sizes
-            let versions = api.get_available_versions(false, None).await?;
+            let vm_lock = state.version_manager.read().await;
+            let versions = if let Some(ref vm) = *vm_lock {
+                let releases = vm.get_available_releases(false).await?;
+                releases
+                    .into_iter()
+                    .map(pumas_core::models::VersionReleaseInfo::from)
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+            drop(vm_lock);
+
             let mut results = serde_json::Map::new();
+            let mut calc = state.size_calculator.write().await;
 
             for version in versions.iter().take(20) {
                 // Limit to avoid too many calculations
                 let archive_size = version.archive_size.unwrap_or(0);
-                if let Ok(size_info) = api.calculate_release_size(&version.tag_name, archive_size, None).await {
+                if let Ok(size_info) = calc.calculate_release_size(&version.tag_name, archive_size, None).await {
                     if let Ok(value) = serde_json::to_value(&size_info) {
                         results.insert(version.tag_name.clone(), value);
                     }
@@ -459,27 +571,82 @@ async fn dispatch_method(
         }
 
         // ====================================================================
-        // Dependency Management
+        // Dependency Management (uses pumas-app-manager)
         // ====================================================================
         "check_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let status = api.check_version_dependencies(&tag, app_id).await?;
-            Ok(serde_json::to_value(status)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let status = vm.check_dependencies(&tag).await?;
+                Ok(serde_json::to_value(status)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         "install_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let result = api.install_version_dependencies(&tag, app_id).await?;
-            Ok(serde_json::to_value(result)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let result = vm.install_dependencies(&tag, None).await?;
+                Ok(serde_json::to_value(result)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         "get_release_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let app_id = get_app_id!(params);
-            let deps = api.get_release_dependencies(&tag, app_id).await?;
-            Ok(serde_json::to_value(deps)?)
+            let _app_id = get_app_id!(params);
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version_path = vm.version_path(&tag);
+                let requirements_path = version_path.join("requirements.txt");
+
+                if !requirements_path.exists() {
+                    return Ok(serde_json::to_value::<Vec<String>>(vec![])?);
+                }
+
+                let content = std::fs::read_to_string(&requirements_path).map_err(|e| {
+                    pumas_core::PumasError::Io {
+                        message: format!("Failed to read requirements.txt: {}", e),
+                        path: Some(requirements_path),
+                        source: Some(e),
+                    }
+                })?;
+
+                // Parse requirements (simple extraction of package names)
+                let packages: Vec<String> = content
+                    .lines()
+                    .filter(|line| {
+                        let line = line.trim();
+                        !line.is_empty() && !line.starts_with('#') && !line.starts_with('-')
+                    })
+                    .filter_map(|line| {
+                        let name = line
+                            .split(|c| c == '=' || c == '>' || c == '<' || c == '[' || c == ';')
+                            .next()?
+                            .trim();
+                        if !name.is_empty() {
+                            Some(name.to_string())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                Ok(serde_json::to_value(packages)?)
+            } else {
+                Err(pumas_core::PumasError::Config {
+                    message: "Version manager not initialized".to_string(),
+                })
+            }
         }
 
         // ====================================================================
@@ -516,26 +683,36 @@ async fn dispatch_method(
         }
 
         "launch_comfyui" => {
-            // Get the active version and launch it
-            let active = api.get_active_version(None).await?;
-            if let Some(tag) = active {
-                let response = api.launch_version(&tag, None).await?;
-                Ok(serde_json::to_value(response)?)
+            // Get the active version from version_manager and launch it
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let active = vm.get_active_version().await?;
+                if let Some(tag) = active {
+                    let version_dir = vm.version_path(&tag);
+                    drop(vm_lock);  // Release lock before calling api
+                    let response = api.launch_version(&tag, &version_dir).await?;
+                    Ok(serde_json::to_value(response)?)
+                } else {
+                    Ok(json!({
+                        "success": false,
+                        "error": "No active version set"
+                    }))
+                }
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "No active version set"
+                    "error": "Version manager not initialized"
                 }))
             }
         }
 
         // ====================================================================
-        // Shortcuts
+        // Shortcuts (uses version_manager for version_dir)
         // ====================================================================
         "get_version_shortcuts" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let state = api.get_version_shortcut_state(&tag).await;
-            Ok(serde_json::to_value(state)?)
+            let shortcut_state = api.get_version_shortcut_state(&tag).await;
+            Ok(serde_json::to_value(shortcut_state)?)
         }
 
         "get_all_shortcut_states" => {
@@ -546,8 +723,15 @@ async fn dispatch_method(
         "toggle_menu" => {
             let tag = get_str_param!(params, "tag", "tag");
             if let Some(t) = tag {
-                let result = api.toggle_menu_shortcut(t).await?;
-                Ok(serde_json::to_value(result)?)
+                let vm_lock = state.version_manager.read().await;
+                if let Some(ref vm) = *vm_lock {
+                    let version_dir = vm.version_path(t);
+                    drop(vm_lock);
+                    let result = api.toggle_menu_shortcut(t, &version_dir).await?;
+                    Ok(serde_json::to_value(result)?)
+                } else {
+                    Ok(json!(false))
+                }
             } else {
                 Ok(json!(false))
             }
@@ -556,8 +740,15 @@ async fn dispatch_method(
         "toggle_desktop" => {
             let tag = get_str_param!(params, "tag", "tag");
             if let Some(t) = tag {
-                let result = api.toggle_desktop_shortcut(t).await?;
-                Ok(serde_json::to_value(result)?)
+                let vm_lock = state.version_manager.read().await;
+                if let Some(ref vm) = *vm_lock {
+                    let version_dir = vm.version_path(t);
+                    drop(vm_lock);
+                    let result = api.toggle_desktop_shortcut(t, &version_dir).await?;
+                    Ok(serde_json::to_value(result)?)
+                } else {
+                    Ok(json!(false))
+                }
             } else {
                 Ok(json!(false))
             }
@@ -620,9 +811,25 @@ async fn dispatch_method(
 
         "open_active_install" => {
             let _app_id = get_app_id!(params);
-            match api.open_active_install().await {
-                Ok(()) => Ok(json!({"success": true})),
-                Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
+            // Get the active version from version_manager and open its directory
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                if let Some(tag) = vm.get_active_version().await? {
+                    let version_dir = vm.version_path(&tag);
+                    drop(vm_lock);
+                    if version_dir.exists() {
+                        match api.open_directory(&version_dir) {
+                            Ok(()) => Ok(json!({"success": true})),
+                            Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
+                        }
+                    } else {
+                        Ok(json!({"success": false, "error": "Version directory not found"}))
+                    }
+                } else {
+                    Ok(json!({"success": false, "error": "No active version set"}))
+                }
+            } else {
+                Ok(json!({"success": false, "error": "Version manager not initialized"}))
             }
         }
 
@@ -965,20 +1172,56 @@ async fn dispatch_method(
 
         "preview_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let response = api.preview_model_mapping(&version_tag).await?;
-            Ok(serde_json::to_value(response)?)
+            // Get the models path from version_manager
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version_path = vm.version_path(&version_tag);
+                let models_path = version_path.join("models");
+                drop(vm_lock);
+                let response = api.preview_model_mapping(&version_tag, &models_path).await?;
+                Ok(serde_json::to_value(response)?)
+            } else {
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized"
+                }))
+            }
         }
 
         "apply_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let response = api.apply_model_mapping(&version_tag).await?;
-            Ok(serde_json::to_value(response)?)
+            // Get the models path from version_manager
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version_path = vm.version_path(&version_tag);
+                let models_path = version_path.join("models");
+                drop(vm_lock);
+                let response = api.apply_model_mapping(&version_tag, &models_path).await?;
+                Ok(serde_json::to_value(response)?)
+            } else {
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized"
+                }))
+            }
         }
 
         "sync_models_incremental" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let response = api.sync_models_incremental(&version_tag).await?;
-            Ok(serde_json::to_value(response)?)
+            // Get the models path from version_manager
+            let vm_lock = state.version_manager.read().await;
+            if let Some(ref vm) = *vm_lock {
+                let version_path = vm.version_path(&version_tag);
+                let models_path = version_path.join("models");
+                drop(vm_lock);
+                let response = api.sync_models_incremental(&version_tag, &models_path).await?;
+                Ok(serde_json::to_value(response)?)
+            } else {
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized"
+                }))
+            }
         }
 
         "sync_with_resolutions" => {
@@ -1061,32 +1304,32 @@ async fn dispatch_method(
         }
 
         // ====================================================================
-        // Custom Nodes
+        // Custom Nodes (uses pumas-app-manager)
         // ====================================================================
         "get_custom_nodes" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let nodes = api.list_custom_nodes(&version_tag)?;
+            let nodes = state.custom_nodes_manager.list_custom_nodes(&version_tag)?;
             Ok(serde_json::to_value(nodes)?)
         }
 
         "install_custom_node" => {
             let repo_url = require_str_param!(params, "repo_url", "repoUrl");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let result = api.install_custom_node(&repo_url, &version_tag).await?;
+            let result = state.custom_nodes_manager.install_from_git(&repo_url, &version_tag).await?;
             Ok(serde_json::to_value(result)?)
         }
 
         "update_custom_node" => {
             let node_name = require_str_param!(params, "node_name", "nodeName");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let result = api.update_custom_node(&node_name, &version_tag).await?;
+            let result = state.custom_nodes_manager.update(&node_name, &version_tag).await?;
             Ok(serde_json::to_value(result)?)
         }
 
         "remove_custom_node" => {
             let node_name = require_str_param!(params, "node_name", "nodeName");
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            let result = api.remove_custom_node(&node_name, &version_tag)?;
+            let result = state.custom_nodes_manager.remove(&node_name, &version_tag)?;
             Ok(json!({"success": result}))
         }
 

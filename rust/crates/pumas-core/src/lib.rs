@@ -1,28 +1,34 @@
-//! Pumas Core - Headless library for AI model and version management.
+//! Pumas Core - Headless library for AI model management and system utilities.
 //!
-//! This crate provides the core functionality for managing AI application versions
-//! (ComfyUI, Ollama, etc.) and AI models. It can be used programmatically without
-//! any HTTP/RPC layer.
+//! This crate provides the core functionality for managing AI models and system
+//! utilities. It can be used programmatically without any HTTP/RPC layer.
+//!
+//! For version management (ComfyUI versions, custom nodes), see the
+//! `pumas-app-manager` crate.
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use pumas_core::{PumasApi, config::AppId};
+//! ```rust,ignore
+//! use pumas_core::PumasApi;
 //!
 //! #[tokio::main]
-//! async fn main() -> anyhow::Result<()> {
+//! async fn main() -> pumas_core::Result<()> {
 //!     let api = PumasApi::new("/path/to/pumas").await?;
 //!
-//!     // Get available versions
-//!     let versions = api.get_available_versions(false, None).await?;
-//!     println!("Found {} versions", versions.len());
+//!     // List models in the library
+//!     let models = api.list_models().await?;
+//!     println!("Found {} models", models.len());
+//!
+//!     // Search for models
+//!     let search = api.search_models("llama", 10, 0).await?;
+//!     println!("Search found {} results", search.total_count);
 //!
 //!     Ok(())
 //! }
 //! ```
 
+pub mod cancel;
 pub mod config;
-pub mod custom_nodes;
 pub mod error;
 pub mod index;
 pub mod launcher;
@@ -33,24 +39,26 @@ pub mod network;
 pub mod process;
 pub mod shortcut;
 pub mod system;
-pub mod version_manager;
 
 // Re-export commonly used types
+pub use cancel::{CancellationToken, CancelledError};
 pub use config::AppId;
-pub use custom_nodes::CustomNodesManager;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
+pub use launcher::{LauncherUpdater, PatchManager, UpdateApplyResult, UpdateCheckResult};
 pub use metadata::MetadataManager;
 pub use model_library::sharding::{self, ShardValidation};
 pub use model_library::{
-    HuggingFaceClient, ModelImporter, ModelLibrary, ModelMapper,
-    HfSearchParams, DownloadRequest, BatchImportProgress,
+    BatchImportProgress, DownloadRequest, HfSearchParams, HuggingFaceClient, ModelImporter,
+    ModelLibrary, ModelMapper,
 };
-pub use process::{ProcessManager, ProcessInfo};
-pub use shortcut::{ShortcutManager, ShortcutState, ShortcutResult};
-pub use system::{GpuInfo, GpuMonitor, ProcessResources, ResourceTracker, SystemResourceSnapshot, SystemUtils, SystemCheckResult, check_git, check_brave, check_setproctitle};
-pub use launcher::{LauncherUpdater, PatchManager, UpdateCheckResult, UpdateApplyResult, CommitInfo};
-pub use version_manager::{VersionManager, SizeCalculator, ReleaseSize, SizeBreakdown};
+pub use models::CommitInfo;
+pub use process::{ProcessInfo, ProcessManager};
+pub use shortcut::{ShortcutManager, ShortcutResult, ShortcutState};
+pub use system::{
+    check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,
+    ResourceTracker, SystemCheckResult, SystemResourceSnapshot, SystemUtils,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -59,24 +67,22 @@ use tokio::sync::RwLock;
 /// Main API struct for Pumas operations.
 ///
 /// This is the primary entry point for programmatic access to Pumas functionality.
-/// It manages versions, models, and system integration.
+/// It provides model library and system utilities for integrating Pumas functionality
+/// into other applications.
+///
+/// Note: Version management (ComfyUI versions, custom nodes) is handled by the
+/// separate `pumas-app-manager` crate, which is used by the frontend/RPC layer.
 pub struct PumasApi {
     /// Root directory for launcher data
     launcher_root: PathBuf,
     /// Shared state (will be expanded as we implement more features)
     _state: Arc<RwLock<ApiState>>,
-    /// Version manager for ComfyUI
-    version_manager: Arc<RwLock<Option<version_manager::VersionManager>>>,
     /// Process manager for managing running processes
     process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
     /// Shortcut manager for desktop/menu shortcuts
     shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
     /// System utilities
     system_utils: Arc<system::SystemUtils>,
-    /// Custom nodes manager for managing custom nodes in versions
-    custom_nodes_manager: Arc<custom_nodes::CustomNodesManager>,
-    /// Size calculator for estimating release sizes
-    size_calculator: Arc<RwLock<version_manager::SizeCalculator>>,
     /// Model library for managing AI models
     model_library: Arc<RwLock<Option<Arc<model_library::ModelLibrary>>>>,
     /// Model mapper for linking models to application directories
@@ -113,15 +119,6 @@ impl PumasApi {
             background_fetch_completed: false,
         }));
 
-        // Initialize version manager
-        let version_manager = match version_manager::VersionManager::new(&launcher_root, AppId::ComfyUI).await {
-            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
-            Err(e) => {
-                tracing::warn!("Failed to initialize version manager: {}", e);
-                Arc::new(RwLock::new(None))
-            }
-        };
-
         // Initialize process manager
         let process_manager = match process::ProcessManager::new(&launcher_root, None) {
             Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
@@ -143,16 +140,6 @@ impl PumasApi {
         // Initialize system utilities
         let system_utils = Arc::new(system::SystemUtils::new(&launcher_root));
 
-        // Initialize custom nodes manager (for ComfyUI versions)
-        let versions_dir = launcher_root.join(AppId::ComfyUI.versions_dir_name());
-        let custom_nodes_manager = Arc::new(custom_nodes::CustomNodesManager::new(versions_dir));
-
-        // Initialize size calculator
-        let cache_dir = launcher_root
-            .join("launcher-data")
-            .join(config::PathsConfig::CACHE_DIR_NAME);
-        let size_calculator = Arc::new(RwLock::new(version_manager::SizeCalculator::new(cache_dir.clone())));
-
         // Initialize model library for AI model management
         // Uses shared-resources/models to match Python backend path
         let model_library_dir = launcher_root
@@ -163,6 +150,9 @@ impl PumasApi {
             .join("mapping-configs");
 
         // Initialize HuggingFace client for model search/download
+        let cache_dir = launcher_root
+            .join("launcher-data")
+            .join(config::PathsConfig::CACHE_DIR_NAME);
         let hf_cache_dir = cache_dir.join("hf");
         let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
             Ok(client) => Arc::new(RwLock::new(Some(client))),
@@ -196,12 +186,9 @@ impl PumasApi {
         Ok(Self {
             launcher_root,
             _state: state,
-            version_manager,
             process_manager,
             shortcut_manager,
             system_utils,
-            custom_nodes_manager,
-            size_calculator,
             model_library,
             model_mapper,
             hf_client,
@@ -244,37 +231,24 @@ impl PumasApi {
     // ========================================
 
     /// Get overall system status.
+    ///
+    /// Note: This returns basic status. Version-specific status (shortcuts, active version)
+    /// should be obtained through pumas-app-manager in the RPC layer.
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
         // Get actual running status
         let comfyui_running = self.is_comfyui_running().await;
         let last_launch_error = self.get_last_launch_error().await;
         let last_launch_log = self.get_last_launch_log().await;
 
-        // Get shortcut state for active version (if any)
-        let (menu_shortcut, desktop_shortcut, shortcut_version) = {
-            let vm_lock = self.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
-                match vm.get_active_version().await {
-                    Ok(Some(active)) => {
-                        let state = self.get_version_shortcut_state(&active).await;
-                        (state.menu, state.desktop, Some(active))
-                    }
-                    _ => (false, false, None),
-                }
-            } else {
-                (false, false, None)
-            }
-        };
-
         Ok(models::StatusResponse {
             success: true,
             error: None,
             version: env!("CARGO_PKG_VERSION").to_string(),
-            deps_ready: true,  // TODO: implement real check
-            patched: false,    // TODO: implement real check
-            menu_shortcut,
-            desktop_shortcut,
-            shortcut_version,
+            deps_ready: true,
+            patched: false,
+            menu_shortcut: false,
+            desktop_shortcut: false,
+            shortcut_version: None,
             message: if comfyui_running {
                 "ComfyUI running".to_string()
             } else {
@@ -283,7 +257,7 @@ impl PumasApi {
             comfyui_running,
             last_launch_error,
             last_launch_log,
-            app_resources: None, // TODO: implement resource gathering
+            app_resources: None,
         })
     }
 
@@ -406,263 +380,6 @@ impl PumasApi {
     }
 
     // ========================================
-    // Version Management Methods
-    // ========================================
-
-    /// Get the version manager for an app.
-    pub async fn get_version_manager(&self, _app_id: Option<AppId>) -> Result<Arc<RwLock<Option<version_manager::VersionManager>>>> {
-        // For now, return the ComfyUI version manager
-        // In the future, we could have separate managers per app
-        Ok(self.version_manager.clone())
-    }
-
-    /// Get available versions from GitHub.
-    pub async fn get_available_versions(
-        &self,
-        force_refresh: bool,
-        _app_id: Option<AppId>,
-    ) -> Result<Vec<models::VersionReleaseInfo>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            let releases = mgr.get_available_releases(force_refresh).await?;
-            Ok(releases.into_iter().map(models::VersionReleaseInfo::from).collect())
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    /// Get installed versions.
-    pub async fn get_installed_versions(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Result<Vec<String>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.get_installed_versions().await
-        } else {
-            Ok(vec![])
-        }
-    }
-
-    /// Get the active (currently selected) version.
-    pub async fn get_active_version(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Result<Option<String>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.get_active_version().await
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Get the default version.
-    pub async fn get_default_version(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Result<Option<String>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.get_default_version().await
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Set the active version.
-    pub async fn set_active_version(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<bool> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.set_active_version(tag).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Set the default version.
-    pub async fn set_default_version(
-        &self,
-        tag: Option<&str>,
-        _app_id: Option<AppId>,
-    ) -> Result<bool> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.set_default_version(tag).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Get installation progress.
-    pub async fn get_installation_progress(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Option<models::InstallationProgress> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.get_installation_progress().await
-        } else {
-            None
-        }
-    }
-
-    /// Cancel the current installation.
-    pub async fn cancel_installation(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Result<bool> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.cancel_installation().await
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Remove an installed version.
-    pub async fn remove_version(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<bool> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.remove_version(tag).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Validate all installations.
-    pub async fn validate_installations(
-        &self,
-        _app_id: Option<AppId>,
-    ) -> Result<version_manager::ValidationResult> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.validate_installations().await
-        } else {
-            Ok(version_manager::ValidationResult {
-                removed_tags: vec![],
-                orphaned_dirs: vec![],
-                valid_count: 0,
-            })
-        }
-    }
-
-    /// Install a version from GitHub.
-    ///
-    /// Returns a receiver for progress updates.
-    pub async fn install_version(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<tokio::sync::mpsc::Receiver<version_manager::ProgressUpdate>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.install_version(tag).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Check dependencies for a version.
-    pub async fn check_version_dependencies(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<models::DependencyStatus> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.check_dependencies(tag).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Install dependencies for a version.
-    pub async fn install_version_dependencies(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<bool> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.install_dependencies(tag, None).await
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Get release dependencies (requirements.txt packages) for a version.
-    pub async fn get_release_dependencies(
-        &self,
-        tag: &str,
-        _app_id: Option<AppId>,
-    ) -> Result<Vec<String>> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            let version_path = mgr.version_path(tag);
-            let requirements_path = version_path.join("requirements.txt");
-
-            if !requirements_path.exists() {
-                return Ok(vec![]);
-            }
-
-            let content = std::fs::read_to_string(&requirements_path).map_err(|e| {
-                PumasError::Io {
-                    message: format!("Failed to read requirements.txt: {}", e),
-                    path: Some(requirements_path),
-                    source: Some(e),
-                }
-            })?;
-
-            // Parse requirements (simple extraction of package names)
-            let packages: Vec<String> = content
-                .lines()
-                .filter(|line| {
-                    let line = line.trim();
-                    !line.is_empty() && !line.starts_with('#') && !line.starts_with('-')
-                })
-                .filter_map(|line| {
-                    let name = line
-                        .split(|c| c == '=' || c == '>' || c == '<' || c == '[' || c == ';')
-                        .next()?
-                        .trim();
-                    if !name.is_empty() {
-                        Some(name.to_string())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            Ok(packages)
-        } else {
-            Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
-            })
-        }
-    }
-
-    // ========================================
     // Process Management Methods
     // ========================================
 
@@ -696,34 +413,24 @@ impl PumasApi {
         }
     }
 
-    /// Launch a specific version.
-    pub async fn launch_version(&self, tag: &str, _app_id: Option<AppId>) -> Result<models::LaunchResponse> {
-        let version_mgr_lock = self.version_manager.read().await;
-        let proc_mgr_lock = self.process_manager.read().await;
-
-        let version_dir = if let Some(ref vm) = *version_mgr_lock {
-            let path = vm.version_path(tag);
-            if !path.exists() {
-                return Ok(models::LaunchResponse {
-                    success: false,
-                    error: Some(format!("Version {} not installed", tag)),
-                    log_path: None,
-                    ready: None,
-                });
-            }
-            path
-        } else {
+    /// Launch a specific version from a given directory.
+    ///
+    /// The caller (RPC layer) is responsible for resolving the version tag to a directory
+    /// using pumas-app-manager's VersionManager.
+    pub async fn launch_version(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+        if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
-                error: Some("Version manager not initialized".to_string()),
+                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
                 log_path: None,
                 ready: None,
             });
-        };
+        }
 
+        let proc_mgr_lock = self.process_manager.read().await;
         if let Some(ref pm) = *proc_mgr_lock {
             let log_dir = self.launcher_data_dir().join("logs");
-            let result = pm.launch_version(tag, &version_dir, Some(&log_dir));
+            let result = pm.launch_version(tag, version_dir, Some(&log_dir));
 
             Ok(models::LaunchResponse {
                 success: result.success,
@@ -785,31 +492,24 @@ impl PumasApi {
     }
 
     /// Create shortcuts for a version.
+    ///
+    /// The caller (RPC layer) is responsible for providing the version directory path.
     pub async fn create_version_shortcuts(
         &self,
         tag: &str,
+        version_dir: &std::path::Path,
         create_menu: bool,
         create_desktop: bool,
     ) -> Result<models::ShortcutState> {
-        let version_mgr_lock = self.version_manager.read().await;
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-
-        let version_dir = if let Some(ref vm) = *version_mgr_lock {
-            let path = vm.version_path(tag);
-            if !path.exists() {
-                return Err(PumasError::NotFound {
-                    resource: format!("Version: {}", tag),
-                });
-            }
-            path
-        } else {
-            return Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
+        if !version_dir.exists() {
+            return Err(PumasError::NotFound {
+                resource: format!("Version directory: {}", version_dir.display()),
             });
-        };
+        }
 
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
         if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.create_version_shortcuts(tag, &version_dir, create_menu, create_desktop)?;
+            let result = sm.create_version_shortcuts(tag, version_dir, create_menu, create_desktop)?;
             Ok(models::ShortcutState {
                 tag: result.state.tag,
                 menu: result.state.menu,
@@ -845,26 +545,18 @@ impl PumasApi {
     }
 
     /// Toggle menu shortcut for a version.
-    pub async fn toggle_menu_shortcut(&self, tag: &str) -> Result<bool> {
-        let version_mgr_lock = self.version_manager.read().await;
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-
-        let version_dir = if let Some(ref vm) = *version_mgr_lock {
-            let path = vm.version_path(tag);
-            if !path.exists() {
-                return Err(PumasError::NotFound {
-                    resource: format!("Version: {}", tag),
-                });
-            }
-            path
-        } else {
-            return Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
+    ///
+    /// The caller (RPC layer) is responsible for providing the version directory path.
+    pub async fn toggle_menu_shortcut(&self, tag: &str, version_dir: &std::path::Path) -> Result<bool> {
+        if !version_dir.exists() {
+            return Err(PumasError::NotFound {
+                resource: format!("Version directory: {}", version_dir.display()),
             });
-        };
+        }
 
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
         if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.toggle_menu_shortcut(tag, &version_dir)?;
+            let result = sm.toggle_menu_shortcut(tag, version_dir)?;
             Ok(result.success)
         } else {
             Err(PumasError::Config {
@@ -874,26 +566,18 @@ impl PumasApi {
     }
 
     /// Toggle desktop shortcut for a version.
-    pub async fn toggle_desktop_shortcut(&self, tag: &str) -> Result<bool> {
-        let version_mgr_lock = self.version_manager.read().await;
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-
-        let version_dir = if let Some(ref vm) = *version_mgr_lock {
-            let path = vm.version_path(tag);
-            if !path.exists() {
-                return Err(PumasError::NotFound {
-                    resource: format!("Version: {}", tag),
-                });
-            }
-            path
-        } else {
-            return Err(PumasError::Config {
-                message: "Version manager not initialized".to_string(),
+    ///
+    /// The caller (RPC layer) is responsible for providing the version directory path.
+    pub async fn toggle_desktop_shortcut(&self, tag: &str, version_dir: &std::path::Path) -> Result<bool> {
+        if !version_dir.exists() {
+            return Err(PumasError::NotFound {
+                resource: format!("Version directory: {}", version_dir.display()),
             });
-        };
+        }
 
+        let shortcut_mgr_lock = self.shortcut_manager.read().await;
         if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.toggle_desktop_shortcut(tag, &version_dir)?;
+            let result = sm.toggle_desktop_shortcut(tag, version_dir)?;
             Ok(result.success)
         } else {
             Err(PumasError::Config {
@@ -916,20 +600,17 @@ impl PumasApi {
         self.system_utils.open_url(url)
     }
 
-    /// Open the active version's installation directory.
-    pub async fn open_active_install(&self) -> Result<()> {
-        let mgr_lock = self.version_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            if let Some(tag) = mgr.get_active_version().await? {
-                let path = mgr.version_path(&tag);
-                if path.exists() {
-                    return self.system_utils.open_path(&path.to_string_lossy());
-                }
-            }
+    /// Open a directory in the file manager.
+    ///
+    /// The caller (RPC layer) can use this with a version directory path
+    /// obtained from pumas-app-manager's VersionManager.
+    pub fn open_directory(&self, dir: &std::path::Path) -> Result<()> {
+        if !dir.exists() {
+            return Err(PumasError::NotFound {
+                resource: format!("Directory: {}", dir.display()),
+            });
         }
-        Err(PumasError::NotFound {
-            resource: "Active version".to_string(),
-        })
+        self.system_utils.open_path(&dir.to_string_lossy())
     }
 
     // ========================================
@@ -944,57 +625,6 @@ impl PumasApi {
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
         self._state.write().await.background_fetch_completed = false;
-    }
-
-    // ========================================
-    // Custom Nodes Management
-    // ========================================
-
-    /// List all custom nodes for a specific version.
-    pub fn list_custom_nodes(&self, tag: &str) -> Result<Vec<custom_nodes::types::InstalledCustomNode>> {
-        self.custom_nodes_manager.list_custom_nodes(tag)
-    }
-
-    /// Install a custom node from a git URL.
-    pub async fn install_custom_node(&self, git_url: &str, tag: &str) -> Result<custom_nodes::types::InstallResult> {
-        self.custom_nodes_manager.install_from_git(git_url, tag).await
-    }
-
-    /// Update a custom node to the latest version.
-    pub async fn update_custom_node(&self, node_name: &str, tag: &str) -> Result<custom_nodes::types::UpdateResult> {
-        self.custom_nodes_manager.update(node_name, tag).await
-    }
-
-    /// Remove a custom node from a specific version.
-    pub fn remove_custom_node(&self, node_name: &str, tag: &str) -> Result<bool> {
-        self.custom_nodes_manager.remove(node_name, tag)
-    }
-
-    // ========================================
-    // Size Calculator
-    // ========================================
-
-    /// Calculate size for a release.
-    pub async fn calculate_release_size(
-        &self,
-        tag: &str,
-        archive_size: u64,
-        requirements: Option<&[String]>,
-    ) -> Result<version_manager::ReleaseSize> {
-        let mut calc = self.size_calculator.write().await;
-        calc.calculate_release_size(tag, archive_size, requirements).await
-    }
-
-    /// Get cached size for a release.
-    pub async fn get_cached_release_size(&self, tag: &str) -> Option<version_manager::ReleaseSize> {
-        let calc = self.size_calculator.read().await;
-        calc.get_cached_size(tag).cloned()
-    }
-
-    /// Get detailed size breakdown for a release.
-    pub async fn get_release_size_breakdown(&self, tag: &str) -> Option<version_manager::SizeBreakdown> {
-        let calc = self.size_calculator.read().await;
-        calc.get_size_breakdown(tag)
     }
 
     // ========================================
@@ -1339,17 +969,17 @@ impl PumasApi {
     }
 
     /// Preview model mapping for a version without applying it.
+    ///
+    /// The caller (RPC layer) is responsible for providing the models_path,
+    /// typically obtained as `version_dir.join("models")` from pumas-app-manager.
     pub async fn preview_model_mapping(
         &self,
         version_tag: &str,
+        models_path: &std::path::Path,
     ) -> Result<models::MappingPreviewResponse> {
         let mapper_lock = self.model_mapper.read().await;
-        let vm_lock = self.version_manager.read().await;
 
-        if let (Some(ref mapper), Some(ref vm)) = (&*mapper_lock, &*vm_lock) {
-            let version_path = vm.version_path(version_tag);
-            let models_path = version_path.join("models");
-
+        if let Some(ref mapper) = *mapper_lock {
             if !models_path.exists() {
                 return Ok(models::MappingPreviewResponse {
                     success: false,
@@ -1358,7 +988,7 @@ impl PumasApi {
                 });
             }
 
-            let preview = mapper.preview_mapping("comfyui", Some(version_tag), &models_path).await?;
+            let preview = mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
 
             Ok(models::MappingPreviewResponse {
                 success: true,
@@ -1373,29 +1003,29 @@ impl PumasApi {
         } else {
             Ok(models::MappingPreviewResponse {
                 success: false,
-                error: Some("Model mapper or version manager not initialized".to_string()),
+                error: Some("Model mapper not initialized".to_string()),
                 preview: None,
             })
         }
     }
 
     /// Apply model mapping for a version.
+    ///
+    /// The caller (RPC layer) is responsible for providing the models_path,
+    /// typically obtained as `version_dir.join("models")` from pumas-app-manager.
     pub async fn apply_model_mapping(
         &self,
         version_tag: &str,
+        models_path: &std::path::Path,
     ) -> Result<models::MappingApplyResponse> {
         let mapper_lock = self.model_mapper.read().await;
-        let vm_lock = self.version_manager.read().await;
 
-        if let (Some(ref mapper), Some(ref vm)) = (&*mapper_lock, &*vm_lock) {
-            let version_path = vm.version_path(version_tag);
-            let models_path = version_path.join("models");
-
+        if let Some(ref mapper) = *mapper_lock {
             if !models_path.exists() {
-                std::fs::create_dir_all(&models_path)?;
+                std::fs::create_dir_all(models_path)?;
             }
 
-            let result = mapper.apply_mapping("comfyui", Some(version_tag), &models_path).await?;
+            let result = mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
 
             Ok(models::MappingApplyResponse {
                 success: true,
@@ -1407,7 +1037,7 @@ impl PumasApi {
         } else {
             Ok(models::MappingApplyResponse {
                 success: false,
-                error: Some("Model mapper or version manager not initialized".to_string()),
+                error: Some("Model mapper not initialized".to_string()),
                 created: 0,
                 updated: 0,
                 errors: vec![],
@@ -1416,13 +1046,16 @@ impl PumasApi {
     }
 
     /// Perform incremental sync of models for a version.
+    ///
+    /// The caller (RPC layer) is responsible for providing the models_path.
     pub async fn sync_models_incremental(
         &self,
         version_tag: &str,
+        models_path: &std::path::Path,
     ) -> Result<models::SyncModelsResponse> {
         // Incremental sync is essentially the same as apply_mapping
         // but we could add additional logic here for detecting changes
-        let result = self.apply_model_mapping(version_tag).await?;
+        let result = self.apply_model_mapping(version_tag, models_path).await?;
 
         Ok(models::SyncModelsResponse {
             success: result.success,

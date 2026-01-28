@@ -292,9 +292,15 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let versions = vm.get_installed_versions().await?;
-                Ok(serde_json::to_value(versions)?)
+                Ok(json!({
+                    "success": true,
+                    "versions": versions
+                }))
             } else {
-                Ok(serde_json::to_value::<Vec<String>>(vec![])?)
+                Ok(json!({
+                    "success": true,
+                    "versions": []
+                }))
             }
         }
 
@@ -303,9 +309,15 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let version = vm.get_active_version().await?;
-                Ok(serde_json::to_value(version)?)
+                Ok(json!({
+                    "success": true,
+                    "version": version
+                }))
             } else {
-                Ok(serde_json::to_value::<Option<String>>(None)?)
+                Ok(json!({
+                    "success": true,
+                    "version": null
+                }))
             }
         }
 
@@ -314,9 +326,15 @@ async fn dispatch_method(
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
                 let version = vm.get_default_version().await?;
-                Ok(serde_json::to_value(version)?)
+                Ok(json!({
+                    "success": true,
+                    "version": version
+                }))
             } else {
-                Ok(serde_json::to_value::<Option<String>>(None)?)
+                Ok(json!({
+                    "success": true,
+                    "version": null
+                }))
             }
         }
 
@@ -440,15 +458,21 @@ async fn dispatch_method(
                 let default = vm.get_default_version().await?;
                 let installed = vm.get_installed_versions().await?;
                 Ok(json!({
-                    "active": active,
-                    "default": default,
-                    "installed": installed
+                    "success": true,
+                    "status": {
+                        "activeVersion": active,
+                        "defaultVersion": default,
+                        "installedVersions": installed
+                    }
                 }))
             } else {
                 Ok(json!({
-                    "active": null,
-                    "default": null,
-                    "installed": []
+                    "success": true,
+                    "status": {
+                        "activeVersion": null,
+                        "defaultVersion": null,
+                        "installedVersions": []
+                    }
                 }))
             }
         }

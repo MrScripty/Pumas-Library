@@ -145,7 +145,9 @@ export function InstallDialog({
     }
 
     const releasesNeedingSize = availableVersions.filter(
-      release => release.total_size === null || release.total_size === undefined
+      release =>
+        release.tag_name && // Skip releases without valid tag_name
+        (release.total_size === null || release.total_size === undefined)
     );
 
     if (releasesNeedingSize.length === 0) {

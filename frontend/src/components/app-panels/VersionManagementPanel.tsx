@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
 import type { AppVersionState } from '../../utils/appVersionState';
+import { IconButton } from '../ui';
 
 interface VersionManagementPanelProps {
   appDisplayName: string;
@@ -26,7 +27,7 @@ export function VersionManagementPanel({
 }: VersionManagementPanelProps) {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  const latestVersion = versions.availableVersions[0]?.tag_name ?? null;
+  const latestVersion = versions.availableVersions[0]?.tagName ?? null;
   const hasNewVersion = useMemo(() => {
     if (!latestVersion) return false;
     return !versions.installedVersions.includes(latestVersion);
@@ -53,35 +54,24 @@ export function VersionManagementPanel({
 
   if (showManager) {
     return (
-      <div className="w-full flex-1 flex flex-col gap-4 min-h-0">
+      <div className="w-full flex-1 flex flex-col gap-2 min-h-0">
         <div className="w-full flex items-center justify-between flex-shrink-0">
-          <button
-            onClick={() => onShowManager(false)}
-            className="flex items-center gap-2 px-3 py-2 rounded border border-[hsl(var(--border-control))] bg-[hsl(var(--surface-interactive))] hover:bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--text-primary))] text-sm transition-colors"
-          >
-            <ArrowLeft size={14} />
-            <span>{backLabel ?? `Back to ${appDisplayName}`}</span>
-          </button>
-          <div className="flex items-center gap-3 text-xs text-[hsl(var(--text-secondary))]">
+          <div className="flex items-center gap-2 text-sm text-[hsl(var(--text-secondary))]">
+            <IconButton
+              icon={<ArrowLeft />}
+              tooltip="Back"
+              onClick={() => onShowManager(false)}
+              size="md"
+            />
             <span>{versions.installedVersions.length} installed</span>
-            <motion.button
-              onClick={handleRefresh}
-              disabled={isRefreshing || versions.isLoading}
-              className="p-2 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors disabled:opacity-50"
-              whileHover={{ scale: isRefreshing || versions.isLoading ? 1 : 1.05 }}
-              whileTap={{ scale: isRefreshing || versions.isLoading ? 1 : 0.96 }}
-              title="Refresh versions"
-            >
-              <RefreshCw
-                size={14}
-                className={
-                  isRefreshing
-                    ? 'animate-spin text-[hsl(var(--text-tertiary))]'
-                    : 'text-[hsl(var(--text-secondary))]'
-                }
-              />
-            </motion.button>
           </div>
+          <IconButton
+            icon={<RefreshCw className={isRefreshing ? 'animate-spin' : ''} />}
+            tooltip="Refresh"
+            onClick={handleRefresh}
+            disabled={isRefreshing || versions.isLoading}
+            size="md"
+          />
         </div>
         <div className="w-full flex-1 min-h-0 overflow-hidden">
           <InstallDialog

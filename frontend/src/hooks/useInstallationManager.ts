@@ -112,18 +112,18 @@ export function useInstallationManager({
         const averageSpeed = computeAverageSpeed(networkStateRef.current.downloadSamples);
 
         // Estimate total size based on stage
-        const release = availableVersions.find((r) => r.tag_name === progress.tag);
-        const archiveEstimate = release?.archive_size ?? null;
+        const release = availableVersions.find((r) => r.tagName === progress.tag);
+        const archiveEstimate = release?.archiveSize ?? null;
         const dependencyEstimate =
-          release?.total_size && release?.archive_size
-            ? Math.max(release.total_size - release.archive_size, 0)
+          release?.totalSize && release?.archiveSize
+            ? Math.max(release.totalSize - release.archiveSize, 0)
             : null;
 
         let expectedTotal: number | null = null;
         if (progress.stage === 'download') {
-          expectedTotal = progress.total_size ?? archiveEstimate ?? release?.total_size ?? null;
+          expectedTotal = progress.total_size ?? archiveEstimate ?? release?.totalSize ?? null;
         } else if (progress.stage === 'dependencies') {
-          expectedTotal = dependencyEstimate ?? release?.total_size ?? null;
+          expectedTotal = dependencyEstimate ?? release?.totalSize ?? null;
         }
 
         // Calculate ETA

@@ -19,6 +19,7 @@ import {
 import type { ModelCategory, RelatedModelsState } from '../types/apps';
 import { formatSize, formatDate } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
+import { EmptyState, IconButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
 
 interface LocalModelsListProps {
   modelGroups: ModelCategory[];
@@ -53,22 +54,16 @@ export function LocalModelsList({
 }: LocalModelsListProps) {
   if (modelGroups.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-[hsl(var(--launcher-text-muted))]">
-        <HardDrive className="w-12 h-12 mb-3 opacity-50" />
-        <p className="text-sm text-center">
-          {totalModels === 0
-            ? 'No models found. Add models to your library to get started.'
-            : 'No models match your filters.'}
-        </p>
-        {totalModels > 0 && hasFilters && onClearFilters && (
-          <button
-            onClick={onClearFilters}
-            className="mt-2 text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+      <EmptyState
+        icon={<HardDrive />}
+        message={totalModels === 0
+          ? 'No models found. Add models to your library to get started.'
+          : 'No models match your filters.'}
+        action={totalModels > 0 && hasFilters && onClearFilters ? {
+          label: 'Clear filters',
+          onClick: onClearFilters,
+        } : undefined}
+      />
     );
   }
 
@@ -77,11 +72,11 @@ export function LocalModelsList({
       {modelGroups.map((group: ModelCategory) => (
         <div key={group.category} className="space-y-2">
           <div className="flex items-center gap-2 px-1">
-            <Tag className="w-3.5 h-3.5 text-[hsl(var(--launcher-text-muted))]" />
-            <p className="text-xs font-semibold text-[hsl(var(--launcher-text-muted))] uppercase tracking-wider">
+            <Tag className="w-3.5 h-3.5 text-[hsl(var(--text-muted))]" />
+            <p className="text-xs font-semibold text-[hsl(var(--text-muted))] uppercase tracking-wider">
               {group.category}
             </p>
-            <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
+            <span className="text-xs text-[hsl(var(--text-muted))]">
               ({group.models.length})
             </span>
           </div>
@@ -101,79 +96,56 @@ export function LocalModelsList({
               const progressDegrees = Math.round(progressValue * 360);
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
               return (
-                <div
-                  key={model.id}
-                  className={`rounded transition-colors group ${
-                    isLinked
-                      ? 'bg-[hsl(var(--launcher-bg-tertiary)/0.4)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.6)]'
-                      : 'bg-[hsl(var(--launcher-bg-tertiary)/0.2)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.4)]'
-                  }`}
-                >
+                <ListItem key={model.id} highlighted={isLinked}>
                   {/* Main row */}
-                  <div className="flex items-center justify-between p-2.5">
+                  <ListItemContent>
                     <div className="flex items-center gap-2 flex-1 min-w-0">
-                      <button
+                      <IconButton
+                        icon={<Star fill={isStarred ? 'currentColor' : 'none'} />}
+                        tooltip={isStarred ? 'Unstar' : 'Star'}
                         onClick={() => onToggleStar(model.id)}
                         disabled={isDownloading}
-                        className={`flex-shrink-0 transition-colors ${
-                          isDownloading
-                            ? 'text-[hsl(var(--launcher-text-muted))] opacity-50 cursor-not-allowed'
-                            : 'text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
-                        }`}
-                      >
-                        <Star className="w-4 h-4" fill={isStarred ? 'currentColor' : 'none'} />
-                      </button>
+                        size="sm"
+                      />
                       <div className="flex-1 min-w-0">
                         <span
                           className={`text-sm font-medium block truncate ${
                             isDownloading
-                              ? 'text-[hsl(var(--launcher-text-muted))]'
+                              ? 'text-[hsl(var(--text-muted))]'
                               : isLinked
-                              ? 'text-[hsl(var(--launcher-text-primary))]'
-                              : 'text-[hsl(var(--launcher-text-secondary))]'
+                              ? 'text-[hsl(var(--text-primary))]'
+                              : 'text-[hsl(var(--text-secondary))]'
                           }`}
                         >
                           {model.name}
                         </span>
                         {/* Metadata row */}
-                        <div className="flex items-center gap-3 mt-1 text-xs text-[hsl(var(--launcher-text-muted))]">
+                        <MetadataRow>
                           {model.size && (
-                            <span className="flex items-center gap-1">
-                              <HardDrive className="w-3 h-3" />
+                            <MetadataItem icon={<HardDrive />}>
                               {formatSize(model.size)}
-                            </span>
+                            </MetadataItem>
                           )}
                           {model.date && (
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
+                            <MetadataItem icon={<Calendar />}>
                               {formatDate(model.date)}
-                            </span>
+                            </MetadataItem>
                           )}
-                        </div>
+                        </MetadataRow>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                       {canShowRelated && (
-                        <button
+                        <IconButton
+                          icon={isExpanded ? <ChevronDown /> : <ChevronRight />}
+                          tooltip={isExpanded ? 'Hide related' : 'Show related'}
                           onClick={() => onToggleRelated(model.id)}
-                          className={`flex-shrink-0 transition-colors ${
-                            isExpanded
-                              ? 'text-[hsl(var(--launcher-accent-primary))]'
-                              : 'text-[hsl(var(--launcher-text-muted))] group-hover:text-[hsl(var(--launcher-accent-primary))]'
-                          }`}
-                          title={isExpanded ? 'Hide related models' : 'Show related models'}
-                          aria-label={isExpanded ? 'Hide related models' : 'Show related models'}
-                          aria-expanded={isExpanded}
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
+                          size="sm"
+                          active={isExpanded}
+                        />
                       )}
                       {isDownloading ? (
-                        <div className="relative flex h-4 w-4 items-center justify-center text-[hsl(var(--launcher-text-muted))]">
+                        <div className="relative flex h-4 w-4 items-center justify-center text-[hsl(var(--text-muted))]">
                           <span
                             className={`download-progress-ring ${isQueued ? 'is-waiting' : ''}`}
                             style={
@@ -186,43 +158,41 @@ export function LocalModelsList({
                           <Download className="h-3.5 w-3.5" />
                         </div>
                       ) : (
-                        <button
+                        <IconButton
+                          icon={
+                            <svg
+                              width="16"
+                              height="16"
+                              viewBox="0 0 16 16"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                            >
+                              <path d="M7 3.5L9 1.5C10.1 0.4 11.9 0.4 13 1.5C14.1 2.6 14.1 4.4 13 5.5L11 7.5" />
+                              <path d="M9 12.5L7 14.5C5.9 15.6 4.1 15.6 3 14.5C1.9 13.4 1.9 11.6 3 10.5L5 8.5" />
+                              <path d="M10 6L6 10" />
+                            </svg>
+                          }
+                          tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : 'Link to app'}
                           onClick={() => onToggleLink(model.id)}
-                          className={`flex-shrink-0 transition-colors cursor-pointer ${
-                            isLinked
-                              ? 'text-[hsl(var(--launcher-accent-primary))] hover:text-[hsl(var(--launcher-accent-primary)/0.8)]'
-                              : 'text-[hsl(var(--launcher-text-muted))] group-hover:text-[hsl(var(--launcher-accent-primary))]'
-                          }`}
-                          title={isLinked ? `Linked to ${selectedAppId || 'app'}` : 'Link to current app'}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          >
-                            <path d="M7 3.5L9 1.5C10.1 0.4 11.9 0.4 13 1.5C14.1 2.6 14.1 4.4 13 5.5L11 7.5" />
-                            <path d="M9 12.5L7 14.5C5.9 15.6 4.1 15.6 3 14.5C1.9 13.4 1.9 11.6 3 10.5L5 8.5" />
-                            <path d="M10 6L6 10" />
-                          </svg>
-                        </button>
+                          size="sm"
+                          active={isLinked}
+                        />
                       )}
                     </div>
-                  </div>
+                  </ListItemContent>
                   {canShowRelated && isExpanded && (
                     <div className="border-t border-[hsl(var(--launcher-border))] px-3 py-2 space-y-2">
-                      <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-[hsl(var(--launcher-text-muted))]">
+                      <div className="flex items-center justify-between text-[11px] uppercase tracking-wider text-[hsl(var(--text-muted))]">
                         <span>Related models</span>
                         {relatedModels.length > 0 && (
                           <span>{relatedModels.length}</span>
                         )}
                       </div>
                       {isLoadingRelated && (
-                        <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
+                        <div className="text-xs text-[hsl(var(--text-muted))]">
                           Looking up related models...
                         </div>
                       )}
@@ -232,7 +202,7 @@ export function LocalModelsList({
                         </div>
                       )}
                       {!isLoadingRelated && relatedStatus !== 'error' && relatedModels.length === 0 && (
-                        <div className="text-xs text-[hsl(var(--launcher-text-muted))]">
+                        <div className="text-xs text-[hsl(var(--text-muted))]">
                           No related models found.
                         </div>
                       )}
@@ -245,36 +215,34 @@ export function LocalModelsList({
                             >
                               <div className="min-w-0">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-xs font-semibold text-[hsl(var(--launcher-text-primary))] truncate">
+                                  <span className="text-xs font-semibold text-[hsl(var(--text-primary))] truncate">
                                     {related.name}
                                   </span>
                                   <span
-                                    className="inline-flex items-center gap-1 text-[hsl(var(--launcher-text-muted))]"
+                                    className="inline-flex items-center gap-1 text-[hsl(var(--text-muted))]"
                                     title={related.kind}
                                     aria-label={related.kind}
                                   >
                                     <ModelKindIcon kind={related.kind} />
                                   </span>
                                 </div>
-                                <span className="text-[11px] text-[hsl(var(--launcher-text-muted))] truncate">
+                                <span className="text-[11px] text-[hsl(var(--text-muted))] truncate">
                                   {related.developer}
                                 </span>
                               </div>
-                              <button
+                              <IconButton
+                                icon={<ExternalLink />}
+                                tooltip="Open"
                                 onClick={() => onOpenRelatedUrl(related.url)}
-                                className="flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))] transition-colors"
-                                title={`Open ${related.url}`}
-                                aria-label={`Open ${related.url}`}
-                              >
-                                <ExternalLink className="w-3.5 h-3.5" />
-                              </button>
+                                size="sm"
+                              />
                             </div>
                           ))}
                         </div>
                       )}
                     </div>
                   )}
-                </div>
+                </ListItem>
               );
             })}
           </div>

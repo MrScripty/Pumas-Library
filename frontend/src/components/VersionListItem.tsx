@@ -21,6 +21,7 @@ import type { VersionRelease, InstallationProgress } from '../hooks/useVersions'
 import { ProgressRing } from './ProgressRing';
 import { formatSpeed } from '../utils/formatters';
 import { formatVersionDate, formatGB } from '../utils/installationFormatters';
+import { IconButton } from './ui';
 
 interface VersionListItemProps {
   release: VersionRelease;
@@ -65,10 +66,10 @@ export function VersionListItem({
   onCancelMouseEnter,
   onCancelMouseLeave,
 }: VersionListItemProps) {
-  const displayTag = release.tag_name?.replace(/^v/i, '') || release.tag_name;
-  const releaseUrl = release.html_url;
+  const displayTag = release.tagName?.replace(/^v/i, '') || release.tagName;
+  const releaseUrl = release.htmlUrl;
   const showUninstall = isInstalled && !isInstalling && isHovered;
-  const totalBytes = (progress ? progress.total_size : null) ?? release.total_size ?? null;
+  const totalBytes = (progress ? progress.total_size : null) ?? release.totalSize ?? null;
   const isComplete = isInstalled || (isInstalling && progress?.success && !!progress?.completed_at);
 
   // Progress calculations
@@ -135,9 +136,9 @@ export function VersionListItem({
       animate={{ opacity: 1, y: 0 }}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      className="w-full p-3 transition-colors"
+      className="w-full p-2 transition-colors"
     >
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center justify-between gap-2">
         {/* Version Info */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
@@ -147,28 +148,20 @@ export function VersionListItem({
                   {displayTag}
                 </h3>
                 {releaseUrl && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenUrl(releaseUrl);
-                    }}
-                    className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
-                    title="Open release notes"
-                  >
-                    <ExternalLink size={14} className="text-[hsl(var(--text-secondary))]" />
-                  </button>
+                  <IconButton
+                    icon={<ExternalLink />}
+                    tooltip="Release notes"
+                    onClick={() => onOpenUrl(releaseUrl)}
+                    size="sm"
+                  />
                 )}
                 {failedLogPath && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onOpenLogPath(failedLogPath);
-                    }}
-                    className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors flex-shrink-0"
-                    title="Open last install log"
-                  >
-                    <FileText size={14} className="text-[hsl(var(--accent-error))]" />
-                  </button>
+                  <IconButton
+                    icon={<FileText className="text-[hsl(var(--accent-error))]" />}
+                    tooltip="View log"
+                    onClick={() => onOpenLogPath(failedLogPath)}
+                    size="sm"
+                  />
                 )}
                 {release.prerelease && (
                   <span className="px-2 py-0.5 bg-[hsl(var(--accent-warning))]/20 text-[hsl(var(--accent-warning))] text-[11px] rounded-full">
@@ -176,8 +169,8 @@ export function VersionListItem({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-1 text-xs text-[hsl(var(--launcher-text-muted))]">
-                <span>{formatVersionDate(release.published_at)}</span>
+              <div className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))]">
+                <span>{formatVersionDate(release.publishedAt)}</span>
               </div>
             </div>
           </div>
@@ -264,7 +257,11 @@ export function VersionListItem({
               </>
             )}
           </motion.button>
-          <Gear size={16} className="text-[hsl(var(--launcher-text-muted))]" />
+          <IconButton
+            icon={<Gear />}
+            tooltip="Settings"
+            size="sm"
+          />
         </div>
       </div>
     </motion.div>

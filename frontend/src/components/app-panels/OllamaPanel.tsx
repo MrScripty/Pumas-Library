@@ -27,8 +27,8 @@ export function OllamaPanel({
   const isManagerOpen = versions.isSupported && showVersionManager;
 
   return (
-    <div className="flex-1 flex flex-col gap-4 p-8 px-0 mx-2 py-1 overflow-hidden">
-      <div className="px-6 w-full flex flex-col gap-4">
+    <div className="flex-1 flex flex-col gap-4 p-6 overflow-hidden">
+      <div className="w-full flex flex-col gap-4">
         <VersionManagementPanel
           appDisplayName={appDisplayName}
           versions={versions}

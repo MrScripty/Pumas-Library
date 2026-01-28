@@ -72,6 +72,7 @@ export function InstallDialog({
   const [errorVersion, setErrorVersion] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const cancellationRef = useRef(false);
+  const sizeCalcTriggeredRef = useRef(false);
 
   // Custom hooks
   const {
@@ -138,35 +139,45 @@ export function InstallDialog({
     return () => clearTimeout(timer);
   }, [progress, onRefreshProgress, setShowCompletedItems, setViewMode]);
 
-  // Calculate sizes for releases in the background when dialog opens
+  // Reset size calculation flag when dialog closes
   useEffect(() => {
-    if (!isOpen || availableVersions.length === 0) {
+    if (!isOpen) {
+      sizeCalcTriggeredRef.current = false;
+    }
+  }, [isOpen]);
+
+  // Calculate sizes for releases in the background when dialog opens (once per session)
+  useEffect(() => {
+    if (!isOpen || availableVersions.length === 0 || sizeCalcTriggeredRef.current) {
       return;
     }
 
     const releasesNeedingSize = availableVersions.filter(
       release =>
-        release.tag_name && // Skip releases without valid tag_name
-        (release.total_size === null || release.total_size === undefined)
+        release.tagName && // Skip releases without valid tag_name
+        (release.totalSize === null || release.totalSize === undefined)
     );
 
     if (releasesNeedingSize.length === 0) {
       return;
     }
 
+    // Mark as triggered to prevent re-running on availableVersions updates
+    sizeCalcTriggeredRef.current = true;
+
     const calculateSizes = async () => {
       logger.info('Starting background size calculation', { releaseCount: releasesNeedingSize.length });
 
       for (const release of releasesNeedingSize) {
         try {
-          await api.calculate_release_size(release.tag_name, false, appId);
+          await api.calculate_release_size(release.tagName, false, appId);
         } catch (error) {
           if (error instanceof APIError) {
-            logger.error('API error calculating release size', { error: error.message, endpoint: error.endpoint, tag: release.tag_name });
+            logger.error('API error calculating release size', { error: error.message, endpoint: error.endpoint, tag: release.tagName });
           } else if (error instanceof Error) {
-            logger.error('Failed to calculate release size', { error: error.message, tag: release.tag_name });
+            logger.error('Failed to calculate release size', { error: error.message, tag: release.tagName });
           } else {
-            logger.error('Unknown error calculating release size', { error, tag: release.tag_name });
+            logger.error('Unknown error calculating release size', { error, tag: release.tagName });
           }
         }
       }
@@ -191,7 +202,7 @@ export function InstallDialog({
     if (!showPreReleases && release.prerelease) {
       return false;
     }
-    if (!showInstalled && installedVersions.includes(release.tag_name)) {
+    if (!showInstalled && installedVersions.includes(release.tagName)) {
       return false;
     }
     return true;
@@ -349,7 +360,7 @@ export function InstallDialog({
               onClick={onClose}
               className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
             >
-              <X size={20} className="text-[hsl(var(--launcher-text-muted))]" />
+              <X size={20} className="text-[hsl(var(--text-muted))]" />
             </button>
           </div>
         </div>
@@ -409,10 +420,10 @@ export function InstallDialog({
           />
         ) : isLoading ? (
           <div className="flex items-center justify-center py-12 px-4">
-            <Loader2 size={32} className="text-[hsl(var(--launcher-text-muted))] animate-spin" />
+            <Loader2 size={32} className="text-[hsl(var(--text-muted))] animate-spin" />
           </div>
         ) : filteredVersions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-[hsl(var(--launcher-text-muted))]">
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-[hsl(var(--text-muted))]">
             <AlertCircle size={48} className="mb-3" />
             <p>No versions available</p>
             <p className="text-sm mt-1">Try adjusting the filters above</p>
@@ -420,40 +431,40 @@ export function InstallDialog({
         ) : (
           <div className="space-y-3">
             {filteredVersions.map((release) => {
-              const isInstalled = installedVersions.includes(release.tag_name);
-              const isInstalling = installingVersion === release.tag_name;
+              const isInstalled = installedVersions.includes(release.tagName);
+              const isInstalling = installingVersion === release.tagName;
               const currentProgress = isInstalling ? progress : null;
-              const hasError = errorVersion === release.tag_name;
+              const hasError = errorVersion === release.tagName;
 
               return (
                 <VersionListItem
-                  key={release.tag_name}
+                  key={release.tagName}
                   release={release}
                   isInstalled={isInstalled}
                   isInstalling={isInstalling}
                   progress={currentProgress}
                   hasError={hasError}
                   errorMessage={errorMessage}
-                  isHovered={hoveredTag === release.tag_name}
-                  isCancelHovered={isInstalling && cancelHoverTag === release.tag_name}
+                  isHovered={hoveredTag === release.tagName}
+                  isCancelHovered={isInstalling && cancelHoverTag === release.tagName}
                   installNetworkStatus={installNetworkStatus}
-                  failedLogPath={stickyFailedTag === release.tag_name ? stickyFailedLogPath : null}
-                  onInstall={() => handleInstall(release.tag_name)}
-                  onRemove={() => onRemoveVersion(release.tag_name).catch(error => {
+                  failedLogPath={stickyFailedTag === release.tagName ? stickyFailedLogPath : null}
+                  onInstall={() => handleInstall(release.tagName)}
+                  onRemove={() => onRemoveVersion(release.tagName).catch(error => {
                     if (error instanceof APIError) {
-                      logger.error('API error removing version', { error: error.message, endpoint: error.endpoint, tag: release.tag_name });
+                      logger.error('API error removing version', { error: error.message, endpoint: error.endpoint, tag: release.tagName });
                     } else if (error instanceof Error) {
-                      logger.error('Failed to remove version', { error: error.message, tag: release.tag_name });
+                      logger.error('Failed to remove version', { error: error.message, tag: release.tagName });
                     } else {
-                      logger.error('Unknown error removing version', { error, tag: release.tag_name });
+                      logger.error('Unknown error removing version', { error, tag: release.tagName });
                     }
                   })}
                   onCancel={handleCancelInstallation}
                   onOpenUrl={openReleaseLink}
                   onOpenLogPath={openLogPath}
-                  onMouseEnter={() => setHoveredTag(release.tag_name)}
+                  onMouseEnter={() => setHoveredTag(release.tagName)}
                   onMouseLeave={() => setHoveredTag(null)}
-                  onCancelMouseEnter={() => setCancelHoverTag(release.tag_name)}
+                  onCancelMouseEnter={() => setCancelHoverTag(release.tagName)}
                   onCancelMouseLeave={() => setCancelHoverTag(null)}
                 />
               );

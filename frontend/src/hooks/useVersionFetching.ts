@@ -184,8 +184,8 @@ export function useVersionFetching({
 
         // If backend flags an installing release, update local state
         const installingRelease = (result.versions || []).find((r: VersionRelease) => r.installing);
-        if (installingRelease?.tag_name && onInstallingTagUpdate) {
-          onInstallingTagUpdate(installingRelease.tag_name);
+        if (installingRelease?.tagName && onInstallingTagUpdate) {
+          onInstallingTagUpdate(installingRelease.tagName);
         }
 
         // Schedule a follow-up fetch to pick up size data after background calc

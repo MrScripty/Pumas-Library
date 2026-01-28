@@ -72,14 +72,17 @@
   --surface-overlay: var(--launcher-bg-overlay);
   --surface-interactive: var(--launcher-bg-control);
   --surface-interactive-hover: var(--launcher-bg-control-hover);
+  --surface-control: var(--launcher-bg-control);
 
   --text-primary: var(--launcher-text-primary);
   --text-secondary: var(--launcher-text-secondary);
   --text-tertiary: var(--launcher-text-muted);
+  --text-muted: var(--launcher-text-muted);
 
   --border-default: var(--launcher-border);
   --border-control: var(--launcher-border-control);
 
+  --accent-primary: var(--launcher-accent-primary);
   --accent-success: var(--launcher-accent-success);
   --accent-error: var(--launcher-accent-error);
   --accent-info: var(--launcher-accent-info);

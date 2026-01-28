@@ -26,6 +26,7 @@ import {
   formatDownloads,
   resolveReleaseIcon,
 } from '../utils/modelFormatters';
+import { EmptyState, IconButton, ListItem, MetadataItem } from './ui';
 
 interface RemoteModelsListProps {
   models: RemoteModelInfo[];
@@ -62,35 +63,29 @@ export function RemoteModelsList({
 
   if (isLoading) {
     return (
-      <div className="flex items-center gap-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-        <Search className="w-3.5 h-3.5" />
+      <div className="flex items-center gap-2 text-xs text-[hsl(var(--text-muted))]">
+        <Search className="w-3.5 h-3.5 animate-pulse" />
         <span>Searching Hugging Face...</span>
       </div>
     );
   }
 
   if (error) {
-    return <div className="text-xs text-[hsl(var(--launcher-accent-error))]">{error}</div>;
+    return <div className="text-xs text-[hsl(var(--accent-error))]">{error}</div>;
   }
 
   if (models.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-64 text-[hsl(var(--launcher-text-muted))]">
-        <Search className="w-10 h-10 mb-3 opacity-50" />
-        <p className="text-sm text-center">
-          {searchQuery.trim()
-            ? 'No Hugging Face models match your search.'
-            : 'Type to search Hugging Face models.'}
-        </p>
-        {(searchQuery.trim() || selectedKind !== 'all') && onClearFilters && (
-          <button
-            onClick={onClearFilters}
-            className="mt-2 text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
-          >
-            Clear filters
-          </button>
-        )}
-      </div>
+      <EmptyState
+        icon={<Search />}
+        message={searchQuery.trim()
+          ? 'No Hugging Face models match your search.'
+          : 'Type to search Hugging Face models.'}
+        action={(searchQuery.trim() || selectedKind !== 'all') && onClearFilters ? {
+          label: 'Clear filters',
+          onClick: onClearFilters,
+        } : undefined}
+      />
     );
   }
 
@@ -132,18 +127,15 @@ export function RemoteModelsList({
         const quantLabels = downloadOptions.map((option) => option.quant);
 
         return (
-          <div
-            key={model.repoId}
-            className="rounded transition-colors bg-[hsl(var(--launcher-bg-tertiary)/0.2)] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.35)]"
-          >
-            <div className="flex items-start justify-between gap-3 p-3">
+          <ListItem key={model.repoId}>
+            <div className="flex items-start justify-between gap-2 p-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-[hsl(var(--launcher-text-primary))] truncate">
+                  <span className="text-sm font-semibold text-[hsl(var(--text-primary))] truncate">
                     {model.name}
                   </span>
                 </div>
-                <div className="mt-1 flex items-start justify-between gap-4 text-xs text-[hsl(var(--launcher-text-muted))]">
+                <div className="mt-1 flex items-start justify-between gap-4 text-xs text-[hsl(var(--text-muted))]">
                   <div className="flex flex-col gap-1 min-w-0">
                     {model.developer && onSearchDeveloper && (
                       <button
@@ -167,7 +159,7 @@ export function RemoteModelsList({
                       <ModelKindIcon kind={model.kind} />
                     </span>
                   </div>
-                  <div className="flex flex-col gap-1 items-end text-[hsl(var(--launcher-text-muted))]">
+                  <div className="flex flex-col gap-1 items-end text-[hsl(var(--text-muted))]">
                     <span className="inline-flex items-center gap-1">
                       <span title="Release date" aria-label="Release date" className="inline-flex">
                         {(() => {
@@ -185,41 +177,30 @@ export function RemoteModelsList({
                     </span>
                   </div>
                 </div>
-                <div className="flex flex-wrap gap-3 mt-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-                  <span className="inline-flex items-center gap-1">
-                    <span title="Format" aria-label="Format" className="inline-flex">
-                      <Blocks className="w-3.5 h-3.5" />
-                    </span>
+                <div className="flex flex-wrap gap-2 mt-1.5 text-xs text-[hsl(var(--text-muted))]">
+                  <MetadataItem icon={<Blocks />}>
                     {model.formats.length ? model.formats.join(', ') : 'Unknown'}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span title="Quantization" aria-label="Quantization" className="inline-flex">
-                      <ChartPie className="w-3.5 h-3.5" />
-                    </span>
+                  </MetadataItem>
+                  <MetadataItem icon={<ChartPie />}>
                     {quantLabels.length ? quantLabels.join(', ') : 'Unknown'}
-                  </span>
-                  <span className="inline-flex items-center gap-1">
-                    <span title="Download size" aria-label="Download size" className="inline-flex">
-                      <Download className="w-3.5 h-3.5" />
-                    </span>
+                  </MetadataItem>
+                  <MetadataItem icon={<Download />}>
                     {formatDownloadSizeRange(model)}
-                  </span>
+                  </MetadataItem>
                 </div>
                 {downloadError && downloadRepoId === model.repoId && (
-                  <div className="mt-2 text-xs text-[hsl(var(--launcher-accent-error))]">
+                  <div className="mt-1.5 text-xs text-[hsl(var(--accent-error))]">
                     {downloadError}
                   </div>
                 )}
               </div>
-              <div className="relative flex flex-col items-center gap-2">
-                <button
+              <div className="relative flex flex-col items-center gap-1">
+                <IconButton
+                  icon={<ExternalLink />}
+                  tooltip="Open"
                   onClick={() => onOpenUrl(model.url)}
-                  className="flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))] transition-colors"
-                  title={`Open ${model.url}`}
-                  aria-label={`Open ${model.url}`}
-                >
-                  <ExternalLink className="w-4 h-4" />
-                </button>
+                  size="sm"
+                />
                 <button
                   onClick={() => {
                     if (isDownloading) {
@@ -238,7 +219,7 @@ export function RemoteModelsList({
                   className={`group flex-shrink-0 transition-colors ${
                     openQuantMenuRepoId === model.repoId
                       ? 'text-[hsl(var(--launcher-accent-primary))]'
-                      : 'text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
+                      : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
                   }`}
                   title={isDownloading ? 'Cancel download' : 'Download options'}
                   aria-label={isDownloading ? 'Cancel download' : 'Download options'}
@@ -278,7 +259,7 @@ export function RemoteModelsList({
                           setOpenQuantMenuRepoId(null);
                           void onStartDownload(model, option.quant);
                         }}
-                        className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                        className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
                       >
                         {option.quant}
                         {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
@@ -292,7 +273,7 @@ export function RemoteModelsList({
                         setOpenQuantMenuRepoId(null);
                         void onStartDownload(model, null);
                       }}
-                      className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--launcher-text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                      className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
                     >
                       All files
                       {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
@@ -301,7 +282,7 @@ export function RemoteModelsList({
                 )}
               </div>
             </div>
-          </div>
+          </ListItem>
         );
       })}
     </>

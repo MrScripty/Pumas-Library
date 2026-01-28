@@ -6,15 +6,15 @@
  */
 
 export interface VersionRelease {
-  tag_name: string;
+  tagName: string;
   name: string;
-  published_at: string;
+  publishedAt: string;
   prerelease: boolean;
   body?: string;
-  html_url?: string;
-  total_size?: number | null;
-  archive_size?: number | null;
-  dependencies_size?: number | null;
+  htmlUrl?: string;
+  totalSize?: number | null;
+  archiveSize?: number | null;
+  dependenciesSize?: number | null;
   installing?: boolean;
 }
 

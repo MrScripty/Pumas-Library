@@ -15,6 +15,7 @@ import {
   useAnimationTimestamp,
   getDeleteZoneShakeStyle
 } from '../utils/dragAnimations';
+import { Tooltip } from './ui';
 
 interface AppSidebarProps {
   apps: AppConfig[];
@@ -319,13 +320,15 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     >
       {/* Plus indicator - show on hover when not dragging */}
       {!draggedId && floatingState === null && mousePos.y > 0 && sidebarRef.current && (
-        <div
-          className="absolute left-1/2 transform -translate-x-1/2 z-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
-          style={{ top: `${getNearestIconPosition()}px` }}
-          onClick={handlePlusClick}
-        >
-          <Plus className="w-8 h-8 text-[hsl(var(--launcher-accent-primary)/0.5)]" />
-        </div>
+        <Tooltip content="Add app" position="right">
+          <div
+            className="absolute left-1/2 transform -translate-x-1/2 z-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+            style={{ top: `${getNearestIconPosition()}px` }}
+            onClick={handlePlusClick}
+          >
+            <Plus className="w-8 h-8 text-[hsl(var(--accent-primary)/0.5)]" />
+          </div>
+        </Tooltip>
       )}
 
       {/* Icon list with Framer Motion */}

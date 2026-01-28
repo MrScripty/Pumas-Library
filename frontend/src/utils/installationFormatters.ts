@@ -66,6 +66,6 @@ export function formatVersionDate(dateString: string): string {
 /**
  * Get GitHub release URL for a version
  */
-export function getReleaseUrl(release: { html_url?: string; tag_name: string }): string {
-  return release.html_url || '';
+export function getReleaseUrl(release: { htmlUrl?: string; tagName: string }): string {
+  return release.htmlUrl || '';
 }

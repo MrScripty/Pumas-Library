@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { X, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, Download, Package, ArrowUp } from 'lucide-react';
-import { useHover } from '@react-aria/interactions';
 import type { SystemResources } from '../types/apps';
 import { formatSpeed, formatBytes } from '../utils/formatters';
+import { Tooltip, IconButton } from './ui';
 
 interface InstallationProgress {
   tag: string;
@@ -55,31 +55,6 @@ const getLoadColor = (load: number): string => {
   return 'hsl(var(--accent-error))'; // Red for high load
 };
 
-// Tooltip component with hover state
-interface TooltipProps {
-  children: React.ReactNode;
-  tooltip: string;
-  className?: string;
-}
-
-const IconWithTooltip: React.FC<TooltipProps> = ({ children, tooltip, className = '' }) => {
-  const [isHovered, setIsHovered] = useState(false);
-  const { hoverProps } = useHover({
-    onHoverStart: () => setIsHovered(true),
-    onHoverEnd: () => setIsHovered(false),
-  });
-
-  return (
-    <div className={`relative ${className}`} {...hoverProps}>
-      {children}
-      {isHovered && (
-        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 px-2 py-1 bg-[hsl(var(--surface-overlay))] border border-[hsl(var(--launcher-border))] rounded text-[10px] text-[hsl(var(--text-primary))] whitespace-nowrap z-50 pointer-events-none">
-          {tooltip}
-        </div>
-      )}
-    </div>
-  );
-};
 
 export const Header: React.FC<HeaderProps> = ({
   systemResources,
@@ -196,19 +171,17 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center gap-2 flex-shrink-0">
           <span className="text-xs font-semibold text-[hsl(var(--text-primary))]">AI Manager</span>
           {launcherUpdateAvailable ? (
-            <button
-              className="p-0.5 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
-              title="Update available"
-            >
-              <ArrowUp className="w-3 h-3 text-[hsl(var(--accent-success))]" />
-            </button>
+            <IconButton
+              icon={<ArrowUp className="text-[hsl(var(--accent-success))]" />}
+              tooltip="Update available"
+              size="sm"
+            />
           ) : !cacheStatus.has_cache ? (
-            <button
-              className="p-0.5 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
-              title="Check for updates"
-            >
-              <RefreshCw className="w-3 h-3 text-[hsl(var(--text-secondary))]" />
-            </button>
+            <IconButton
+              icon={<RefreshCw />}
+              tooltip="Check for updates"
+              size="sm"
+            />
           ) : null}
         </div>
 
@@ -221,28 +194,27 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Right: Close button */}
-        <button
+        <IconButton
+          icon={<X className="group-hover:text-[hsl(var(--accent-error))] transition-colors" />}
+          tooltip="Close"
           onClick={onClose}
-          className="flex-shrink-0 p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors group"
-          title="Close"
-        >
-          <X className="w-4 h-4 text-[hsl(var(--text-secondary))] group-hover:text-[hsl(var(--accent-error))] transition-colors" />
-        </button>
+          size="sm"
+        />
       </div>
 
       {/* Bottom strip: Very thin resource bar */}
       <div className="h-3 px-3 pb-1.5 flex items-center gap-2">
         {/* Left: Biceps (load indicator) + CPU icon */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <IconWithTooltip tooltip={`${cpuUsage}%`}>
+          <Tooltip content={`${cpuUsage}%`}>
             <BicepsFlexed
-              className="w-3 h-3"
+              className="w-3.5 h-3.5"
               style={{ color: getLoadColor(cpuUsage) }}
             />
-          </IconWithTooltip>
-          <IconWithTooltip tooltip={`RAM ${formatBytes(ramUsed * 1024 * 1024 * 1024)}`}>
-            <Cpu className="w-3 h-3 text-[hsl(var(--launcher-accent-cpu))]" />
-          </IconWithTooltip>
+          </Tooltip>
+          <Tooltip content={`RAM ${formatBytes(ramUsed * 1024 * 1024 * 1024)}`}>
+            <Cpu className="w-3.5 h-3.5 text-[hsl(var(--launcher-accent-cpu))]" />
+          </Tooltip>
         </div>
 
         {/* Center: RAM/VRAM bars - very thin strips */}
@@ -266,15 +238,15 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right: GPU icon + Biceps (load indicator, flipped) */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <IconWithTooltip tooltip={`VRAM ${formatBytes(vramUsed * 1024 * 1024 * 1024)}`}>
-            <Gpu className="w-3 h-3 text-[hsl(var(--launcher-accent-gpu))]" />
-          </IconWithTooltip>
-          <IconWithTooltip tooltip={`${gpuUsage}%`}>
+          <Tooltip content={`VRAM ${formatBytes(vramUsed * 1024 * 1024 * 1024)}`}>
+            <Gpu className="w-3.5 h-3.5 text-[hsl(var(--launcher-accent-gpu))]" />
+          </Tooltip>
+          <Tooltip content={`${gpuUsage}%`}>
             <BicepsFlexed
-              className="w-3 h-3 scale-x-[-1]"
+              className="w-3.5 h-3.5 scale-x-[-1]"
               style={{ color: getLoadColor(gpuUsage) }}
             />
-          </IconWithTooltip>
+          </Tooltip>
         </div>
       </div>
     </div>

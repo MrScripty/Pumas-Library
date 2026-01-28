@@ -23,6 +23,7 @@ import {
 import type { InstallationProgress } from '../hooks/useVersions';
 import { formatBytes, formatSpeed } from '../utils/formatters';
 import { formatElapsedTime } from '../utils/installationFormatters';
+import { IconButton } from './ui';
 
 const STAGE_LABELS = {
   download: 'Downloading',
@@ -60,19 +61,18 @@ export function ProgressDetailsView({
   const CurrentStageIcon = STAGE_ICONS[progress.stage] || Loader2;
 
   return (
-    <div className="space-y-4 px-4">
-      {/* Back Button */}
-      <div className="flex items-center justify-between gap-3">
-        <button
+    <div className="space-y-3 px-3">
+      {/* Header */}
+      <div className="flex items-center gap-2">
+        <IconButton
+          icon={<ArrowLeft />}
+          tooltip="Back"
           onClick={onBackToList}
-          className="flex items-center gap-2 px-3 py-2 rounded border border-[hsl(var(--surface-low))] bg-[hsl(var(--surface-lowest))] hover:bg-[hsl(var(--surface-low))] text-[hsl(var(--text-primary))] text-sm transition-colors"
-        >
-          <ArrowLeft size={14} />
-          <span>Back to versions</span>
-        </button>
-        <div className="text-sm text-[hsl(var(--launcher-text-muted))] truncate">
+          size="md"
+        />
+        <span className="text-sm text-[hsl(var(--text-muted))] truncate">
           {installingVersion ? `Installing ${installingVersion}` : 'Installation details'}
-        </div>
+        </span>
       </div>
 
       {/* Overall Progress */}
@@ -102,12 +102,12 @@ export function ProgressDetailsView({
               <h3 className="text-[hsl(var(--text-primary))] font-medium">
                 {STAGE_LABELS[progress.stage]}
               </h3>
-              <span className="text-sm text-[hsl(var(--launcher-text-muted))]">
+              <span className="text-sm text-[hsl(var(--text-muted))]">
                 {progress.stage_progress}%
               </span>
             </div>
             {progress.current_item && (
-              <p className="text-sm text-[hsl(var(--launcher-text-muted))] truncate">
+              <p className="text-sm text-[hsl(var(--text-muted))] truncate">
                 {progress.current_item}
               </p>
             )}
@@ -127,8 +127,8 @@ export function ProgressDetailsView({
       {progress.download_speed !== null && (
         <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
           <div className="flex items-center gap-2 mb-1">
-            <Download size={14} className="text-[hsl(var(--launcher-text-muted))]" />
-            <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Speed</span>
+            <Download size={14} className="text-[hsl(var(--text-muted))]" />
+            <span className="text-xs text-[hsl(var(--text-muted))]">Speed</span>
           </div>
           <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
             {formatSpeed(progress.download_speed)}
@@ -139,8 +139,8 @@ export function ProgressDetailsView({
       {progress.stage === 'dependencies' && progress.dependency_count !== null && (
         <div className="bg-[hsl(var(--surface-low))] rounded-lg p-3">
           <div className="flex items-center gap-2 mb-1">
-            <Package size={14} className="text-[hsl(var(--launcher-text-muted))]" />
-            <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Packages</span>
+            <Package size={14} className="text-[hsl(var(--text-muted))]" />
+            <span className="text-xs text-[hsl(var(--text-muted))]">Packages</span>
           </div>
           <span className="text-base font-semibold text-[hsl(var(--text-primary))]">
             {progress.completed_dependencies} / {progress.dependency_count}
@@ -149,7 +149,7 @@ export function ProgressDetailsView({
       )}
 
       {/* Elapsed Time */}
-      <div className="flex items-center gap-2 text-sm text-[hsl(var(--launcher-text-muted))]">
+      <div className="flex items-center gap-2 text-sm text-[hsl(var(--text-muted))]">
         <Clock size={14} />
         <span>Elapsed: {formatElapsedTime(progress.started_at)}</span>
       </div>
@@ -168,9 +168,9 @@ export function ProgressDetailsView({
               </span>
             </div>
             {showCompletedItems ? (
-              <ChevronUp size={14} className="text-[hsl(var(--launcher-text-muted))]" />
+              <ChevronUp size={14} className="text-[hsl(var(--text-muted))]" />
             ) : (
-              <ChevronDown size={14} className="text-[hsl(var(--launcher-text-muted))]" />
+              <ChevronDown size={14} className="text-[hsl(var(--text-muted))]" />
             )}
           </button>
           <AnimatePresence>
@@ -191,7 +191,7 @@ export function ProgressDetailsView({
                         {item.name}
                       </span>
                       {item.size !== null && (
-                        <span className="text-[hsl(var(--launcher-text-muted))] text-xs ml-2">
+                        <span className="text-[hsl(var(--text-muted))] text-xs ml-2">
                           {formatBytes(item.size)}
                         </span>
                       )}
@@ -213,7 +213,7 @@ export function ProgressDetailsView({
               <AlertCircle size={20} className="text-[hsl(var(--accent-warning))]" />
               <div>
                 <p className="text-[hsl(var(--accent-warning))] font-medium text-sm">Installation Cancelled</p>
-                <p className="text-xs text-[hsl(var(--launcher-text-muted))] mt-1">
+                <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
                   The installation was stopped and incomplete files have been removed
                 </p>
               </div>
@@ -224,7 +224,7 @@ export function ProgressDetailsView({
               <AlertCircle size={20} className="text-[hsl(var(--accent-error))]" />
               <div>
                 <p className="text-[hsl(var(--accent-error))] font-medium text-sm">Installation Failed</p>
-                <p className="text-xs text-[hsl(var(--launcher-text-muted))] mt-1">{progress.error}</p>
+                <p className="text-xs text-[hsl(var(--text-muted))] mt-1">{progress.error}</p>
                 {progress.log_path && (
                   <button
                     onClick={() => onOpenLogPath(progress.log_path)}
@@ -246,7 +246,7 @@ export function ProgressDetailsView({
           <CheckCircle2 size={20} className="text-[hsl(var(--accent-success))]" />
           <div>
             <p className="text-[hsl(var(--accent-success))] font-medium text-sm">Installation Complete!</p>
-            <p className="text-xs text-[hsl(var(--launcher-text-muted))] mt-1">
+            <p className="text-xs text-[hsl(var(--text-muted))] mt-1">
               {installingVersion} has been successfully installed
             </p>
           </div>

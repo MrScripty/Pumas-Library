@@ -176,31 +176,49 @@ pub struct ModelData {
 }
 
 /// HuggingFace model search result.
+///
+/// Note: Fields like `developer`, `kind`, `formats`, `quants`, and `url` are
+/// non-optional to match frontend TypeScript expectations. The frontend cannot
+/// handle null values for these fields. Use empty strings/arrays as defaults.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HuggingFaceModel {
     pub repo_id: String,
     pub name: String,
+    /// Developer/organization name (empty string if unknown)
     #[serde(default)]
-    pub developer: Option<String>,
+    pub developer: String,
+    /// Model kind/type (e.g., "text-generation", defaults to "unknown")
+    #[serde(default = "default_kind")]
+    pub kind: String,
+    /// Supported formats (e.g., ["safetensors", "gguf"])
     #[serde(default)]
-    pub kind: Option<String>,
+    pub formats: Vec<String>,
+    /// Available quantization levels (e.g., ["Q4_K_M", "Q8_0"])
     #[serde(default)]
-    pub formats: Option<Vec<String>>,
+    pub quants: Vec<String>,
+    /// Detailed download options with sizes
     #[serde(default)]
-    pub quants: Option<Vec<String>>,
+    pub download_options: Vec<DownloadOption>,
+    /// URL to the model page (empty string if unknown)
     #[serde(default)]
-    pub download_options: Option<Vec<DownloadOption>>,
-    #[serde(default)]
-    pub url: Option<String>,
+    pub url: String,
+    /// Release/last modified date
     #[serde(default)]
     pub release_date: Option<String>,
+    /// Total download count
     #[serde(default)]
     pub downloads: Option<u64>,
+    /// Total size in bytes (all files)
     #[serde(default)]
     pub total_size_bytes: Option<u64>,
+    /// Size in bytes per quantization level
     #[serde(default)]
     pub quant_sizes: Option<HashMap<String, u64>>,
+}
+
+fn default_kind() -> String {
+    "unknown".to_string()
 }
 
 /// Download option for a quantization variant.

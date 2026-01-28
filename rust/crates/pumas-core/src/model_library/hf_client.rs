@@ -180,10 +180,15 @@ impl HuggingFaceClient {
             .to_string();
 
         // Extract developer from modelId (before the /)
-        let developer = result.model_id.split('/').next().map(String::from);
+        let developer = result
+            .model_id
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
 
-        // Determine kind from pipeline_tag
-        let kind = result.pipeline_tag.clone();
+        // Determine kind from pipeline_tag (default to "unknown")
+        let kind = result.pipeline_tag.unwrap_or_else(|| "unknown".to_string());
 
         // Extract formats and quants from tags
         let formats: Vec<String> = result
@@ -203,23 +208,18 @@ impl HuggingFaceClient {
             .cloned()
             .collect();
 
+        // Build URL for the model page
+        let url = format!("https://huggingface.co/{}", result.model_id);
+
         HuggingFaceModel {
             repo_id: result.model_id,
             name,
             developer,
             kind,
-            formats: if formats.is_empty() {
-                None
-            } else {
-                Some(formats)
-            },
-            quants: if quants.is_empty() {
-                None
-            } else {
-                Some(quants)
-            },
-            download_options: None, // Populated by get_download_options
-            url: None,
+            formats,
+            quants,
+            download_options: vec![], // Populated by get_download_options
+            url,
             release_date: result.last_modified,
             downloads: result.downloads,
             total_size_bytes: None,
@@ -367,7 +367,7 @@ impl HuggingFaceClient {
             repo_id: best_match.repo_id.clone(),
             official_name: Some(best_match.name.clone()),
             family: None, // Would need more analysis
-            model_type: best_match.kind.clone(),
+            model_type: Some(best_match.kind.clone()),
             subtype: None,
             variant: None,
             precision: None,
@@ -845,8 +845,8 @@ mod tests {
 
         assert_eq!(model.repo_id, "TheBloke/Llama-2-7B-GGUF");
         assert_eq!(model.name, "Llama-2-7B-GGUF");
-        assert_eq!(model.developer, Some("TheBloke".to_string()));
-        assert!(model.formats.as_ref().unwrap().contains(&"gguf".to_string()));
-        assert!(model.quants.as_ref().unwrap().contains(&"Q4_K_M".to_string()));
+        assert_eq!(model.developer, "TheBloke");
+        assert!(model.formats.contains(&"gguf".to_string()));
+        assert!(model.quants.contains(&"Q4_K_M".to_string()));
     }
 }

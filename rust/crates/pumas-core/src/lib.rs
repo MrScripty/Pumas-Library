@@ -77,20 +77,20 @@ pub struct PumasApi {
     launcher_root: PathBuf,
     /// Shared state (will be expanded as we implement more features)
     _state: Arc<RwLock<ApiState>>,
-    /// Process manager for managing running processes
+    /// Process manager for managing running processes (optional feature)
     process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
-    /// Shortcut manager for desktop/menu shortcuts
+    /// Shortcut manager for desktop/menu shortcuts (optional feature)
     shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
     /// System utilities
     system_utils: Arc<system::SystemUtils>,
-    /// Model library for managing AI models (immutable after init)
-    model_library: Option<Arc<model_library::ModelLibrary>>,
+    /// Model library for managing AI models (required, immutable after init)
+    model_library: Arc<model_library::ModelLibrary>,
     /// Model mapper for linking models to application directories (immutable after init)
-    model_mapper: Option<model_library::ModelMapper>,
-    /// HuggingFace client for model search and download (has internal mutability)
+    model_mapper: model_library::ModelMapper,
+    /// HuggingFace client for model search and download (optional, external service)
     hf_client: Option<model_library::HuggingFaceClient>,
     /// Model importer for importing local models (immutable after init)
-    model_importer: Option<model_library::ModelImporter>,
+    model_importer: model_library::ModelImporter,
 }
 
 /// Internal state for the API.
@@ -149,7 +149,7 @@ impl PumasApi {
             .join("launcher-data")
             .join("mapping-configs");
 
-        // Initialize HuggingFace client for model search/download
+        // Initialize HuggingFace client for model search/download (optional - external service)
         let cache_dir = launcher_root
             .join("launcher-data")
             .join(config::PathsConfig::CACHE_DIR_NAME);
@@ -162,18 +162,15 @@ impl PumasApi {
             }
         };
 
-        let (model_library, model_mapper, model_importer) = match model_library::ModelLibrary::new(&model_library_dir).await {
-            Ok(library) => {
-                let lib_arc = Arc::new(library);
-                let mapper = model_library::ModelMapper::new(lib_arc.clone(), &mapping_config_dir);
-                let importer = model_library::ModelImporter::new(lib_arc.clone());
-                (Some(lib_arc), Some(mapper), Some(importer))
-            }
-            Err(e) => {
-                tracing::warn!("Failed to initialize model library: {}", e);
-                (None, None, None)
-            }
-        };
+        // Initialize model library (required - core functionality)
+        let model_library = model_library::ModelLibrary::new(&model_library_dir)
+            .await
+            .map_err(|e| PumasError::Config {
+                message: format!("Model library initialization failed: {}", e),
+            })?;
+        let model_library = Arc::new(model_library);
+        let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
+        let model_importer = model_library::ModelImporter::new(model_library.clone());
 
         Ok(Self {
             launcher_root,
@@ -625,11 +622,7 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        if let Some(ref lib) = self.model_library {
-            lib.list_models().await
-        } else {
-            Ok(vec![])
-        }
+        self.model_library.list_models().await
     }
 
     /// Search models using full-text search.
@@ -639,45 +632,22 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        if let Some(ref lib) = self.model_library {
-            lib.search_models(query, limit, offset).await
-        } else {
-            Ok(SearchResult {
-                models: vec![],
-                total_count: 0,
-                query_time_ms: 0.0,
-                query: query.to_string(),
-            })
-        }
+        self.model_library.search_models(query, limit, offset).await
     }
 
     /// Rebuild the model index from metadata files.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
-        if let Some(ref lib) = self.model_library {
-            lib.rebuild_index().await
-        } else {
-            Ok(0)
-        }
+        self.model_library.rebuild_index().await
     }
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        if let Some(ref lib) = self.model_library {
-            lib.get_model(model_id).await
-        } else {
-            Ok(None)
-        }
+        self.model_library.get_model(model_id).await
     }
 
     /// Mark a model's metadata as manually set (protected from auto-updates).
     pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        if let Some(ref lib) = self.model_library {
-            lib.mark_metadata_as_manual(model_id).await
-        } else {
-            Err(PumasError::Config {
-                message: "Model library not initialized".to_string(),
-            })
-        }
+        self.model_library.mark_metadata_as_manual(model_id).await
     }
 
     /// Import a model from a local path.
@@ -685,17 +655,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
-        if let Some(ref importer) = self.model_importer {
-            importer.import(spec).await
-        } else {
-            Ok(model_library::ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_path: None,
-                error: Some("Model importer not initialized".to_string()),
-                security_tier: None,
-            })
-        }
+        self.model_importer.import(spec).await
     }
 
     /// Import multiple models in batch.
@@ -703,20 +663,7 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
-        if let Some(ref importer) = self.model_importer {
-            importer.batch_import(specs, None).await
-        } else {
-            specs
-                .into_iter()
-                .map(|spec| model_library::ModelImportResult {
-                    path: spec.path.clone(),
-                    success: false,
-                    model_path: None,
-                    error: Some("Model importer not initialized".to_string()),
-                    security_tier: None,
-                })
-                .collect()
-        }
+        self.model_importer.batch_import(specs, None).await
     }
 
     /// Search for models on HuggingFace.
@@ -744,10 +691,10 @@ impl PumasApi {
         &self,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
-        if let (Some(ref client), Some(ref lib)) = (&self.hf_client, &self.model_library) {
+        if let Some(ref client) = self.hf_client {
             // Determine destination directory
             let model_type = request.model_type.as_deref().unwrap_or("unknown");
-            let dest_dir = lib.build_model_path(
+            let dest_dir = self.model_library.build_model_path(
                 model_type,
                 &request.family,
                 &model_library::normalize_name(&request.official_name),
@@ -755,7 +702,7 @@ impl PumasApi {
             client.start_download(request, &dest_dir).await
         } else {
             Err(PumasError::Config {
-                message: "HuggingFace client or model library not initialized".to_string(),
+                message: "HuggingFace client not initialized".to_string(),
             })
         }
     }
@@ -819,126 +766,91 @@ impl PumasApi {
     ///
     /// Returns information about total links, healthy links, broken links, etc.
     pub async fn get_link_health(&self, _version_tag: Option<&str>) -> Result<models::LinkHealthResponse> {
-        if let Some(ref library) = self.model_library {
-            let registry = library.link_registry().read().await;
-            let all_links = registry.get_all().await;
+        let registry = self.model_library.link_registry().read().await;
+        let all_links = registry.get_all().await;
 
-            let mut healthy = 0;
-            let mut broken: Vec<String> = Vec::new();
+        let mut healthy = 0;
+        let mut broken: Vec<String> = Vec::new();
 
-            for link in &all_links {
-                // Check if symlink target exists
-                if link.target.is_symlink() {
-                    if link.source.exists() {
-                        healthy += 1;
-                    } else {
-                        broken.push(link.target.to_string_lossy().to_string());
-                    }
-                } else if link.target.exists() {
-                    // Hardlink or copy - just check if target exists
+        for link in &all_links {
+            // Check if symlink target exists
+            if link.target.is_symlink() {
+                if link.source.exists() {
                     healthy += 1;
                 } else {
                     broken.push(link.target.to_string_lossy().to_string());
                 }
+            } else if link.target.exists() {
+                // Hardlink or copy - just check if target exists
+                healthy += 1;
+            } else {
+                broken.push(link.target.to_string_lossy().to_string());
             }
-
-            Ok(models::LinkHealthResponse {
-                success: true,
-                error: None,
-                status: if broken.is_empty() { "healthy".to_string() } else { "degraded".to_string() },
-                total_links: all_links.len(),
-                healthy_links: healthy,
-                broken_links: broken,
-                orphaned_links: vec![],
-                warnings: vec![],
-                errors: vec![],
-            })
-        } else {
-            Ok(models::LinkHealthResponse {
-                success: true,
-                error: None,
-                status: "unknown".to_string(),
-                total_links: 0,
-                healthy_links: 0,
-                broken_links: vec![],
-                orphaned_links: vec![],
-                warnings: vec!["Model library not initialized".to_string()],
-                errors: vec![],
-            })
         }
+
+        Ok(models::LinkHealthResponse {
+            success: true,
+            error: None,
+            status: if broken.is_empty() { "healthy".to_string() } else { "degraded".to_string() },
+            total_links: all_links.len(),
+            healthy_links: healthy,
+            broken_links: broken,
+            orphaned_links: vec![],
+            warnings: vec![],
+            errors: vec![],
+        })
     }
 
     /// Clean up broken model links.
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
-        if let Some(ref library) = self.model_library {
-            let registry = library.link_registry().write().await;
-            let broken = registry.cleanup_broken().await?;
+        let registry = self.model_library.link_registry().write().await;
+        let broken = registry.cleanup_broken().await?;
 
-            // Also remove the actual broken symlinks from the filesystem
-            for entry in &broken {
-                if entry.target.exists() || entry.target.is_symlink() {
-                    let _ = std::fs::remove_file(&entry.target);
-                }
+        // Also remove the actual broken symlinks from the filesystem
+        for entry in &broken {
+            if entry.target.exists() || entry.target.is_symlink() {
+                let _ = std::fs::remove_file(&entry.target);
             }
-
-            Ok(models::CleanBrokenLinksResponse {
-                success: true,
-                cleaned: broken.len(),
-            })
-        } else {
-            Ok(models::CleanBrokenLinksResponse {
-                success: false,
-                cleaned: 0,
-            })
         }
+
+        Ok(models::CleanBrokenLinksResponse {
+            success: true,
+            cleaned: broken.len(),
+        })
     }
 
     /// Get all links for a specific model.
     pub async fn get_links_for_model(&self, model_id: &str) -> Result<models::LinksForModelResponse> {
-        if let Some(ref library) = self.model_library {
-            let registry = library.link_registry().read().await;
-            let links = registry.get_links_for_model(model_id).await;
+        let registry = self.model_library.link_registry().read().await;
+        let links = registry.get_links_for_model(model_id).await;
 
-            let link_info: Vec<models::LinkInfo> = links
-                .into_iter()
-                .map(|l| models::LinkInfo {
-                    source: l.source.to_string_lossy().to_string(),
-                    target: l.target.to_string_lossy().to_string(),
-                    link_type: format!("{:?}", l.link_type).to_lowercase(),
-                    app_id: l.app_id,
-                    app_version: l.app_version,
-                    created_at: l.created_at,
-                })
-                .collect();
+        let link_info: Vec<models::LinkInfo> = links
+            .into_iter()
+            .map(|l| models::LinkInfo {
+                source: l.source.to_string_lossy().to_string(),
+                target: l.target.to_string_lossy().to_string(),
+                link_type: format!("{:?}", l.link_type).to_lowercase(),
+                app_id: l.app_id,
+                app_version: l.app_version,
+                created_at: l.created_at,
+            })
+            .collect();
 
-            Ok(models::LinksForModelResponse {
-                success: true,
-                links: link_info,
-            })
-        } else {
-            Ok(models::LinksForModelResponse {
-                success: false,
-                links: vec![],
-            })
-        }
+        Ok(models::LinksForModelResponse {
+            success: true,
+            links: link_info,
+        })
     }
 
     /// Delete a model and cascade delete all its links.
     pub async fn delete_model_with_cascade(&self, model_id: &str) -> Result<models::DeleteModelResponse> {
-        if let Some(ref library) = self.model_library {
-            library.delete_model(model_id, true).await?;
-            Ok(models::DeleteModelResponse {
-                success: true,
-                error: None,
-            })
-        } else {
-            Ok(models::DeleteModelResponse {
-                success: false,
-                error: Some("Model library not initialized".to_string()),
-            })
-        }
+        self.model_library.delete_model(model_id, true).await?;
+        Ok(models::DeleteModelResponse {
+            success: true,
+            error: None,
+        })
     }
 
     /// Preview model mapping for a version without applying it.
@@ -950,34 +862,26 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingPreviewResponse> {
-        if let Some(ref mapper) = self.model_mapper {
-            if !models_path.exists() {
-                return Ok(models::MappingPreviewResponse {
-                    success: false,
-                    error: Some(format!("Version models directory not found: {}", models_path.display())),
-                    preview: None,
-                });
-            }
-
-            let preview = mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
-
-            Ok(models::MappingPreviewResponse {
-                success: true,
-                error: None,
-                preview: Some(models::MappingPreviewData {
-                    creates: preview.creates.len(),
-                    skips: preview.skips.len(),
-                    conflicts: preview.conflicts.len(),
-                    broken: preview.broken.len(),
-                }),
-            })
-        } else {
-            Ok(models::MappingPreviewResponse {
+        if !models_path.exists() {
+            return Ok(models::MappingPreviewResponse {
                 success: false,
-                error: Some("Model mapper not initialized".to_string()),
+                error: Some(format!("Version models directory not found: {}", models_path.display())),
                 preview: None,
-            })
+            });
         }
+
+        let preview = self.model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
+
+        Ok(models::MappingPreviewResponse {
+            success: true,
+            error: None,
+            preview: Some(models::MappingPreviewData {
+                creates: preview.creates.len(),
+                skips: preview.skips.len(),
+                conflicts: preview.conflicts.len(),
+                broken: preview.broken.len(),
+            }),
+        })
     }
 
     /// Apply model mapping for a version.
@@ -989,29 +893,19 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingApplyResponse> {
-        if let Some(ref mapper) = self.model_mapper {
-            if !models_path.exists() {
-                std::fs::create_dir_all(models_path)?;
-            }
-
-            let result = mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
-
-            Ok(models::MappingApplyResponse {
-                success: true,
-                error: None,
-                created: result.created,
-                updated: 0,
-                errors: result.errors.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect(),
-            })
-        } else {
-            Ok(models::MappingApplyResponse {
-                success: false,
-                error: Some("Model mapper not initialized".to_string()),
-                created: 0,
-                updated: 0,
-                errors: vec![],
-            })
+        if !models_path.exists() {
+            std::fs::create_dir_all(models_path)?;
         }
+
+        let result = self.model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
+
+        Ok(models::MappingApplyResponse {
+            success: true,
+            error: None,
+            created: result.created,
+            updated: 0,
+            errors: result.errors.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect(),
+        })
     }
 
     /// Perform incremental sync of models for a version.

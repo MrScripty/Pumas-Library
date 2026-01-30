@@ -106,7 +106,7 @@ windows-sys = { version = "0.59", features = [
 ] }
 
 # Internal crates
-pumas-core = { path = "crates/pumas-core" }
+pumas-library = { path = "crates/pumas-core" }
 pumas-app-manager = { path = "crates/pumas-app-manager" }
 
 [profile.release]

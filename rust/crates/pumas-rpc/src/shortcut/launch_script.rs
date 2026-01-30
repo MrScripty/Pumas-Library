@@ -3,8 +3,8 @@
 //! Currently generates bash scripts for Linux. Windows support (PowerShell scripts)
 //! can be added by implementing platform-specific script generation.
 
-use crate::error::{PumasError, Result};
-use crate::platform;
+use pumas_library::error::{PumasError, Result};
+use pumas_library::platform;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};

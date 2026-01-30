@@ -8,8 +8,8 @@ use std::fs;
 use std::io::Write;
 use std::path::Path;
 
-use crate::error::{PumasError, Result};
-use crate::platform;
+use pumas_library::error::{PumasError, Result};
+use pumas_library::platform;
 use tracing::debug;
 
 /// A desktop entry representation.

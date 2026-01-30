@@ -12,7 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Internal crates
-pumas-core = { workspace = true }
+pumas-library = { workspace = true }
 pumas-app-manager = { workspace = true }
 
 # Async runtime
@@ -29,6 +29,9 @@ serde_json = { workspace = true }
 
 # Error handling
 anyhow = { workspace = true }
+
+# Filesystem paths
+dirs = { workspace = true }
 
 # Logging
 tracing = { workspace = true }

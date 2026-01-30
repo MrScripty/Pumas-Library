@@ -8,7 +8,7 @@ description = "Application version and custom node management for Pumas Library"
 
 [dependencies]
 # Internal crates
-pumas-core = { workspace = true }
+pumas-library = { workspace = true }
 
 # Async runtime
 tokio = { workspace = true }

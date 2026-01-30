@@ -1,18 +1,19 @@
 //! HTTP server implementation using Axum.
 
 use crate::handler::{handle_health, handle_rpc};
+use crate::shortcut::ShortcutManager;
 use axum::{
     routing::{get, post},
     Router,
 };
 use pumas_app_manager::{CustomNodesManager, VersionManager, SizeCalculator};
-use pumas_core::PumasApi;
+use pumas_library::PumasApi;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tower_http::cors::{Any, CorsLayer};
-use tracing::info;
+use tracing::{info, warn};
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -24,6 +25,8 @@ pub struct AppState {
     pub custom_nodes_manager: Arc<CustomNodesManager>,
     /// Size calculator for release size estimates
     pub size_calculator: Arc<RwLock<SizeCalculator>>,
+    /// Shortcut manager for desktop/menu shortcuts
+    pub shortcut_manager: Arc<RwLock<Option<ShortcutManager>>>,
     /// Launcher root directory
     pub launcher_root: PathBuf,
 }
@@ -40,11 +43,24 @@ pub async fn start_server(
     host: &str,
     port: u16,
 ) -> anyhow::Result<SocketAddr> {
+    // Initialize shortcut manager
+    let shortcut_manager = match ShortcutManager::new(&launcher_root) {
+        Ok(mgr) => {
+            info!("Shortcut manager initialized");
+            Some(mgr)
+        }
+        Err(e) => {
+            warn!("Failed to initialize shortcut manager: {}", e);
+            None
+        }
+    };
+
     let state = Arc::new(AppState {
         api,
         version_manager: Arc::new(RwLock::new(version_manager)),
         custom_nodes_manager: Arc::new(custom_nodes_manager),
         size_calculator: Arc::new(RwLock::new(size_calculator)),
+        shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         launcher_root,
     });
 
@@ -83,7 +99,7 @@ pub async fn start_server(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pumas_core::AppId;
+    use pumas_library::AppId;
     use tempfile::TempDir;
 
     #[tokio::test]

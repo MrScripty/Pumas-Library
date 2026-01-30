@@ -2,12 +2,12 @@
 //!
 //! Handles downloading, extracting, and setting up new versions.
 
-use pumas_core::config::{AppId, InstallationConfig, PathsConfig};
-use pumas_core::metadata::{InstalledVersionMetadata, MetadataManager};
-use pumas_core::models::InstallationStage;
-use pumas_core::network::GitHubRelease;
+use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
+use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
+use pumas_library::models::InstallationStage;
+use pumas_library::network::GitHubRelease;
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
-use pumas_core::{PumasError, Result};
+use pumas_library::{PumasError, Result};
 use chrono::Utc;
 use std::fs::File;
 use std::io::{BufReader, Write};

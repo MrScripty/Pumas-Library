@@ -1,10 +1,14 @@
 [package]
-name = "pumas-core"
+name = "pumas-library"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
+repository.workspace = true
 description = "Headless library for Pumas model and version management"
+keywords = ["ai", "models", "library", "huggingface", "model-management"]
+categories = ["database", "filesystem"]
+readme = "README.md"
 
 [dependencies]
 # Async runtime
@@ -103,4 +107,8 @@ windows-sys = { workspace = true }
 tokio = { workspace = true, features = ["test-util", "macros"] }
 
 [features]
-default = []
+default = ["full"]
+full = ["hf-client", "process-manager", "gpu-monitor"]
+hf-client = []       # HuggingFace model search & download
+process-manager = [] # ComfyUI process management
+gpu-monitor = []     # GPU monitoring via nvidia-smi

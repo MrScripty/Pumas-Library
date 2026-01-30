@@ -280,7 +280,7 @@ impl PumasError {
 /// # Example
 ///
 /// ```ignore
-/// use pumas_core::error::IoResultExt;
+/// use pumas_library::error::IoResultExt;
 ///
 /// // Before (verbose):
 /// std::fs::read_to_string(&path).map_err(|e| PumasError::Io {
@@ -321,7 +321,7 @@ impl<T> IoResultExt<T> for std::result::Result<T, std::io::Error> {
 /// # Example
 ///
 /// ```ignore
-/// use pumas_core::io_err;
+/// use pumas_library::io_err;
 ///
 /// // Create an error mapper with just path:
 /// std::fs::read(&path).map_err(io_err!(&path))?;

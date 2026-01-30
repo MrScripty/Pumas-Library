@@ -6,8 +6,8 @@
 use super::desktop_entry::DesktopEntry;
 use super::icon::IconManager;
 use super::launch_script::LaunchScriptGenerator;
-use crate::error::{PumasError, Result};
-use crate::platform;
+use pumas_library::error::{PumasError, Result};
+use pumas_library::platform;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};

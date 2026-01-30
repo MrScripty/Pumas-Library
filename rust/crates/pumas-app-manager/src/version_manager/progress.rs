@@ -3,8 +3,8 @@
 //! Tracks installation progress with stages, package weights,
 //! and persistence for recovery.
 
-use pumas_core::models::{InstallationProgress, InstallationProgressItem, InstallationStage};
-use pumas_core::{PumasError, Result};
+use pumas_library::models::{InstallationProgress, InstallationProgressItem, InstallationStage};
+use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;

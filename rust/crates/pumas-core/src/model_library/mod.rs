@@ -30,6 +30,7 @@ mod identifier;
 mod naming;
 mod hashing;
 mod link_registry;
+mod watcher;
 pub mod sharding;
 
 pub use types::*;
@@ -37,7 +38,8 @@ pub use library::ModelLibrary;
 pub use importer::ModelImporter;
 pub use mapper::ModelMapper;
 pub use hf_client::HuggingFaceClient;
-pub use identifier::{identify_model_type, ModelTypeInfo};
+pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
 pub use naming::normalize_name;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub use link_registry::LinkRegistry;
+pub use watcher::{ModelLibraryWatcher, ChangeCallback};

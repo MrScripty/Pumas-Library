@@ -5,8 +5,9 @@
 //!
 //! Note: Version management tests have been moved to pumas-app-manager.
 //! PumasApi now focuses on model library and system utilities.
+//! Shortcut tests have been moved to pumas-rpc.
 
-use pumas_core::{PumasApi, AppId};
+use pumas_library::{PumasApi, AppId};
 use std::path::Path;
 use tempfile::TempDir;
 
@@ -29,20 +30,33 @@ fn create_test_env() -> TempDir {
 #[tokio::test]
 async fn test_api_creation_succeeds() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await;
+    let api = PumasApi::builder(temp_dir.path()).build().await;
+    assert!(api.is_ok());
+}
+
+#[tokio::test]
+async fn test_api_creation_with_auto_create_dirs() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    // Don't create directories manually - test auto_create_dirs
+    let api = PumasApi::builder(temp_dir.path())
+        .auto_create_dirs(true)
+        .build()
+        .await;
     assert!(api.is_ok());
 }
 
 #[tokio::test]
 async fn test_api_creation_fails_for_nonexistent_path() {
-    let result = PumasApi::new("/nonexistent/path/that/does/not/exist").await;
+    let result = PumasApi::builder("/nonexistent/path/that/does/not/exist")
+        .build()
+        .await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_api_paths() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Test path methods
     assert_eq!(api.launcher_root(), temp_dir.path());
@@ -56,7 +70,7 @@ async fn test_api_paths() {
 #[tokio::test]
 async fn test_get_status() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let status = api.get_status().await;
     assert!(status.is_ok());
@@ -70,7 +84,7 @@ async fn test_get_status() {
 #[tokio::test]
 async fn test_get_disk_space() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let disk_space = api.get_disk_space().await;
     assert!(disk_space.is_ok());
@@ -86,7 +100,7 @@ async fn test_get_disk_space() {
 #[tokio::test]
 async fn test_get_system_resources() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let resources = api.get_system_resources().await;
     assert!(resources.is_ok());
@@ -102,7 +116,7 @@ async fn test_get_system_resources() {
 #[tokio::test]
 async fn test_background_fetch_flag() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Initially should be false
     assert!(!api.has_background_fetch_completed().await);
@@ -115,7 +129,7 @@ async fn test_background_fetch_flag() {
 #[tokio::test]
 async fn test_process_methods() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // ComfyUI should not be running in test environment
     let running = api.is_comfyui_running().await;
@@ -127,20 +141,9 @@ async fn test_process_methods() {
 }
 
 #[tokio::test]
-async fn test_shortcut_state_for_nonexistent_version() {
-    let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
-
-    let state = api.get_version_shortcut_state("v0.0.0").await;
-    assert_eq!(state.tag, "v0.0.0");
-    assert!(!state.menu);
-    assert!(!state.desktop);
-}
-
-#[tokio::test]
 async fn test_open_path_with_invalid_path() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening a non-existent path should fail gracefully
     let result = api.open_path("/nonexistent/path/that/does/not/exist");
@@ -152,7 +155,7 @@ async fn test_open_path_with_invalid_path() {
 #[tokio::test]
 async fn test_open_url_with_invalid_url() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening an invalid URL should fail gracefully
     let result = api.open_url("not-a-valid-url");
@@ -164,7 +167,7 @@ async fn test_open_url_with_invalid_url() {
 #[tokio::test]
 async fn test_open_directory_for_nonexistent_path() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening non-existent directory should fail
     let result = api.open_directory(Path::new("/nonexistent/path"));
@@ -174,7 +177,7 @@ async fn test_open_directory_for_nonexistent_path() {
 #[tokio::test]
 async fn test_launch_version_for_nonexistent_version() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Create a non-existent version directory path
     let version_dir = temp_dir.path().join("comfyui-versions/v999.999.999");
@@ -188,35 +191,9 @@ async fn test_launch_version_for_nonexistent_version() {
 }
 
 #[tokio::test]
-async fn test_toggle_menu_shortcut_for_nonexistent_version() {
-    let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
-
-    // Create a non-existent version directory path
-    let version_dir = temp_dir.path().join("comfyui-versions/v999.999.999");
-
-    // Toggling menu shortcut for non-existent directory should fail
-    let result = api.toggle_menu_shortcut("v999.999.999", &version_dir).await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
-async fn test_toggle_desktop_shortcut_for_nonexistent_version() {
-    let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
-
-    // Create a non-existent version directory path
-    let version_dir = temp_dir.path().join("comfyui-versions/v999.999.999");
-
-    // Toggling desktop shortcut for non-existent directory should fail
-    let result = api.toggle_desktop_shortcut("v999.999.999", &version_dir).await;
-    assert!(result.is_err());
-}
-
-#[tokio::test]
 async fn test_model_library_list_with_empty_library() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // With no models, list should return empty
     let models = api.list_models().await;
@@ -227,7 +204,7 @@ async fn test_model_library_list_with_empty_library() {
 #[tokio::test]
 async fn test_model_search_with_empty_library() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Searching empty library should return empty results
     let result = api.search_models("test", 10, 0).await;
@@ -240,7 +217,7 @@ async fn test_model_search_with_empty_library() {
 #[tokio::test]
 async fn test_get_model_nonexistent() {
     let temp_dir = create_test_env();
-    let api = PumasApi::new(temp_dir.path()).await.unwrap();
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Getting non-existent model should return None
     let model = api.get_model("nonexistent-model-id").await;

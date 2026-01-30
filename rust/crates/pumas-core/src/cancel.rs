@@ -15,7 +15,7 @@ use std::sync::Arc;
 /// # Example
 ///
 /// ```
-/// use pumas_core::cancel::CancellationToken;
+/// use pumas_library::cancel::CancellationToken;
 ///
 /// let token = CancellationToken::new();
 /// let token_clone = token.clone();

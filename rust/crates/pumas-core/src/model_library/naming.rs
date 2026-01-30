@@ -40,7 +40,7 @@ static NON_ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9\-_
 /// # Examples
 ///
 /// ```
-/// use pumas_core::model_library::normalize_name;
+/// use pumas_library::model_library::normalize_name;
 ///
 /// assert_eq!(normalize_name("Llama 2 7B"), "llama_2_7b");
 /// assert_eq!(normalize_name("SDXL-1.0-Base"), "sdxl-1_0-base");
@@ -97,7 +97,7 @@ pub fn normalize_name(name: &str) -> String {
 /// # Examples
 ///
 /// ```ignore
-/// use pumas_core::model_library::naming::normalize_filename;
+/// use pumas_library::model_library::naming::normalize_filename;
 ///
 /// assert_eq!(normalize_filename("My Model.safetensors"), "my_model.safetensors");
 /// assert_eq!(normalize_filename("test/file.gguf"), "testfile.gguf");
@@ -123,7 +123,7 @@ pub fn normalize_filename(filename: &str) -> String {
 /// # Examples
 ///
 /// ```ignore
-/// use pumas_core::model_library::naming::extract_base_name;
+/// use pumas_library::model_library::naming::extract_base_name;
 ///
 /// assert_eq!(extract_base_name("llama-2-7b-Q4_K_M.gguf"), "llama-2-7b");
 /// assert_eq!(extract_base_name("model-00001-of-00005.safetensors"), "model");
@@ -161,7 +161,7 @@ pub fn extract_base_name(filename: &str) -> String {
 /// # Examples
 ///
 /// ```ignore
-/// use pumas_core::model_library::naming::detect_shard;
+/// use pumas_library::model_library::naming::detect_shard;
 ///
 /// assert_eq!(detect_shard("model-00001-of-00005.safetensors"), Some((1, 5)));
 /// assert_eq!(detect_shard("model.gguf"), None);

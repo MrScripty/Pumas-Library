@@ -141,7 +141,7 @@ macro_rules! require_str_param {
         match get_str_param!($params, $snake, $camel) {
             Some(s) => s.to_string(),
             None => {
-                return Err(pumas_core::PumasError::InvalidParams {
+                return Err(pumas_library::PumasError::InvalidParams {
                     message: format!("Missing required parameter: {}", $snake),
                 });
             }
@@ -176,7 +176,7 @@ macro_rules! get_app_id {
             .get("app_id")
             .or_else(|| $params.get("appId"))
             .and_then(|v| v.as_str())
-            .and_then(pumas_core::AppId::from_str)
+            .and_then(pumas_library::AppId::from_str)
     };
 }
 
@@ -228,7 +228,7 @@ async fn dispatch_method(
     state: &AppState,
     method: &str,
     params: &Value,
-) -> pumas_core::Result<Value> {
+) -> pumas_library::Result<Value> {
     let api = &state.api;
     match method {
         // ====================================================================
@@ -260,9 +260,12 @@ async fn dispatch_method(
                 // Get shortcut states for active version
                 if let Some(ref tag) = active_version {
                     response.shortcut_version = Some(tag.clone());
-                    let shortcut_state = api.get_version_shortcut_state(tag).await;
-                    response.menu_shortcut = shortcut_state.menu;
-                    response.desktop_shortcut = shortcut_state.desktop;
+                    let sm_lock = state.shortcut_manager.read().await;
+                    if let Some(ref sm) = *sm_lock {
+                        let shortcut_state = sm.get_version_shortcut_state(tag);
+                        response.menu_shortcut = shortcut_state.menu;
+                        response.desktop_shortcut = shortcut_state.desktop;
+                    }
                 }
             }
             drop(vm_lock);
@@ -331,16 +334,16 @@ async fn dispatch_method(
                 // Handle rate limit errors specially to return structured response
                 match vm.get_available_releases(force_refresh).await {
                     Ok(releases) => {
-                        let versions: Vec<pumas_core::models::VersionReleaseInfo> = releases
+                        let versions: Vec<pumas_library::models::VersionReleaseInfo> = releases
                             .into_iter()
-                            .map(pumas_core::models::VersionReleaseInfo::from)
+                            .map(pumas_library::models::VersionReleaseInfo::from)
                             .collect();
                         Ok(json!({
                             "success": true,
                             "versions": versions
                         }))
                     }
-                    Err(pumas_core::PumasError::RateLimited { service, retry_after_secs }) => {
+                    Err(pumas_library::PumasError::RateLimited { service, retry_after_secs }) => {
                         warn!("Rate limited by {} when fetching versions", service);
                         Ok(json!({
                             "success": false,
@@ -403,7 +406,7 @@ async fn dispatch_method(
                 let result = vm.set_default_version(tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -417,7 +420,7 @@ async fn dispatch_method(
                 let result = vm.set_active_version(&tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -463,7 +466,7 @@ async fn dispatch_method(
                 let result = vm.remove_version(&tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -487,7 +490,7 @@ async fn dispatch_method(
                 let progress = vm.get_installation_progress().await;
                 Ok(serde_json::to_value(progress)?)
             } else {
-                Ok(serde_json::to_value::<Option<pumas_core::models::InstallationProgress>>(None)?)
+                Ok(serde_json::to_value::<Option<pumas_library::models::InstallationProgress>>(None)?)
             }
         }
 
@@ -618,7 +621,7 @@ async fn dispatch_method(
                 let releases = vm.get_available_releases(false).await?;
                 releases
                     .into_iter()
-                    .map(pumas_core::models::VersionReleaseInfo::from)
+                    .map(pumas_library::models::VersionReleaseInfo::from)
                     .collect::<Vec<_>>()
             } else {
                 vec![]
@@ -689,7 +692,7 @@ async fn dispatch_method(
                 let status = vm.check_dependencies(&tag).await?;
                 Ok(serde_json::to_value(status)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -703,7 +706,7 @@ async fn dispatch_method(
                 let result = vm.install_dependencies(&tag, None).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -722,7 +725,7 @@ async fn dispatch_method(
                 }
 
                 let content = std::fs::read_to_string(&requirements_path).map_err(|e| {
-                    pumas_core::PumasError::Io {
+                    pumas_library::PumasError::Io {
                         message: format!("Failed to read requirements.txt: {}", e),
                         path: Some(requirements_path),
                         source: Some(e),
@@ -751,7 +754,7 @@ async fn dispatch_method(
 
                 Ok(serde_json::to_value(packages)?)
             } else {
-                Err(pumas_core::PumasError::Config {
+                Err(pumas_library::PumasError::Config {
                     message: "Version manager not initialized".to_string(),
                 })
             }
@@ -825,13 +828,39 @@ async fn dispatch_method(
         // ====================================================================
         "get_version_shortcuts" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let shortcut_state = api.get_version_shortcut_state(&tag).await;
-            Ok(serde_json::to_value(shortcut_state)?)
+            let sm_lock = state.shortcut_manager.read().await;
+            if let Some(ref sm) = *sm_lock {
+                let shortcut_state = sm.get_version_shortcut_state(&tag);
+                Ok(json!({
+                    "tag": shortcut_state.tag,
+                    "menu": shortcut_state.menu,
+                    "desktop": shortcut_state.desktop
+                }))
+            } else {
+                Ok(json!({
+                    "tag": tag,
+                    "menu": false,
+                    "desktop": false
+                }))
+            }
         }
 
         "get_all_shortcut_states" => {
-            // TODO: Implement getting all shortcut states
-            Ok(json!({}))
+            let sm_lock = state.shortcut_manager.read().await;
+            if let Some(ref sm) = *sm_lock {
+                let states = sm.get_all_shortcut_states();
+                let result: HashMap<String, serde_json::Value> = states
+                    .into_iter()
+                    .map(|(tag, state)| (tag, json!({
+                        "tag": state.tag,
+                        "menu": state.menu,
+                        "desktop": state.desktop
+                    })))
+                    .collect();
+                Ok(json!(result))
+            } else {
+                Ok(json!({}))
+            }
         }
 
         "toggle_menu" => {
@@ -841,8 +870,15 @@ async fn dispatch_method(
                 if let Some(ref vm) = *vm_lock {
                     let version_dir = vm.version_path(t);
                     drop(vm_lock);
-                    let result = api.toggle_menu_shortcut(t, &version_dir).await?;
-                    Ok(serde_json::to_value(result)?)
+                    let sm_lock = state.shortcut_manager.read().await;
+                    if let Some(ref sm) = *sm_lock {
+                        match sm.toggle_menu_shortcut(t, &version_dir) {
+                            Ok(result) => Ok(json!(result.success)),
+                            Err(e) => Ok(json!({"success": false, "error": e.to_string()}))
+                        }
+                    } else {
+                        Ok(json!(false))
+                    }
                 } else {
                     Ok(json!(false))
                 }
@@ -858,8 +894,15 @@ async fn dispatch_method(
                 if let Some(ref vm) = *vm_lock {
                     let version_dir = vm.version_path(t);
                     drop(vm_lock);
-                    let result = api.toggle_desktop_shortcut(t, &version_dir).await?;
-                    Ok(serde_json::to_value(result)?)
+                    let sm_lock = state.shortcut_manager.read().await;
+                    if let Some(ref sm) = *sm_lock {
+                        match sm.toggle_desktop_shortcut(t, &version_dir) {
+                            Ok(result) => Ok(json!(result.success)),
+                            Err(e) => Ok(json!({"success": false, "error": e.to_string()}))
+                        }
+                    } else {
+                        Ok(json!(false))
+                    }
                 } else {
                     Ok(json!(false))
                 }
@@ -870,13 +913,21 @@ async fn dispatch_method(
 
         // Legacy shortcut methods (deprecated but still supported)
         "menu_exists" => {
-            // Check if any menu shortcut exists
-            Ok(json!(false))
+            let sm_lock = state.shortcut_manager.read().await;
+            if let Some(ref sm) = *sm_lock {
+                Ok(json!(sm.menu_exists()))
+            } else {
+                Ok(json!(false))
+            }
         }
 
         "desktop_exists" => {
-            // Check if any desktop shortcut exists
-            Ok(json!(false))
+            let sm_lock = state.shortcut_manager.read().await;
+            if let Some(ref sm) = *sm_lock {
+                Ok(json!(sm.desktop_exists()))
+            } else {
+                Ok(json!(false))
+            }
         }
 
         "install_icon" => {
@@ -983,7 +1034,7 @@ async fn dispatch_method(
             let subtype = get_str_param!(params, "subtype", "subtype").map(String::from);
             let security_acknowledged = get_bool_param!(params, "security_acknowledged", "securityAcknowledged");
 
-            let spec = pumas_core::model_library::ModelImportSpec {
+            let spec = pumas_library::model_library::ModelImportSpec {
                 path: local_path,
                 family,
                 official_name,
@@ -1006,7 +1057,7 @@ async fn dispatch_method(
             let quant = get_str_param!(params, "quant", "quant").map(String::from);
             let filename = get_str_param!(params, "filename", "filename").map(String::from);
 
-            let request = pumas_core::DownloadRequest {
+            let request = pumas_library::DownloadRequest {
                 repo_id,
                 family,
                 official_name,
@@ -1035,7 +1086,7 @@ async fn dispatch_method(
             let quant = get_str_param!(params, "quant", "quant").map(String::from);
             let filename = get_str_param!(params, "filename", "filename").map(String::from);
 
-            let request = pumas_core::DownloadRequest {
+            let request = pumas_library::DownloadRequest {
                 repo_id,
                 family,
                 official_name,
@@ -1140,7 +1191,7 @@ async fn dispatch_method(
 
         "import_batch" => {
             // Parse the imports array from params
-            let imports: Vec<pumas_core::model_library::ModelImportSpec> = params
+            let imports: Vec<pumas_library::model_library::ModelImportSpec> = params
                 .get("imports")
                 .and_then(|v| serde_json::from_value(v.clone()).ok())
                 .unwrap_or_default();
@@ -1187,7 +1238,7 @@ async fn dispatch_method(
             let paths: Vec<std::path::PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
 
             // Detect sharded sets
-            let sets = pumas_core::sharding::detect_sharded_sets(&paths);
+            let sets = pumas_library::sharding::detect_sharded_sets(&paths);
 
             // Convert to serializable format
             let result: std::collections::HashMap<String, Vec<String>> = sets
@@ -1237,7 +1288,7 @@ async fn dispatch_method(
 
             match extension.as_str() {
                 "gguf" => {
-                    match pumas_core::model_library::extract_gguf_metadata(&file_path) {
+                    match pumas_library::model_library::extract_gguf_metadata(&file_path) {
                         Ok(metadata) => {
                             // Convert HashMap<String, String> to Value
                             let metadata_value: serde_json::Map<String, Value> = metadata
@@ -1304,7 +1355,7 @@ async fn dispatch_method(
 
                 match extension.as_str() {
                     "gguf" => {
-                        match pumas_core::model_library::extract_gguf_metadata(file_path) {
+                        match pumas_library::model_library::extract_gguf_metadata(file_path) {
                             Ok(metadata) => {
                                 let metadata_value: serde_json::Map<String, Value> = metadata
                                     .into_iter()
@@ -1627,7 +1678,7 @@ async fn dispatch_method(
         // ====================================================================
         _ => {
             warn!("Method not found: {}", method);
-            Err(pumas_core::PumasError::Other(format!(
+            Err(pumas_library::PumasError::Other(format!(
                 "Method not found: {}",
                 method
             )))

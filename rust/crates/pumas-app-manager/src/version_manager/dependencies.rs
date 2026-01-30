@@ -2,11 +2,11 @@
 //!
 //! Handles checking and installing dependencies using pip/uv.
 
-use pumas_core::config::AppId;
-use pumas_core::models::DependencyStatus;
+use pumas_library::config::AppId;
+use pumas_library::models::DependencyStatus;
 use crate::version_manager::constraints::ConstraintsManager;
 use crate::version_manager::progress::ProgressUpdate;
-use pumas_core::{PumasError, Result};
+use pumas_library::{PumasError, Result};
 use regex::Regex;
 use std::collections::HashSet;
 use std::path::PathBuf;

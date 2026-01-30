@@ -5,12 +5,13 @@
 
 mod handler;
 mod server;
+mod shortcut;
 mod wrapper;
 
 use anyhow::Result;
 use clap::Parser;
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
-use pumas_core::AppId;
+use pumas_library::AppId;
 use std::path::PathBuf;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -78,7 +79,7 @@ async fn main() -> Result<()> {
     info!("Launcher root: {}", launcher_root.display());
 
     // Create the core API instance (model library, system utilities)
-    let api = pumas_core::PumasApi::new(&launcher_root).await?;
+    let api = pumas_library::PumasApi::new(&launcher_root).await?;
 
     // Initialize version manager for ComfyUI (from pumas-app-manager)
     let version_manager = match VersionManager::new(&launcher_root, AppId::ComfyUI).await {

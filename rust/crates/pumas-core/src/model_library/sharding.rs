@@ -74,7 +74,7 @@ static VALIDATION_PATTERN: LazyLock<Regex> =
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use pumas_core::model_library::sharding::detect_sharded_sets;
+/// use pumas_library::model_library::sharding::detect_sharded_sets;
 ///
 /// let files = vec![
 ///     PathBuf::from("model-00001-of-00003.safetensors"),
@@ -186,7 +186,7 @@ pub fn detect_sharded_sets(files: &[PathBuf]) -> HashMap<String, Vec<PathBuf>> {
 ///
 /// ```
 /// use std::path::PathBuf;
-/// use pumas_core::model_library::sharding::validate_shard_completeness;
+/// use pumas_library::model_library::sharding::validate_shard_completeness;
 ///
 /// let shards = vec![
 ///     PathBuf::from("model-00001-of-00003.safetensors"),

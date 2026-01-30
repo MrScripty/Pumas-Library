@@ -9,10 +9,10 @@
 //! # Example
 //!
 //! ```rust,ignore
-//! use pumas_core::PumasApi;
+//! use pumas_library::PumasApi;
 //!
 //! #[tokio::main]
-//! async fn main() -> pumas_core::Result<()> {
+//! async fn main() -> pumas_library::Result<()> {
 //!     let api = PumasApi::new("/path/to/pumas").await?;
 //!
 //!     // List models in the library
@@ -38,7 +38,6 @@ pub mod models;
 pub mod network;
 pub mod platform;
 pub mod process;
-pub mod shortcut;
 pub mod system;
 
 // Re-export commonly used types
@@ -55,7 +54,6 @@ pub use model_library::{
 };
 pub use models::CommitInfo;
 pub use process::{ProcessInfo, ProcessManager};
-pub use shortcut::{ShortcutManager, ShortcutResult, ShortcutState};
 pub use system::{
     check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,
     ResourceTracker, SystemCheckResult, SystemResourceSnapshot, SystemUtils,
@@ -82,8 +80,6 @@ pub struct PumasApi {
     network_manager: Arc<network::NetworkManager>,
     /// Process manager for managing running processes (optional feature)
     process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
-    /// Shortcut manager for desktop/menu shortcuts (optional feature)
-    shortcut_manager: Arc<RwLock<Option<shortcut::ShortcutManager>>>,
     /// System utilities
     system_utils: Arc<system::SystemUtils>,
     /// Model library for managing AI models (required, immutable after init)
@@ -102,7 +98,226 @@ struct ApiState {
     background_fetch_completed: bool,
 }
 
+/// Builder for configuring PumasApi initialization.
+///
+/// Use this for more control over API initialization options.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use pumas_library::PumasApi;
+///
+/// let api = PumasApi::builder("./my-models")
+///     .auto_create_dirs(true)
+///     .with_hf_client(false)
+///     .build()
+///     .await?;
+/// ```
+pub struct PumasApiBuilder {
+    launcher_root: PathBuf,
+    auto_create_dirs: bool,
+    enable_hf_client: bool,
+    enable_process_manager: bool,
+}
+
+impl PumasApiBuilder {
+    /// Create a new builder with the launcher root directory.
+    pub fn new(launcher_root: impl Into<PathBuf>) -> Self {
+        Self {
+            launcher_root: launcher_root.into(),
+            auto_create_dirs: false,
+            enable_hf_client: true,
+            enable_process_manager: true,
+        }
+    }
+
+    /// Auto-create required directories if they don't exist.
+    ///
+    /// When enabled, the builder will create the following directories:
+    /// - `launcher-data/`
+    /// - `launcher-data/metadata/`
+    /// - `launcher-data/cache/`
+    /// - `launcher-data/mapping-configs/`
+    /// - `shared-resources/models/`
+    ///
+    /// Default: `false` (directories must exist)
+    pub fn auto_create_dirs(mut self, enable: bool) -> Self {
+        self.auto_create_dirs = enable;
+        self
+    }
+
+    /// Enable or disable HuggingFace client initialization.
+    ///
+    /// When disabled, HuggingFace search and download features will not be available.
+    ///
+    /// Default: `true`
+    pub fn with_hf_client(mut self, enable: bool) -> Self {
+        self.enable_hf_client = enable;
+        self
+    }
+
+    /// Enable or disable process manager initialization.
+    ///
+    /// When disabled, ComfyUI process management features will not be available.
+    ///
+    /// Default: `true`
+    pub fn with_process_manager(mut self, enable: bool) -> Self {
+        self.enable_process_manager = enable;
+        self
+    }
+
+    /// Create the required directory structure.
+    fn create_directory_structure(launcher_root: &PathBuf) -> Result<()> {
+        use std::fs;
+
+        let dirs = [
+            launcher_root.join("launcher-data"),
+            launcher_root.join("launcher-data").join("metadata"),
+            launcher_root.join("launcher-data").join("cache"),
+            launcher_root.join("launcher-data").join("cache").join("hf"),
+            launcher_root.join("launcher-data").join("mapping-configs"),
+            launcher_root.join("launcher-data").join("logs"),
+            launcher_root.join("shared-resources"),
+            launcher_root.join("shared-resources").join("models"),
+        ];
+
+        for dir in &dirs {
+            if !dir.exists() {
+                fs::create_dir_all(dir).map_err(|e| PumasError::Io {
+                    message: format!("Failed to create directory: {}", dir.display()),
+                    path: Some(dir.clone()),
+                    source: Some(e),
+                })?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Build the PumasApi instance.
+    pub async fn build(self) -> Result<PumasApi> {
+        // Auto-create directories if requested
+        if self.auto_create_dirs {
+            // Create launcher_root if it doesn't exist
+            if !self.launcher_root.exists() {
+                std::fs::create_dir_all(&self.launcher_root).map_err(|e| PumasError::Io {
+                    message: format!("Failed to create launcher root: {}", self.launcher_root.display()),
+                    path: Some(self.launcher_root.clone()),
+                    source: Some(e),
+                })?;
+            }
+            Self::create_directory_structure(&self.launcher_root)?;
+        } else {
+            // Ensure the launcher root exists
+            if !self.launcher_root.exists() {
+                return Err(PumasError::Config {
+                    message: format!("Launcher root does not exist: {}", self.launcher_root.display()),
+                });
+            }
+        }
+
+        let state = Arc::new(RwLock::new(ApiState {
+            background_fetch_completed: false,
+        }));
+
+        // Initialize network manager for connectivity checking
+        let network_manager = Arc::new(
+            network::NetworkManager::new().map_err(|e| PumasError::Config {
+                message: format!("Failed to initialize network manager: {}", e),
+            })?,
+        );
+
+        // Check initial connectivity (non-blocking, will update state)
+        let nm_clone = network_manager.clone();
+        tokio::spawn(async move {
+            nm_clone.check_connectivity().await;
+        });
+
+        // Initialize process manager (if enabled)
+        let process_manager = if self.enable_process_manager {
+            match process::ProcessManager::new(&self.launcher_root, None) {
+                Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize process manager: {}", e);
+                    Arc::new(RwLock::new(None))
+                }
+            }
+        } else {
+            Arc::new(RwLock::new(None))
+        };
+
+        // Initialize system utilities
+        let system_utils = Arc::new(system::SystemUtils::new(&self.launcher_root));
+
+        // Initialize model library for AI model management
+        let model_library_dir = self.launcher_root
+            .join("shared-resources")
+            .join("models");
+        let mapping_config_dir = self.launcher_root
+            .join("launcher-data")
+            .join("mapping-configs");
+
+        // Initialize HuggingFace client (if enabled)
+        let hf_client = if self.enable_hf_client {
+            let cache_dir = self.launcher_root
+                .join("launcher-data")
+                .join(config::PathsConfig::CACHE_DIR_NAME);
+            let hf_cache_dir = cache_dir.join("hf");
+            match model_library::HuggingFaceClient::new(&hf_cache_dir) {
+                Ok(client) => Some(client),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize HuggingFace client: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Initialize model library (required - core functionality)
+        let model_library = model_library::ModelLibrary::new(&model_library_dir)
+            .await
+            .map_err(|e| PumasError::Config {
+                message: format!("Model library initialization failed: {}", e),
+            })?;
+        let model_library = Arc::new(model_library);
+        let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
+        let model_importer = model_library::ModelImporter::new(model_library.clone());
+
+        Ok(PumasApi {
+            launcher_root: self.launcher_root,
+            _state: state,
+            network_manager,
+            process_manager,
+            system_utils,
+            model_library,
+            model_mapper,
+            hf_client,
+            model_importer,
+        })
+    }
+}
+
 impl PumasApi {
+    /// Create a builder for PumasApi.
+    ///
+    /// Use the builder for more control over initialization options:
+    /// - `auto_create_dirs`: Create required directories automatically
+    /// - `with_hf_client`: Enable/disable HuggingFace integration
+    /// - `with_process_manager`: Enable/disable process management
+    ///
+    /// # Example
+    ///
+    /// ```rust,ignore
+    /// let api = PumasApi::builder("./my-models")
+    ///     .auto_create_dirs(true)
+    ///     .build()
+    ///     .await?;
+    /// ```
+    pub fn builder(launcher_root: impl Into<PathBuf>) -> PumasApiBuilder {
+        PumasApiBuilder::new(launcher_root)
+    }
+
     /// Create a new PumasApi instance.
     ///
     /// # Arguments
@@ -140,15 +355,6 @@ impl PumasApi {
             Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
             Err(e) => {
                 tracing::warn!("Failed to initialize process manager: {}", e);
-                Arc::new(RwLock::new(None))
-            }
-        };
-
-        // Initialize shortcut manager
-        let shortcut_manager = match shortcut::ShortcutManager::new(&launcher_root) {
-            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
-            Err(e) => {
-                tracing::warn!("Failed to initialize shortcut manager: {}", e);
                 Arc::new(RwLock::new(None))
             }
         };
@@ -193,7 +399,6 @@ impl PumasApi {
             _state: state,
             network_manager,
             process_manager,
-            shortcut_manager,
             system_utils,
             model_library,
             model_mapper,
@@ -559,124 +764,6 @@ impl PumasApi {
             mgr.last_launch_error()
         } else {
             None
-        }
-    }
-
-    // ========================================
-    // Shortcut Management Methods
-    // ========================================
-
-    /// Get shortcut state for a version.
-    pub async fn get_version_shortcut_state(&self, tag: &str) -> models::ShortcutState {
-        let mgr_lock = self.shortcut_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            let state = mgr.get_version_shortcut_state(tag);
-            models::ShortcutState {
-                tag: state.tag,
-                menu: state.menu,
-                desktop: state.desktop,
-            }
-        } else {
-            models::ShortcutState {
-                tag: tag.to_string(),
-                menu: false,
-                desktop: false,
-            }
-        }
-    }
-
-    /// Create shortcuts for a version.
-    ///
-    /// The caller (RPC layer) is responsible for providing the version directory path.
-    pub async fn create_version_shortcuts(
-        &self,
-        tag: &str,
-        version_dir: &std::path::Path,
-        create_menu: bool,
-        create_desktop: bool,
-    ) -> Result<models::ShortcutState> {
-        if !version_dir.exists() {
-            return Err(PumasError::NotFound {
-                resource: format!("Version directory: {}", version_dir.display()),
-            });
-        }
-
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-        if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.create_version_shortcuts(tag, version_dir, create_menu, create_desktop)?;
-            Ok(models::ShortcutState {
-                tag: result.state.tag,
-                menu: result.state.menu,
-                desktop: result.state.desktop,
-            })
-        } else {
-            Err(PumasError::Config {
-                message: "Shortcut manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Remove shortcuts for a version.
-    pub async fn remove_version_shortcuts(
-        &self,
-        tag: &str,
-        remove_menu: bool,
-        remove_desktop: bool,
-    ) -> Result<models::ShortcutState> {
-        let mgr_lock = self.shortcut_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            let result = mgr.remove_version_shortcuts(tag, remove_menu, remove_desktop)?;
-            Ok(models::ShortcutState {
-                tag: result.state.tag,
-                menu: result.state.menu,
-                desktop: result.state.desktop,
-            })
-        } else {
-            Err(PumasError::Config {
-                message: "Shortcut manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Toggle menu shortcut for a version.
-    ///
-    /// The caller (RPC layer) is responsible for providing the version directory path.
-    pub async fn toggle_menu_shortcut(&self, tag: &str, version_dir: &std::path::Path) -> Result<bool> {
-        if !version_dir.exists() {
-            return Err(PumasError::NotFound {
-                resource: format!("Version directory: {}", version_dir.display()),
-            });
-        }
-
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-        if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.toggle_menu_shortcut(tag, version_dir)?;
-            Ok(result.success)
-        } else {
-            Err(PumasError::Config {
-                message: "Shortcut manager not initialized".to_string(),
-            })
-        }
-    }
-
-    /// Toggle desktop shortcut for a version.
-    ///
-    /// The caller (RPC layer) is responsible for providing the version directory path.
-    pub async fn toggle_desktop_shortcut(&self, tag: &str, version_dir: &std::path::Path) -> Result<bool> {
-        if !version_dir.exists() {
-            return Err(PumasError::NotFound {
-                resource: format!("Version directory: {}", version_dir.display()),
-            });
-        }
-
-        let shortcut_mgr_lock = self.shortcut_manager.read().await;
-        if let Some(ref sm) = *shortcut_mgr_lock {
-            let result = sm.toggle_desktop_shortcut(tag, version_dir)?;
-            Ok(result.success)
-        } else {
-            Err(PumasError::Config {
-                message: "Shortcut manager not initialized".to_string(),
-            })
         }
     }
 

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 /// # Example
 ///
 /// ```ignore
-/// use pumas_core::models::ApiResponse;
+/// use pumas_library::models::ApiResponse;
 ///
 /// #[derive(Serialize)]
 /// struct DiskSpaceData {

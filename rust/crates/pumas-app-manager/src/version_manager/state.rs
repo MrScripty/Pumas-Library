@@ -3,10 +3,10 @@
 //! Manages the state of installed, active, and default versions.
 //! Handles state persistence and validation.
 
-use pumas_core::config::AppId;
-use pumas_core::metadata::{InstalledVersionMetadata, MetadataManager};
+use pumas_library::config::AppId;
+use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use crate::version_manager::ValidationResult;
-use pumas_core::{PumasError, Result};
+use pumas_library::{PumasError, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -79,7 +79,7 @@ impl VersionState {
     /// 4. Newest installed version
     fn determine_active_version(
         &self,
-        versions: &pumas_core::metadata::VersionsMetadata,
+        versions: &pumas_library::metadata::VersionsMetadata,
     ) -> Result<Option<String>> {
         // 1. Check .active-version file
         let active_file = self.launcher_root.join(".active-version");

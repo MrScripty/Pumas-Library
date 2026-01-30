@@ -9,7 +9,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use pumas_core::system::SystemUtils;
+//! use pumas_library::system::SystemUtils;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

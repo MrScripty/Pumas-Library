@@ -5,7 +5,7 @@
 //! - Generating version-specific icons with overlays (requires external tools)
 //! - Icon cache updates
 
-use crate::error::{PumasError, Result};
+use pumas_library::error::{PumasError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;

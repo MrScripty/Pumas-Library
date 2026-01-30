@@ -13,8 +13,8 @@
 //!
 //! # Example
 //!
-//! ```rust,no_run
-//! use pumas_core::shortcut::ShortcutManager;
+//! ```rust,ignore
+//! use crate::shortcut::ShortcutManager;
 //! use std::path::Path;
 //!
 //! fn main() -> anyhow::Result<()> {

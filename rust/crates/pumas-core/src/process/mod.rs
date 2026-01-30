@@ -11,7 +11,7 @@
 //! # Example
 //!
 //! ```rust,no_run
-//! use pumas_core::process::ProcessManager;
+//! use pumas_library::process::ProcessManager;
 //!
 //! #[tokio::main]
 //! async fn main() -> anyhow::Result<()> {

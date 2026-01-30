@@ -20,5 +20,5 @@ pub use version_manager::{
 };
 
 // Re-export pumas-core types that are commonly needed with app manager
-pub use pumas_core::config::AppId;
-pub use pumas_core::error::{PumasError, Result};
+pub use pumas_library::config::AppId;
+pub use pumas_library::error::{PumasError, Result};

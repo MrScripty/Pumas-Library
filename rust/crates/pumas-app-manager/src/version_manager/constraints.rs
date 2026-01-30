@@ -3,7 +3,7 @@
 //! Resolves unpinned dependencies to specific versions based on release dates
 //! for reproducible installations.
 
-use pumas_core::{PumasError, Result};
+use pumas_library::{PumasError, Result};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

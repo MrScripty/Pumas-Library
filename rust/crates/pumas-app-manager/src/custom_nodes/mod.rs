@@ -12,7 +12,7 @@ use std::path::PathBuf;
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
-use pumas_core::error::{PumasError, Result};
+use pumas_library::error::{PumasError, Result};
 
 /// Manager for custom nodes in ComfyUI versions.
 pub struct CustomNodesManager {

@@ -76,9 +76,12 @@ impl RetryConfig {
         let capped_secs = delay_secs.min(self.max_delay.as_secs_f64());
 
         let final_secs = if self.jitter {
-            // Add jitter: random value between 0 and delay * 2
+            // Decorrelated jitter: multiply delay by random factor between 0.5 and 1.5
+            // This keeps the average delay the same while adding randomness to prevent
+            // thundering herd, without allowing near-zero delays
             let mut rng = rand::rng();
-            rng.random_range(0.0..capped_secs * 2.0).min(self.max_delay.as_secs_f64())
+            let jitter_factor = rng.random_range(0.5..1.5);
+            (capped_secs * jitter_factor).min(self.max_delay.as_secs_f64())
         } else {
             capped_secs
         };
@@ -220,14 +223,29 @@ mod tests {
     #[test]
     fn test_delay_with_jitter() {
         let config = RetryConfig::new()
-            .with_base_delay(Duration::from_secs(1))
+            .with_base_delay(Duration::from_secs(2))
             .with_jitter(true);
 
-        // With jitter, delay should be random but bounded
-        for _ in 0..10 {
+        // With decorrelated jitter, delay should be between 0.5x and 1.5x the base
+        // For attempt 0 with base 2s: expected range is 1s to 3s
+        for _ in 0..20 {
             let delay = config.calculate_delay(0);
-            // Max delay with jitter is min(base * 2, max_delay) = 2s
-            assert!(delay <= Duration::from_secs(2));
+            // Jitter factor is 0.5 to 1.5, so delay should be 1s to 3s
+            assert!(
+                delay >= Duration::from_secs(1) && delay <= Duration::from_secs(3),
+                "Delay {:?} should be between 1s and 3s",
+                delay
+            );
+        }
+
+        // For attempt 1 with base 2s: 2 * 2^1 = 4s, range is 2s to 6s
+        for _ in 0..20 {
+            let delay = config.calculate_delay(1);
+            assert!(
+                delay >= Duration::from_secs(2) && delay <= Duration::from_secs(6),
+                "Delay {:?} should be between 2s and 6s",
+                delay
+            );
         }
     }
 

@@ -14,6 +14,8 @@ use crate::model_library::types::{
     DownloadRequest, DownloadStatus, HfMetadataResult, HfSearchParams, HuggingFaceModel,
     LfsFileInfo, ModelDownloadProgress, RepoFileTree,
 };
+use crate::network::{CacheStrategy, WebSource, WebSourceId};
+use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
+use tracing::{debug, warn};
 
 /// HuggingFace API base URL.
 const HF_API_BASE: &str = "https://huggingface.co/api";
@@ -747,6 +750,66 @@ impl HuggingFaceClient {
 
     fn write_cache<T: Serialize>(&self, path: &Path, data: &T) -> Result<()> {
         atomic_write_json(path, data, false)
+    }
+}
+
+// === WebSource trait implementations ===
+
+impl WebSourceId for HuggingFaceClient {
+    fn id(&self) -> &'static str {
+        "huggingface"
+    }
+
+    fn domains(&self) -> &[&'static str] {
+        &["huggingface.co"]
+    }
+}
+
+impl CacheStrategy for HuggingFaceClient {
+    fn default_ttl(&self) -> Duration {
+        Duration::from_secs(REPO_CACHE_TTL_SECS)
+    }
+
+    fn allow_stale_on_offline(&self) -> bool {
+        true
+    }
+
+    fn max_stale_age(&self) -> Option<Duration> {
+        // Allow stale data up to 7 days old for HuggingFace
+        Some(Duration::from_secs(7 * 24 * 60 * 60))
+    }
+}
+
+#[async_trait]
+impl WebSource for HuggingFaceClient {
+    fn has_cache(&self, key: &str) -> bool {
+        // Check if we have cached file tree for this repo
+        let cache_path = self.get_cache_path(key, "files");
+        cache_path.exists()
+    }
+
+    fn is_cache_fresh(&self, key: &str) -> bool {
+        let cache_path = self.get_cache_path(key, "files");
+        if !cache_path.exists() {
+            return false;
+        }
+
+        // Check if cache is within TTL
+        std::fs::metadata(&cache_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.elapsed().ok())
+            .map(|elapsed| elapsed.as_secs() < REPO_CACHE_TTL_SECS)
+            .unwrap_or(false)
+    }
+
+    async fn on_network_restored(&self) {
+        debug!("HuggingFace source: network restored");
+        // Could trigger cache refresh here if needed
+    }
+
+    fn on_circuit_open(&self, domain: &str) {
+        warn!("HuggingFace source: circuit breaker opened for {}", domain);
     }
 }
 

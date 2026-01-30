@@ -10,7 +10,9 @@ use crate::config::{AppId, NetworkConfig};
 use crate::models::{CacheStatus, GitHubReleasesCache};
 use crate::network::client::HttpClient;
 use crate::network::retry::{retry_async, RetryConfig};
+use super::web_source::{CacheStrategy, WebSource, WebSourceId};
 use crate::{PumasError, Result};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use mini_moka::sync::Cache;
 use reqwest::StatusCode;
@@ -485,6 +487,62 @@ impl GitHubClient {
             repo
         );
         Ok(all_releases)
+    }
+}
+
+// === WebSource trait implementations ===
+
+impl WebSourceId for GitHubClient {
+    fn id(&self) -> &'static str {
+        "github"
+    }
+
+    fn domains(&self) -> &[&'static str] {
+        &["api.github.com"]
+    }
+}
+
+impl CacheStrategy for GitHubClient {
+    fn default_ttl(&self) -> Duration {
+        NetworkConfig::GITHUB_RELEASES_TTL
+    }
+
+    fn allow_stale_on_offline(&self) -> bool {
+        true
+    }
+
+    fn max_stale_age(&self) -> Option<Duration> {
+        // Allow stale data up to 7 days old
+        Some(Duration::from_secs(7 * 24 * 60 * 60))
+    }
+}
+
+#[async_trait]
+impl WebSource for GitHubClient {
+    fn has_cache(&self, key: &str) -> bool {
+        self.cache.get_memory(key).is_some() || self.cache.get_disk(key).is_some()
+    }
+
+    fn is_cache_fresh(&self, key: &str) -> bool {
+        // Memory cache is always fresh (managed by TTL internally)
+        if self.cache.get_memory(key).is_some() {
+            return true;
+        }
+
+        // Check disk cache validity
+        self.cache
+            .get_disk(key)
+            .map(|c| self.cache.is_disk_cache_valid(&c))
+            .unwrap_or(false)
+    }
+
+    async fn on_network_restored(&self) {
+        debug!("GitHub source: network restored, background refresh may occur");
+        // The existing caching logic will handle refresh on next request
+    }
+
+    fn on_circuit_open(&self, domain: &str) {
+        warn!("GitHub source: circuit breaker opened for {}", domain);
     }
 }
 

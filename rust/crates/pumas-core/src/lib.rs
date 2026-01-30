@@ -78,6 +78,8 @@ pub struct PumasApi {
     launcher_root: PathBuf,
     /// Shared state (will be expanded as we implement more features)
     _state: Arc<RwLock<ApiState>>,
+    /// Network manager for connectivity and web source management
+    network_manager: Arc<network::NetworkManager>,
     /// Process manager for managing running processes (optional feature)
     process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
     /// Shortcut manager for desktop/menu shortcuts (optional feature)
@@ -119,6 +121,19 @@ impl PumasApi {
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
         }));
+
+        // Initialize network manager for connectivity checking
+        let network_manager = Arc::new(
+            network::NetworkManager::new().map_err(|e| PumasError::Config {
+                message: format!("Failed to initialize network manager: {}", e),
+            })?,
+        );
+
+        // Check initial connectivity (non-blocking, will update state)
+        let nm_clone = network_manager.clone();
+        tokio::spawn(async move {
+            nm_clone.check_connectivity().await;
+        });
 
         // Initialize process manager
         let process_manager = match process::ProcessManager::new(&launcher_root, None) {
@@ -176,6 +191,7 @@ impl PumasApi {
         Ok(Self {
             launcher_root,
             _state: state,
+            network_manager,
             process_manager,
             shortcut_manager,
             system_utils,
@@ -217,6 +233,35 @@ impl PumasApi {
     }
 
     // ========================================
+    // Network Connectivity
+    // ========================================
+
+    /// Check if network is currently online.
+    pub fn is_online(&self) -> bool {
+        self.network_manager.is_online()
+    }
+
+    /// Get current network connectivity state.
+    pub fn connectivity_state(&self) -> network::ConnectivityState {
+        self.network_manager.connectivity()
+    }
+
+    /// Check network connectivity (performs actual probe).
+    pub async fn check_connectivity(&self) -> network::ConnectivityState {
+        self.network_manager.check_connectivity().await
+    }
+
+    /// Get detailed network status including circuit breaker states.
+    pub async fn network_status(&self) -> network::NetworkStatus {
+        self.network_manager.status().await
+    }
+
+    /// Get the network manager for advanced operations.
+    pub fn network_manager(&self) -> &Arc<network::NetworkManager> {
+        &self.network_manager
+    }
+
+    // ========================================
     // Status & System Methods (stubs for now)
     // ========================================
 
@@ -229,6 +274,24 @@ impl PumasApi {
         let comfyui_running = self.is_comfyui_running().await;
         let last_launch_error = self.get_last_launch_error().await;
         let last_launch_log = self.get_last_launch_log().await;
+
+        // Get app resources if ComfyUI is running
+        let app_resources = if comfyui_running {
+            let mgr_lock = self.process_manager.read().await;
+            if let Some(ref mgr) = *mgr_lock {
+                mgr.aggregate_app_resources().map(|r| models::AppResources {
+                    comfyui: Some(models::AppResourceUsage {
+                        // Convert from GB (f32) to bytes (u64) for frontend
+                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                    }),
+                })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         Ok(models::StatusResponse {
             success: true,
@@ -247,7 +310,7 @@ impl PumasApi {
             comfyui_running,
             last_launch_error,
             last_launch_log,
-            app_resources: None,
+            app_resources,
         })
     }
 

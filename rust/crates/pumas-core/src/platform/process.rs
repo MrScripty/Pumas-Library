@@ -154,40 +154,64 @@ fn terminate_process_windows(pid: u32) -> Result<bool> {
     }
 }
 
-/// Terminate a process group (Unix) or process tree (Windows).
+/// Terminate a process and its children (Unix) or process tree (Windows).
 ///
 /// # Platform Behavior
-/// - **Linux/macOS**: Sends signal to negative PID (process group)
+/// - **Linux/macOS**: Sends signal directly to the process (not process group)
 /// - **Windows**: Uses `taskkill /T` which already handles the tree
+///
+/// Note: We use `kill(pid, ...)` instead of `killpg(pid, ...)` because the process
+/// may not be a process group leader. Using killpg with a non-leader PID would
+/// send signals to the wrong (or non-existent) process group.
 pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     #[cfg(unix)]
     {
-        use nix::sys::signal::{killpg, Signal};
+        use nix::sys::signal::{kill, Signal};
         use nix::unistd::Pid;
         use std::thread::sleep;
         use std::time::Duration;
 
-        let pgid = Pid::from_raw(pid as i32);
+        if !is_process_alive(pid) {
+            debug!("Process {} is not running", pid);
+            return Ok(true);
+        }
 
-        // Try SIGTERM to the process group
-        debug!("Sending SIGTERM to process group {}", pid);
-        let _ = killpg(pgid, Signal::SIGTERM);
+        let nix_pid = Pid::from_raw(pid as i32);
 
-        // Wait
+        // Kill the process directly (not the process group)
+        debug!("Sending SIGTERM to process {}", pid);
+        if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
+            if e == nix::errno::Errno::ESRCH {
+                return Ok(true);
+            }
+            warn!("Failed to send SIGTERM to {}: {}", pid, e);
+        }
+
+        // Wait for graceful termination
         let wait_interval = Duration::from_millis(100);
         let iterations = (timeout_ms / 100).max(1);
 
         for _ in 0..iterations {
             sleep(wait_interval);
             if !is_process_alive(pid) {
+                debug!("Process {} terminated gracefully", pid);
                 return Ok(true);
             }
         }
 
-        // SIGKILL the group
-        debug!("Sending SIGKILL to process group {}", pid);
-        let _ = killpg(pgid, Signal::SIGKILL);
+        // Process still running, use SIGKILL
+        debug!("Process {} still running, sending SIGKILL", pid);
+        if let Err(e) = kill(nix_pid, Signal::SIGKILL) {
+            if e == nix::errno::Errno::ESRCH {
+                return Ok(true);
+            }
+            return Err(PumasError::Other(format!(
+                "Failed to kill process {}: {}",
+                pid, e
+            )));
+        }
 
+        // Brief wait to confirm death
         sleep(Duration::from_millis(100));
         Ok(!is_process_alive(pid))
     }

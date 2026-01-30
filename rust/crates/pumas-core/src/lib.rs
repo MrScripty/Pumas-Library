@@ -402,12 +402,30 @@ impl PumasApi {
             0.0
         };
 
-        // GPU (placeholder - would need nvml-wrapper for real GPU stats)
-        let gpu = models::GpuResources {
-            usage: 0.0,
-            memory: 0,
-            memory_total: 0,
-            temp: None,
+        // GPU - use ResourceTracker's NvidiaSmiMonitor for real GPU stats
+        let gpu = if let Some(ref mgr) = *self.process_manager.read().await {
+            let tracker = mgr.resource_tracker();
+            match tracker.get_system_resources() {
+                Ok(snapshot) => models::GpuResources {
+                    usage: snapshot.gpu_usage,
+                    memory: snapshot.gpu_memory_used,
+                    memory_total: snapshot.gpu_memory_total,
+                    temp: snapshot.gpu_temp,
+                },
+                Err(_) => models::GpuResources {
+                    usage: 0.0,
+                    memory: 0,
+                    memory_total: 0,
+                    temp: None,
+                },
+            }
+        } else {
+            models::GpuResources {
+                usage: 0.0,
+                memory: 0,
+                memory_total: 0,
+                temp: None,
+            }
         };
 
         Ok(models::SystemResourcesResponse {

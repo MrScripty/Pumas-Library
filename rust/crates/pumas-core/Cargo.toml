@@ -86,6 +86,10 @@ rand = "0.9"
 # Directory utilities (home dir, etc.)
 dirs = { workspace = true }
 
+# File system watching
+notify = { workspace = true }
+notify-debouncer-mini = { workspace = true }
+
 # Platform-specific: Unix
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }

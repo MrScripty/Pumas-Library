@@ -44,7 +44,7 @@ export default function App() {
   // --- Custom Hooks ---
   const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
-  const { launchError, launchLogPath, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess();
+  const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, clearStartingState, clearStoppingState, openLogPath } = useComfyUIProcess();
   const { modelGroups, scanModels, fetchModels } = useModels();
 
   const comfyVersions = useVersions({ appId: 'comfyui' });
@@ -103,7 +103,12 @@ export default function App() {
     let waitTimeout: NodeJS.Timeout | null = null;
 
     const startPolling = () => {
-      checkLauncherVersion(true);
+      // Delay update check to not block initial render
+      setTimeout(() => {
+        checkLauncherVersion(true).catch(err => {
+          logger.debug('Background update check failed', { error: err });
+        });
+      }, 3000);
       void fetchDiskSpace();
     };
 
@@ -122,68 +127,53 @@ export default function App() {
     };
   }, []);
 
-  // Update app status based on backend data
+  // Update app status and iconState based on backend data
   useEffect(() => {
-    if (!status) return;
-
-    const freshResources = systemResources;
     setApps(prevApps => prevApps.map(app => {
       if (app.id === 'comfyui') {
-        const resources = status.app_resources?.comfyui;
-
+        // Calculate resource usage percentages
         let gpuUsagePercent: number | undefined = undefined;
-        const gpuTotal = freshResources?.gpu?.memory_total;
-        if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
-          gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
-        }
-
         let ramUsagePercent: number | undefined = undefined;
-        const ramTotal = freshResources?.ram?.total;
-        if (resources?.ram_memory && ramTotal && ramTotal > 0) {
-          ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
+
+        if (status) {
+          const resources = status.app_resources?.comfyui;
+          const gpuTotal = systemResources?.gpu?.memory_total;
+          if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
+            gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
+          }
+          const ramTotal = systemResources?.ram?.total;
+          if (resources?.ram_memory && ramTotal && ramTotal > 0) {
+            ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
+          }
         }
 
-        const updates: Partial<AppConfig> = {
-          status: comfyUIRunning ? 'running' : (depsInstalled ? 'idle' : 'idle'),
+        // Determine iconState - transition states have highest priority
+        let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
+        if (isStopping) {
+          newIconState = 'stopping';
+        } else if (isStarting) {
+          newIconState = 'starting';
+        } else if (comfyUIRunning) {
+          newIconState = 'running';
+        } else if (launchError) {
+          newIconState = 'error';
+        } else if (comfyInstalledVersions.length > 0) {
+          newIconState = 'offline';
+        } else {
+          newIconState = 'uninstalled';
+        }
+
+        return {
+          ...app,
+          status: comfyUIRunning ? 'running' : 'idle',
           ramUsage: ramUsagePercent,
           gpuUsage: gpuUsagePercent,
+          iconState: newIconState,
         };
-
-        if (comfyUIRunning) {
-          updates.iconState = 'running';
-        } else if (launchError) {
-          updates.iconState = 'error';
-        }
-
-        return { ...app, ...updates };
       }
       return app;
     }));
-  }, [status, systemResources, comfyUIRunning, depsInstalled, launchError]);
-
-  // Manage iconState based on ComfyUI installed versions
-  useEffect(() => {
-    setApps(prevApps => prevApps.map(app => {
-      if (app.id === 'comfyui') {
-        let newState: 'running' | 'offline' | 'uninstalled' | 'error';
-
-        if (comfyUIRunning) {
-          newState = 'running';
-        } else if (launchError) {
-          newState = 'error';
-        } else if (comfyInstalledVersions.length > 0) {
-          newState = 'offline';
-        } else {
-          newState = 'uninstalled';
-        }
-
-        if (newState !== app.iconState) {
-          return { ...app, iconState: newState };
-        }
-      }
-      return app;
-    }));
-  }, [comfyInstalledVersions, comfyUIRunning, launchError]);
+  }, [status, systemResources, comfyUIRunning, depsInstalled, launchError, isStarting, isStopping, comfyInstalledVersions]);
 
   // Launch error flash effect is handled by AppIndicator component
 
@@ -219,12 +209,23 @@ export default function App() {
 
   const handleLaunchComfyUI = async () => {
     if (comfyUIRunning) {
-      await stopComfyUI();
+      try {
+        await stopComfyUI();
+        await refetchStatus(false, true);  // Force bypass polling guard
+      } finally {
+        // Clear transition state AFTER status is updated to avoid flash of 'running'
+        clearStoppingState();
+      }
     } else {
-      await launchComfyUI();
+      try {
+        await launchComfyUI();
+        await refetchStatus(false, true);  // Force bypass polling guard
+      } finally {
+        // Clear transition state AFTER status is updated to avoid flash of 'offline'
+        clearStartingState();
+      }
     }
-    await refetchStatus(false);
-    setTimeout(() => refetchStatus(false), 1200);
+    setTimeout(() => refetchStatus(false, true), 1200);
   };
 
   const handleLaunchApp = async (appId: string) => {

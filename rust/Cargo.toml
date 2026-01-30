@@ -92,6 +92,10 @@ uuid = { version = "1", features = ["v4"] }
 # Directory utilities
 dirs = "5"
 
+# File system watching
+notify = "7"
+notify-debouncer-mini = "0.5"
+
 # Platform-specific process management (used conditionally in crates)
 nix = { version = "0.29", features = ["signal", "process"] }
 libc = "0.2"

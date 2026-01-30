@@ -10,8 +10,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 /// JSON-RPC 2.0 request structure.
 #[derive(Debug, Deserialize)]
@@ -179,6 +181,45 @@ macro_rules! get_app_id {
 }
 
 // ============================================================================
+// Helper functions
+// ============================================================================
+
+/// Extract the JSON header from a safetensors file.
+///
+/// Safetensors format: 8-byte header size (little-endian u64) followed by JSON header.
+fn extract_safetensors_header(path: &str) -> std::result::Result<Value, String> {
+    use std::io::Read;
+
+    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+
+    // Read header size (8 bytes, little-endian)
+    let mut size_buf = [0u8; 8];
+    file.read_exact(&mut size_buf).map_err(|e| e.to_string())?;
+    let header_size = u64::from_le_bytes(size_buf) as usize;
+
+    // Sanity check
+    if header_size > 100_000_000 {
+        return Err("Header size too large".to_string());
+    }
+
+    // Read JSON header
+    let mut header_buf = vec![0u8; header_size];
+    file.read_exact(&mut header_buf).map_err(|e| e.to_string())?;
+
+    // Parse JSON - the header contains tensor metadata, not model metadata
+    // Safetensors stores tensor shapes/dtypes, not general metadata like GGUF
+    let header: Value = serde_json::from_slice(&header_buf).map_err(|e| e.to_string())?;
+
+    // Extract __metadata__ field if present (some safetensors files include this)
+    if let Some(metadata) = header.get("__metadata__") {
+        Ok(metadata.clone())
+    } else {
+        // Return tensor info as metadata
+        Ok(header)
+    }
+}
+
+// ============================================================================
 // Method dispatcher
 // ============================================================================
 
@@ -194,6 +235,8 @@ async fn dispatch_method(
         // Status & System
         // ====================================================================
         "get_status" => {
+            // Ensure process manager has current version paths for accurate running detection
+            sync_version_paths_to_process_manager(state).await;
             let mut response = api.get_status().await?;
 
             // Enrich with version-specific data from version manager
@@ -738,16 +781,22 @@ async fn dispatch_method(
         // Process Management
         // ====================================================================
         "is_comfyui_running" => {
+            // Ensure process manager has current version paths for accurate detection
+            sync_version_paths_to_process_manager(state).await;
             let running = api.is_comfyui_running().await;
             Ok(serde_json::to_value(running)?)
         }
 
         "stop_comfyui" => {
+            // Ensure process manager has current version paths for proper PID file cleanup
+            sync_version_paths_to_process_manager(state).await;
             let result = api.stop_comfyui().await?;
-            Ok(serde_json::to_value(result)?)
+            Ok(json!({ "success": result }))
         }
 
         "launch_comfyui" => {
+            // Ensure process manager has current version paths
+            sync_version_paths_to_process_manager(state).await;
             // Get the active version from version_manager and launch it
             let vm_lock = state.version_manager.read().await;
             if let Some(ref vm) = *vm_lock {
@@ -1177,10 +1226,121 @@ async fn dispatch_method(
 
         "get_embedded_metadata" => {
             let file_path = require_str_param!(params, "file_path", "filePath");
-            // TODO: Implement embedded metadata extraction
+            let path = std::path::Path::new(&file_path);
+
+            // Detect file type from extension
+            let extension = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .map(|s| s.to_lowercase())
+                .unwrap_or_default();
+
+            match extension.as_str() {
+                "gguf" => {
+                    match pumas_core::model_library::extract_gguf_metadata(&file_path) {
+                        Ok(metadata) => {
+                            // Convert HashMap<String, String> to Value
+                            let metadata_value: serde_json::Map<String, Value> = metadata
+                                .into_iter()
+                                .map(|(k, v)| (k, Value::String(v)))
+                                .collect();
+                            Ok(json!({
+                                "success": true,
+                                "file_type": "gguf",
+                                "metadata": metadata_value
+                            }))
+                        }
+                        Err(e) => Ok(json!({
+                            "success": false,
+                            "file_type": "gguf",
+                            "error": e.to_string(),
+                            "metadata": null
+                        }))
+                    }
+                }
+                "safetensors" => {
+                    // Read safetensors JSON header
+                    match extract_safetensors_header(&file_path) {
+                        Ok(header) => Ok(json!({
+                            "success": true,
+                            "file_type": "safetensors",
+                            "metadata": header
+                        })),
+                        Err(e) => Ok(json!({
+                            "success": false,
+                            "file_type": "safetensors",
+                            "error": e,
+                            "metadata": null
+                        }))
+                    }
+                }
+                _ => Ok(json!({
+                    "success": false,
+                    "file_type": "unsupported",
+                    "error": format!("Unsupported file type: {}", extension),
+                    "metadata": null
+                }))
+            }
+        }
+
+        "get_library_model_metadata" => {
+            let model_id = require_str_param!(params, "model_id", "modelId");
+
+            // Get the library
+            let library = api.model_library();
+
+            // Get stored metadata from metadata.json
+            let model_dir = library.library_root().join(&model_id);
+            let stored_metadata = library.load_metadata(&model_dir)?;
+
+            // Find primary model file and get embedded metadata
+            let primary_file = library.get_primary_model_file(&model_id);
+            let embedded_metadata: Option<Value> = if let Some(ref file_path) = primary_file {
+                let extension = file_path
+                    .extension()
+                    .and_then(|e: &std::ffi::OsStr| e.to_str())
+                    .map(|s: &str| s.to_lowercase())
+                    .unwrap_or_default();
+
+                match extension.as_str() {
+                    "gguf" => {
+                        match pumas_core::model_library::extract_gguf_metadata(file_path) {
+                            Ok(metadata) => {
+                                let metadata_value: serde_json::Map<String, Value> = metadata
+                                    .into_iter()
+                                    .map(|(k, v)| (k, Value::String(v)))
+                                    .collect();
+                                Some(json!({
+                                    "file_type": "gguf",
+                                    "metadata": metadata_value
+                                }))
+                            }
+                            Err(_) => None
+                        }
+                    }
+                    "safetensors" => {
+                        match extract_safetensors_header(&file_path.to_string_lossy()) {
+                            Ok(header) => Some(json!({
+                                "file_type": "safetensors",
+                                "metadata": header
+                            })),
+                            Err(_) => None
+                        }
+                    }
+                    _ => None
+                }
+            } else {
+                None
+            };
+
+            let primary_file_str = primary_file.map(|p: std::path::PathBuf| p.to_string_lossy().to_string());
+
             Ok(json!({
-                "success": false,
-                "error": "Not yet implemented"
+                "success": true,
+                "model_id": model_id,
+                "stored_metadata": stored_metadata,
+                "embedded_metadata": embedded_metadata,
+                "primary_file": primary_file_str
             }))
         }
 
@@ -1478,6 +1638,35 @@ async fn dispatch_method(
 // ============================================================================
 // Helper Functions
 // ============================================================================
+
+/// Synchronize version paths from version_manager to process_manager.
+///
+/// This ensures the process manager knows about all installed version directories
+/// so it can properly detect and clean up PID files.
+async fn sync_version_paths_to_process_manager(state: &AppState) {
+    let vm_lock = state.version_manager.read().await;
+    if let Some(ref vm) = *vm_lock {
+        // Get installed versions
+        if let Ok(installed) = vm.get_installed_versions().await {
+            let version_paths: HashMap<String, PathBuf> = installed
+                .into_iter()
+                .map(|tag| {
+                    let path = vm.version_path(&tag);
+                    (tag, path)
+                })
+                .collect();
+
+            info!(
+                "Syncing {} version paths to process manager",
+                version_paths.len()
+            );
+
+            // Update process manager
+            drop(vm_lock);  // Release version_manager lock first
+            state.api.set_process_version_paths(version_paths).await;
+        }
+    }
+}
 
 /// Detect if running in a sandbox environment.
 fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static str>) {

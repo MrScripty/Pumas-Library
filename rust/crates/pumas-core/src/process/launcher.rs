@@ -1,12 +1,20 @@
 //! Process launching functionality.
 
 use crate::error::{PumasError, Result};
+use crate::platform;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
+
+// Platform-specific imports for process detachment
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
+
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 
 /// Configuration for launching a process.
 #[derive(Debug, Clone)]
@@ -173,6 +181,31 @@ impl ProcessLauncher {
             cmd.stderr(Stdio::null());
         }
 
+        // Detach the process from Pumas so it runs independently.
+        // This prevents zombie processes when we kill the child - init will reap it instead.
+        // Without this, killed processes become zombies because Pumas doesn't call wait().
+        #[cfg(unix)]
+        {
+            // SAFETY: setsid() is async-signal-safe and creates a new session.
+            // The child becomes a session leader and is no longer our child in
+            // the process tree sense - init will adopt it.
+            unsafe {
+                cmd.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            // CREATE_NEW_PROCESS_GROUP detaches the process on Windows
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+
         // Spawn the process
         info!("Launching {} from {}", config.tag, config.version_dir.display());
 
@@ -251,62 +284,33 @@ impl ProcessLauncher {
         }
     }
 
-    /// Stop a process by PID.
+    /// Stop a process by PID using the cross-platform process module.
     ///
-    /// Sends SIGTERM first, then SIGKILL after a grace period.
-    #[cfg(unix)]
-    pub fn stop_process(pid: u32, grace_period: Duration) -> Result<bool> {
-        use nix::sys::signal::{kill, Signal};
-        use nix::unistd::Pid;
-
-        let nix_pid = Pid::from_raw(pid as i32);
-
-        // Send SIGTERM
-        info!("Sending SIGTERM to process {}", pid);
-        if let Err(e) = kill(nix_pid, Signal::SIGTERM) {
-            if e == nix::errno::Errno::ESRCH {
-                debug!("Process {} already exited", pid);
-                return Ok(true);
-            }
-            warn!("Failed to send SIGTERM to {}: {}", pid, e);
-        }
-
-        // Wait for graceful shutdown
-        std::thread::sleep(grace_period);
-
-        // Check if still running
-        if kill(nix_pid, None).is_ok() {
-            // Still running - send SIGKILL
-            info!("Process {} still running, sending SIGKILL", pid);
-            if let Err(e) = kill(nix_pid, Signal::SIGKILL) {
-                if e != nix::errno::Errno::ESRCH {
-                    warn!("Failed to send SIGKILL to {}: {}", pid, e);
-                }
-            }
-        }
-
-        Ok(true)
+    /// Uses terminate_process_tree to handle both the main process and any child processes.
+    /// On Unix: sends SIGTERM, waits, then SIGKILL if needed
+    /// On Windows: uses taskkill with /F /T flags
+    pub fn stop_process(pid: u32, timeout_ms: u64) -> Result<bool> {
+        info!("Stopping process {} (timeout: {}ms)", pid, timeout_ms);
+        platform::terminate_process_tree(pid, timeout_ms)
     }
 
-    #[cfg(windows)]
-    pub fn stop_process(pid: u32, _grace_period: Duration) -> Result<bool> {
-        // On Windows, use taskkill
-        let output = Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/F"])
-            .output();
+    /// Stop all processes matching a pattern in their command line.
+    ///
+    /// This is useful for cleaning up orphaned processes that weren't tracked via PID files.
+    /// Returns the number of processes that were stopped.
+    pub fn stop_processes_by_pattern(pattern: &str, timeout_ms: u64) -> Result<u32> {
+        let processes = platform::find_processes_by_cmdline(pattern);
+        let mut stopped = 0;
 
-        match output {
-            Ok(o) if o.status.success() => Ok(true),
-            Ok(o) => {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                warn!("taskkill failed: {}", stderr);
-                Ok(false)
-            }
-            Err(e) => {
-                warn!("Failed to run taskkill: {}", e);
-                Ok(false)
+        for (pid, cmdline) in processes {
+            debug!("Found process {} matching '{}': {}", pid, pattern, cmdline);
+            if platform::terminate_process(pid, timeout_ms)? {
+                info!("Stopped process {} (matched pattern '{}')", pid, pattern);
+                stopped += 1;
             }
         }
+
+        Ok(stopped)
     }
 
     /// Remove a PID file.

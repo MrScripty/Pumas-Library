@@ -14,18 +14,29 @@ const logger = getLogger('useComfyUIProcess');
 export function useComfyUIProcess() {
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launchLogPath, setLaunchLogPath] = useState<string | null>(null);
+  const [isStarting, setIsStarting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
 
   const launchComfyUI = useCallback(async () => {
     if (!isAPIAvailable()) {
       return;
     }
 
+    setIsStarting(true);
     try {
       const result = await api.launch_comfyui();
 
       if (result.success) {
         setLaunchError(null);
         setLaunchLogPath(result.log_path || null);
+        // Open browser when server is ready
+        if (result.ready) {
+          try {
+            await api.open_url('http://127.0.0.1:8188');
+          } catch (e) {
+            logger.warn('Failed to open browser', { error: e });
+          }
+        }
       } else {
         const errMsg = result.error || 'Failed to launch ComfyUI';
         setLaunchError(errMsg);
@@ -42,6 +53,7 @@ export function useComfyUIProcess() {
         logger.error('Unknown error launching ComfyUI', { error });
       }
     }
+    // NOTE: isStarting is cleared by caller via clearStartingState() after status confirms
   }, []);
 
   const stopComfyUI = useCallback(async () => {
@@ -49,6 +61,7 @@ export function useComfyUIProcess() {
       return;
     }
 
+    setIsStopping(true);
     try {
       const result = await api.stop_comfyui();
 
@@ -69,6 +82,16 @@ export function useComfyUIProcess() {
         logger.error('Unknown error stopping ComfyUI', { error });
       }
     }
+    // NOTE: isStopping is cleared by caller via clearStoppingState() after status confirms
+  }, []);
+
+  // Clear transition states - called by App.tsx after status is updated
+  const clearStartingState = useCallback(() => {
+    setIsStarting(false);
+  }, []);
+
+  const clearStoppingState = useCallback(() => {
+    setIsStopping(false);
   }, []);
 
   const openLogPath = useCallback(async (path: string | null | undefined) => {
@@ -92,8 +115,12 @@ export function useComfyUIProcess() {
   return {
     launchError,
     launchLogPath,
+    isStarting,
+    isStopping,
     launchComfyUI,
     stopComfyUI,
+    clearStartingState,
+    clearStoppingState,
     openLogPath,
   };
 }

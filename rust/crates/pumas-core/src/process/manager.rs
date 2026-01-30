@@ -7,7 +7,7 @@ use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::Duration;
+use std::fs;
 use tracing::{debug, error, info, warn};
 
 /// Process with resource information.
@@ -70,6 +70,11 @@ impl ProcessManager {
 
     /// Update the known version paths.
     pub fn set_version_paths(&self, version_paths: HashMap<String, PathBuf>) {
+        info!(
+            "set_version_paths called with {} entries: {:?}",
+            version_paths.len(),
+            version_paths.keys().collect::<Vec<_>>()
+        );
         let mut detector = self.detector.write().unwrap();
         detector.set_version_paths(version_paths);
     }
@@ -77,7 +82,14 @@ impl ProcessManager {
     /// Check if any managed process is running.
     pub fn is_running(&self) -> bool {
         let detector = self.detector.read().unwrap();
-        detector.is_any_running()
+        let processes = detector.detect_processes();
+        let running = !processes.is_empty();
+        info!(
+            "ProcessManager.is_running: {} (found {} processes)",
+            running,
+            processes.len()
+        );
+        running
     }
 
     /// Get all running processes with resource information.
@@ -90,7 +102,7 @@ impl ProcessManager {
             .map(|proc| {
                 let resources = self
                     .resource_tracker
-                    .get_process_resources(proc.pid, true)
+                    .get_process_resources(proc.pid, false)
                     .unwrap_or_default();
 
                 ProcessInfo {
@@ -179,59 +191,86 @@ impl ProcessManager {
     pub fn stop_all(&self) -> Result<bool> {
         let detector = self.detector.read().unwrap();
         let processes = detector.detect_processes();
+        let timeout_ms = 2000; // 2 second grace period
 
-        if processes.is_empty() {
-            return Ok(false);
-        }
+        info!(
+            "stop_all: detected {} processes to stop",
+            processes.len()
+        );
 
         let mut stopped_any = false;
-        let grace_period = Duration::from_millis(500);
 
-        for proc in processes {
-            info!("Stopping process {} ({})", proc.pid, proc.tag.as_deref().unwrap_or("unknown"));
+        // Stop each detected process
+        for proc in &processes {
+            info!(
+                "Stopping process {} (tag={}, source={:?}, pid_file={:?})",
+                proc.pid,
+                proc.tag.as_deref().unwrap_or("unknown"),
+                proc.source,
+                proc.pid_file
+            );
 
-            // Stop the process
-            if ProcessLauncher::stop_process(proc.pid, grace_period)? {
+            // Stop the process using platform module
+            let stop_result = ProcessLauncher::stop_process(proc.pid, timeout_ms)?;
+            info!("stop_process({}) returned: {}", proc.pid, stop_result);
+            if stop_result {
                 stopped_any = true;
             }
 
             // Remove PID file if present
-            if let Some(pid_file) = proc.pid_file {
-                if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
-                    warn!("Failed to remove PID file: {}", e);
+            if let Some(ref pid_file) = proc.pid_file {
+                info!("Removing PID file: {:?}", pid_file);
+                if let Err(e) = ProcessLauncher::remove_pid_file(pid_file) {
+                    warn!("Failed to remove PID file {:?}: {}", pid_file, e);
+                } else {
+                    info!("Successfully removed PID file: {:?}", pid_file);
                 }
+            } else {
+                warn!(
+                    "Process {} has NO pid_file (detected via {:?}) - cannot remove PID file!",
+                    proc.pid, proc.source
+                );
             }
         }
 
-        // Also try to stop any Brave browser windows running ComfyUI
-        #[cfg(unix)]
-        {
-            self.stop_brave_windows();
-        }
-
-        Ok(stopped_any)
-    }
-
-    /// Stop Brave browser windows running ComfyUI.
-    #[cfg(unix)]
-    fn stop_brave_windows(&self) {
-        use std::process::Command;
-
-        let output = Command::new("pgrep")
-            .args(["-f", "brave.*--app=http://127.0.0.1"])
-            .output();
-
-        if let Ok(output) = output {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                for pid_str in stdout.lines() {
-                    if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                        debug!("Stopping Brave window with PID {}", pid);
-                        let _ = ProcessLauncher::stop_process(pid, Duration::from_millis(100));
+        // Also scan for PID files in comfyui-versions directory
+        // This catches cases where version_paths is not populated
+        let versions_dir = self.root_dir.join("comfyui-versions");
+        info!("Scanning for orphaned PID files in: {:?}", versions_dir);
+        if versions_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&versions_dir) {
+                for entry in entries.flatten() {
+                    let pid_file = entry.path().join("comfyui.pid");
+                    if pid_file.exists() {
+                        warn!(
+                            "Found orphaned PID file (not tracked by version_paths): {:?}",
+                            pid_file
+                        );
+                        if let Err(e) = fs::remove_file(&pid_file) {
+                            warn!("Failed to remove orphaned PID file {:?}: {}", pid_file, e);
+                        } else {
+                            info!("Removed orphaned PID file: {:?}", pid_file);
+                        }
                     }
                 }
             }
         }
+
+        // Cleanup any orphaned ComfyUI processes (cross-platform)
+        let orphaned = ProcessLauncher::stop_processes_by_pattern("comfyui-versions", timeout_ms)?;
+        if orphaned > 0 {
+            info!("Stopped {} orphaned comfyui processes", orphaned);
+            stopped_any = true;
+        }
+
+        // Also cleanup browser windows running ComfyUI app mode (cross-platform)
+        let browser_windows = ProcessLauncher::stop_processes_by_pattern("--app=http://127.0.0.1", 500)?;
+        if browser_windows > 0 {
+            info!("Stopped {} browser app windows", browser_windows);
+        }
+
+        info!("stop_all completed, stopped_any={}", stopped_any);
+        Ok(stopped_any)
     }
 
     /// Get the last launch log path.

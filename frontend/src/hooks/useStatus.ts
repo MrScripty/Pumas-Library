@@ -29,8 +29,9 @@ export function useStatus(options: UseStatusOptions = {}) {
   const isPolling = useRef(false);
   const lastResourcesFetch = useRef(0);
 
-  const fetchStatus = useCallback(async (isInitialLoad = false) => {
-    if (isPolling.current) {
+  const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
+    // Allow force=true to bypass the polling guard for manual refreshes
+    if (isPolling.current && !force) {
       return;
     }
 

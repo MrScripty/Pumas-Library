@@ -261,6 +261,11 @@ impl PumasApi {
         &self.network_manager
     }
 
+    /// Get the model library for direct access.
+    pub fn model_library(&self) -> &Arc<model_library::ModelLibrary> {
+        &self.model_library
+    }
+
     // ========================================
     // Status & System Methods (stubs for now)
     // ========================================
@@ -471,6 +476,24 @@ impl PumasApi {
             mgr.get_processes_with_resources()
         } else {
             vec![]
+        }
+    }
+
+    /// Update the version paths for process detection.
+    ///
+    /// This should be called by the RPC layer after obtaining version information
+    /// from the VersionManager. Without this, PID file detection will only check
+    /// the root-level PID file and may miss version-specific PID files.
+    pub async fn set_process_version_paths(&self, version_paths: std::collections::HashMap<String, PathBuf>) {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            tracing::info!(
+                "PumasApi.set_process_version_paths: setting {} version paths",
+                version_paths.len()
+            );
+            mgr.set_version_paths(version_paths);
+        } else {
+            tracing::warn!("PumasApi.set_process_version_paths: process manager not initialized");
         }
     }
 

@@ -82,6 +82,7 @@ pub fn terminate_process(pid: u32, timeout_ms: u64) -> Result<bool> {
 #[cfg(unix)]
 fn terminate_process_unix(pid: u32, timeout_ms: u64) -> Result<bool> {
     use nix::sys::signal::{kill, Signal};
+    use nix::sys::wait::{waitpid, WaitPidFlag};
     use nix::unistd::Pid;
     use std::thread::sleep;
     use std::time::Duration;
@@ -104,6 +105,8 @@ fn terminate_process_unix(pid: u32, timeout_ms: u64) -> Result<bool> {
 
     for _ in 0..iterations {
         sleep(wait_interval);
+        // Try to reap zombie (non-blocking)
+        let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
         if !is_process_alive(pid) {
             debug!("Process {} terminated gracefully", pid);
             return Ok(true);
@@ -122,8 +125,12 @@ fn terminate_process_unix(pid: u32, timeout_ms: u64) -> Result<bool> {
         )));
     }
 
-    // Brief wait to confirm death
+    // Brief wait then reap the zombie
     sleep(Duration::from_millis(100));
+
+    // Reap the zombie to remove it from process table
+    let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
+
     Ok(!is_process_alive(pid))
 }
 
@@ -167,12 +174,15 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
     #[cfg(unix)]
     {
         use nix::sys::signal::{kill, Signal};
+        use nix::sys::wait::{waitpid, WaitPidFlag};
         use nix::unistd::Pid;
         use std::thread::sleep;
         use std::time::Duration;
 
         if !is_process_alive(pid) {
             debug!("Process {} is not running", pid);
+            // Try to reap in case it's a zombie we haven't reaped yet
+            let _ = waitpid(Pid::from_raw(pid as i32), Some(WaitPidFlag::WNOHANG));
             return Ok(true);
         }
 
@@ -193,6 +203,8 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
 
         for _ in 0..iterations {
             sleep(wait_interval);
+            // Try to reap (non-blocking) - this handles zombies
+            let _ = waitpid(nix_pid, Some(WaitPidFlag::WNOHANG));
             if !is_process_alive(pid) {
                 debug!("Process {} terminated gracefully", pid);
                 return Ok(true);
@@ -211,8 +223,24 @@ pub fn terminate_process_tree(pid: u32, timeout_ms: u64) -> Result<bool> {
             )));
         }
 
-        // Brief wait to confirm death
+        // Brief wait then reap the zombie
         sleep(Duration::from_millis(100));
+
+        // Reap the zombie - this is critical!
+        // waitpid() collects the exit status and removes the zombie from the process table.
+        // Without this, the process stays as a zombie and is_process_alive() returns true.
+        match waitpid(nix_pid, Some(WaitPidFlag::WNOHANG)) {
+            Ok(status) => {
+                debug!("Reaped process {}: {:?}", pid, status);
+            }
+            Err(e) => {
+                // ECHILD means we're not the parent - that's fine, init will reap it
+                if e != nix::errno::Errno::ECHILD {
+                    debug!("waitpid({}) failed: {} (this is usually OK)", pid, e);
+                }
+            }
+        }
+
         Ok(!is_process_alive(pid))
     }
 

@@ -324,6 +324,40 @@ impl SystemUtils {
 
     #[cfg(target_os = "linux")]
     fn open_url_linux(&self, url: &str) -> Result<()> {
+        // Try to open as a standalone webapp using Chromium-based browsers
+        // These browsers support --app mode which opens without browser chrome
+        let chromium_browsers = [
+            ("brave-browser", vec!["--app"]),
+            ("brave", vec!["--app"]),
+            ("google-chrome", vec!["--app"]),
+            ("google-chrome-stable", vec!["--app"]),
+            ("chromium", vec!["--app"]),
+            ("chromium-browser", vec!["--app"]),
+            ("microsoft-edge", vec!["--app"]),
+        ];
+
+        for (browser, base_args) in &chromium_browsers {
+            if command_exists(browser) {
+                let app_url = format!("{}={}", base_args[0], url);
+                debug!("Opening {} with {} in app mode", url, browser);
+
+                match Command::new(browser).arg(&app_url).spawn() {
+                    Ok(mut child) => {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        debug!("{} failed to launch: {}", browser, e);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback to xdg-open if no Chromium browser found
+        debug!("No Chromium-based browser found, falling back to xdg-open");
         let result = Command::new("xdg-open").arg(url).spawn();
 
         match result {
@@ -342,6 +376,42 @@ impl SystemUtils {
 
     #[cfg(target_os = "macos")]
     fn open_url_macos(&self, url: &str) -> Result<()> {
+        // Try to open as a standalone webapp using Chromium-based browsers
+        let chromium_apps = [
+            "Brave Browser",
+            "Google Chrome",
+            "Chromium",
+            "Microsoft Edge",
+        ];
+
+        let app_url = format!("--app={}", url);
+
+        for browser in &chromium_apps {
+            // Check if the browser app exists
+            let app_path = format!("/Applications/{}.app", browser);
+            if std::path::Path::new(&app_path).exists() {
+                debug!("Opening {} with {} in app mode", url, browser);
+
+                match Command::new("open")
+                    .args(["-a", browser, "-n", "--args", &app_url])
+                    .spawn()
+                {
+                    Ok(mut child) => {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        debug!("{} failed to launch: {}", browser, e);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback to default browser
+        debug!("No Chromium-based browser found, falling back to default browser");
         let result = Command::new("open").arg(url).spawn();
 
         match result {
@@ -357,6 +427,53 @@ impl SystemUtils {
 
     #[cfg(target_os = "windows")]
     fn open_url_windows(&self, url: &str) -> Result<()> {
+        // Try to open as a standalone webapp using Chromium-based browsers
+        let chromium_browsers = [
+            (
+                r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                "Brave",
+            ),
+            (
+                r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+                "Brave",
+            ),
+            (
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                "Chrome",
+            ),
+            (
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                "Chrome",
+            ),
+            (
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                "Edge",
+            ),
+        ];
+
+        let app_url = format!("--app={}", url);
+
+        for (browser_path, name) in &chromium_browsers {
+            if std::path::Path::new(browser_path).exists() {
+                debug!("Opening {} with {} in app mode", url, name);
+
+                match Command::new(browser_path).arg(&app_url).spawn() {
+                    Ok(mut child) => {
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                        return Ok(());
+                    }
+                    Err(e) => {
+                        debug!("{} failed to launch: {}", name, e);
+                        continue;
+                    }
+                }
+            }
+        }
+
+        // Fallback to default browser
+        debug!("No Chromium-based browser found, falling back to default browser");
         let result = Command::new("cmd").args(["/c", "start", "", url]).spawn();
 
         match result {

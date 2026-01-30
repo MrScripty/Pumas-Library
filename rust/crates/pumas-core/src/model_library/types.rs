@@ -21,6 +21,8 @@ pub enum ModelType {
     Llm,
     /// Diffusion model (image generation)
     Diffusion,
+    /// Embedding model (text/image embeddings for similarity, retrieval, etc.)
+    Embedding,
     /// Audio model
     Audio,
     /// Vision model
@@ -34,6 +36,7 @@ impl ModelType {
         match self {
             ModelType::Llm => "llm",
             ModelType::Diffusion => "diffusion",
+            ModelType::Embedding => "embedding",
             ModelType::Audio => "audio",
             ModelType::Vision => "vision",
             ModelType::Unknown => "unknown",
@@ -48,6 +51,7 @@ impl std::str::FromStr for ModelType {
         match s.to_lowercase().as_str() {
             "llm" => Ok(ModelType::Llm),
             "diffusion" => Ok(ModelType::Diffusion),
+            "embedding" => Ok(ModelType::Embedding),
             "audio" => Ok(ModelType::Audio),
             "vision" => Ok(ModelType::Vision),
             _ => Ok(ModelType::Unknown),
@@ -553,7 +557,18 @@ mod tests {
     fn test_model_type_parsing() {
         assert_eq!("llm".parse::<ModelType>().unwrap(), ModelType::Llm);
         assert_eq!("diffusion".parse::<ModelType>().unwrap(), ModelType::Diffusion);
+        assert_eq!("embedding".parse::<ModelType>().unwrap(), ModelType::Embedding);
         assert_eq!("unknown_type".parse::<ModelType>().unwrap(), ModelType::Unknown);
+    }
+
+    #[test]
+    fn test_model_type_as_str() {
+        assert_eq!(ModelType::Llm.as_str(), "llm");
+        assert_eq!(ModelType::Diffusion.as_str(), "diffusion");
+        assert_eq!(ModelType::Embedding.as_str(), "embedding");
+        assert_eq!(ModelType::Audio.as_str(), "audio");
+        assert_eq!(ModelType::Vision.as_str(), "vision");
+        assert_eq!(ModelType::Unknown.as_str(), "unknown");
     }
 
     #[test]

@@ -2,14 +2,27 @@
 //!
 //! Analyzes file headers and content to determine:
 //! - File format (GGUF, Safetensors, Pickle, ONNX)
-//! - Model type (LLM, diffusion)
-//! - Model family (llama, mistral, stable-diffusion, etc.)
+//! - Model type (LLM, diffusion, embedding)
+//! - Model family (llama, mistral, qwen3, stable-diffusion, etc.)
 
 use crate::error::{PumasError, Result};
 use crate::model_library::types::{FileFormat, ModelFamily, ModelType};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
+
+/// Key GGUF metadata fields for model identification.
+#[derive(Debug, Default)]
+struct GgufMetadata {
+    /// Model architecture (e.g., "qwen3", "llama")
+    architecture: Option<String>,
+    /// Model name (e.g., "Qwen3 Embedding 0.6b")
+    name: Option<String>,
+    /// Model basename (e.g., "qwen3-embedding")
+    basename: Option<String>,
+    /// Model type field from GGUF (usually "model")
+    model_type: Option<String>,
+}
 
 /// Magic bytes for file format detection.
 mod magic {
@@ -180,49 +193,119 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
 
     let mut info = ModelTypeInfo {
         format: FileFormat::Gguf,
-        model_type: ModelType::Llm, // GGUF is primarily for LLMs
+        model_type: ModelType::Llm, // Default, will be refined based on metadata
         family: None,
         extra: HashMap::new(),
     };
 
     info.extra.insert("gguf_version".to_string(), version.to_string());
 
-    // Parse metadata to find architecture
-    if let Ok(arch) = extract_gguf_architecture(file, metadata_count as usize) {
-        info.family = Some(ModelFamily::new(&arch));
-        info.extra.insert("architecture".to_string(), arch);
+    // Parse metadata to find architecture, name, basename, etc.
+    if let Ok(metadata) = extract_gguf_key_metadata(file, metadata_count as usize) {
+        // Set family from architecture (preserves version, e.g., "qwen3" not "qwen")
+        if let Some(ref arch) = metadata.architecture {
+            info.family = Some(ModelFamily::new(arch));
+            info.extra.insert("architecture".to_string(), arch.clone());
+        }
+
+        // Store additional metadata
+        if let Some(ref name) = metadata.name {
+            info.extra.insert("name".to_string(), name.clone());
+        }
+        if let Some(ref basename) = metadata.basename {
+            info.extra.insert("basename".to_string(), basename.clone());
+        }
+
+        // Detect embedding models from metadata
+        info.model_type = detect_model_type_from_gguf_metadata(&metadata);
     }
 
     Ok(info)
 }
 
-/// Extract architecture field from GGUF metadata.
-fn extract_gguf_architecture<R: Read>(file: &mut R, metadata_count: usize) -> Result<String> {
+/// Detect model type from GGUF metadata fields.
+///
+/// Checks name, basename for embedding indicators.
+fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
+    // Check for embedding model indicators in name and basename
+    let check_for_embedding = |s: &str| -> bool {
+        let lower = s.to_lowercase();
+        lower.contains("embedding") || lower.contains("embed-")
+    };
+
+    if let Some(ref basename) = metadata.basename {
+        if check_for_embedding(basename) {
+            return ModelType::Embedding;
+        }
+    }
+
+    if let Some(ref name) = metadata.name {
+        if check_for_embedding(name) {
+            return ModelType::Embedding;
+        }
+    }
+
+    // Default to LLM for GGUF files (most common use case)
+    ModelType::Llm
+}
+
+/// Extract key metadata fields from GGUF for model identification.
+///
+/// Extracts: general.architecture, general.name, general.basename
+fn extract_gguf_key_metadata<R: Read>(file: &mut R, metadata_count: usize) -> Result<GgufMetadata> {
     // GGUF string format: length (u64) + bytes
     // GGUF metadata KV: key_string + value_type (u32) + value
 
+    let mut metadata = GgufMetadata::default();
+    let target_keys = [
+        "general.architecture",
+        "general.name",
+        "general.basename",
+        "general.type",
+    ];
+
     for _ in 0..std::cmp::min(metadata_count, 100) {
         // Read key
-        let key = read_gguf_string(file)?;
+        let key = match read_gguf_string(file) {
+            Ok(k) => k,
+            Err(_) => break,
+        };
 
         // Read value type
         let mut type_buf = [0u8; 4];
-        file.read_exact(&mut type_buf)?;
+        if file.read_exact(&mut type_buf).is_err() {
+            break;
+        }
         let value_type = u32::from_le_bytes(type_buf);
 
-        // Check if this is the architecture field
-        if key == "general.architecture" {
-            // Type 8 is string
-            if value_type == 8 {
-                return read_gguf_string(file);
+        // Check if this is a key we want (string type = 8)
+        if target_keys.contains(&key.as_str()) && value_type == 8 {
+            if let Ok(value) = read_gguf_string(file) {
+                match key.as_str() {
+                    "general.architecture" => metadata.architecture = Some(value),
+                    "general.name" => metadata.name = Some(value),
+                    "general.basename" => metadata.basename = Some(value),
+                    "general.type" => metadata.model_type = Some(value),
+                    _ => {}
+                }
+            }
+        } else {
+            // Skip this value based on type
+            if skip_gguf_value(file, value_type).is_err() {
+                break;
             }
         }
 
-        // Skip this value based on type
-        skip_gguf_value(file, value_type)?;
+        // Early exit if we have all the info we need
+        if metadata.architecture.is_some()
+            && metadata.name.is_some()
+            && metadata.basename.is_some()
+        {
+            break;
+        }
     }
 
-    Err(PumasError::Other("Architecture not found in GGUF".into()))
+    Ok(metadata)
 }
 
 /// Read a GGUF string (length-prefixed).
@@ -331,11 +414,12 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
     // Count indicators for each type
     let mut llm_indicators = 0;
     let mut diffusion_indicators = 0;
+    let mut embedding_indicators = 0;
+    let mut has_lm_head = false;
 
-    // LLM patterns
+    // LLM patterns (transformer architecture, but also used by embedding models)
     let llm_patterns = [
         "self_attn",
-        "lm_head",
         "embed_tokens",
         "model.layers.",
         "transformer.h.",
@@ -364,8 +448,22 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
         "diffusion_model",
     ];
 
+    // Embedding-specific patterns (pooling, sentence transformers, etc.)
+    let embedding_patterns = [
+        "pooler",
+        "sentence_",
+        "dense_layer",
+        "projection",
+    ];
+
     for name in &tensor_names {
         let lower = name.to_lowercase();
+
+        // Check for lm_head specifically (indicates text generation, not embedding)
+        if lower.contains("lm_head") {
+            has_lm_head = true;
+            llm_indicators += 1;
+        }
 
         for pattern in llm_patterns {
             if lower.contains(pattern) {
@@ -378,13 +476,31 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
                 diffusion_indicators += 1;
             }
         }
+
+        for pattern in embedding_patterns {
+            if lower.contains(pattern) {
+                embedding_indicators += 1;
+            }
+        }
     }
 
     // Determine type based on indicators
-    let model_type = if llm_indicators > diffusion_indicators && llm_indicators > 5 {
-        ModelType::Llm
-    } else if diffusion_indicators > llm_indicators && diffusion_indicators > 5 {
+    // Embedding models often have transformer architecture but NO lm_head,
+    // and may have pooler or projection layers
+    let model_type = if diffusion_indicators > llm_indicators && diffusion_indicators > 5 {
         ModelType::Diffusion
+    } else if llm_indicators > 5 {
+        // Transformer-based model - is it LLM or embedding?
+        if !has_lm_head && embedding_indicators > 0 {
+            // Has transformer layers but no lm_head and has embedding patterns
+            ModelType::Embedding
+        } else if has_lm_head {
+            ModelType::Llm
+        } else {
+            // Has transformer layers but no clear indicator - default to LLM
+            // since embedding models typically have explicit pooling layers
+            ModelType::Llm
+        }
     } else {
         ModelType::Unknown
     };
@@ -400,8 +516,9 @@ fn detect_family_from_tensors(tensor_names: &[&str], model_type: ModelType) -> O
     let names_str = tensor_names.join(" ").to_lowercase();
 
     match model_type {
-        ModelType::Llm => {
-            // Check for specific LLM architectures
+        ModelType::Llm | ModelType::Embedding => {
+            // Check for specific LLM/embedding architectures
+            // These patterns work for both LLMs and embedding models based on the same architecture
             if names_str.contains("mistral") {
                 Some(ModelFamily::new(ModelFamily::MISTRAL))
             } else if names_str.contains("gemma") {
@@ -412,6 +529,8 @@ fn detect_family_from_tensors(tensor_names: &[&str], model_type: ModelType) -> O
                 Some(ModelFamily::new(ModelFamily::QWEN))
             } else if names_str.contains("falcon") {
                 Some(ModelFamily::new(ModelFamily::FALCON))
+            } else if names_str.contains("bert") {
+                Some(ModelFamily::new("bert"))
             } else if names_str.contains("llama") || names_str.contains("rotary") {
                 Some(ModelFamily::new(ModelFamily::LLAMA))
             } else {

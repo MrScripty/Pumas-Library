@@ -215,6 +215,14 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     ) {
       return 'diffusion';
     }
+    // Embedding models on HuggingFace are typically feature-extraction or sentence-similarity
+    if (
+      normalized.includes('feature-extraction') ||
+      normalized.includes('sentence-similarity') ||
+      normalized.includes('embedding')
+    ) {
+      return 'embedding';
+    }
     return 'llm';
   };
 

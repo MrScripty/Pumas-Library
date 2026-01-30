@@ -326,6 +326,16 @@ fn read_gguf_string<R: Read>(file: &mut R) -> Result<String> {
 
 /// Skip a GGUF value based on its type.
 fn skip_gguf_value<R: Read>(file: &mut R, value_type: u32) -> Result<()> {
+    skip_gguf_value_impl(file, value_type, 0)
+}
+
+/// Skip a GGUF value with depth tracking to prevent stack overflow on nested arrays.
+fn skip_gguf_value_impl<R: Read>(file: &mut R, value_type: u32, depth: usize) -> Result<()> {
+    // Prevent stack overflow on deeply nested or malformed files
+    if depth > 10 {
+        return Err(PumasError::Other("GGUF array nesting too deep".into()));
+    }
+
     let skip_bytes = match value_type {
         0 => 1,  // uint8
         1 => 1,  // int8
@@ -342,17 +352,20 @@ fn skip_gguf_value<R: Read>(file: &mut R, value_type: u32) -> Result<()> {
             u64::from_le_bytes(len_buf) as usize
         }
         9 => {
-            // array
+            // array - properly skip all elements
             let mut type_buf = [0u8; 4];
             file.read_exact(&mut type_buf)?;
-            let _array_type = u32::from_le_bytes(type_buf);
+            let array_type = u32::from_le_bytes(type_buf);
 
             let mut len_buf = [0u8; 8];
             file.read_exact(&mut len_buf)?;
-            let _array_len = u64::from_le_bytes(len_buf);
+            let array_len = u64::from_le_bytes(len_buf) as usize;
 
-            // For simplicity, just skip the rest of this search
-            return Err(PumasError::Other("Skipping array".into()));
+            // Skip each element in the array
+            for _ in 0..array_len {
+                skip_gguf_value_impl(file, array_type, depth + 1)?;
+            }
+            return Ok(());
         }
         10 => 8, // uint64
         11 => 8, // int64
@@ -392,7 +405,15 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
     let header: serde_json::Value = serde_json::from_str(&header_str)?;
 
     // Analyze tensor names to determine model type
-    let (model_type, family) = analyze_tensor_names(&header);
+    let (mut model_type, family) = analyze_tensor_names(&header);
+
+    // Check directory context for embedding indicators
+    // This catches embedding models that don't have distinctive tensor patterns
+    if model_type != ModelType::Embedding {
+        if is_embedding_from_context(path) {
+            model_type = ModelType::Embedding;
+        }
+    }
 
     Ok(ModelTypeInfo {
         format: FileFormat::Safetensors,
@@ -400,6 +421,29 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
         family,
         extra: HashMap::new(),
     })
+}
+
+/// Check directory context for embedding model indicators.
+///
+/// This supplements tensor analysis by checking:
+/// 1. Presence of sentence_transformers config file
+/// 2. Model path/name containing "embedding"
+fn is_embedding_from_context(path: &Path) -> bool {
+    // Check parent directory for sentence_transformers config
+    if let Some(parent) = path.parent() {
+        let sentence_transformers_config = parent.join("config_sentence_transformers.json");
+        if sentence_transformers_config.exists() {
+            return true;
+        }
+    }
+
+    // Check if path contains "embedding" indicator
+    let path_str = path.to_string_lossy().to_lowercase();
+    if path_str.contains("embedding") || path_str.contains("embed-") {
+        return true;
+    }
+
+    false
 }
 
 /// Analyze tensor names to determine model type and family.

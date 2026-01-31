@@ -1112,6 +1112,96 @@ export interface PyWebViewAPI {
   // ========================================
   /** Open native file picker for model import */
   open_model_import_dialog(): Promise<{ success: boolean; paths: string[] }>;
+
+  // ========================================
+  // Plugin System
+  // ========================================
+  /** Get all registered plugins */
+  get_plugins(): Promise<GetPluginsResponse>;
+
+  /** Get a specific plugin by ID */
+  get_plugin(appId: string): Promise<GetPluginResponse>;
+
+  /** Call a plugin-defined API endpoint */
+  call_plugin_endpoint(
+    appId: string,
+    endpointName: string,
+    params: Record<string, string>
+  ): Promise<PluginEndpointResponse>;
+
+  /** Check if a plugin's API is healthy */
+  check_plugin_health(appId: string): Promise<PluginHealthResponse>;
+
+  /** Launch an app by its plugin ID */
+  launch_app(appId: string, versionTag: string): Promise<LaunchResponse>;
+
+  /** Stop a running app */
+  stop_app(appId: string): Promise<BaseResponse>;
+
+  /** Get the status of an app */
+  get_app_status(appId: string): Promise<AppStatusResponse>;
+}
+
+// ============================================================================
+// Plugin Types
+// ============================================================================
+
+/**
+ * Plugin configuration from backend
+ */
+export interface PluginConfigResponse {
+  id: string;
+  displayName: string;
+  description: string;
+  icon?: string;
+  githubRepo?: string;
+  installationType: 'binary' | 'python-venv' | 'docker';
+  capabilities: {
+    hasVersionManagement: boolean;
+    supportsShortcuts: boolean;
+    hasDependencies: boolean;
+    hasConnectionUrl: boolean;
+    hasModelLibrary: boolean;
+    hasStats: boolean;
+  };
+  connection?: {
+    defaultPort: number;
+    protocol: string;
+    healthEndpoint?: string;
+  };
+  modelCompatibility?: {
+    supportedFormats: string[];
+    importCommand?: string;
+  };
+  panelLayout: Array<{
+    type: string;
+    config?: Record<string, unknown>;
+  }>;
+  sidebarPriority: number;
+  enabledByDefault: boolean;
+}
+
+export interface GetPluginsResponse extends BaseResponse {
+  plugins: PluginConfigResponse[];
+}
+
+export interface GetPluginResponse extends BaseResponse {
+  plugin?: PluginConfigResponse;
+}
+
+export interface PluginEndpointResponse extends BaseResponse {
+  data?: unknown;
+}
+
+export interface PluginHealthResponse extends BaseResponse {
+  healthy: boolean;
+}
+
+export interface AppStatusResponse extends BaseResponse {
+  running: boolean;
+  pid?: number;
+  port?: number;
+  uptime_secs?: number;
 }
 
 // ============================================================================

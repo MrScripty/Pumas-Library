@@ -170,7 +170,25 @@ impl ResourceTracker {
         Ok(resources)
     }
 
-    /// Compute resource usage for a process (and optionally its children).
+    /// Recursively collect all descendant PIDs of a process.
+    fn collect_all_descendants(
+        system: &sysinfo::System,
+        parent_pid: Pid,
+        pids: &mut Vec<u32>,
+    ) {
+        for (child_pid, child_process) in system.processes() {
+            if child_process.parent() == Some(parent_pid) {
+                let child_pid_u32 = child_pid.as_u32();
+                if !pids.contains(&child_pid_u32) {
+                    pids.push(child_pid_u32);
+                    // Recursively find this child's children
+                    Self::collect_all_descendants(system, *child_pid, pids);
+                }
+            }
+        }
+    }
+
+    /// Compute resource usage for a process (and optionally its descendants).
     fn compute_process_resources(
         &self,
         pid: u32,
@@ -185,14 +203,8 @@ impl ResourceTracker {
         let mut pids_to_check = vec![pid];
 
         if include_children {
-            // Find child processes
-            if let Some(process) = system.process(sysinfo_pid) {
-                for (child_pid, child_process) in system.processes() {
-                    if child_process.parent() == Some(sysinfo_pid) {
-                        pids_to_check.push(child_pid.as_u32());
-                    }
-                }
-            }
+            // Recursively find ALL descendants, not just direct children
+            Self::collect_all_descendants(&system, sysinfo_pid, &mut pids_to_check);
         }
 
         // Aggregate CPU and RAM

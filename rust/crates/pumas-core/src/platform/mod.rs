@@ -24,7 +24,9 @@ pub mod process;
 // Re-export commonly used items
 pub use paths::{apps_dir, desktop_dir, venv_python};
 pub use permissions::set_executable;
-pub use process::{is_process_alive, terminate_process};
+pub use process::{
+    find_processes_by_cmdline, is_process_alive, terminate_process, terminate_process_tree,
+};
 
 /// Returns the current platform name.
 pub fn current_platform() -> &'static str {

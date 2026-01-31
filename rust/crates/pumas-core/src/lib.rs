@@ -27,6 +27,7 @@
 //! }
 //! ```
 
+pub mod cache;
 pub mod cancel;
 pub mod config;
 pub mod error;
@@ -41,6 +42,7 @@ pub mod process;
 pub mod system;
 
 // Re-export commonly used types
+pub use cache::{CacheBackend, CacheConfig, CacheEntry, CacheMeta, CacheStats, SqliteCache};
 pub use cancel::{CancellationToken, CancelledError};
 pub use config::AppId;
 pub use error::{PumasError, Result};

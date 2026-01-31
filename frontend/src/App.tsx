@@ -25,7 +25,7 @@ const logger = getLogger('App');
 export default function App() {
   // --- Multi-App State ---
   const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
-  const [selectedAppId, setSelectedAppId] = useState<string | null>('comfyui');
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
   const appIds = useMemo(() => apps.map(app => app.id), [apps]);
   const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
 
@@ -49,12 +49,16 @@ export default function App() {
 
   const comfyVersions = useVersions({ appId: 'comfyui' });
   const ollamaVersions = useVersions({ appId: 'ollama' });
-  const activeVersions =
-    selectedAppId === 'comfyui'
-      ? comfyVersions
-      : selectedAppId === 'ollama'
-        ? ollamaVersions
-        : comfyVersions;
+
+  // Map app IDs to their version hooks - only supported apps have versions
+  const activeVersions = useMemo(() => {
+    if (selectedAppId === 'comfyui') return comfyVersions;
+    if (selectedAppId === 'ollama') return ollamaVersions;
+    // For unsupported apps or no selection, return comfyVersions as placeholder
+    // (getAppVersionState will return UNSUPPORTED_VERSION_STATE anyway)
+    return comfyVersions;
+  }, [selectedAppId, comfyVersions, ollamaVersions]);
+
   const appVersions = getAppVersionState(selectedAppId, activeVersions);
 
   const { installedVersions: comfyInstalledVersions, activeVersion: comfyActiveVersion } =

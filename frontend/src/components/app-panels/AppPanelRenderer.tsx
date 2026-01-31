@@ -1,6 +1,7 @@
 import { ComfyUIPanel, type ComfyUIPanelProps } from './ComfyUIPanel';
 import { DefaultAppPanel, type DefaultAppPanelProps } from './DefaultAppPanel';
 import { OllamaPanel, type OllamaPanelProps } from './OllamaPanel';
+import { ModelManager } from '../ModelManager';
 
 interface AppPanelRendererProps {
   selectedAppId: string | null;
@@ -15,8 +16,13 @@ export function AppPanelRenderer({
   ollama,
   fallback,
 }: AppPanelRendererProps) {
+  // No app selected - show Model Library as the default/home view
   if (!selectedAppId) {
-    return null;
+    return (
+      <div className="flex-1 flex flex-col overflow-hidden p-6">
+        <ModelManager {...fallback.modelManagerProps} />
+      </div>
+    );
   }
 
   switch (selectedAppId) {

@@ -11,6 +11,7 @@ use crate::error::{PumasError, Result};
 use crate::index::{ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
+use crate::model_library::identifier::identify_model_type;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{ModelMetadata, ModelOverrides};
 use crate::model_library::LinkRegistry;
@@ -627,6 +628,130 @@ impl ModelLibrary {
         stats.total_size_bytes = self.total_size().await?;
 
         Ok(stats)
+    }
+
+    // ========================================
+    // Type Detection
+    // ========================================
+
+    /// Re-detect model type for a single model and update its metadata.
+    ///
+    /// This is useful when the type detection logic has been improved and
+    /// existing models need to be re-classified.
+    ///
+    /// # Arguments
+    ///
+    /// * `model_id` - Model ID to re-detect type for
+    ///
+    /// # Returns
+    ///
+    /// The new model type if it changed, None if unchanged or model not found.
+    pub async fn redetect_model_type(&self, model_id: &str) -> Result<Option<String>> {
+        let model_dir = self.library_root.join(model_id);
+
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
+
+        // Load current metadata
+        let mut metadata = match self.load_metadata(&model_dir)? {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+
+        let current_type = metadata.model_type.clone().unwrap_or_default();
+
+        // Find primary model file
+        let primary_file = match find_primary_model_file(&model_dir) {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        // Re-detect type from file content
+        let type_info = identify_model_type(&primary_file)?;
+        let new_type = type_info.model_type.as_str().to_string();
+
+        // Also update family if detected
+        let new_family = type_info.family.map(|f| f.as_str().to_string());
+
+        // Check if type changed
+        if new_type == current_type && new_family == metadata.family {
+            return Ok(None);
+        }
+
+        // Update metadata
+        metadata.model_type = Some(new_type.clone());
+        if let Some(family) = new_family {
+            metadata.family = Some(family);
+        }
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        // Save and re-index
+        self.save_metadata(&model_dir, &metadata).await?;
+        self.index_model_dir(&model_dir).await?;
+
+        tracing::info!(
+            "Re-detected model type for {}: {} -> {}",
+            model_id,
+            current_type,
+            new_type
+        );
+
+        Ok(Some(new_type))
+    }
+
+    /// Re-detect types for all models in the library.
+    ///
+    /// This is useful for migrating existing libraries after type detection
+    /// logic has been improved.
+    ///
+    /// # Returns
+    ///
+    /// The number of models whose types were updated.
+    pub async fn redetect_all_model_types(&self) -> Result<usize> {
+        tracing::info!("Re-detecting model types for all models in library");
+
+        let mut updated_count = 0;
+        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let total = model_dirs.len();
+
+        for (idx, model_dir) in model_dirs.iter().enumerate() {
+            if let Some(model_id) = self.get_model_id(model_dir) {
+                match self.redetect_model_type(&model_id).await {
+                    Ok(Some(_)) => {
+                        updated_count += 1;
+                    }
+                    Ok(None) => {
+                        // Type unchanged
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to re-detect type for {}: {}", model_id, e);
+                    }
+                }
+            }
+
+            if (idx + 1) % 10 == 0 || idx + 1 == total {
+                tracing::debug!("Re-detection progress: {}/{}", idx + 1, total);
+            }
+        }
+
+        tracing::info!(
+            "Re-detection complete: {} of {} models updated",
+            updated_count,
+            total
+        );
+
+        Ok(updated_count)
+    }
+
+    /// Get the primary model file path for a model.
+    ///
+    /// Returns the largest model file in the model directory.
+    pub fn get_primary_model_file(&self, model_id: &str) -> Option<PathBuf> {
+        let model_dir = self.library_root.join(model_id);
+        find_primary_model_file(&model_dir)
     }
 }
 

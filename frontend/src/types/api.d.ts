@@ -904,6 +904,20 @@ export interface PyWebViewAPI {
   get_model_download_status(downloadId: string): Promise<ModelDownloadStatusResponse>;
   cancel_model_download(downloadId: string): Promise<BaseResponse>;
 
+  /**
+   * Get metadata for a library model (both stored and embedded)
+   */
+  get_library_model_metadata(modelId: string): Promise<{
+    success: boolean;
+    model_id: string;
+    stored_metadata: Record<string, unknown> | null;
+    embedded_metadata: {
+      file_type: string;
+      metadata: Record<string, unknown>;
+    } | null;
+    primary_file: string | null;
+  }>;
+
   // ========================================
   // Model Library Import (Phase 1A - Part 6)
   // ========================================

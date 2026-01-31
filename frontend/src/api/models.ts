@@ -63,6 +63,23 @@ class ModelsAPI {
     const api = this.getAPI();
     return await api.cancel_model_download(downloadId);
   }
+
+  /**
+   * Get metadata for a library model (both stored and embedded).
+   */
+  async getLibraryModelMetadata(modelId: string): Promise<{
+    success: boolean;
+    model_id: string;
+    stored_metadata: Record<string, unknown> | null;
+    embedded_metadata: {
+      file_type: string;
+      metadata: Record<string, unknown>;
+    } | null;
+    primary_file: string | null;
+  }> {
+    const api = this.getAPI();
+    return await api.get_library_model_metadata(modelId);
+  }
 }
 
 export const modelsAPI = new ModelsAPI();

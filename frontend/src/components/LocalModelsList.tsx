@@ -3,9 +3,11 @@
  *
  * Displays locally installed models grouped by category.
  * Extracted from ModelManager.tsx
+ *
+ * Ctrl+click on a model name opens its metadata modal.
  */
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import {
   Star,
   HardDrive,
@@ -20,6 +22,7 @@ import type { ModelCategory, RelatedModelsState } from '../types/apps';
 import { formatSize, formatDate } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
 import { EmptyState, IconButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
+import { ModelMetadataModal } from './ModelMetadataModal';
 
 interface LocalModelsListProps {
   modelGroups: ModelCategory[];
@@ -52,6 +55,25 @@ export function LocalModelsList({
   onToggleRelated,
   onOpenRelatedUrl,
 }: LocalModelsListProps) {
+  // State for metadata modal
+  const [metadataModal, setMetadataModal] = useState<{
+    modelId: string;
+    modelName: string;
+  } | null>(null);
+
+  // Handle ctrl+click on model name to open metadata
+  const handleModelNameClick = (
+    e: React.MouseEvent,
+    modelId: string,
+    modelName: string
+  ) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      setMetadataModal({ modelId, modelName });
+    }
+  };
+
   if (modelGroups.length === 0) {
     return (
       <EmptyState
@@ -109,13 +131,15 @@ export function LocalModelsList({
                       />
                       <div className="flex-1 min-w-0">
                         <span
-                          className={`text-sm font-medium block truncate ${
+                          className={`text-sm font-medium block truncate cursor-pointer ${
                             isDownloading
                               ? 'text-[hsl(var(--text-muted))]'
                               : isLinked
                               ? 'text-[hsl(var(--text-primary))]'
                               : 'text-[hsl(var(--text-secondary))]'
                           }`}
+                          onClick={(e) => handleModelNameClick(e, model.id, model.name)}
+                          title="Ctrl+click to view metadata"
                         >
                           {model.name}
                         </span>
@@ -248,6 +272,15 @@ export function LocalModelsList({
           </div>
         </div>
       ))}
+
+      {/* Metadata Modal */}
+      {metadataModal && (
+        <ModelMetadataModal
+          modelId={metadataModal.modelId}
+          modelName={metadataModal.modelName}
+          onClose={() => setMetadataModal(null)}
+        />
+      )}
     </>
   );
 }

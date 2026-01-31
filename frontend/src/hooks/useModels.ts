@@ -37,8 +37,6 @@ export function useModels() {
   const [isRevalidating, setIsRevalidating] = useState(false);
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
   const [hasNewResults, setHasNewResults] = useState(false);
-  const modelCountRef = useRef<number | null>(null);
-  const isModelCountPolling = useRef(false);
   const searchSequenceRef = useRef(0);
   const lastRenderedSequenceRef = useRef(0);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,7 +85,6 @@ export function useModels() {
         });
 
         setModelGroups(categorizedModels);
-        modelCountRef.current = modelEntries.length;
       }
     } catch (error) {
       if (error instanceof APIError) {
@@ -117,46 +114,8 @@ export function useModels() {
     }
   }, [fetchModels]);
 
-  // Poll for model count changes
-  useEffect(() => {
-    const pollModelLibrary = async () => {
-      if (isModelCountPolling.current) {
-        return;
-      }
-
-      isModelCountPolling.current = true;
-      try {
-        const result = await modelsAPI.scanSharedStorage();
-        if (result.success) {
-          const modelsFound = result.result?.modelsFound;
-          if (typeof modelsFound === 'number') {
-            if (modelCountRef.current === null) {
-              modelCountRef.current = modelsFound;
-            } else if (modelsFound !== modelCountRef.current) {
-              modelCountRef.current = modelsFound;
-              await fetchModels();
-            }
-          }
-        }
-      } catch (error) {
-        if (error instanceof APIError) {
-          logger.error('API error polling model library count', { error: error.message, endpoint: error.endpoint });
-        } else if (error instanceof Error) {
-          logger.error('Unexpected error polling model library count', { error: error.message });
-        } else {
-          logger.error('Unknown error polling model library count', { error });
-        }
-      } finally {
-        isModelCountPolling.current = false;
-      }
-    };
-
-    const interval = setInterval(() => {
-      void pollModelLibrary();
-    }, 10000);
-
-    return () => clearInterval(interval);
-  }, [fetchModels]);
+  // Note: Polling removed - file watching will be implemented in the backend
+  // to notify the frontend when models change, instead of polling every 10 seconds
 
   // Initial fetch
   useEffect(() => {

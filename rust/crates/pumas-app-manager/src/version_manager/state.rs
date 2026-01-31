@@ -283,21 +283,33 @@ impl VersionState {
         // Check metadata entries against filesystem
         let metadata = self.metadata_manager.load_versions(Some(self.app_id))?;
         for (tag, info) in &metadata.installed {
-            let version_path = versions_dir.join(&info.path);
+            // Handle both old format (full path like "comfyui-versions/v0.4.0")
+            // and new format (just tag like "v0.4.0")
+            let version_path = if info.path.contains('/') || info.path.contains('\\') {
+                // Old format: path includes directory, use just the last component
+                let path = std::path::Path::new(&info.path);
+                let tag_name = path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| info.path.clone());
+                versions_dir.join(&tag_name)
+            } else {
+                // New format: path is just the tag
+                versions_dir.join(&info.path)
+            };
+
             if !self.is_version_complete(&version_path) {
                 warn!("Incomplete installation found: {} at {}", tag, version_path.display());
                 removed_tags.push(tag.clone());
             }
         }
 
-        // Remove incomplete installations
+        // Remove incomplete installations - ONLY remove metadata, NOT files
+        // Files may be intentionally incomplete during installation or user may want to recover
         for tag in &removed_tags {
-            let version_path = versions_dir.join(tag);
-            if version_path.exists() {
-                info!("Removing incomplete installation: {}", tag);
-                let _ = std::fs::remove_dir_all(&version_path);
-            }
+            warn!("Removing stale metadata entry for incomplete installation: {}", tag);
             self.remove_installed_version(tag)?;
+            // NOTE: We no longer delete files automatically to prevent data loss
+            // Orphaned directories will be reported but not deleted
         }
 
         // Check for orphaned directories (exist on disk but not in metadata)
@@ -346,8 +358,15 @@ impl VersionState {
                 version_path.join("venv").join("bin").join("python"),
             ],
             AppId::Ollama => {
-                // Ollama is a binary, different structure
-                vec![version_path.join("ollama")]
+                // Ollama binary could be at root or in bin/ subdirectory (from tar extraction)
+                // Check both locations - if either exists, consider it complete
+                let bin_path = version_path.join("bin").join("ollama");
+                let root_path = version_path.join("ollama");
+                if bin_path.exists() {
+                    vec![bin_path]
+                } else {
+                    vec![root_path]
+                }
             }
             _ => {
                 // Generic check - just need the directory to exist

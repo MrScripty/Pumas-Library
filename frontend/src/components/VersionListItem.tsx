@@ -69,7 +69,7 @@ export function VersionListItem({
   const displayTag = release.tagName?.replace(/^v/i, '') || release.tagName;
   const releaseUrl = release.htmlUrl;
   const showUninstall = isInstalled && !isInstalling && isHovered;
-  const totalBytes = (progress ? progress.total_size : null) ?? release.totalSize ?? null;
+  const totalBytes = (progress ? progress.total_size : null) ?? release.totalSize ?? release.archiveSize ?? null;
   const isComplete = isInstalled || (isInstalling && progress?.success && !!progress?.completed_at);
 
   // Progress calculations

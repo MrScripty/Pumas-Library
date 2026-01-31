@@ -357,7 +357,9 @@ export function VersionSelector({
   const hasInstalledVersions = installedVersions.length > 0;
   const hasVersionsToShow = combinedVersions.length > 0;
   const emphasizeInstall = !hasInstalledVersions && !isLoading;
-  const hasInstallActivity = Boolean(installingVersion);
+  // Check both installingVersion and that installation is not complete
+  const isInstallComplete = Boolean(installationProgress?.completed_at);
+  const hasInstallActivity = Boolean(installingVersion) && !isInstallComplete;
   const isInstallFailed = installNetworkStatus === 'failed';
   const isInstallPending = hasInstallActivity && !isInstallFailed && (
     !installationProgress
@@ -648,7 +650,7 @@ export function VersionSelector({
                 const isActive = version === activeVersion;
                 const toggles = shortcutState[version] || { menu: false, desktop: false };
                 const isEnabled = supportsShortcuts && toggles.menu && toggles.desktop;
-                const isInstalling = installingVersion === version && !installedVersions.includes(version);
+                const isInstalling = installingVersion === version && !installedVersions.includes(version) && !isInstallComplete;
                 const isDefault = defaultVersion === version;
                 return (
                   <VersionDropdownItem

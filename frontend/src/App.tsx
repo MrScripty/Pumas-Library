@@ -63,6 +63,7 @@ export default function App() {
 
   const { installedVersions: comfyInstalledVersions, activeVersion: comfyActiveVersion } =
     comfyVersions;
+  const { installedVersions: ollamaInstalledVersions } = ollamaVersions;
   const installationProgress = appVersions.installationProgress;
   const cacheStatus = appVersions.cacheStatus;
 
@@ -131,53 +132,68 @@ export default function App() {
     };
   }, []);
 
-  // Update app status and iconState based on backend data
+  // Update ComfyUI app status and iconState based on backend data
+  // Separate effect to avoid coupling with other apps
   useEffect(() => {
     setApps(prevApps => prevApps.map(app => {
-      if (app.id === 'comfyui') {
-        // Calculate resource usage percentages
-        let gpuUsagePercent: number | undefined = undefined;
-        let ramUsagePercent: number | undefined = undefined;
+      if (app.id !== 'comfyui') return app;
 
-        if (status) {
-          const resources = status.app_resources?.comfyui;
-          const gpuTotal = systemResources?.gpu?.memory_total;
-          if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
-            gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
-          }
-          const ramTotal = systemResources?.ram?.total;
-          if (resources?.ram_memory && ramTotal && ramTotal > 0) {
-            ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
-          }
+      // Calculate resource usage percentages
+      let gpuUsagePercent: number | undefined = undefined;
+      let ramUsagePercent: number | undefined = undefined;
+
+      if (status) {
+        const resources = status.app_resources?.comfyui;
+        const gpuTotal = systemResources?.gpu?.memory_total;
+        if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
+          gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
         }
-
-        // Determine iconState - transition states have highest priority
-        let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
-        if (isStopping) {
-          newIconState = 'stopping';
-        } else if (isStarting) {
-          newIconState = 'starting';
-        } else if (comfyUIRunning) {
-          newIconState = 'running';
-        } else if (launchError) {
-          newIconState = 'error';
-        } else if (comfyInstalledVersions.length > 0) {
-          newIconState = 'offline';
-        } else {
-          newIconState = 'uninstalled';
+        const ramTotal = systemResources?.ram?.total;
+        if (resources?.ram_memory && ramTotal && ramTotal > 0) {
+          ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
         }
-
-        return {
-          ...app,
-          status: comfyUIRunning ? 'running' : 'idle',
-          ramUsage: ramUsagePercent,
-          gpuUsage: gpuUsagePercent,
-          iconState: newIconState,
-        };
       }
-      return app;
+
+      // Determine iconState - transition states have highest priority
+      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
+      if (isStopping) {
+        newIconState = 'stopping';
+      } else if (isStarting) {
+        newIconState = 'starting';
+      } else if (comfyUIRunning) {
+        newIconState = 'running';
+      } else if (launchError) {
+        newIconState = 'error';
+      } else if (comfyInstalledVersions.length > 0) {
+        newIconState = 'offline';
+      } else {
+        newIconState = 'uninstalled';
+      }
+
+      return {
+        ...app,
+        status: comfyUIRunning ? 'running' : 'idle',
+        ramUsage: ramUsagePercent,
+        gpuUsage: gpuUsagePercent,
+        iconState: newIconState,
+      };
     }));
   }, [status, systemResources, comfyUIRunning, depsInstalled, launchError, isStarting, isStopping, comfyInstalledVersions]);
+
+  // Update Ollama app iconState based on installed versions
+  // Separate effect to avoid coupling with other apps
+  useEffect(() => {
+    setApps(prevApps => prevApps.map(app => {
+      if (app.id !== 'ollama') return app;
+
+      // Ollama iconState - based on installed versions only (no running state yet)
+      const newIconState = ollamaInstalledVersions.length > 0 ? 'offline' : 'uninstalled';
+      return {
+        ...app,
+        iconState: newIconState,
+      };
+    }));
+  }, [ollamaInstalledVersions]);
 
   // Launch error flash effect is handled by AppIndicator component
 

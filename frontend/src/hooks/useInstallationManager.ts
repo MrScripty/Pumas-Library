@@ -159,15 +159,23 @@ export function useInstallationManager({
 
         return adjustedProgress;
       } else {
-        if (!progress && installingTag) {
-        return null;
-      }
-      setInstallingTag(null);
-      setInstallationProgress(null);
-      setInstallNetworkStatus('idle');
-      resetNetworkStatusState(networkStateRef.current);
-      lastDownloadTagRef.current = null;
-      lastStageRef.current = null;
+        // Installation completed (progress.completed_at set) or no progress
+        // Clear all state and stop polling
+        if (installPollRef.current) {
+          clearInterval(installPollRef.current);
+          installPollRef.current = null;
+        }
+        setInstallingTag(null);
+        setInstallationProgress(null);
+        setInstallNetworkStatus('idle');
+        resetNetworkStatusState(networkStateRef.current);
+        lastDownloadTagRef.current = null;
+        lastStageRef.current = null;
+
+        // Refresh version list when installation completes
+        if (progress?.completed_at) {
+          void onRefreshVersions();
+        }
       }
 
       return null;
@@ -182,7 +190,7 @@ export function useInstallationManager({
       setInstallNetworkStatus('failed');
       return null;
     }
-  }, [availableVersions, installingTag, isEnabled, resolvedAppId]);
+  }, [availableVersions, installingTag, isEnabled, onRefreshVersions, resolvedAppId]);
 
   // Switch to a different installed version
   const switchVersion = useCallback(async (tag: string) => {

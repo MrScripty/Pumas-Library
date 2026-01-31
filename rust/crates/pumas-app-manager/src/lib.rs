@@ -11,10 +11,12 @@
 //! - `custom_nodes` - Manage custom node extensions for ComfyUI
 
 pub mod custom_nodes;
+pub mod process;
 pub mod version_manager;
 
 // Re-export commonly used types
 pub use custom_nodes::{CustomNodesManager, InstalledCustomNode, InstallResult, UpdateResult};
+pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use version_manager::{
     ReleaseSize, SizeBreakdown, SizeCalculator, VersionManager,
 };

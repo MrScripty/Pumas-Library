@@ -43,6 +43,7 @@ semver = { workspace = true }
 regex = { workspace = true }
 
 # Async utilities
+async-trait = { workspace = true }
 futures = { workspace = true }
 
 # Platform-specific: Unix

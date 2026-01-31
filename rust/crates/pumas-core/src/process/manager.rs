@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 use std::fs;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 /// Process with resource information.
 #[derive(Debug, Clone)]
@@ -70,11 +70,6 @@ impl ProcessManager {
 
     /// Update the known version paths.
     pub fn set_version_paths(&self, version_paths: HashMap<String, PathBuf>) {
-        info!(
-            "set_version_paths called with {} entries: {:?}",
-            version_paths.len(),
-            version_paths.keys().collect::<Vec<_>>()
-        );
         let mut detector = self.detector.write().unwrap();
         detector.set_version_paths(version_paths);
     }
@@ -83,13 +78,7 @@ impl ProcessManager {
     pub fn is_running(&self) -> bool {
         let detector = self.detector.read().unwrap();
         let processes = detector.detect_processes();
-        let running = !processes.is_empty();
-        info!(
-            "ProcessManager.is_running: {} (found {} processes)",
-            running,
-            processes.len()
-        );
-        running
+        !processes.is_empty()
     }
 
     /// Get all running processes with resource information.

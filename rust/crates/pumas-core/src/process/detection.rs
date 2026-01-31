@@ -4,7 +4,7 @@ use crate::platform;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn};
+use tracing::debug;
 
 /// How the process was detected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,26 +64,15 @@ impl ProcessDetector {
         let mut processes = Vec::new();
         let mut seen_pids = HashSet::new();
 
-        info!(
-            "ProcessDetector.detect_processes: version_paths has {} entries: {:?}",
-            self.version_paths.len(),
-            self.version_paths.keys().collect::<Vec<_>>()
-        );
-
         // 1. Check PID files
         self.detect_from_pid_files(&mut processes, &mut seen_pids);
-        info!(
-            "After PID file check: found {} processes, pids={:?}",
-            processes.len(),
-            processes.iter().map(|p| p.pid).collect::<Vec<_>>()
-        );
 
         // 2. Scan process table
         self.detect_from_process_scan(&mut processes, &mut seen_pids);
-        info!(
-            "After process scan: found {} total processes, pids={:?}",
-            processes.len(),
-            processes.iter().map(|p| (p.pid, &p.source)).collect::<Vec<_>>()
+
+        debug!(
+            "detect_processes: found {} processes via PID files and process scan",
+            processes.len()
         );
 
         processes
@@ -102,16 +91,11 @@ impl ProcessDetector {
     ) {
         // Check root-level PID file (legacy)
         let root_pid_file = self.root_dir.join("comfyui.pid");
-        info!("Checking root PID file: {:?} (exists={})", root_pid_file, root_pid_file.exists());
         self.check_pid_file(&root_pid_file, None, processes, seen_pids);
 
         // Check per-version PID files
-        if self.version_paths.is_empty() {
-            warn!("version_paths is EMPTY - will not check any per-version PID files!");
-        }
         for (tag, version_path) in &self.version_paths {
             let pid_file = version_path.join("comfyui.pid");
-            info!("Checking version PID file for {}: {:?} (exists={})", tag, pid_file, pid_file.exists());
             self.check_pid_file(&pid_file, Some(tag.clone()), processes, seen_pids);
         }
     }
@@ -147,13 +131,12 @@ impl ProcessDetector {
 
         // Check if process is alive
         if !self.is_process_alive(pid) {
-            warn!(
-                "STALE PID FILE DETECTED: {:?} contains PID {} but process is NOT running! File should be cleaned up.",
+            debug!(
+                "Stale PID file {:?}: process {} not running",
                 pid_file, pid
             );
             return;
         }
-        info!("PID file {:?}: process {} IS ALIVE", pid_file, pid);
 
         if seen_pids.insert(pid) {
             processes.push(DetectedProcess {

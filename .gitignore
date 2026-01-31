@@ -48,7 +48,9 @@ temp/
 
 # ComfyUI runtime files
 comfyui.pid
-launcher-data/
+# launcher-data runtime files (except plugins directory which is tracked)
+launcher-data/*
+!launcher-data/plugins/
 .active-version
 shared-resources/
 comfyui.db

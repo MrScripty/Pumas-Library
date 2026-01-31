@@ -1,0 +1,87 @@
+{
+  "id": "ollama",
+  "displayName": "Ollama",
+  "description": "Local LLM runtime and model server",
+  "icon": "cpu",
+  "githubRepo": "ollama/ollama",
+  "installationType": "binary",
+
+  "capabilities": {
+    "hasVersionManagement": true,
+    "supportsShortcuts": false,
+    "hasDependencies": false,
+    "hasConnectionUrl": true,
+    "hasModelLibrary": true,
+    "hasStats": true
+  },
+
+  "connection": {
+    "defaultPort": 11434,
+    "protocol": "http",
+    "healthEndpoint": "/api/version"
+  },
+
+  "versionFilter": {
+    "includePrereleases": false,
+    "excludePatterns": ["source", "debug", "rocm"],
+    "platformAssets": {
+      "linux-amd64": "ollama-linux-amd64",
+      "linux-arm64": "ollama-linux-arm64",
+      "darwin-amd64": "ollama-darwin",
+      "darwin-arm64": "ollama-darwin",
+      "windows-amd64": "ollama-windows-amd64.exe"
+    }
+  },
+
+  "modelCompatibility": {
+    "supportedFormats": ["gguf"],
+    "importCommand": "ollama create {{model_name}} -f {{modelfile_path}}"
+  },
+
+  "api": {
+    "stats": {
+      "method": "GET",
+      "endpoint": "/api/ps",
+      "pollingIntervalMs": 2000,
+      "responseMapping": {
+        "loadedModels": "$.models[*].name",
+        "memoryUsage": "$.models[*].size"
+      }
+    },
+    "loadModel": {
+      "method": "POST",
+      "endpoint": "/api/generate",
+      "bodyTemplate": {
+        "model": "{{model_name}}",
+        "prompt": "",
+        "keep_alive": "5m"
+      }
+    },
+    "unloadModel": {
+      "method": "POST",
+      "endpoint": "/api/generate",
+      "bodyTemplate": {
+        "model": "{{model_name}}",
+        "keep_alive": "0"
+      }
+    },
+    "listModels": {
+      "method": "GET",
+      "endpoint": "/api/tags",
+      "responseMapping": {
+        "models": "$.models[*]"
+      }
+    }
+  },
+
+  "panelLayout": [
+    {"type": "version_manager"},
+    {"type": "connection_info"},
+    {"type": "stats", "config": {"showMemory": true}},
+    {"type": "model_selector", "config": {"filter": "gguf"}},
+    {"type": "model_library"}
+  ],
+
+  "sidebarPriority": 20,
+  "enabledByDefault": true
+}

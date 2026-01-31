@@ -1,0 +1,44 @@
+{
+  "id": "comfyui",
+  "displayName": "ComfyUI",
+  "description": "Powerful and modular stable diffusion GUI",
+  "icon": "zap",
+  "githubRepo": "comfyanonymous/ComfyUI",
+  "installationType": "python-venv",
+
+  "capabilities": {
+    "hasVersionManagement": true,
+    "supportsShortcuts": true,
+    "hasDependencies": true,
+    "hasConnectionUrl": true,
+    "hasModelLibrary": false,
+    "hasStats": false
+  },
+
+  "connection": {
+    "defaultPort": 8188,
+    "protocol": "http",
+    "healthEndpoint": "/system_stats"
+  },
+
+  "versionFilter": {
+    "includePrereleases": false,
+    "excludePatterns": []
+  },
+
+  "pythonConfig": {
+    "requirementsFile": "requirements.txt",
+    "entryPoint": "main.py",
+    "pythonVersion": "3.10"
+  },
+
+  "panelLayout": [
+    {"type": "version_manager"},
+    {"type": "dependency_status"},
+    {"type": "connection_info"},
+    {"type": "shortcut_manager"}
+  ],
+
+  "sidebarPriority": 10,
+  "enabledByDefault": true
+}

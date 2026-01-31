@@ -38,6 +38,7 @@ pub mod model_library;
 pub mod models;
 pub mod network;
 pub mod platform;
+pub mod plugins;
 pub mod process;
 pub mod system;
 
@@ -55,6 +56,7 @@ pub use model_library::{
     ModelLibrary, ModelMapper,
 };
 pub use models::CommitInfo;
+pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
 pub use system::{
     check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,

@@ -10,11 +10,13 @@
 //! - `version_manager` - Install, manage, and launch application versions
 //! - `custom_nodes` - Manage custom node extensions for ComfyUI
 
+pub mod api_proxy;
 pub mod custom_nodes;
 pub mod process;
 pub mod version_manager;
 
 // Re-export commonly used types
+pub use api_proxy::PluginApiProxy;
 pub use custom_nodes::{CustomNodesManager, InstalledCustomNode, InstallResult, UpdateResult};
 pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use version_manager::{

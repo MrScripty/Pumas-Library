@@ -215,10 +215,58 @@ pub struct HuggingFaceModel {
     /// Size in bytes per quantization level
     #[serde(default)]
     pub quant_sizes: Option<HashMap<String, u64>>,
+    /// Compatible inference engines based on model formats
+    #[serde(default)]
+    pub compatible_engines: Vec<String>,
 }
 
 fn default_kind() -> String {
     "unknown".to_string()
+}
+
+/// Detect compatible inference engines based on model formats.
+///
+/// Maps file formats to the inference engines that can load them:
+/// - GGUF: Ollama, llama.cpp
+/// - SafeTensors: Candle, Diffusers, transformers
+/// - ONNX: ONNX Runtime
+/// - PyTorch (.bin, .pt, .pth): transformers, Diffusers
+pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
+    use std::collections::HashSet;
+
+    let mut engines: HashSet<&str> = HashSet::new();
+
+    for format in formats {
+        match format.to_lowercase().as_str() {
+            "gguf" => {
+                engines.insert("ollama");
+                engines.insert("llama.cpp");
+            }
+            "ggml" => {
+                engines.insert("llama.cpp");
+            }
+            "safetensors" => {
+                engines.insert("candle");
+                engines.insert("transformers");
+                engines.insert("diffusers");
+            }
+            "pytorch" | "bin" => {
+                engines.insert("transformers");
+                engines.insert("diffusers");
+            }
+            "onnx" => {
+                engines.insert("onnx-runtime");
+            }
+            "tensorrt" => {
+                engines.insert("tensorrt");
+            }
+            _ => {}
+        }
+    }
+
+    let mut sorted: Vec<String> = engines.into_iter().map(String::from).collect();
+    sorted.sort();
+    sorted
 }
 
 /// Download option for a quantization variant.

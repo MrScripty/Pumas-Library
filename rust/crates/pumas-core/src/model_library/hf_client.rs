@@ -443,6 +443,9 @@ impl HuggingFaceClient {
         // Build URL for the model page
         let url = format!("https://huggingface.co/{}", result.model_id);
 
+        // Detect compatible inference engines based on formats
+        let compatible_engines = crate::models::detect_compatible_engines(&formats);
+
         HuggingFaceModel {
             repo_id: result.model_id,
             name,
@@ -456,6 +459,7 @@ impl HuggingFaceClient {
             downloads: result.downloads,
             total_size_bytes: None,
             quant_sizes: None,
+            compatible_engines,
         }
     }
 

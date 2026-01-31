@@ -101,6 +101,8 @@ export interface HuggingFaceModel {
   downloads?: number | null;
   totalSizeBytes?: number | null;
   quantSizes?: Record<string, number>;
+  /** Compatible inference engines based on model formats */
+  compatibleEngines?: string[];
 }
 
 export interface SearchHFModelsResponse extends BaseResponse {

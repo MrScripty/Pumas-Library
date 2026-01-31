@@ -58,6 +58,8 @@ export interface RemoteModelInfo {
   downloads?: number | null;
   totalSizeBytes?: number | null;
   quantSizes?: Record<string, number>;
+  /** Compatible inference engines based on model formats */
+  compatibleEngines?: string[];
 }
 
 export type RelatedModelsStatus = 'idle' | 'loading' | 'loaded' | 'error';

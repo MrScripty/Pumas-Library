@@ -104,6 +104,9 @@ pub struct CachedRepoDetails {
 
 impl From<CachedRepoDetails> for HuggingFaceModel {
     fn from(cached: CachedRepoDetails) -> Self {
+        // Compute compatible engines from formats
+        let compatible_engines = crate::models::detect_compatible_engines(&cached.formats);
+
         HuggingFaceModel {
             repo_id: cached.repo_id,
             name: cached.name,
@@ -117,6 +120,7 @@ impl From<CachedRepoDetails> for HuggingFaceModel {
             downloads: cached.downloads,
             total_size_bytes: cached.total_size_bytes,
             quant_sizes: None, // Deprecated field
+            compatible_engines,
         }
     }
 }

@@ -16,6 +16,7 @@ import {
   ChartSpline,
   Blocks,
   ChartPie,
+  Cpu,
 } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/useModelDownloads';
@@ -107,6 +108,36 @@ export function RemoteModelsList({
     return formatDownloadSize(model.totalSizeBytes ?? null);
   };
 
+  /**
+   * Get styling classes for inference engine badge.
+   * Uses theme variables with different accent colors for recognition.
+   */
+  const getEngineStyle = (engine: string): string => {
+    // Use theme accent colors based on engine type
+    switch (engine.toLowerCase()) {
+      case 'ollama':
+        // Primary accent (green) for main inference engine
+        return 'bg-[hsl(var(--launcher-accent-primary)/0.15)] text-[hsl(var(--launcher-accent-primary))]';
+      case 'llama.cpp':
+        // Info accent (cyan) for low-level inference
+        return 'bg-[hsl(var(--launcher-accent-info)/0.15)] text-[hsl(var(--launcher-accent-info))]';
+      case 'candle':
+      case 'transformers':
+        // Warning accent (orange) for ML frameworks
+        return 'bg-[hsl(var(--launcher-accent-warning)/0.15)] text-[hsl(var(--launcher-accent-warning))]';
+      case 'diffusers':
+        // GPU accent (orange) for diffusion models
+        return 'bg-[hsl(var(--launcher-accent-gpu)/0.15)] text-[hsl(var(--launcher-accent-gpu))]';
+      case 'onnx-runtime':
+      case 'tensorrt':
+        // RAM accent (cyan) for optimized runtimes
+        return 'bg-[hsl(var(--launcher-accent-ram)/0.15)] text-[hsl(var(--launcher-accent-ram))]';
+      default:
+        // Default to muted secondary
+        return 'bg-[hsl(var(--launcher-bg-secondary)/0.5)] text-[hsl(var(--text-secondary))]';
+    }
+  };
+
   return (
     <>
       {models.map((model) => {
@@ -188,6 +219,20 @@ export function RemoteModelsList({
                     {formatDownloadSizeRange(model)}
                   </MetadataItem>
                 </div>
+                {model.compatibleEngines && model.compatibleEngines.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-[hsl(var(--text-muted))] mr-0.5" />
+                    {model.compatibleEngines.map((engine) => (
+                      <span
+                        key={engine}
+                        className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${getEngineStyle(engine)}`}
+                        title={`Compatible with ${engine}`}
+                      >
+                        {engine}
+                      </span>
+                    ))}
+                  </div>
+                )}
                 {downloadError && downloadRepoId === model.repoId && (
                   <div className="mt-1.5 text-xs text-[hsl(var(--accent-error))]">
                     {downloadError}

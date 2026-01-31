@@ -267,12 +267,61 @@ impl GitHubClient {
     }
 
     /// Get releases for an app by its ID.
+    /// Also populates archive_size from platform-matched assets for display.
     pub async fn get_releases_for_app(
         &self,
         app_id: AppId,
         force_refresh: bool,
     ) -> Result<Vec<GitHubRelease>> {
-        self.get_releases(app_id.github_repo(), force_refresh).await
+        let mut releases = self.get_releases(app_id.github_repo(), force_refresh).await?;
+
+        // Populate archive_size from platform-matched assets
+        Self::populate_archive_sizes(&mut releases, app_id);
+
+        Ok(releases)
+    }
+
+    /// Populate archive_size from platform-matched release assets.
+    /// For Ollama, this selects the binary for the current platform (e.g., ollama-linux-amd64.tgz).
+    /// For ComfyUI, archive_size remains None (uses zipball which isn't in assets).
+    fn populate_archive_sizes(releases: &mut [GitHubRelease], app_id: AppId) {
+        match app_id {
+            AppId::Ollama => {
+                for release in releases.iter_mut() {
+                    if let Some(asset) = Self::find_ollama_asset_for_platform(&release.assets) {
+                        release.archive_size = Some(asset.size);
+                    }
+                }
+            }
+            AppId::ComfyUI => {
+                // ComfyUI uses source zipball, which isn't in assets array
+                // Size estimation handled elsewhere
+            }
+            _ => {}
+        }
+    }
+
+    /// Find the Ollama binary asset matching the current platform.
+    /// Uses exact matching to avoid selecting variant builds (ROCm, Jetpack, etc.).
+    fn find_ollama_asset_for_platform(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+        let os = std::env::consts::OS;
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => std::env::consts::ARCH,
+        };
+
+        // Exact patterns for standard binaries (excludes -rocm, -jetpack variants)
+        let exact_patterns = [
+            format!("ollama-{}-{}.tar.zst", os, arch), // Primary (current format)
+            format!("ollama-{}-{}.tgz", os, arch),     // Legacy format
+            format!("ollama-{}-{}.tar.gz", os, arch),  // Legacy format
+            format!("ollama-{}-{}.zip", os, arch),     // Windows
+        ];
+
+        assets
+            .iter()
+            .find(|a| exact_patterns.iter().any(|p| a.name == *p))
     }
 
     /// Get the latest non-prerelease release.

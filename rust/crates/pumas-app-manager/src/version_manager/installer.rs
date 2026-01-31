@@ -5,7 +5,7 @@
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
-use pumas_library::network::GitHubRelease;
+use pumas_library::network::{GitHubAsset, GitHubRelease};
 use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use pumas_library::{PumasError, Result};
 use chrono::Utc;
@@ -50,7 +50,21 @@ impl VersionInstaller {
     }
 
     /// Install a version from a GitHub release.
+    /// Dispatches to app-specific installation method based on app_id.
     pub async fn install_version(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        match self.app_id {
+            AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
+            AppId::ComfyUI | _ => self.install_python_app(tag, release, progress_tx).await,
+        }
+    }
+
+    /// Install a Python-based app (ComfyUI) from source with venv and dependencies.
+    async fn install_python_app(
         &self,
         tag: &str,
         release: &GitHubRelease,
@@ -139,6 +153,373 @@ impl VersionInstaller {
         result
     }
 
+    /// Install Ollama binary from pre-built release assets.
+    /// Unlike Python apps, Ollama is distributed as a pre-compiled binary.
+    async fn install_ollama_binary(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        progress_tx: mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        info!("Starting Ollama binary installation for {}", tag);
+
+        // Select platform-appropriate asset (e.g., ollama-linux-amd64.tgz)
+        let asset = self.select_ollama_asset(&release.assets)?;
+        let download_url = &asset.download_url;
+        let total_size = asset.size;
+        let asset_name = asset.name.clone();
+
+        info!(
+            "Selected Ollama asset: {} ({} bytes)",
+            asset_name, total_size
+        );
+
+        // Create log file
+        let log_dir = self.logs_dir();
+        std::fs::create_dir_all(&log_dir).ok();
+        let log_path = log_dir.join(format!(
+            "install-ollama-{}-{}.log",
+            self.slugify_tag(tag),
+            Utc::now().format("%Y%m%d-%H%M%S")
+        ));
+
+        // Start progress tracking with actual asset size from GitHub
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.start_installation(
+                tag,
+                Some(total_size),
+                None,
+                Some(log_path.to_string_lossy().as_ref()),
+            );
+        }
+
+        // Use download cache directory to avoid re-downloading on reinstalls
+        let cache_downloads = self.launcher_root.join("launcher-data").join("cache").join("downloads");
+        std::fs::create_dir_all(&cache_downloads).map_err(|e| PumasError::Io {
+            message: format!("Failed to create download cache directory: {}", e),
+            path: Some(cache_downloads.clone()),
+            source: Some(e),
+        })?;
+
+        let archive_path = cache_downloads.join(&asset_name);
+
+        // Check if we have a valid cached download
+        let cache_valid = if archive_path.exists() {
+            match std::fs::metadata(&archive_path) {
+                Ok(meta) if meta.len() == total_size => {
+                    info!("Using cached download: {} ({} bytes)", asset_name, total_size);
+                    true
+                }
+                Ok(meta) => {
+                    info!("Cached download size mismatch ({} != {}), re-downloading", meta.len(), total_size);
+                    let _ = std::fs::remove_file(&archive_path);
+                    false
+                }
+                Err(_) => {
+                    let _ = std::fs::remove_file(&archive_path);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        // Download binary asset (skip if cache is valid)
+        let result = self
+            .do_ollama_install(
+                tag,
+                release,
+                download_url,
+                total_size,
+                &asset_name,
+                &archive_path,
+                cache_valid,
+                &progress_tx,
+            )
+            .await;
+
+        // Keep cached download on success, remove on failure
+        if result.is_err() {
+            let _ = std::fs::remove_file(&archive_path);
+        }
+
+        // Update progress tracker
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.complete_installation(result.is_ok());
+        }
+
+        result
+    }
+
+    /// Execute Ollama installation steps.
+    async fn do_ollama_install(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        download_url: &str,
+        total_size: u64,
+        asset_name: &str,
+        archive_path: &PathBuf,
+        cache_valid: bool,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        // Check cancellation
+        self.check_cancelled()?;
+
+        // Step 1: Download binary asset (skip if using cache)
+        if cache_valid {
+            // Update progress to show we're using cache
+            {
+                let mut tracker = self.progress_tracker.write().await;
+                tracker.update_stage(InstallationStage::Download, 100.0, Some("Using cached download"));
+            }
+            let _ = progress_tx
+                .send(ProgressUpdate::Download {
+                    downloaded_bytes: total_size,
+                    total_bytes: Some(total_size),
+                    speed_bytes_per_sec: None,
+                })
+                .await;
+        } else {
+            self.download_archive(download_url, archive_path, progress_tx)
+                .await?;
+        }
+
+        // Check cancellation
+        self.check_cancelled()?;
+
+        // Step 2: Create version directory
+        let version_dir = self.versions_dir().join(tag);
+        std::fs::create_dir_all(&version_dir).map_err(|e| PumasError::Io {
+            message: format!("Failed to create version directory: {}", e),
+            path: Some(version_dir.clone()),
+            source: Some(e),
+        })?;
+
+        // Step 3: Extract binary from archive
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(InstallationStage::Extract, 0.0, Some("Extracting binary..."));
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::StageChanged {
+                stage: InstallationStage::Extract,
+                message: "Extracting binary...".to_string(),
+            })
+            .await;
+
+        self.extract_ollama_binary(archive_path, &version_dir, asset_name)?;
+
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(InstallationStage::Extract, 100.0, Some("Extraction complete"));
+        }
+
+        // Check cancellation
+        self.check_cancelled()?;
+
+        // Step 4: Finalize (no venv, no deps - just mark as installed)
+        self.finalize_ollama_installation(tag, release, &version_dir, progress_tx)
+            .await?;
+
+        info!("Ollama installation of {} completed successfully", tag);
+        Ok(())
+    }
+
+    /// Select the appropriate Ollama binary asset for the current platform.
+    /// Uses exact matching to avoid selecting variant builds (ROCm, Jetpack, etc.).
+    fn select_ollama_asset<'a>(&self, assets: &'a [GitHubAsset]) -> Result<&'a GitHubAsset> {
+        let os = std::env::consts::OS;
+        let arch = match std::env::consts::ARCH {
+            "x86_64" => "amd64",
+            "aarch64" => "arm64",
+            _ => std::env::consts::ARCH,
+        };
+
+        // Exact patterns for standard binaries (excludes -rocm, -jetpack variants)
+        let exact_patterns = [
+            format!("ollama-{}-{}.tar.zst", os, arch), // Primary (current format)
+            format!("ollama-{}-{}.tgz", os, arch),     // Legacy format
+            format!("ollama-{}-{}.tar.gz", os, arch),  // Legacy format
+            format!("ollama-{}-{}.zip", os, arch),     // Windows
+        ];
+
+        assets
+            .iter()
+            .find(|a| exact_patterns.iter().any(|p| a.name == *p))
+            .ok_or_else(|| PumasError::InstallationFailed {
+                message: format!(
+                    "No Ollama binary found for {}-{}. Looking for: {:?}. Available assets: {:?}",
+                    os,
+                    arch,
+                    exact_patterns,
+                    assets.iter().map(|a| &a.name).collect::<Vec<_>>()
+                ),
+            })
+    }
+
+    /// Extract Ollama binary from archive format.
+    /// Ollama releases are distributed as:
+    /// - Linux: ollama-linux-amd64.tar.zst (Zstandard compressed tar, current format)
+    /// - Linux (legacy): ollama-linux-amd64.tgz (gzip compressed tar)
+    /// - macOS: ollama-darwin-arm64.tar.zst
+    /// - Windows: ollama-windows-amd64.zip (containing ollama.exe)
+    fn extract_ollama_binary(
+        &self,
+        archive_path: &PathBuf,
+        version_dir: &PathBuf,
+        asset_name: &str,
+    ) -> Result<()> {
+        info!("Extracting Ollama binary from {}", asset_name);
+
+        if asset_name.ends_with(".tar.zst") {
+            // Extract tar.zst (Zstandard compressed tar - current Ollama format)
+            self.extract_tar_zst(archive_path, version_dir)?;
+        } else if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
+            // Extract tar.gz (legacy format)
+            self.extract_tarball(archive_path, version_dir)?;
+        } else if asset_name.ends_with(".zip") {
+            // Extract zip
+            self.extract_zip(archive_path, version_dir)?;
+        } else {
+            // Raw binary (e.g., ollama-linux-amd64 without extension)
+            let binary_name = if cfg!(windows) { "ollama.exe" } else { "ollama" };
+            let dest = version_dir.join(binary_name);
+            std::fs::copy(archive_path, &dest).map_err(|e| PumasError::Io {
+                message: format!("Failed to copy binary: {}", e),
+                path: Some(dest.clone()),
+                source: Some(e),
+            })?;
+        }
+
+        // Find and make the binary executable on Unix
+        self.finalize_ollama_binary(version_dir)?;
+
+        info!("Ollama binary extraction complete");
+        Ok(())
+    }
+
+    /// Extract a .tar.zst archive (Zstandard compressed tar).
+    fn extract_tar_zst(&self, archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
+        info!("Extracting tar.zst archive to {}", dest_dir.display());
+
+        let file = File::open(archive_path).map_err(|e| PumasError::Io {
+            message: format!("Failed to open archive: {}", e),
+            path: Some(archive_path.clone()),
+            source: Some(e),
+        })?;
+
+        let decoder = zstd::Decoder::new(BufReader::new(file)).map_err(|e| PumasError::Io {
+            message: format!("Failed to create zstd decoder: {}", e),
+            path: Some(archive_path.clone()),
+            source: Some(std::io::Error::other(e)),
+        })?;
+
+        let mut archive = tar::Archive::new(decoder);
+        archive.unpack(dest_dir).map_err(|e| PumasError::Io {
+            message: format!("Failed to extract tar.zst: {}", e),
+            path: Some(dest_dir.clone()),
+            source: Some(e),
+        })?;
+
+        Ok(())
+    }
+
+    /// Find the ollama binary in the extracted directory and make it executable.
+    fn finalize_ollama_binary(&self, version_dir: &PathBuf) -> Result<()> {
+        // Ollama archives typically extract to bin/ollama or just ollama
+        let possible_paths = [
+            version_dir.join("bin").join("ollama"),
+            version_dir.join("ollama"),
+        ];
+
+        let binary_path = possible_paths.iter().find(|p| p.exists());
+
+        #[cfg(unix)]
+        if let Some(binary) = binary_path {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(binary)
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to get binary metadata: {}", e),
+                    path: Some(binary.clone()),
+                    source: Some(e),
+                })?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(binary, perms).map_err(|e| PumasError::Io {
+                message: format!("Failed to set binary permissions: {}", e),
+                path: Some(binary.clone()),
+                source: Some(e),
+            })?;
+            info!("Set executable permissions on {}", binary.display());
+        }
+
+        Ok(())
+    }
+
+    /// Finalize Ollama installation (create metadata, no Python/venv).
+    async fn finalize_ollama_installation(
+        &self,
+        tag: &str,
+        release: &GitHubRelease,
+        version_dir: &PathBuf,
+        progress_tx: &mpsc::Sender<ProgressUpdate>,
+    ) -> Result<()> {
+        info!("Finalizing Ollama installation for {}", tag);
+
+        // Update progress
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(InstallationStage::Setup, 0.0, Some("Finalizing installation..."));
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::StageChanged {
+                stage: InstallationStage::Setup,
+                message: "Finalizing installation...".to_string(),
+            })
+            .await;
+
+        // Find the download URL for metadata
+        let download_url = release.assets.iter()
+            .find(|a| a.name.contains("linux") || a.name.contains("darwin") || a.name.contains("windows"))
+            .map(|a| a.download_url.clone());
+
+        // Create metadata entry (no Python version for Ollama)
+        let metadata = InstalledVersionMetadata {
+            path: tag.to_string(),
+            installed_date: Utc::now().to_rfc3339(),
+            release_tag: tag.to_string(),
+            python_version: None, // Ollama is a Go binary, no Python
+            git_commit: None,
+            release_date: Some(release.published_at.clone()),
+            release_notes: release.body.clone(),
+            download_url,
+            size: release.archive_size,
+            requirements_hash: None,
+            dependencies_installed: Some(true), // No dependencies needed
+        };
+
+        // Save metadata
+        self.metadata_manager
+            .update_installed_version(tag, metadata, Some(self.app_id))?;
+
+        // Update progress
+        {
+            let mut tracker = self.progress_tracker.write().await;
+            tracker.update_stage(InstallationStage::Setup, 100.0, Some("Installation complete"));
+        }
+        let _ = progress_tx
+            .send(ProgressUpdate::Setup {
+                message: "Installation complete".to_string(),
+            })
+            .await;
+
+        info!("Ollama installation of {} finalized", tag);
+        Ok(())
+    }
+
     async fn do_install(
         &self,
         tag: &str,
@@ -214,9 +595,11 @@ impl VersionInstaller {
             })
             .await;
 
-        // Create HTTP client
+        // Create HTTP client with appropriate timeouts for large downloads
+        // - connect_timeout: time to establish connection (15s is fine)
+        // - NO overall timeout: downloads can take a long time for large files (1.6 GB+)
         let client = reqwest::Client::builder()
-            .timeout(InstallationConfig::URL_FETCH_TIMEOUT)
+            .connect_timeout(InstallationConfig::URL_FETCH_TIMEOUT)
             .user_agent("pumas-library")
             .build()
             .map_err(|e| PumasError::Network {

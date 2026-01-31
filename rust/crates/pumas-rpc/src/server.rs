@@ -8,6 +8,7 @@ use axum::{
 };
 use pumas_app_manager::{CustomNodesManager, VersionManager, SizeCalculator};
 use pumas_library::PumasApi;
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -19,8 +20,8 @@ use tracing::{info, warn};
 pub struct AppState {
     /// Core API (model library, system utilities)
     pub api: PumasApi,
-    /// Version manager for ComfyUI (from pumas-app-manager)
-    pub version_manager: Arc<RwLock<Option<VersionManager>>>,
+    /// Version managers for each supported app (keyed by app_id: "comfyui", "ollama", etc.)
+    pub version_managers: Arc<RwLock<HashMap<String, VersionManager>>>,
     /// Custom nodes manager (from pumas-app-manager)
     pub custom_nodes_manager: Arc<CustomNodesManager>,
     /// Size calculator for release size estimates
@@ -36,7 +37,7 @@ pub struct AppState {
 /// Returns the actual address the server is bound to (useful when port=0).
 pub async fn start_server(
     api: PumasApi,
-    version_manager: Option<VersionManager>,
+    version_managers: HashMap<String, VersionManager>,
     custom_nodes_manager: CustomNodesManager,
     size_calculator: SizeCalculator,
     launcher_root: PathBuf,
@@ -57,7 +58,7 @@ pub async fn start_server(
 
     let state = Arc::new(AppState {
         api,
-        version_manager: Arc::new(RwLock::new(version_manager)),
+        version_managers: Arc::new(RwLock::new(version_managers)),
         custom_nodes_manager: Arc::new(custom_nodes_manager),
         size_calculator: Arc::new(RwLock::new(size_calculator)),
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
@@ -108,8 +109,11 @@ mod tests {
         let launcher_root = temp_dir.path().to_path_buf();
         let api = PumasApi::new(&launcher_root).await.unwrap();
 
-        // Initialize version manager (may fail if directory doesn't exist, which is fine for test)
-        let version_manager = VersionManager::new(&launcher_root, AppId::ComfyUI).await.ok();
+        // Initialize version managers (may fail if directories don't exist, which is fine for test)
+        let mut version_managers = HashMap::new();
+        if let Ok(vm) = VersionManager::new(&launcher_root, AppId::ComfyUI).await {
+            version_managers.insert("comfyui".to_string(), vm);
+        }
 
         // Initialize custom nodes manager
         let versions_dir = launcher_root.join(AppId::ComfyUI.versions_dir_name());
@@ -121,7 +125,7 @@ mod tests {
 
         let addr = start_server(
             api,
-            version_manager,
+            version_managers,
             custom_nodes_manager,
             size_calculator,
             launcher_root,

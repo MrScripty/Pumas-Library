@@ -12,6 +12,7 @@ use anyhow::Result;
 use clap::Parser;
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
 use pumas_library::AppId;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -81,17 +82,32 @@ async fn main() -> Result<()> {
     // Create the core API instance (model library, system utilities)
     let api = pumas_library::PumasApi::new(&launcher_root).await?;
 
-    // Initialize version manager for ComfyUI (from pumas-app-manager)
-    let version_manager = match VersionManager::new(&launcher_root, AppId::ComfyUI).await {
+    // Initialize version managers for all supported apps
+    let mut version_managers: HashMap<String, VersionManager> = HashMap::new();
+
+    // ComfyUI version manager
+    match VersionManager::new(&launcher_root, AppId::ComfyUI).await {
         Ok(mgr) => {
-            info!("Version manager initialized successfully");
-            Some(mgr)
+            info!("ComfyUI version manager initialized successfully");
+            version_managers.insert("comfyui".to_string(), mgr);
         }
         Err(e) => {
-            warn!("Failed to initialize version manager: {}", e);
-            None
+            warn!("Failed to initialize ComfyUI version manager: {}", e);
         }
-    };
+    }
+
+    // Ollama version manager
+    match VersionManager::new(&launcher_root, AppId::Ollama).await {
+        Ok(mgr) => {
+            info!("Ollama version manager initialized successfully");
+            version_managers.insert("ollama".to_string(), mgr);
+        }
+        Err(e) => {
+            warn!("Failed to initialize Ollama version manager: {}", e);
+        }
+    }
+
+    info!("Initialized {} version manager(s)", version_managers.len());
 
     // Initialize custom nodes manager
     let versions_dir = launcher_root.join(AppId::ComfyUI.versions_dir_name());
@@ -108,7 +124,7 @@ async fn main() -> Result<()> {
     // Start the server
     let addr = server::start_server(
         api,
-        version_manager,
+        version_managers,
         custom_nodes_manager,
         size_calculator,
         launcher_root,

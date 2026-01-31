@@ -239,9 +239,9 @@ async fn dispatch_method(
             sync_version_paths_to_process_manager(state).await;
             let mut response = api.get_status().await?;
 
-            // Enrich with version-specific data from version manager
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            // Enrich with version-specific data from ComfyUI version manager
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get("comfyui") {
                 // Get active version
                 let active_version = vm.get_active_version().await.ok().flatten();
 
@@ -268,7 +268,7 @@ async fn dispatch_method(
                     }
                 }
             }
-            drop(vm_lock);
+            drop(managers);
 
             Ok(serde_json::to_value(response)?)
         }
@@ -327,10 +327,10 @@ async fn dispatch_method(
         // ====================================================================
         "get_available_versions" => {
             let force_refresh = get_bool_param!(params, "force_refresh", "forceRefresh").unwrap_or(false);
-            let _app_id = get_app_id!(params);
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
 
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 // Handle rate limit errors specially to return structured response
                 match vm.get_available_releases(force_refresh).await {
                     Ok(releases) => {
@@ -363,9 +363,9 @@ async fn dispatch_method(
         }
 
         "get_installed_versions" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let versions = vm.get_installed_versions().await?;
                 // Return raw array - wrapper.rs will add {success, versions} wrapper
                 Ok(serde_json::to_value(versions)?)
@@ -375,9 +375,9 @@ async fn dispatch_method(
         }
 
         "get_active_version" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let version = vm.get_active_version().await?;
                 // Return raw value - wrapper.rs will add {success, version} wrapper
                 Ok(serde_json::to_value(version)?)
@@ -387,9 +387,9 @@ async fn dispatch_method(
         }
 
         "get_default_version" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let version = vm.get_default_version().await?;
                 // Return raw value - wrapper.rs will add {success, version} wrapper
                 Ok(serde_json::to_value(version)?)
@@ -400,38 +400,38 @@ async fn dispatch_method(
 
         "set_default_version" => {
             let tag = get_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.set_default_version(tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
 
         "switch_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.set_active_version(&tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
 
         "install_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
 
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 // Start the installation (returns a progress receiver)
                 match vm.install_version(&tag).await {
                     Ok(_rx) => {
@@ -453,29 +453,29 @@ async fn dispatch_method(
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "Version manager not initialized"
+                    "error": format!("Version manager not initialized for app: {}", app_id_str)
                 }))
             }
         }
 
         "remove_version" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.remove_version(&tag).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
 
         "cancel_installation" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.cancel_installation().await?;
                 Ok(serde_json::to_value(result)?)
             } else {
@@ -484,9 +484,9 @@ async fn dispatch_method(
         }
 
         "get_installation_progress" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let progress = vm.get_installation_progress().await;
                 Ok(serde_json::to_value(progress)?)
             } else {
@@ -495,9 +495,9 @@ async fn dispatch_method(
         }
 
         "validate_installations" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.validate_installations().await?;
                 Ok(serde_json::to_value(result)?)
             } else {
@@ -510,9 +510,9 @@ async fn dispatch_method(
         }
 
         "get_version_status" => {
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 // Return version status combining active/default/installed
                 let active = vm.get_active_version().await?;
                 let default = vm.get_default_version().await?;
@@ -552,9 +552,9 @@ async fn dispatch_method(
 
         "get_version_info" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let installed = vm.get_installed_versions().await?;
                 let is_installed = installed.contains(&tag);
                 Ok(json!({
@@ -616,8 +616,9 @@ async fn dispatch_method(
 
         "calculate_all_release_sizes" => {
             // Get all available versions and calculate sizes
-            let vm_lock = state.version_manager.read().await;
-            let versions = if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            let versions = if let Some(vm) = managers.get(app_id_str) {
                 let releases = vm.get_available_releases(false).await?;
                 releases
                     .into_iter()
@@ -626,7 +627,7 @@ async fn dispatch_method(
             } else {
                 vec![]
             };
-            drop(vm_lock);
+            drop(managers);
 
             let mut results = serde_json::Map::new();
             let mut calc = state.size_calculator.write().await;
@@ -658,11 +659,11 @@ async fn dispatch_method(
         }
 
         "get_github_cache_status" => {
-            let _app_id = get_app_id!(params);
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
             // Return cache status in format expected by frontend
             // CacheStatusResponse expects: has_cache, is_valid, is_fetching, age_seconds?, last_fetched?, releases_count?
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let cache_status = vm.get_github_cache_status();
                 Ok(json!({
                     "has_cache": cache_status.has_cache,
@@ -686,37 +687,37 @@ async fn dispatch_method(
         // ====================================================================
         "check_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let status = vm.check_dependencies(&tag).await?;
                 Ok(serde_json::to_value(status)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
 
         "install_version_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let result = vm.install_dependencies(&tag, None).await?;
                 Ok(serde_json::to_value(result)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
 
         "get_release_dependencies" => {
             let tag = require_str_param!(params, "tag", "tag");
-            let _app_id = get_app_id!(params);
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 let version_path = vm.version_path(&tag);
                 let requirements_path = version_path.join("requirements.txt");
 
@@ -755,7 +756,7 @@ async fn dispatch_method(
                 Ok(serde_json::to_value(packages)?)
             } else {
                 Err(pumas_library::PumasError::Config {
-                    message: "Version manager not initialized".to_string(),
+                    message: format!("Version manager not initialized for app: {}", app_id_str),
                 })
             }
         }
@@ -800,13 +801,13 @@ async fn dispatch_method(
         "launch_comfyui" => {
             // Ensure process manager has current version paths
             sync_version_paths_to_process_manager(state).await;
-            // Get the active version from version_manager and launch it
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            // Get the active version from comfyui version_manager and launch it
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get("comfyui") {
                 let active = vm.get_active_version().await?;
                 if let Some(tag) = active {
                     let version_dir = vm.version_path(&tag);
-                    drop(vm_lock);  // Release lock before calling api
+                    drop(managers);  // Release lock before calling api
                     let response = api.launch_version(&tag, &version_dir).await?;
                     Ok(serde_json::to_value(response)?)
                 } else {
@@ -818,7 +819,7 @@ async fn dispatch_method(
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "Version manager not initialized"
+                    "error": "Version manager not initialized for comfyui"
                 }))
             }
         }
@@ -866,10 +867,10 @@ async fn dispatch_method(
         "toggle_menu" => {
             let tag = get_str_param!(params, "tag", "tag");
             if let Some(t) = tag {
-                let vm_lock = state.version_manager.read().await;
-                if let Some(ref vm) = *vm_lock {
+                let managers = state.version_managers.read().await;
+                if let Some(vm) = managers.get("comfyui") {
                     let version_dir = vm.version_path(t);
-                    drop(vm_lock);
+                    drop(managers);
                     let sm_lock = state.shortcut_manager.read().await;
                     if let Some(ref sm) = *sm_lock {
                         match sm.toggle_menu_shortcut(t, &version_dir) {
@@ -890,10 +891,10 @@ async fn dispatch_method(
         "toggle_desktop" => {
             let tag = get_str_param!(params, "tag", "tag");
             if let Some(t) = tag {
-                let vm_lock = state.version_manager.read().await;
-                if let Some(ref vm) = *vm_lock {
+                let managers = state.version_managers.read().await;
+                if let Some(vm) = managers.get("comfyui") {
                     let version_dir = vm.version_path(t);
-                    drop(vm_lock);
+                    drop(managers);
                     let sm_lock = state.shortcut_manager.read().await;
                     if let Some(ref sm) = *sm_lock {
                         match sm.toggle_desktop_shortcut(t, &version_dir) {
@@ -975,13 +976,13 @@ async fn dispatch_method(
         }
 
         "open_active_install" => {
-            let _app_id = get_app_id!(params);
+            let app_id_str = get_str_param!(params, "app_id", "appId").unwrap_or("comfyui");
             // Get the active version from version_manager and open its directory
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get(app_id_str) {
                 if let Some(tag) = vm.get_active_version().await? {
                     let version_dir = vm.version_path(&tag);
-                    drop(vm_lock);
+                    drop(managers);
                     if version_dir.exists() {
                         match api.open_directory(&version_dir) {
                             Ok(()) => Ok(json!({"success": true})),
@@ -994,7 +995,7 @@ async fn dispatch_method(
                     Ok(json!({"success": false, "error": "No active version set"}))
                 }
             } else {
-                Ok(json!({"success": false, "error": "Version manager not initialized"}))
+                Ok(json!({"success": false, "error": format!("Version manager not initialized for app: {}", app_id_str)}))
             }
         }
 
@@ -1448,54 +1449,54 @@ async fn dispatch_method(
 
         "preview_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // Get the models path from version_manager
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            // Get the models path from comfyui version_manager
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get("comfyui") {
                 let version_path = vm.version_path(&version_tag);
                 let models_path = version_path.join("models");
-                drop(vm_lock);
+                drop(managers);
                 let response = api.preview_model_mapping(&version_tag, &models_path).await?;
                 Ok(serde_json::to_value(response)?)
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "Version manager not initialized"
+                    "error": "Version manager not initialized for comfyui"
                 }))
             }
         }
 
         "apply_model_mapping" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // Get the models path from version_manager
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            // Get the models path from comfyui version_manager
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get("comfyui") {
                 let version_path = vm.version_path(&version_tag);
                 let models_path = version_path.join("models");
-                drop(vm_lock);
+                drop(managers);
                 let response = api.apply_model_mapping(&version_tag, &models_path).await?;
                 Ok(serde_json::to_value(response)?)
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "Version manager not initialized"
+                    "error": "Version manager not initialized for comfyui"
                 }))
             }
         }
 
         "sync_models_incremental" => {
             let version_tag = require_str_param!(params, "version_tag", "versionTag");
-            // Get the models path from version_manager
-            let vm_lock = state.version_manager.read().await;
-            if let Some(ref vm) = *vm_lock {
+            // Get the models path from comfyui version_manager
+            let managers = state.version_managers.read().await;
+            if let Some(vm) = managers.get("comfyui") {
                 let version_path = vm.version_path(&version_tag);
                 let models_path = version_path.join("models");
-                drop(vm_lock);
+                drop(managers);
                 let response = api.sync_models_incremental(&version_tag, &models_path).await?;
                 Ok(serde_json::to_value(response)?)
             } else {
                 Ok(json!({
                     "success": false,
-                    "error": "Version manager not initialized"
+                    "error": "Version manager not initialized for comfyui"
                 }))
             }
         }
@@ -1690,13 +1691,13 @@ async fn dispatch_method(
 // Helper Functions
 // ============================================================================
 
-/// Synchronize version paths from version_manager to process_manager.
+/// Synchronize version paths from ComfyUI version_manager to process_manager.
 ///
 /// This ensures the process manager knows about all installed version directories
 /// so it can properly detect and clean up PID files.
 async fn sync_version_paths_to_process_manager(state: &AppState) {
-    let vm_lock = state.version_manager.read().await;
-    if let Some(ref vm) = *vm_lock {
+    let managers = state.version_managers.read().await;
+    if let Some(vm) = managers.get("comfyui") {
         // Get installed versions
         if let Ok(installed) = vm.get_installed_versions().await {
             let version_paths: HashMap<String, PathBuf> = installed
@@ -1708,7 +1709,7 @@ async fn sync_version_paths_to_process_manager(state: &AppState) {
                 .collect();
 
             // Update process manager
-            drop(vm_lock);  // Release version_manager lock first
+            drop(managers);  // Release version_managers lock first
             state.api.set_process_version_paths(version_paths).await;
         }
     }

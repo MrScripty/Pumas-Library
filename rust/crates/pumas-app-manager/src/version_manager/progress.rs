@@ -129,10 +129,42 @@ struct InstallationProgressState {
 impl InstallationProgressTracker {
     /// Create a new progress tracker.
     pub fn new(cache_dir: PathBuf) -> Self {
-        Self {
+        let tracker = Self {
             cache_dir,
             state_filename: "installation-state.json".to_string(),
             state: Mutex::new(None),
+        };
+
+        // Clear any stale completed installation state from previous sessions
+        tracker.clear_stale_state_file();
+
+        tracker
+    }
+
+    /// Clear the state file if it contains a completed installation.
+    /// This prevents stale "completed" states from persisting across restarts.
+    fn clear_stale_state_file(&self) {
+        let state_path = self.cache_dir.join(&self.state_filename);
+        if !state_path.exists() {
+            return;
+        }
+
+        match std::fs::read_to_string(&state_path) {
+            Ok(json) => {
+                if let Ok(state) = serde_json::from_str::<InstallationProgressState>(&json) {
+                    if state.completed_at.is_some() {
+                        debug!(
+                            "Clearing stale completed installation state for {} from previous session",
+                            state.tag
+                        );
+                        let _ = std::fs::remove_file(&state_path);
+                    }
+                }
+            }
+            Err(_) => {
+                // If we can't read the file, remove it to be safe
+                let _ = std::fs::remove_file(&state_path);
+            }
         }
     }
 
@@ -371,6 +403,22 @@ impl InstallationProgressTracker {
         let state_path = self.cache_dir.join(&self.state_filename);
         if state_path.exists() {
             let _ = std::fs::remove_file(&state_path);
+        }
+    }
+
+    /// Clear state only if installation is completed.
+    /// Used to clean up after frontend has had time to poll final status.
+    pub fn clear_completed_state(&mut self) {
+        let should_clear = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .as_ref()
+                .map(|s| s.completed_at.is_some())
+                .unwrap_or(false)
+        };
+        if should_clear {
+            debug!("Clearing completed installation state");
+            self.clear();
         }
     }
 

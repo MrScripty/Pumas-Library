@@ -68,6 +68,7 @@ use pumas_library::{PumasError, Result};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
 
@@ -126,6 +127,25 @@ impl VersionManager {
         let state = Arc::new(RwLock::new(
             VersionState::new(&launcher_root, app_id, metadata_manager.clone()).await?,
         ));
+
+        // Validate installed versions exist on disk (removes stale entries)
+        {
+            let mut state_guard = state.write().await;
+            match state_guard.validate_installations() {
+                Ok(validation) => {
+                    if !validation.removed_tags.is_empty() {
+                        info!(
+                            "Removed {} stale version entries for {:?}",
+                            validation.removed_tags.len(),
+                            app_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!("Failed to validate installations for {:?}: {}", app_id, e);
+                }
+            }
+        }
 
         Ok(Self {
             launcher_root,
@@ -384,6 +404,7 @@ impl VersionManager {
         let tag = tag.to_string();
         let state = self.state.clone();
         let installing_tag = self.installing_tag.clone();
+        let progress_tracker = self.progress_tracker.clone();
 
         tokio::spawn(async move {
             let result = installer.install_version(&tag, &release, tx.clone()).await;
@@ -396,8 +417,9 @@ impl VersionManager {
 
             // Update state on success
             if result.is_ok() {
-                if let Ok(mut state) = state.try_write() {
-                    let _ = state.refresh();
+                let mut state_guard = state.write().await;
+                if let Err(e) = state_guard.refresh() {
+                    warn!("Failed to refresh state after installation: {}", e);
                 }
             }
 
@@ -408,6 +430,13 @@ impl VersionManager {
                     message: e.to_string(),
                 },
             }).await;
+
+            // Schedule progress state cleanup after frontend has time to poll final status
+            tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                let mut tracker = progress_tracker.write().await;
+                tracker.clear_completed_state();
+            });
         });
 
         Ok(rx)

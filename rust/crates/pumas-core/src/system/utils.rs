@@ -2,7 +2,7 @@
 
 use crate::error::{PumasError, Result};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use tracing::{debug, error, warn};
 
 /// Disk space information.
@@ -327,21 +327,43 @@ impl SystemUtils {
         // Try to open as a standalone webapp using Chromium-based browsers
         // These browsers support --app mode which opens without browser chrome
         let chromium_browsers = [
-            ("brave-browser", vec!["--app"]),
-            ("brave", vec!["--app"]),
-            ("google-chrome", vec!["--app"]),
-            ("google-chrome-stable", vec!["--app"]),
-            ("chromium", vec!["--app"]),
-            ("chromium-browser", vec!["--app"]),
-            ("microsoft-edge", vec!["--app"]),
+            "brave-browser",
+            "brave",
+            "google-chrome",
+            "google-chrome-stable",
+            "chromium",
+            "chromium-browser",
+            "microsoft-edge",
         ];
 
-        for (browser, base_args) in &chromium_browsers {
-            if command_exists(browser) {
-                let app_url = format!("{}={}", base_args[0], url);
-                debug!("Opening {} with {} in app mode", url, browser);
+        // Create unique profile directory in /tmp (matches working shell script)
+        // Using /tmp ensures complete isolation from any existing Brave profiles
+        let timestamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let profile_dir = std::env::temp_dir().join(format!("comfyui-profile-{}", timestamp));
+        if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+            warn!("Failed to create profile directory: {}", e);
+        }
+        let user_data_dir = format!("--user-data-dir={}", profile_dir.display());
 
-                match Command::new(browser).arg(&app_url).spawn() {
+        for browser in &chromium_browsers {
+            if command_exists(browser) {
+                let app_url = format!("--app={}", url);
+                debug!("Opening {} with {} in app mode (profile: {})", url, browser, profile_dir.display());
+
+                // Launch as standalone app window - matches working shell script exactly
+                match Command::new(browser)
+                    .arg(&app_url)
+                    .arg("--new-window")
+                    .arg(&user_data_dir)
+                    .arg("--class=ComfyUI-App")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                {
                     Ok(mut child) => {
                         std::thread::spawn(move || {
                             let _ = child.wait();
@@ -384,7 +406,13 @@ impl SystemUtils {
             "Microsoft Edge",
         ];
 
+        // Create profile directory for standalone app mode
+        let profile_dir = self.script_dir.join("launcher-data").join("profiles").join("comfyui-app");
+        if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+            warn!("Failed to create profile directory: {}", e);
+        }
         let app_url = format!("--app={}", url);
+        let user_data_dir = format!("--user-data-dir={}", profile_dir.display());
 
         for browser in &chromium_apps {
             // Check if the browser app exists
@@ -392,8 +420,12 @@ impl SystemUtils {
             if std::path::Path::new(&app_path).exists() {
                 debug!("Opening {} with {} in app mode", url, browser);
 
+                // Use -n to open a new instance, --new-window for standalone app
                 match Command::new("open")
-                    .args(["-a", browser, "-n", "--args", &app_url])
+                    .args(["-a", browser, "-n", "--args", "--new-window", &user_data_dir, &app_url])
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
                     .spawn()
                 {
                     Ok(mut child) => {
@@ -451,13 +483,28 @@ impl SystemUtils {
             ),
         ];
 
+        // Create profile directory for standalone app mode
+        let profile_dir = self.script_dir.join("launcher-data").join("profiles").join("comfyui-app");
+        if let Err(e) = std::fs::create_dir_all(&profile_dir) {
+            warn!("Failed to create profile directory: {}", e);
+        }
         let app_url = format!("--app={}", url);
+        let user_data_dir = format!("--user-data-dir={}", profile_dir.display());
 
         for (browser_path, name) in &chromium_browsers {
             if std::path::Path::new(browser_path).exists() {
                 debug!("Opening {} with {} in app mode", url, name);
 
-                match Command::new(browser_path).arg(&app_url).spawn() {
+                match Command::new(browser_path)
+                    .arg(&app_url)
+                    .arg("--new-window")
+                    .arg("--new-instance")
+                    .arg(&user_data_dir)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                {
                     Ok(mut child) => {
                         std::thread::spawn(move || {
                             let _ = child.wait();

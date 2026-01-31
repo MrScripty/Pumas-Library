@@ -547,6 +547,9 @@ pub struct RepoFileTree {
     pub regular_files: Vec<String>,
     /// When this was cached
     pub cached_at: String,
+    /// Last modified timestamp from HuggingFace (for cache invalidation)
+    #[serde(default)]
+    pub last_modified: Option<String>,
 }
 
 #[cfg(test)]

@@ -1707,11 +1707,6 @@ async fn sync_version_paths_to_process_manager(state: &AppState) {
                 })
                 .collect();
 
-            info!(
-                "Syncing {} version paths to process manager",
-                version_paths.len()
-            );
-
             // Update process manager
             drop(vm_lock);  // Release version_manager lock first
             state.api.set_process_version_paths(version_paths).await;

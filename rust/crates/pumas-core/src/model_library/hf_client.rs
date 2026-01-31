@@ -9,11 +9,13 @@
 use crate::error::{PumasError, Result};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::compute_fast_hash;
+use crate::model_library::hf_cache::HfSearchCache;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
     DownloadRequest, DownloadStatus, HfMetadataResult, HfSearchParams, HuggingFaceModel,
     LfsFileInfo, ModelDownloadProgress, RepoFileTree,
 };
+use crate::models::DownloadOption;
 use crate::network::{CacheStrategy, WebSource, WebSourceId};
 use async_trait::async_trait;
 use reqwest::Client;
@@ -25,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// HuggingFace API base URL.
 const HF_API_BASE: &str = "https://huggingface.co/api";
@@ -37,14 +39,24 @@ const HF_HUB_BASE: &str = "https://huggingface.co";
 const REPO_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// Client for HuggingFace Hub API operations.
-#[derive(Debug)]
 pub struct HuggingFaceClient {
     /// HTTP client
     client: Client,
-    /// Cache directory for LFS file info
+    /// Cache directory for LFS file info (legacy JSON cache)
     cache_dir: PathBuf,
     /// Active downloads
     downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
+    /// SQLite search cache (optional)
+    search_cache: Option<Arc<HfSearchCache>>,
+}
+
+impl std::fmt::Debug for HuggingFaceClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HuggingFaceClient")
+            .field("cache_dir", &self.cache_dir)
+            .field("has_search_cache", &self.search_cache.is_some())
+            .finish()
+    }
 }
 
 /// Internal state for an active download.
@@ -103,25 +115,114 @@ impl HuggingFaceClient {
             client,
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
+            search_cache: None,
         })
+    }
+
+    /// Create a new HuggingFace client with SQLite search cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `cache_dir` - Directory for caching API responses (legacy JSON)
+    /// * `search_cache` - SQLite search cache for intelligent caching
+    pub fn with_cache(cache_dir: impl Into<PathBuf>, search_cache: Arc<HfSearchCache>) -> Result<Self> {
+        let mut client = Self::new(cache_dir)?;
+        client.search_cache = Some(search_cache);
+        Ok(client)
+    }
+
+    /// Set the search cache after construction.
+    pub fn set_search_cache(&mut self, cache: Arc<HfSearchCache>) {
+        self.search_cache = Some(cache);
+    }
+
+    /// Get a reference to the search cache if available.
+    pub fn search_cache(&self) -> Option<&Arc<HfSearchCache>> {
+        self.search_cache.as_ref()
     }
 
     // ========================================
     // Search Operations
     // ========================================
 
-    /// Search for models on HuggingFace.
+    /// Search for models on HuggingFace with automatic caching.
+    ///
+    /// This method transparently handles caching:
+    /// - Checks SQLite cache for recent search results
+    /// - Falls back to HuggingFace API if cache miss or stale
+    /// - Enriches results with download options (file sizes)
+    /// - Caches results for future queries
     ///
     /// # Arguments
     ///
     /// * `params` - Search parameters
     pub async fn search(&self, params: &HfSearchParams) -> Result<Vec<HuggingFaceModel>> {
+        // If we have a cache, use it transparently
+        let cache = match &self.search_cache {
+            Some(c) => c,
+            None => {
+                // No cache configured, use direct API
+                return self.search_api(params).await;
+            }
+        };
+
+        let limit = params.limit.unwrap_or(20);
+        let offset = params.offset.unwrap_or(0);
+        let kind = params.kind.as_deref();
+
+        // Check cache for existing search results
+        match cache.get_search_results(&params.query, kind, limit, offset) {
+            Ok(Some(models)) => {
+                info!(
+                    "Cache hit for search '{}': {} models",
+                    params.query,
+                    models.len()
+                );
+                return Ok(models);
+            }
+            Ok(None) => {
+                debug!("Cache miss for search '{}'", params.query);
+            }
+            Err(e) => {
+                warn!("Cache error, falling back to API: {}", e);
+            }
+        }
+
+        // Cache miss - perform API search
+        let models = self.search_api(params).await?;
+
+        // Enrich models with download options from cache or API
+        let enriched = self.enrich_models_with_download_options(&models).await;
+
+        // Cache the search results
+        let repo_ids: Vec<String> = enriched.iter().map(|m| m.repo_id.clone()).collect();
+        if let Err(e) = cache.cache_search_results(&params.query, kind, limit, offset, &repo_ids) {
+            warn!("Failed to cache search results: {}", e);
+        }
+
+        // Cache individual model details
+        for model in &enriched {
+            if let Err(e) = cache.cache_repo_details(model) {
+                warn!("Failed to cache repo details for {}: {}", model.repo_id, e);
+            }
+        }
+
+        Ok(enriched)
+    }
+
+    /// Direct API search without caching (internal use).
+    ///
+    /// # Arguments
+    ///
+    /// * `params` - Search parameters
+    async fn search_api(&self, params: &HfSearchParams) -> Result<Vec<HuggingFaceModel>> {
         let limit = params.limit.unwrap_or(20);
         let offset = params.offset.unwrap_or(0);
 
         // Build search URL
+        // Note: full=true is required to get lastModified field in response
         let mut url = format!(
-            "{}/models?search={}&limit={}&offset={}",
+            "{}/models?search={}&limit={}&offset={}&full=true",
             HF_API_BASE,
             urlencoding::encode(&params.query),
             limit,
@@ -172,6 +273,128 @@ impl HuggingFaceClient {
         Ok(models)
     }
 
+    /// Enrich models with download options (file sizes) from cache or API.
+    async fn enrich_models_with_download_options(
+        &self,
+        models: &[HuggingFaceModel],
+    ) -> Vec<HuggingFaceModel> {
+        let mut enriched = Vec::with_capacity(models.len());
+
+        for model in models {
+            let mut model = model.clone();
+
+            // Try to get download options from cache first
+            if let Some(cache) = &self.search_cache {
+                // Check if we need to refresh based on lastModified
+                let needs_refresh = cache
+                    .needs_refresh(&model.repo_id, model.release_date.as_deref())
+                    .unwrap_or(true);
+
+                if !needs_refresh {
+                    // Use cached details
+                    if let Ok(Some(cached)) = cache.get_repo_details(&model.repo_id) {
+                        if !cached.download_options.is_empty() {
+                            model.download_options = cached.download_options;
+                            model.total_size_bytes = cached.total_size_bytes;
+                            enriched.push(model);
+                            continue;
+                        }
+                    }
+                }
+            }
+
+            // Fetch from API
+            match self.get_repo_files(&model.repo_id).await {
+                Ok(tree) => {
+                    let download_options = Self::extract_download_options_from_tree(&tree, &model.quants);
+                    let total_size = tree.lfs_files.iter().map(|f| f.size).sum();
+
+                    model.download_options = download_options;
+                    model.total_size_bytes = Some(total_size);
+                }
+                Err(e) => {
+                    debug!(
+                        "Failed to fetch repo files for {}: {}",
+                        model.repo_id, e
+                    );
+                    // Keep model without download options
+                }
+            }
+
+            enriched.push(model);
+        }
+
+        enriched
+    }
+
+    /// Extract download options from repo file tree.
+    fn extract_download_options_from_tree(
+        tree: &RepoFileTree,
+        quants: &[String],
+    ) -> Vec<DownloadOption> {
+        let mut options = Vec::new();
+
+        // Build regex for quant pattern matching
+        let quant_pattern = regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
+            .ok();
+
+        for lfs_file in &tree.lfs_files {
+            // Only include model files
+            if !lfs_file.filename.ends_with(".gguf")
+                && !lfs_file.filename.ends_with(".safetensors")
+                && !lfs_file.filename.ends_with(".bin")
+            {
+                continue;
+            }
+
+            // Try to extract quant from filename
+            let quant = if let Some(ref pattern) = quant_pattern {
+                pattern
+                    .captures(&lfs_file.filename)
+                    .and_then(|cap| cap.get(1))
+                    .map(|m| m.as_str().to_string())
+            } else {
+                None
+            };
+
+            // If we found a quant, or the file matches a known quant
+            if let Some(q) = quant {
+                options.push(DownloadOption {
+                    quant: q,
+                    size_bytes: Some(lfs_file.size),
+                });
+            } else if quants.iter().any(|q| lfs_file.filename.contains(q)) {
+                // Fallback: check if filename contains any of the known quants
+                for q in quants {
+                    if lfs_file.filename.contains(q) {
+                        options.push(DownloadOption {
+                            quant: q.clone(),
+                            size_bytes: Some(lfs_file.size),
+                        });
+                        break;
+                    }
+                }
+            } else if quants.is_empty() {
+                // No quants specified, include file by name
+                let name = lfs_file
+                    .filename
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&lfs_file.filename);
+                options.push(DownloadOption {
+                    quant: name.to_string(),
+                    size_bytes: Some(lfs_file.size),
+                });
+            }
+        }
+
+        // Sort by quant name for consistent ordering
+        options.sort_by(|a, b| a.quant.cmp(&b.quant));
+        options.dedup_by(|a, b| a.quant == b.quant);
+
+        options
+    }
+
     /// Convert HF search result to our model type.
     fn convert_search_result(&self, result: HfSearchResult) -> HuggingFaceModel {
         // Extract name from modelId (after the /)
@@ -201,7 +424,8 @@ impl HuggingFaceClient {
             .cloned()
             .collect();
 
-        let quants: Vec<String> = result
+        // Extract quants from tags first
+        let mut quants: Vec<String> = result
             .tags
             .iter()
             .filter(|t| {
@@ -210,6 +434,11 @@ impl HuggingFaceClient {
             })
             .cloned()
             .collect();
+
+        // If no quants from tags, extract from sibling filenames (GGUF models)
+        if quants.is_empty() {
+            quants = Self::extract_quants_from_filenames(&result.siblings);
+        }
 
         // Build URL for the model page
         let url = format!("https://huggingface.co/{}", result.model_id);
@@ -228,6 +457,37 @@ impl HuggingFaceClient {
             total_size_bytes: None,
             quant_sizes: None,
         }
+    }
+
+    /// Extract quantization names from sibling filenames.
+    ///
+    /// Looks for patterns like Q4_K_M, Q8_0, etc. in GGUF/model filenames.
+    fn extract_quants_from_filenames(siblings: &[HfSibling]) -> Vec<String> {
+        use std::collections::HashSet;
+
+        let quant_pattern = regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
+            .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap()); // fallback to never-match
+
+        let mut quants: HashSet<String> = HashSet::new();
+
+        for sibling in siblings {
+            let filename = &sibling.rfilename;
+            // Only check model files (gguf, safetensors, etc.)
+            if filename.ends_with(".gguf")
+                || filename.ends_with(".safetensors")
+                || filename.ends_with(".bin")
+            {
+                for cap in quant_pattern.captures_iter(filename) {
+                    if let Some(m) = cap.get(1) {
+                        quants.insert(m.as_str().to_string());
+                    }
+                }
+            }
+        }
+
+        let mut sorted: Vec<String> = quants.into_iter().collect();
+        sorted.sort();
+        sorted
     }
 
     // ========================================
@@ -299,6 +559,7 @@ impl HuggingFaceClient {
             lfs_files,
             regular_files,
             cached_at: chrono::Utc::now().to_rfc3339(),
+            last_modified: None, // Would need separate API call to get this
         };
 
         // Cache the result
@@ -821,12 +1082,24 @@ struct HfSearchResult {
     model_id: String,
     #[serde(default)]
     tags: Vec<String>,
-    #[serde(default)]
+    /// Note: HuggingFace API returns this as snake_case "pipeline_tag"
+    #[serde(default, rename = "pipeline_tag")]
     pipeline_tag: Option<String>,
+    /// Requires full=true in API request to be populated
     #[serde(default)]
     last_modified: Option<String>,
     #[serde(default)]
     downloads: Option<u64>,
+    /// File list from repo (available with full=true)
+    #[serde(default)]
+    siblings: Vec<HfSibling>,
+}
+
+/// HuggingFace sibling file entry from search API.
+#[derive(Debug, Deserialize)]
+struct HfSibling {
+    /// Relative filename in the repo
+    rfilename: String,
 }
 
 /// HuggingFace file entry from tree API.
@@ -902,6 +1175,7 @@ mod tests {
             pipeline_tag: Some("text-generation".to_string()),
             last_modified: Some("2024-01-01".to_string()),
             downloads: Some(10000),
+            siblings: vec![],
         };
 
         let model = client.convert_search_result(mock_result);

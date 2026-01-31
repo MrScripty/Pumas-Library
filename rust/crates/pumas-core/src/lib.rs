@@ -263,8 +263,26 @@ impl PumasApiBuilder {
                 .join("launcher-data")
                 .join(config::PathsConfig::CACHE_DIR_NAME);
             let hf_cache_dir = cache_dir.join("hf");
+
+            // Initialize SQLite search cache at shared-resources/cache/search.sqlite
+            let search_cache_dir = self.launcher_root.join("shared-resources").join("cache");
+            let search_cache_db = search_cache_dir.join("search.sqlite");
+            let search_cache = match model_library::HfSearchCache::new(&search_cache_db) {
+                Ok(cache) => Some(std::sync::Arc::new(cache)),
+                Err(e) => {
+                    tracing::warn!("Failed to initialize HuggingFace search cache: {}", e);
+                    None
+                }
+            };
+
             match model_library::HuggingFaceClient::new(&hf_cache_dir) {
-                Ok(client) => Some(client),
+                Ok(mut client) => {
+                    // Attach search cache if available
+                    if let Some(cache) = search_cache {
+                        client.set_search_cache(cache);
+                    }
+                    Some(client)
+                }
                 Err(e) => {
                     tracing::warn!("Failed to initialize HuggingFace client: {}", e);
                     None
@@ -376,8 +394,26 @@ impl PumasApi {
             .join("launcher-data")
             .join(config::PathsConfig::CACHE_DIR_NAME);
         let hf_cache_dir = cache_dir.join("hf");
+
+        // Initialize SQLite search cache at shared-resources/cache/search.sqlite
+        let search_cache_dir = launcher_root.join("shared-resources").join("cache");
+        let search_cache_db = search_cache_dir.join("search.sqlite");
+        let search_cache = match model_library::HfSearchCache::new(&search_cache_db) {
+            Ok(cache) => Some(std::sync::Arc::new(cache)),
+            Err(e) => {
+                tracing::warn!("Failed to initialize HuggingFace search cache: {}", e);
+                None
+            }
+        };
+
         let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
-            Ok(client) => Some(client),
+            Ok(mut client) => {
+                // Attach search cache if available
+                if let Some(cache) = search_cache {
+                    client.set_search_cache(cache);
+                }
+                Some(client)
+            }
             Err(e) => {
                 tracing::warn!("Failed to initialize HuggingFace client: {}", e);
                 None
@@ -692,10 +728,6 @@ impl PumasApi {
     pub async fn set_process_version_paths(&self, version_paths: std::collections::HashMap<String, PathBuf>) {
         let mgr_lock = self.process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
-            tracing::info!(
-                "PumasApi.set_process_version_paths: setting {} version paths",
-                version_paths.len()
-            );
             mgr.set_version_paths(version_paths);
         } else {
             tracing::warn!("PumasApi.set_process_version_paths: process manager not initialized");
@@ -859,6 +891,11 @@ impl PumasApi {
     }
 
     /// Search for models on HuggingFace.
+    ///
+    /// Uses intelligent caching to minimize API calls:
+    /// - Cached results are returned immediately if fresh (< 24 hours)
+    /// - Model details including download sizes are enriched from cache
+    /// - Falls back to API when cache is stale or missing
     pub async fn search_hf_models(
         &self,
         query: &str,
@@ -872,6 +909,7 @@ impl PumasApi {
                 limit: Some(limit),
                 ..Default::default()
             };
+            // search() handles caching transparently
             client.search(&params).await
         } else {
             Ok(vec![])

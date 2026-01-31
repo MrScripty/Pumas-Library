@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 
 export type AppStatus = 'idle' | 'running' | 'installing' | 'error';
-export type AppIconState = 'running' | 'offline' | 'uninstalled' | 'error';
+export type AppIconState = 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
 
 export interface AppConfig {
   id: string;

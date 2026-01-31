@@ -223,6 +223,14 @@ export const AppIcon: React.FC<AppIconProps> = ({
       <div className="relative overflow-visible">
         {state === 'running' ? (
           <RunningIcon appId={appId} ramUsage={ramUsage} gpuUsage={gpuUsage} isSelected={isSelected} />
+        ) : state === 'starting' ? (
+          <div className="animate-pulse">
+            <OfflineIcon appId={appId} isSelected={isSelected} />
+          </div>
+        ) : state === 'stopping' ? (
+          <div className="animate-pulse">
+            <RunningIcon appId={appId} ramUsage={ramUsage} gpuUsage={gpuUsage} isSelected={isSelected} />
+          </div>
         ) : state === 'offline' ? (
           <OfflineIcon appId={appId} isSelected={isSelected} />
         ) : state === 'uninstalled' ? (

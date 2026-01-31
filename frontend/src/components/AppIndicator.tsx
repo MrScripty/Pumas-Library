@@ -7,7 +7,7 @@ const logger = getLogger('AppIndicator');
 
 interface AppIndicatorProps {
   appId: string;
-  state: 'running' | 'offline' | 'uninstalled' | 'error';
+  state: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
   isSelected: boolean;
   hasInstall: boolean;
   launchError: boolean;
@@ -72,6 +72,12 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   const handleClick = (e: React.MouseEvent) => {
     e.stopPropagation();
 
+    // Ignore clicks during transition states
+    if (state === 'starting' || state === 'stopping') {
+      logger.debug(`Click ignored for app: ${appId}, in transition state: ${state}`);
+      return;
+    }
+
     if (state === 'running') {
       logger.info(`Stop requested for app: ${appId}`);
       onStop?.();
@@ -87,6 +93,52 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   };
 
   const getIndicatorContent = () => {
+    // Starting state - pulsing play icon
+    if (state === 'starting') {
+      return (
+        <div className="relative w-full h-full flex items-center justify-center">
+          <div
+            className="absolute w-full h-full bg-[hsl(var(--launcher-accent-success))] rounded-full opacity-20 animate-pulse"
+            style={{
+              boxShadow: `
+                0 0 4px 0px hsl(var(--launcher-accent-success) / 0.6),
+                0 0 8px 2px hsl(var(--launcher-accent-success) / 0.4),
+                0 0 12px 4px hsl(var(--launcher-accent-success) / 0.2)
+              `
+            }}
+          />
+          <Play
+            className="w-3 h-3 text-[hsl(var(--launcher-accent-success))] relative z-10 animate-pulse"
+            fill="currentColor"
+          />
+        </div>
+      );
+    }
+
+    // Stopping state - pulsing stop icon
+    if (state === 'stopping') {
+      return (
+        <div className="relative w-full h-full flex items-center justify-center">
+          <div
+            className="absolute w-full h-full bg-[hsl(var(--accent-error))] rounded-full opacity-20 animate-pulse"
+            style={{
+              boxShadow: `
+                0 0 4px 0px hsl(var(--accent-error) / 0.6),
+                0 0 8px 2px hsl(var(--accent-error) / 0.4),
+                0 0 12px 4px hsl(var(--accent-error) / 0.2)
+              `
+            }}
+          />
+          <Square
+            className="w-3 h-3 text-[hsl(var(--accent-error))] relative z-10 animate-pulse"
+            fill="currentColor"
+            stroke="currentColor"
+            strokeWidth={1}
+          />
+        </div>
+      );
+    }
+
     // Running state
     if (state === 'running') {
       if (isHovering) {

@@ -6,6 +6,7 @@ use std::collections::HashMap;
 
 /// Base response with success flag.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct BaseResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -30,6 +31,7 @@ impl BaseResponse {
 
 /// Disk space response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DiskSpaceResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -42,6 +44,7 @@ pub struct DiskSpaceResponse {
 
 /// CPU resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CpuResources {
     pub usage: f32,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,6 +53,7 @@ pub struct CpuResources {
 
 /// GPU resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct GpuResources {
     pub usage: f32,
     pub memory: u64,
@@ -60,6 +64,7 @@ pub struct GpuResources {
 
 /// RAM resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RamResources {
     pub usage: f32,
     pub total: u64,
@@ -67,6 +72,7 @@ pub struct RamResources {
 
 /// Disk resources.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DiskResources {
     pub usage: f32,
     pub total: u64,
@@ -75,6 +81,7 @@ pub struct DiskResources {
 
 /// System resources container.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct SystemResources {
     pub cpu: CpuResources,
     pub gpu: GpuResources,
@@ -84,6 +91,7 @@ pub struct SystemResources {
 
 /// System resources response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct SystemResourcesResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,6 +101,7 @@ pub struct SystemResourcesResponse {
 
 /// App-specific resource usage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AppResourceUsage {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gpu_memory: Option<u64>,
@@ -102,13 +111,17 @@ pub struct AppResourceUsage {
 
 /// App resources container.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct AppResources {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub comfyui: Option<AppResourceUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ollama: Option<AppResourceUsage>,
 }
 
 /// Status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct StatusResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,6 +135,7 @@ pub struct StatusResponse {
     pub shortcut_version: Option<String>,
     pub message: String,
     pub comfyui_running: bool,
+    pub ollama_running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_launch_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,6 +154,8 @@ pub struct ModelsResponse {
 }
 
 /// Search HF models response.
+///
+/// Note: Not FFI-compatible due to HuggingFaceModel containing HashMap.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHfModelsResponse {
     pub success: bool,
@@ -151,6 +167,7 @@ pub struct SearchHfModelsResponse {
 /// Model download response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelDownloadResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -166,6 +183,7 @@ pub struct ModelDownloadResponse {
 /// FTS search response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct FtsSearchResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -179,6 +197,7 @@ pub struct FtsSearchResponse {
 /// Import batch response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ImportBatchResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -208,6 +227,7 @@ pub struct NetworkStatusResponse {
 /// Library status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LibraryStatusResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -223,6 +243,7 @@ pub struct LibraryStatusResponse {
 
 /// Deep scan progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DeepScanProgress {
     pub current: u32,
     pub total: u32,
@@ -232,6 +253,7 @@ pub struct DeepScanProgress {
 /// Link health status.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum HealthStatus {
     Healthy,
     Warnings,
@@ -241,6 +263,7 @@ pub enum HealthStatus {
 /// Link type.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum LinkType {
     Symlink,
     Hardlink,
@@ -250,6 +273,7 @@ pub enum LinkType {
 /// Broken link information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct BrokenLinkInfo {
     pub link_id: i64,
     pub target_path: String,
@@ -259,6 +283,8 @@ pub struct BrokenLinkInfo {
 }
 
 /// Link health response.
+///
+/// Note: Not FFI-compatible due to `usize` fields. Use wrapper types in pumas-uniffi.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct LinkHealthResponse {
@@ -275,6 +301,8 @@ pub struct LinkHealthResponse {
 }
 
 /// Clean broken links response.
+///
+/// Note: Not FFI-compatible due to `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct CleanBrokenLinksResponse {
@@ -285,6 +313,7 @@ pub struct CleanBrokenLinksResponse {
 /// Link information for a model.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LinkInfo {
     pub source: String,
     pub target: String,
@@ -298,6 +327,7 @@ pub struct LinkInfo {
 /// Links for model response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LinksForModelResponse {
     pub success: bool,
     pub links: Vec<LinkInfo>,
@@ -306,6 +336,7 @@ pub struct LinksForModelResponse {
 /// Delete model response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DeleteModelResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -313,6 +344,8 @@ pub struct DeleteModelResponse {
 }
 
 /// Mapping preview data.
+///
+/// Note: Not FFI-compatible due to `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MappingPreviewData {
@@ -323,6 +356,8 @@ pub struct MappingPreviewData {
 }
 
 /// Mapping preview response.
+///
+/// Note: Not FFI-compatible due to MappingPreviewData containing `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MappingPreviewResponse {
@@ -334,6 +369,8 @@ pub struct MappingPreviewResponse {
 }
 
 /// Mapping apply response.
+///
+/// Note: Not FFI-compatible due to `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MappingApplyResponse {
@@ -346,6 +383,8 @@ pub struct MappingApplyResponse {
 }
 
 /// Sync models response.
+///
+/// Note: Not FFI-compatible due to `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct SyncModelsResponse {
@@ -358,6 +397,7 @@ pub struct SyncModelsResponse {
 
 /// Shortcut state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ShortcutState {
     pub menu: bool,
     pub desktop: bool,
@@ -367,6 +407,7 @@ pub struct ShortcutState {
 /// Launcher version response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LauncherVersionResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -379,6 +420,7 @@ pub struct LauncherVersionResponse {
 /// Check launcher updates response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CheckLauncherUpdatesResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -392,6 +434,7 @@ pub struct CheckLauncherUpdatesResponse {
 
 /// Commit information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct CommitInfo {
     pub hash: String,
     pub message: String,
@@ -402,6 +445,7 @@ pub struct CommitInfo {
 /// Launch response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LaunchResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -415,6 +459,7 @@ pub struct LaunchResponse {
 /// Sandbox type.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum SandboxType {
     Flatpak,
     Snap,
@@ -427,6 +472,7 @@ pub enum SandboxType {
 /// Sandbox info response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct SandboxInfoResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -464,6 +510,7 @@ mod tests {
             shortcut_version: Some("v1.0.0".into()),
             message: "Ready".into(),
             comfyui_running: false,
+            ollama_running: false,
             last_launch_error: None,
             last_launch_log: None,
             app_resources: None,

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc"]
+members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi"]
 
 [workspace.package]
 version = "0.1.0"
@@ -95,6 +95,9 @@ dirs = "5"
 # File system watching
 notify = "7"
 notify-debouncer-mini = "0.5"
+
+# Cross-language bindings
+uniffi = "0.28"
 
 # Platform-specific process management (used conditionally in crates)
 nix = { version = "0.29", features = ["signal", "process"] }

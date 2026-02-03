@@ -94,6 +94,9 @@ dirs = { workspace = true }
 notify = { workspace = true }
 notify-debouncer-mini = { workspace = true }
 
+# Cross-language bindings (optional)
+uniffi = { workspace = true, optional = true }
+
 # Platform-specific: Unix
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }
@@ -112,3 +115,4 @@ full = ["hf-client", "process-manager", "gpu-monitor"]
 hf-client = []       # HuggingFace model search & download
 process-manager = [] # ComfyUI process management
 gpu-monitor = []     # GPU monitoring via nvidia-smi
+uniffi = ["dep:uniffi"]  # Cross-language bindings via UniFFI

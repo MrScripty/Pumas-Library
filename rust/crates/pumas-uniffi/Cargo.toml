@@ -1,0 +1,33 @@
+[package]
+name = "pumas-uniffi"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "UniFFI bindings for pumas-core - cross-language model management"
+keywords = ["ai", "models", "ffi", "bindings", "uniffi"]
+categories = ["api-bindings", "development-tools::ffi"]
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "pumas_uniffi"
+
+[dependencies]
+# Core library with UniFFI feature enabled
+pumas-library = { path = "../pumas-core", features = ["uniffi"] }
+
+# UniFFI runtime
+uniffi = { workspace = true }
+
+# Async runtime for bridging async functions
+tokio = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+
+[build-dependencies]
+uniffi = { workspace = true, features = ["build"] }
+
+[features]
+default = []

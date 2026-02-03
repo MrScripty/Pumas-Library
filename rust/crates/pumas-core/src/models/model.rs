@@ -5,6 +5,7 @@ use std::collections::HashMap;
 
 /// Hashes for a model's primary file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelHashes {
     #[serde(default)]
     pub sha256: Option<String>,
@@ -78,6 +79,7 @@ where
 
 /// Metadata about an individual file in a model directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelFileInfo {
     pub name: String,
     #[serde(default)]
@@ -161,6 +163,7 @@ pub struct ModelOverrides {
 /// Model data as returned by get_models API.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelData {
     pub model_type: String,
     #[serde(default)]
@@ -272,6 +275,7 @@ pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
 /// Download option for a quantization variant.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DownloadOption {
     pub quant: String,
     #[serde(default)]
@@ -281,6 +285,7 @@ pub struct DownloadOption {
 /// Model download status.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum DownloadStatus {
     Queued,
     Downloading,
@@ -293,6 +298,7 @@ pub enum DownloadStatus {
 /// Model download progress tracking.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelDownloadProgress {
     pub download_id: String,
     #[serde(default)]
@@ -315,6 +321,7 @@ pub struct ModelDownloadProgress {
 /// Security tier for pickle scanning.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum SecurityTier {
     Safe,
     Unknown,
@@ -324,6 +331,7 @@ pub enum SecurityTier {
 /// Detected file type from magic bytes.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum DetectedFileType {
     Safetensors,
     Gguf,
@@ -337,6 +345,7 @@ pub enum DetectedFileType {
 /// Match method for metadata lookup.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum MatchMethod {
     Hash,
     FilenameExact,
@@ -348,6 +357,7 @@ pub enum MatchMethod {
 /// Import stage for progress tracking.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ImportStage {
     Copying,
     Hashing,
@@ -360,6 +370,7 @@ pub enum ImportStage {
 /// Model import specification.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelImportSpec {
     pub path: String,
     pub family: String,
@@ -379,6 +390,7 @@ pub struct ModelImportSpec {
 /// Model import result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelImportResult {
     pub path: String,
     pub success: bool,
@@ -393,6 +405,7 @@ pub struct ModelImportResult {
 /// FTS5 search result model entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct FtsSearchModel {
     pub model_id: String,
     #[serde(default)]

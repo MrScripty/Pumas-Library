@@ -1,0 +1,273 @@
+// UniFFI Interface Definition for pumas-core
+//
+// This file defines the public API surface exposed to other languages.
+// Types marked with [Record] become data classes/structs in target languages.
+// Types marked with [Enum] become enums.
+// Functions become free functions or methods on objects.
+
+namespace pumas {
+    // Version information
+    string version();
+};
+
+// =============================================================================
+// Error Types
+// =============================================================================
+
+[Error]
+enum FfiError {
+    "Network",
+    "Timeout",
+    "RateLimited",
+    "Database",
+    "Io",
+    "NotFound",
+    "Version",
+    "Model",
+    "Download",
+    "Validation",
+    "Config",
+    "Cancelled",
+    "Other",
+};
+
+// =============================================================================
+// Core Enums
+// =============================================================================
+
+enum SecurityTier {
+    "Safe",
+    "Unknown",
+    "Pickle",
+};
+
+enum DownloadStatus {
+    "Queued",
+    "Downloading",
+    "Cancelling",
+    "Completed",
+    "Cancelled",
+    "Error",
+};
+
+enum DetectedFileType {
+    "Safetensors",
+    "Gguf",
+    "Ggml",
+    "Pickle",
+    "Onnx",
+    "Unknown",
+    "Error",
+};
+
+enum ImportStage {
+    "Copying",
+    "Hashing",
+    "WritingMetadata",
+    "Indexing",
+    "Syncing",
+    "Complete",
+};
+
+enum MatchMethod {
+    "Hash",
+    "FilenameExact",
+    "FilenameFuzzy",
+    "Manual",
+    "None",
+};
+
+enum ModelType {
+    "Llm",
+    "Diffusion",
+    "Embedding",
+    "Audio",
+    "Vision",
+    "Unknown",
+};
+
+enum MappingActionType {
+    "Create",
+    "SkipExists",
+    "SkipConflict",
+    "RemoveBroken",
+};
+
+enum ConflictResolution {
+    "Skip",
+    "Overwrite",
+    "Rename",
+};
+
+enum HealthStatus {
+    "Healthy",
+    "Warnings",
+    "Errors",
+};
+
+enum LinkType {
+    "Symlink",
+    "Hardlink",
+    "Copy",
+};
+
+enum SandboxType {
+    "Flatpak",
+    "Snap",
+    "Docker",
+    "Appimage",
+    "None",
+    "Unknown",
+};
+
+// =============================================================================
+// Core Data Types
+// =============================================================================
+
+dictionary ModelHashes {
+    string? sha256;
+    string? blake3;
+};
+
+dictionary ModelFileInfo {
+    string name;
+    string? original_name;
+    u64? size;
+    string? sha256;
+    string? blake3;
+};
+
+dictionary DownloadOption {
+    string quant;
+    u64? size_bytes;
+};
+
+dictionary ModelDownloadProgress {
+    string download_id;
+    string? repo_id;
+    DownloadStatus status;
+    f32? progress;
+    u64? downloaded_bytes;
+    u64? total_bytes;
+    f64? speed;
+    f64? eta_seconds;
+    string? error;
+};
+
+dictionary ModelImportSpec {
+    string path;
+    string family;
+    string official_name;
+    string? repo_id;
+    string? model_type;
+    string? subtype;
+    sequence<string>? tags;
+    boolean? security_acknowledged;
+};
+
+dictionary ModelImportResult {
+    string path;
+    boolean success;
+    string? model_path;
+    string? error;
+    SecurityTier? security_tier;
+};
+
+dictionary ModelData {
+    string model_type;
+    string? official_name;
+    string? cleaned_name;
+    u64? size;
+    string? added_date;
+    boolean? related_available;
+};
+
+dictionary DownloadRequest {
+    string repo_id;
+    string family;
+    string official_name;
+    string? model_type;
+    string? quant;
+    string? filename;
+};
+
+dictionary HfSearchParams {
+    string query;
+    string? kind;
+    u64? limit;
+    u64? offset;
+    string? format;
+};
+
+dictionary LfsFileInfo {
+    string filename;
+    u64 size;
+    string sha256;
+};
+
+dictionary SandboxInfo {
+    string sandbox_type;
+    boolean is_sandboxed;
+    sequence<string> required_permissions;
+};
+
+// =============================================================================
+// Response Types
+// =============================================================================
+
+dictionary BaseResponse {
+    boolean success;
+    string? error;
+};
+
+dictionary MappingPreviewData {
+    u64 creates;
+    u64 skips;
+    u64 conflicts;
+    u64 broken;
+};
+
+dictionary MappingPreviewResponse {
+    boolean success;
+    string? error;
+    MappingPreviewData? preview;
+};
+
+dictionary MappingApplyResponse {
+    boolean success;
+    string? error;
+    u64 created;
+    u64 updated;
+    sequence<string> errors;
+};
+
+dictionary LinkHealthResponse {
+    boolean success;
+    string? error;
+    string status;
+    u64 total_links;
+    u64 healthy_links;
+    sequence<string> broken_links;
+    sequence<string> orphaned_links;
+    sequence<string> warnings;
+    sequence<string> errors;
+};
+
+dictionary DeepScanProgress {
+    u32 current;
+    u32 total;
+    string stage;
+};
+
+dictionary CommitInfo {
+    string hash;
+    string message;
+    string author;
+    string date;
+};
+
+dictionary ShortcutState {
+    boolean menu;
+    boolean desktop;
+    string tag;
+};

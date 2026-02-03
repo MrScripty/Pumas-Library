@@ -16,6 +16,7 @@ pub use crate::models::{
 /// Supported model types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ModelType {
     /// Large Language Model (text generation)
     Llm,
@@ -157,6 +158,7 @@ impl std::fmt::Display for ModelFamily {
 /// HuggingFace metadata lookup result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct HfMetadataResult {
     /// HuggingFace repository ID (e.g., "TheBloke/Llama-2-7B-GGUF")
     pub repo_id: String,
@@ -273,6 +275,7 @@ impl From<FileFormat> for DetectedFileType {
 /// Mapping configuration for linking models to applications.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct MappingConfig {
     /// Application ID (e.g., "comfyui")
     pub app: String,
@@ -288,6 +291,7 @@ pub struct MappingConfig {
 /// Single mapping rule in a configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct MappingRule {
     /// Target directory in app's models folder
     pub target_dir: String,
@@ -311,6 +315,7 @@ pub struct MappingRule {
 /// Action type for mapping operations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum MappingActionType {
     /// Create new link
     Create,
@@ -370,6 +375,7 @@ impl MappingPreview {
 /// Conflict resolution strategy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
 pub enum ConflictResolution {
     /// Skip conflicting model
     Skip,
@@ -382,6 +388,7 @@ pub enum ConflictResolution {
 /// Sandbox environment detection result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct SandboxInfo {
     /// Type of sandbox (flatpak, snap, docker, none)
     pub sandbox_type: String,
@@ -405,6 +412,7 @@ impl Default for SandboxInfo {
 /// Download request parameters.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct DownloadRequest {
     /// HuggingFace repository ID
     pub repo_id: String,
@@ -424,6 +432,8 @@ pub struct DownloadRequest {
 }
 
 /// Batch import progress tracking.
+///
+/// Note: Not FFI-compatible due to `usize` fields. Use wrapper types in pumas-uniffi.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct BatchImportProgress {
@@ -506,6 +516,8 @@ pub struct LinkEntry {
 }
 
 /// HuggingFace search parameters.
+///
+/// Note: Not FFI-compatible due to `usize` fields. Use wrapper types in pumas-uniffi.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct HfSearchParams {
@@ -527,6 +539,7 @@ pub struct HfSearchParams {
 
 /// LFS file information from HuggingFace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct LfsFileInfo {
     /// Filename
     pub filename: String,
@@ -538,6 +551,7 @@ pub struct LfsFileInfo {
 
 /// Repository file tree from HuggingFace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct RepoFileTree {
     /// Repository ID
     pub repo_id: String,

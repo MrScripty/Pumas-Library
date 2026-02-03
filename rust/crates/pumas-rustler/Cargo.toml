@@ -1,0 +1,25 @@
+[package]
+name = "pumas_rustler"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+description = "Elixir/Erlang NIFs for pumas-core via Rustler"
+
+[lib]
+crate-type = ["cdylib"]
+name = "pumas_rustler"
+
+[dependencies]
+# Core library
+pumas-library = { workspace = true }
+
+# Erlang NIF bindings
+rustler = { workspace = true }
+
+# Serialization for complex types
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }

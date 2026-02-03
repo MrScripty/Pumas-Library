@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi"]
+members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi", "crates/pumas-rustler"]
 
 [workspace.package]
 version = "0.1.0"
@@ -98,6 +98,7 @@ notify-debouncer-mini = "0.5"
 
 # Cross-language bindings
 uniffi = "0.28"
+rustler = "0.34"
 
 # Platform-specific process management (used conditionally in crates)
 nix = { version = "0.29", features = ["signal", "process"] }

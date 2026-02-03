@@ -92,6 +92,8 @@ const electronAPI = {
   // ========================================
   launch_comfyui: () => apiCall('launch_comfyui'),
   stop_comfyui: () => apiCall('stop_comfyui'),
+  launch_ollama: () => apiCall('launch_ollama'),
+  stop_ollama: () => apiCall('stop_ollama'),
 
   // ========================================
   // Model Management

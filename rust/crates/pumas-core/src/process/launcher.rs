@@ -41,6 +41,66 @@ pub struct LaunchConfig {
     pub health_check_url: Option<String>,
 }
 
+/// Configuration for launching a binary application (like Ollama).
+#[derive(Debug, Clone)]
+pub struct BinaryLaunchConfig {
+    /// Version tag being launched.
+    pub tag: String,
+    /// Path to the version directory.
+    pub version_dir: PathBuf,
+    /// Path to the binary executable.
+    pub binary_path: PathBuf,
+    /// Command to run (e.g., "serve" for "ollama serve").
+    pub command: Option<String>,
+    /// Additional arguments to pass.
+    pub extra_args: Vec<String>,
+    /// Environment variables to set.
+    pub env_vars: HashMap<String, String>,
+    /// Path to write the PID file.
+    pub pid_file: PathBuf,
+    /// Path to write stdout/stderr logs.
+    pub log_file: Option<PathBuf>,
+    /// Timeout for server readiness check.
+    pub ready_timeout: Duration,
+    /// URL to check for server readiness.
+    pub health_check_url: Option<String>,
+}
+
+impl BinaryLaunchConfig {
+    /// Create a new binary launch config for Ollama.
+    pub fn ollama(tag: impl Into<String>, version_dir: impl AsRef<Path>) -> Self {
+        let version_dir = version_dir.as_ref().to_path_buf();
+        // Ollama release archives extract with a bin/ subdirectory
+        let binary_path = version_dir.join("bin").join("ollama");
+        let pid_file = version_dir.join("ollama.pid");
+
+        Self {
+            tag: tag.into(),
+            version_dir: version_dir.clone(),
+            binary_path,
+            command: Some("serve".to_string()),
+            extra_args: vec![],
+            env_vars: HashMap::new(),
+            pid_file,
+            log_file: None,
+            ready_timeout: Duration::from_secs(30),
+            health_check_url: Some("http://127.0.0.1:11434".to_string()),
+        }
+    }
+
+    /// Set the log file path.
+    pub fn with_log_file(mut self, path: impl AsRef<Path>) -> Self {
+        self.log_file = Some(path.as_ref().to_path_buf());
+        self
+    }
+
+    /// Add an environment variable.
+    pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.env_vars.insert(key.into(), value.into());
+        self
+    }
+}
+
 impl LaunchConfig {
     /// Create a new launch config with sensible defaults.
     pub fn new(tag: impl Into<String>, version_dir: impl AsRef<Path>) -> Self {
@@ -323,6 +383,121 @@ impl ProcessLauncher {
             })?;
         }
         Ok(())
+    }
+
+    /// Launch a binary application (like Ollama) with the given configuration.
+    pub fn launch_binary(config: &BinaryLaunchConfig) -> Result<LaunchResult> {
+        // Validate prerequisites
+        if !config.binary_path.exists() {
+            return Ok(LaunchResult {
+                success: false,
+                process: None,
+                log_path: None,
+                error: Some(format!(
+                    "Binary not found: {}",
+                    config.binary_path.display()
+                )),
+                ready: false,
+            });
+        }
+
+        // Build command
+        let mut cmd = Command::new(&config.binary_path);
+
+        // Add the command (e.g., "serve" for "ollama serve")
+        if let Some(ref command) = config.command {
+            cmd.arg(command);
+        }
+
+        cmd.args(&config.extra_args);
+        cmd.current_dir(&config.version_dir);
+
+        // Set environment variables
+        for (key, value) in &config.env_vars {
+            cmd.env(key, value);
+        }
+
+        // Set up stdio
+        let log_path = config.log_file.clone();
+        if let Some(ref log_file) = log_path {
+            // Ensure parent directory exists
+            if let Some(parent) = log_file.parent() {
+                fs::create_dir_all(parent).ok();
+            }
+
+            // Open log file for writing
+            let file = fs::File::create(log_file).map_err(|e| PumasError::Io {
+                message: "create log file".to_string(),
+                path: Some(log_file.clone()),
+                source: Some(e),
+            })?;
+
+            cmd.stdout(Stdio::from(file.try_clone().unwrap()));
+            cmd.stderr(Stdio::from(file));
+        } else {
+            cmd.stdout(Stdio::null());
+            cmd.stderr(Stdio::null());
+        }
+
+        // Detach the process so it runs independently
+        #[cfg(unix)]
+        {
+            unsafe {
+                cmd.pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
+        }
+
+        // Spawn the process
+        info!("Launching binary {} from {}", config.tag, config.version_dir.display());
+
+        let child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                error!("Failed to spawn binary process: {}", e);
+                return Ok(LaunchResult {
+                    success: false,
+                    process: None,
+                    log_path,
+                    error: Some(format!("Failed to spawn process: {}", e)),
+                    ready: false,
+                });
+            }
+        };
+
+        let pid = child.id();
+
+        // Write PID file
+        if let Err(e) = fs::write(&config.pid_file, pid.to_string()) {
+            warn!("Failed to write PID file: {}", e);
+        }
+
+        info!("Launched binary process with PID {}", pid);
+
+        // Check for readiness (if health check URL is configured)
+        let ready = if let Some(ref url) = config.health_check_url {
+            Self::wait_for_ready(url, config.ready_timeout)
+        } else {
+            true
+        };
+
+        Ok(LaunchResult {
+            success: true,
+            process: Some(child),
+            log_path,
+            error: None,
+            ready,
+        })
     }
 }
 

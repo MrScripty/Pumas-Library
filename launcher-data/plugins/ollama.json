@@ -44,8 +44,8 @@
       "endpoint": "/api/ps",
       "pollingIntervalMs": 2000,
       "responseMapping": {
-        "loadedModels": "$.models[*].name",
-        "memoryUsage": "$.models[*].size"
+        "loadedModels": "$.models[*]",
+        "memoryUsed": "$.models[*].size_vram"
       }
     },
     "loadModel": {

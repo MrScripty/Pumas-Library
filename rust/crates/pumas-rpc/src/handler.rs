@@ -824,6 +824,48 @@ async fn dispatch_method(
             }
         }
 
+        "launch_ollama" => {
+            // Get the active version from ollama version_manager and launch it
+            let managers = state.version_managers.read().await;
+            info!("launch_ollama: checking for ollama version manager");
+            if let Some(vm) = managers.get("ollama") {
+                let installed = vm.get_installed_versions().await?;
+                info!("launch_ollama: installed versions: {:?}", installed);
+                let active = vm.get_active_version().await?;
+                info!("launch_ollama: active version: {:?}", active);
+                if let Some(tag) = active {
+                    let version_dir = vm.version_path(&tag);
+                    info!("launch_ollama: launching tag={} from {:?}", tag, version_dir);
+                    drop(managers);  // Release lock before calling api
+                    let response = api.launch_ollama(&tag, &version_dir).await?;
+                    info!("launch_ollama: result success={}", response.success);
+                    Ok(serde_json::to_value(response)?)
+                } else {
+                    warn!("launch_ollama: no active version set");
+                    Ok(json!({
+                        "success": false,
+                        "error": "No active Ollama version set"
+                    }))
+                }
+            } else {
+                warn!("launch_ollama: version manager not initialized");
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized for ollama"
+                }))
+            }
+        }
+
+        "stop_ollama" => {
+            let result = api.stop_ollama().await?;
+            Ok(json!({ "success": result }))
+        }
+
+        "is_ollama_running" => {
+            let running = api.is_ollama_running().await;
+            Ok(serde_json::to_value(running)?)
+        }
+
         // ====================================================================
         // Shortcuts (uses version_manager for version_dir)
         // ====================================================================

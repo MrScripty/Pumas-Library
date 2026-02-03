@@ -10,6 +10,7 @@ import { useVersions } from './hooks/useVersions';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
+import { useOllamaProcess } from './hooks/useOllamaProcess';
 import { useModels } from './hooks/useModels';
 import { useAppPanelState } from './hooks/useAppPanelState';
 import { api, isAPIAvailable } from './api/adapter';
@@ -45,6 +46,17 @@ export default function App() {
   const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
   const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, clearStartingState, clearStoppingState, openLogPath } = useComfyUIProcess();
+  const {
+    launchError: ollamaLaunchError,
+    launchLogPath: ollamaLaunchLogPath,
+    isStarting: ollamaIsStarting,
+    isStopping: ollamaIsStopping,
+    launchOllama,
+    stopOllama,
+    clearStartingState: clearOllamaStartingState,
+    clearStoppingState: clearOllamaStoppingState,
+    openLogPath: openOllamaLogPath
+  } = useOllamaProcess();
   const { modelGroups, scanModels, fetchModels } = useModels();
 
   const comfyVersions = useVersions({ appId: 'comfyui' });
@@ -68,6 +80,7 @@ export default function App() {
   const cacheStatus = appVersions.cacheStatus;
 
   const comfyUIRunning = status?.comfyui_running || false;
+  const ollamaRunning = status?.ollama_running || false;
   const depsInstalled = status?.deps_ready ?? null;
   const isPatched = status?.patched ?? false;
   const menuShortcut = status?.menu_shortcut ?? false;
@@ -180,20 +193,62 @@ export default function App() {
     }));
   }, [status, systemResources, comfyUIRunning, depsInstalled, launchError, isStarting, isStopping, comfyInstalledVersions]);
 
-  // Update Ollama app iconState based on installed versions
+  // Update Ollama app iconState based on running status and installed versions
   // Separate effect to avoid coupling with other apps
   useEffect(() => {
+    // Debug: log Ollama resources data
+    console.log('Ollama effect - app_resources:', status?.app_resources);
+    console.log('Ollama effect - ollama:', status?.app_resources?.ollama);
+    console.log('Ollama effect - systemResources.ram.total:', systemResources?.ram?.total);
+    console.log('Ollama effect - systemResources.gpu.memory_total:', systemResources?.gpu?.memory_total);
+
     setApps(prevApps => prevApps.map(app => {
       if (app.id !== 'ollama') return app;
 
-      // Ollama iconState - based on installed versions only (no running state yet)
-      const newIconState = ollamaInstalledVersions.length > 0 ? 'offline' : 'uninstalled';
+      // Calculate resource usage percentages for Ollama
+      let gpuUsagePercent: number | undefined = undefined;
+      let ramUsagePercent: number | undefined = undefined;
+
+      if (status) {
+        const resources = status.app_resources?.ollama;
+        const gpuTotal = systemResources?.gpu?.memory_total;
+        if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
+          gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
+        }
+        const ramTotal = systemResources?.ram?.total;
+        if (resources?.ram_memory && ramTotal && ramTotal > 0) {
+          ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
+        }
+        // Debug: log calculated percentages
+        console.log('Ollama effect - calculated ram%:', ramUsagePercent, 'gpu%:', gpuUsagePercent,
+          'resources:', resources, 'ramTotal:', ramTotal, 'gpuTotal:', gpuTotal);
+      }
+
+      // Determine iconState - transition states have highest priority
+      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
+      if (ollamaIsStopping) {
+        newIconState = 'stopping';
+      } else if (ollamaIsStarting) {
+        newIconState = 'starting';
+      } else if (ollamaRunning) {
+        newIconState = 'running';
+      } else if (ollamaLaunchError) {
+        newIconState = 'error';
+      } else if (ollamaInstalledVersions.length > 0) {
+        newIconState = 'offline';
+      } else {
+        newIconState = 'uninstalled';
+      }
+
       return {
         ...app,
+        status: ollamaRunning ? 'running' : 'idle',
+        ramUsage: ramUsagePercent,
+        gpuUsage: gpuUsagePercent,
         iconState: newIconState,
       };
     }));
-  }, [ollamaInstalledVersions]);
+  }, [status, systemResources, ollamaInstalledVersions, ollamaRunning, ollamaLaunchError, ollamaIsStarting, ollamaIsStopping]);
 
   // Launch error flash effect is handled by AppIndicator component
 
@@ -248,21 +303,48 @@ export default function App() {
     setTimeout(() => refetchStatus(false, true), 1200);
   };
 
+  const handleLaunchOllama = async () => {
+    if (ollamaRunning) {
+      try {
+        await stopOllama();
+        await refetchStatus(false, true);  // Force bypass polling guard
+      } finally {
+        // Clear transition state AFTER status is updated to avoid flash of 'running'
+        clearOllamaStoppingState();
+      }
+    } else {
+      try {
+        await launchOllama();
+        await refetchStatus(false, true);  // Force bypass polling guard
+      } finally {
+        // Clear transition state AFTER status is updated to avoid flash of 'offline'
+        clearOllamaStartingState();
+      }
+    }
+    setTimeout(() => refetchStatus(false, true), 1200);
+  };
+
   const handleLaunchApp = async (appId: string) => {
     if (appId === 'comfyui' && !comfyUIRunning) {
       await handleLaunchComfyUI();
+    } else if (appId === 'ollama' && !ollamaRunning) {
+      await handleLaunchOllama();
     }
   };
 
   const handleStopApp = async (appId: string) => {
     if (appId === 'comfyui' && comfyUIRunning) {
       await handleLaunchComfyUI();
+    } else if (appId === 'ollama' && ollamaRunning) {
+      await handleLaunchOllama();
     }
   };
 
   const handleOpenLog = async (appId: string) => {
     if (appId === 'comfyui' && launchLogPath) {
       await openLogPath(launchLogPath);
+    } else if (appId === 'ollama' && ollamaLaunchLogPath) {
+      await openOllamaLogPath(ollamaLaunchLogPath);
     }
   };
 

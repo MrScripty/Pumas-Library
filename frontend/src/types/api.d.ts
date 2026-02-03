@@ -34,10 +34,15 @@ export interface StatusResponse extends BaseResponse {
   shortcut_version: string | null;
   message: string;
   comfyui_running: boolean;
+  ollama_running: boolean;
   last_launch_error: string | null;
   last_launch_log: string | null;
   app_resources?: {
     comfyui?: {
+      gpu_memory?: number;
+      ram_memory?: number;
+    };
+    ollama?: {
       gpu_memory?: number;
       ram_memory?: number;
     };
@@ -727,6 +732,10 @@ export interface StopComfyUIResponse extends BaseResponse {
   // Empty body on success
 }
 
+export interface StopOllamaResponse extends BaseResponse {
+  // Empty body on success
+}
+
 // ============================================================================
 // Shortcuts Types
 // ============================================================================
@@ -875,6 +884,8 @@ export interface PyWebViewAPI {
   // ========================================
   launch_comfyui(): Promise<LaunchResponse>;
   stop_comfyui(): Promise<StopComfyUIResponse>;
+  launch_ollama(): Promise<LaunchResponse>;
+  stop_ollama(): Promise<StopOllamaResponse>;
 
   // ========================================
   // Model Management

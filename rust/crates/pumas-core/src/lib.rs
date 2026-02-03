@@ -27,6 +27,10 @@
 //! }
 //! ```
 
+// UniFFI scaffolding - generates the FFI type registry when uniffi feature is enabled
+#[cfg(feature = "uniffi")]
+uniffi::setup_scaffolding!();
+
 pub mod cache;
 pub mod cancel;
 pub mod config;
@@ -522,26 +526,54 @@ impl PumasApi {
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
         // Get actual running status
         let comfyui_running = self.is_comfyui_running().await;
+        let ollama_running = self.is_ollama_running().await;
         let last_launch_error = self.get_last_launch_error().await;
         let last_launch_log = self.get_last_launch_log().await;
 
-        // Get app resources if ComfyUI is running
-        let app_resources = if comfyui_running {
+        // Get app resources for running apps
+        let app_resources = {
             let mgr_lock = self.process_manager.read().await;
             if let Some(ref mgr) = *mgr_lock {
-                mgr.aggregate_app_resources().map(|r| models::AppResources {
-                    comfyui: Some(models::AppResourceUsage {
+                let comfyui_resources = if comfyui_running {
+                    mgr.aggregate_app_resources().map(|r| models::AppResourceUsage {
                         // Convert from GB (f32) to bytes (u64) for frontend
                         gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
                         ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                    }),
-                })
+                    })
+                } else {
+                    None
+                };
+
+                let ollama_resources = if ollama_running {
+                    mgr.aggregate_ollama_resources().map(|r| models::AppResourceUsage {
+                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                    })
+                } else {
+                    None
+                };
+
+                if comfyui_resources.is_some() || ollama_resources.is_some() {
+                    Some(models::AppResources {
+                        comfyui: comfyui_resources,
+                        ollama: ollama_resources,
+                    })
+                } else {
+                    None
+                }
             } else {
                 None
             }
-        } else {
-            None
         };
+
+        // Debug: log app_resources before returning
+        if let Some(ref res) = app_resources {
+            tracing::info!("get_status: app_resources = comfyui={:?}, ollama={:?}",
+                  res.comfyui.as_ref().map(|r| (r.ram_memory, r.gpu_memory)),
+                  res.ollama.as_ref().map(|r| (r.ram_memory, r.gpu_memory)));
+        } else {
+            tracing::info!("get_status: app_resources = None");
+        }
 
         Ok(models::StatusResponse {
             success: true,
@@ -554,10 +586,13 @@ impl PumasApi {
             shortcut_version: None,
             message: if comfyui_running {
                 "ComfyUI running".to_string()
+            } else if ollama_running {
+                "Ollama running".to_string()
             } else {
                 "Ready".to_string()
             },
             comfyui_running,
+            ollama_running,
             last_launch_error,
             last_launch_log,
             app_resources,
@@ -745,6 +780,61 @@ impl PumasApi {
             mgr.stop_all()
         } else {
             Ok(false)
+        }
+    }
+
+    /// Check if Ollama is currently running.
+    pub async fn is_ollama_running(&self) -> bool {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.is_ollama_running()
+        } else {
+            false
+        }
+    }
+
+    /// Stop Ollama processes.
+    pub async fn stop_ollama(&self) -> Result<bool> {
+        let mgr_lock = self.process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.stop_ollama()
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Launch an Ollama version from a given directory.
+    ///
+    /// The caller (RPC layer) is responsible for resolving the version tag to a directory
+    /// using pumas-app-manager's VersionManager.
+    pub async fn launch_ollama(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+        if !version_dir.exists() {
+            return Ok(models::LaunchResponse {
+                success: false,
+                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
+                log_path: None,
+                ready: None,
+            });
+        }
+
+        let proc_mgr_lock = self.process_manager.read().await;
+        if let Some(ref pm) = *proc_mgr_lock {
+            let log_dir = self.launcher_data_dir().join("logs");
+            let result = pm.launch_ollama(tag, version_dir, Some(&log_dir));
+
+            Ok(models::LaunchResponse {
+                success: result.success,
+                error: result.error,
+                log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+                ready: Some(result.ready),
+            })
+        } else {
+            Ok(models::LaunchResponse {
+                success: false,
+                error: Some("Process manager not initialized".to_string()),
+                log_path: None,
+                ready: None,
+            })
         }
     }
 

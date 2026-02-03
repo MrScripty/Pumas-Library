@@ -76,6 +76,9 @@ htmlcov/
 # Security audit reports
 security-audit-*.json
 
+# Generated language bindings
+bindings/
+
 # Rust
 rust/target/
 rust/Cargo.lock

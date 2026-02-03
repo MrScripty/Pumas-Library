@@ -209,16 +209,20 @@ This creates:
 
 Run the launcher with different modes:
 
-| Command                       | Description                                     |
-| ----------------------------- | ----------------------------------------------- |
-| `./launcher`                  | Launch the application                          |
-| `./launcher dev`              | Launch with developer tools                     |
-| `./launcher build`            | Build all components (Rust, frontend, Electron) |
-| `./launcher build-rust`       | Build Rust backend only                         |
-| `./launcher build-electron`   | Build Electron TypeScript only                  |
-| `./launcher package`          | Package Electron app for distribution           |
-| `./launcher electron-install` | Install Electron dependencies                   |
-| `./launcher help`             | Display usage information                       |
+| Command                                 | Description                                     |
+| --------------------------------------- | ----------------------------------------------- |
+| `./launcher`                            | Launch the application                          |
+| `./launcher dev`                        | Launch with developer tools                     |
+| `./launcher build`                      | Build all components (Rust, frontend, Electron) |
+| `./launcher build-rust`                 | Build Rust backend only                         |
+| `./launcher build-electron`             | Build Electron TypeScript only                  |
+| `./launcher package`                    | Package Electron app for distribution           |
+| `./launcher electron-install`           | Install Electron dependencies                   |
+| `./launcher generate-bindings --python` | Generate Python bindings                        |
+| `./launcher generate-bindings --csharp` | Generate C# bindings                            |
+| `./launcher generate-bindings --elixir` | Build Elixir Rustler NIF                        |
+| `./launcher generate-bindings --all`    | Generate all language bindings                  |
+| `./launcher help`                       | Display usage information                       |
 
 ### Windows Commands
 
@@ -267,15 +271,18 @@ npm start
 
 ### Project Structure
 
-```
+```text
 Pumas-Library/
 ├── rust/                    # Rust backend
 │   └── crates/
 │       ├── pumas-core/      # Core library (headless)
 │       ├── pumas-app-manager/  # Version management
-│       └── pumas-rpc/       # JSON-RPC server
+│       ├── pumas-rpc/       # JSON-RPC server
+│       ├── pumas-uniffi/    # Python, C#, Kotlin, Swift bindings (UniFFI)
+│       └── pumas-rustler/   # Elixir/Erlang NIFs (Rustler)
 ├── frontend/                # React frontend
 ├── electron/                # Electron shell
+├── bindings/                # Generated language bindings (not committed)
 └── .github/workflows/       # CI/CD
 ```
 
@@ -291,6 +298,106 @@ To find platform code:
 
 ```bash
 grep -rn "cfg(.*os\|unix\|windows)" rust/crates/*/src/ --include="*.rs"
+```
+
+---
+
+## Language Bindings
+
+Pumas Library's core Rust crate can be used from other languages via cross-language bindings. Two binding systems are available:
+
+- **UniFFI** (Python, C#, Kotlin, Swift, Ruby) — Mozilla's cross-language bindings generator
+- **Rustler** (Elixir/Erlang) — Native Implemented Functions for the BEAM VM
+
+### Generating Bindings
+
+Use the launcher to generate bindings:
+
+```bash
+# Generate Python bindings
+./launcher generate-bindings --python
+
+# Generate C# bindings
+./launcher generate-bindings --csharp
+
+# Build Elixir Rustler NIF
+./launcher generate-bindings --elixir
+
+# Generate all
+./launcher generate-bindings --all
+```
+
+Or use the standalone script directly:
+
+```bash
+./scripts/generate-bindings.sh python
+./scripts/generate-bindings.sh csharp
+./scripts/generate-bindings.sh elixir
+./scripts/generate-bindings.sh all
+```
+
+Generated bindings are written to `bindings/` and are not committed to the repository.
+
+### Prerequisites
+
+| Language | Tool | Install Command |
+| -------- | ---- | --------------- |
+| Python | uniffi-bindgen | `cargo install uniffi-bindgen-cli` |
+| C# | uniffi-bindgen-cs | `cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3` |
+| Elixir | Rustler | Add `{:rustler, "~> 0.34"}` to `mix.exs` |
+
+### Python
+
+After generating, the bindings are in `bindings/python/`. The native shared library is copied alongside the Python module.
+
+```python
+import sys
+sys.path.insert(0, "bindings/python")
+from pumas_uniffi import version
+print(version())
+```
+
+### C#
+
+After generating, add the `.cs` files from `bindings/csharp/` to your .NET project and ensure the native library (`libpumas_uniffi.so` / `.dll` / `.dylib`) is in the output directory.
+
+```csharp
+using PumasUniFFI;
+Console.WriteLine(PumasUniffiMethods.Version());
+```
+
+### Elixir
+
+Elixir bindings use Rustler, which compiles the NIF as part of the Mix build rather than generating source files. Add Rustler as a dependency and create a NIF module:
+
+```elixir
+# mix.exs
+defp deps do
+  [{:rustler, "~> 0.34"}]
+end
+```
+
+```elixir
+# lib/pumas/native.ex
+defmodule Pumas.Native do
+  use Rustler, otp_app: :pumas, crate: "pumas_rustler"
+
+  def version(), do: :erlang.nif_error(:nif_not_loaded)
+  def parse_model_type(_type), do: :erlang.nif_error(:nif_not_loaded)
+  def validate_json(_json), do: :erlang.nif_error(:nif_not_loaded)
+end
+```
+
+### UniFFI Feature Flag
+
+The `uniffi` feature on `pumas-core` is optional and only adds derive annotations. It has zero overhead when disabled:
+
+```toml
+# Use pumas-core without FFI (default)
+pumas-library = { path = "rust/crates/pumas-core" }
+
+# Use pumas-core with UniFFI derives enabled
+pumas-library = { path = "rust/crates/pumas-core", features = ["uniffi"] }
 ```
 
 ---

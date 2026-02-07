@@ -1180,6 +1180,40 @@ async fn dispatch_method(
             }
         }
 
+        "pause_model_download" => {
+            let download_id = require_str_param!(params, "download_id", "downloadId");
+            match api.pause_hf_download(&download_id).await {
+                Ok(paused) => Ok(json!({
+                    "success": paused
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
+        }
+
+        "resume_model_download" => {
+            let download_id = require_str_param!(params, "download_id", "downloadId");
+            match api.resume_hf_download(&download_id).await {
+                Ok(resumed) => Ok(json!({
+                    "success": resumed
+                })),
+                Err(e) => Ok(json!({
+                    "success": false,
+                    "error": e.to_string()
+                })),
+            }
+        }
+
+        "list_model_downloads" => {
+            let downloads = api.list_hf_downloads().await;
+            Ok(json!({
+                "success": true,
+                "downloads": downloads
+            }))
+        }
+
         "search_hf_models" => {
             let query = require_str_param!(params, "query", "query");
             let kind = get_str_param!(params, "kind", "kind");

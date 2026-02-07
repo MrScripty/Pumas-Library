@@ -17,6 +17,8 @@ log.transports.console.level = 'debug';
 // Window dimensions (matching PyWebView config from backend/config.py)
 const WINDOW_WIDTH = 400;
 const WINDOW_HEIGHT = 520;
+const MIN_WINDOW_WIDTH = 360;
+const MIN_WINDOW_HEIGHT = 400;
 
 // Python sidecar bridge
 let pythonBridge: PythonBridge | null = null;
@@ -77,7 +79,9 @@ async function createWindow(): Promise<void> {
   mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
     height: WINDOW_HEIGHT,
-    resizable: false,
+    minWidth: MIN_WINDOW_WIDTH,
+    minHeight: MIN_WINDOW_HEIGHT,
+    resizable: true,
     frame: false, // Frameless window (custom title bar)
     backgroundColor: '#000000',
     show: false, // Don't show until ready

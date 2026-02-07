@@ -164,11 +164,11 @@ export const Header: React.FC<HeaderProps> = ({
   const StatusIcon = status.icon;
 
   return (
-    <div className="border-b border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-secondary)/0.3)] backdrop-blur-sm relative z-10">
+    <div className="border-b border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-secondary)/0.3)] backdrop-blur-sm relative z-10 app-region-drag">
       {/* Main row: Single compact line with all controls */}
       <div className="h-8 px-3 pt-1 flex items-center justify-between gap-3">
         {/* Left: App name with update button */}
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 app-region-no-drag">
           <span className="text-xs font-semibold text-[hsl(var(--text-primary))]">AI Manager</span>
           {launcherUpdateAvailable ? (
             <IconButton
@@ -186,7 +186,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Center: Status badge */}
-        <div className="flex-1 flex items-center justify-center min-w-0">
+        <div className="flex-1 flex items-center justify-center min-w-0 app-region-no-drag">
           <div className="flex items-center gap-1.5 px-2 py-0.5 bg-[hsl(var(--accent-success)/0.15)] rounded text-[10px] text-[hsl(var(--text-secondary))]">
             <StatusIcon className={`w-3 h-3 flex-shrink-0 ${status.spinning ? 'animate-spin' : ''}`} />
             <span className="truncate whitespace-nowrap">{status.text}</span>
@@ -199,11 +199,12 @@ export const Header: React.FC<HeaderProps> = ({
           tooltip="Close"
           onClick={onClose}
           size="sm"
+          className="app-region-no-drag"
         />
       </div>
 
       {/* Bottom strip: Very thin resource bar */}
-      <div className="h-3 px-3 pb-1.5 flex items-center gap-2">
+      <div className="h-3 px-3 pb-1.5 flex items-center gap-2 app-region-no-drag">
         {/* Left: Biceps (load indicator) + CPU icon */}
         <div className="flex items-center gap-1 flex-shrink-0">
           <Tooltip content={`${cpuUsage}%`}>

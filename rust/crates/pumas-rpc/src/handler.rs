@@ -1153,7 +1153,13 @@ async fn dispatch_method(
         "get_model_download_status" => {
             let download_id = require_str_param!(params, "download_id", "downloadId");
             match api.get_hf_download_progress(&download_id).await {
-                Some(progress) => Ok(serde_json::to_value(progress)?),
+                Some(progress) => {
+                    let mut response = serde_json::to_value(progress)?;
+                    if let Some(obj) = response.as_object_mut() {
+                        obj.insert("success".to_string(), json!(true));
+                    }
+                    Ok(response)
+                }
                 None => Ok(json!({
                     "success": false,
                     "error": "Download not found"

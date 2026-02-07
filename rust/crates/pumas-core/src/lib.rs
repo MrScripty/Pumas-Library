@@ -781,11 +781,11 @@ impl PumasApi {
 
         // Debug: log app_resources before returning
         if let Some(ref res) = app_resources {
-            tracing::info!("get_status: app_resources = comfyui={:?}, ollama={:?}",
+            tracing::debug!("get_status: app_resources = comfyui={:?}, ollama={:?}",
                   res.comfyui.as_ref().map(|r| (r.ram_memory, r.gpu_memory)),
                   res.ollama.as_ref().map(|r| (r.ram_memory, r.gpu_memory)));
         } else {
-            tracing::info!("get_status: app_resources = None");
+            tracing::debug!("get_status: app_resources = None");
         }
 
         Ok(models::StatusResponse {

@@ -480,6 +480,35 @@ impl ModelIndex {
         Ok(ids)
     }
 
+    /// Find a model by hash value (sha256 or blake3).
+    ///
+    /// Searches the `hashes_json` column using SQLite's `json_extract()` for
+    /// matching hash values. Used by the library merge system for content-based
+    /// duplicate detection.
+    pub fn find_by_hash(&self, hash: &str) -> Result<Option<ModelRecord>> {
+        let conn = self.conn.lock().map_err(|_| {
+            PumasError::Database {
+                message: "Failed to acquire connection lock".to_string(),
+                source: None,
+            }
+        })?;
+
+        let result = conn
+            .query_row(
+                "SELECT id, path, cleaned_name, official_name, model_type,
+                        tags_json, hashes_json, metadata_json, updated_at
+                 FROM models
+                 WHERE json_extract(hashes_json, '$.sha256') = ?1
+                    OR json_extract(hashes_json, '$.blake3') = ?1
+                 LIMIT 1",
+                params![hash],
+                Self::row_to_record,
+            )
+            .optional()?;
+
+        Ok(result)
+    }
+
     /// Get the count of models.
     pub fn count(&self) -> Result<usize> {
         let conn = self.conn.lock().map_err(|_| {
@@ -707,5 +736,49 @@ mod tests {
         index.clear().unwrap();
 
         assert_eq!(index.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_find_by_hash_sha256_found() {
+        let (index, _temp) = create_test_index();
+
+        let mut record = create_test_record("model-hash", "Hash Model", "checkpoint");
+        record.hashes = HashMap::from([
+            ("sha256".to_string(), "deadbeef1234".to_string()),
+            ("blake3".to_string(), "cafebabe5678".to_string()),
+        ]);
+        index.upsert(&record).unwrap();
+
+        let found = index.find_by_hash("deadbeef1234").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "model-hash");
+    }
+
+    #[test]
+    fn test_find_by_hash_blake3_found() {
+        let (index, _temp) = create_test_index();
+
+        let mut record = create_test_record("model-hash-b3", "Blake3 Model", "lora");
+        record.hashes = HashMap::from([
+            ("sha256".to_string(), "aaa111".to_string()),
+            ("blake3".to_string(), "bbb222".to_string()),
+        ]);
+        index.upsert(&record).unwrap();
+
+        let found = index.find_by_hash("bbb222").unwrap();
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().id, "model-hash-b3");
+    }
+
+    #[test]
+    fn test_find_by_hash_not_found() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("m1", "Model 1", "type"))
+            .unwrap();
+
+        let found = index.find_by_hash("nonexistent_hash_value").unwrap();
+        assert!(found.is_none());
     }
 }

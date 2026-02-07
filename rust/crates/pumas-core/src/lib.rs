@@ -36,6 +36,7 @@ pub mod cancel;
 pub mod config;
 pub mod error;
 pub mod index;
+pub mod ipc;
 pub mod launcher;
 pub mod metadata;
 pub mod model_library;
@@ -43,6 +44,7 @@ pub mod models;
 pub mod network;
 pub mod platform;
 pub mod plugins;
+pub mod registry;
 pub mod process;
 pub mod system;
 
@@ -77,27 +79,91 @@ use tokio::sync::RwLock;
 /// It provides model library and system utilities for integrating Pumas functionality
 /// into other applications.
 ///
-/// Note: Version management (ComfyUI versions, custom nodes) is handled by the
-/// separate `pumas-app-manager` crate, which is used by the frontend/RPC layer.
+/// Internally, `PumasApi` operates in one of two modes:
+/// - **Primary**: Owns the full state (model library, network, processes, etc.)
+///   and runs an IPC server for other instances to connect to.
+/// - **Client**: Proxies calls to a running primary instance via TCP IPC.
+///
+/// The mode is transparent to callers — the public API is identical.
 pub struct PumasApi {
-    /// Root directory for launcher data
+    /// Root directory for launcher data (available in both modes)
     launcher_root: PathBuf,
-    /// Shared state (will be expanded as we implement more features)
+    /// Internal mode dispatch
+    inner: ApiInner,
+}
+
+/// Internal dispatch: Primary owns state, Client proxies via IPC.
+enum ApiInner {
+    Primary(Arc<PrimaryState>),
+    Client {
+        client: ipc::IpcClient,
+    },
+}
+
+/// All state owned by a primary instance.
+///
+/// This is the full set of subsystems that were previously fields on `PumasApi`.
+/// Wrapped in `Arc` so it can be shared with the IPC server dispatch.
+pub(crate) struct PrimaryState {
     _state: Arc<RwLock<ApiState>>,
-    /// Network manager for connectivity and web source management
     network_manager: Arc<network::NetworkManager>,
-    /// Process manager for managing running processes (optional feature)
     process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
-    /// System utilities
     system_utils: Arc<system::SystemUtils>,
-    /// Model library for managing AI models (required, immutable after init)
     model_library: Arc<model_library::ModelLibrary>,
-    /// Model mapper for linking models to application directories (immutable after init)
     model_mapper: model_library::ModelMapper,
-    /// HuggingFace client for model search and download (optional, external service)
     hf_client: Option<model_library::HuggingFaceClient>,
-    /// Model importer for importing local models (immutable after init)
     model_importer: model_library::ModelImporter,
+    /// IPC server handle (Primary only). Protected by async Mutex for shutdown.
+    server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
+    /// Global registry connection (best-effort, None if unavailable).
+    registry: Option<registry::LibraryRegistry>,
+}
+
+/// IPC dispatch implementation for the primary state.
+///
+/// Routes incoming JSON-RPC method calls to the appropriate PrimaryState methods.
+/// Each method deserializes params, calls the real implementation, and serializes the result.
+#[async_trait::async_trait]
+impl ipc::server::IpcDispatch for PrimaryState {
+    async fn dispatch(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> std::result::Result<serde_json::Value, PumasError> {
+        match method {
+            "list_models" => {
+                let models = self.model_library.list_models().await?;
+                Ok(serde_json::to_value(models)?)
+            }
+            "search_models" => {
+                let query = params["query"].as_str().unwrap_or("");
+                let limit = params["limit"].as_u64().unwrap_or(50) as usize;
+                let offset = params["offset"].as_u64().unwrap_or(0) as usize;
+                let result = self.model_library.search_models(query, limit, offset).await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            "get_model" => {
+                let model_id = params["model_id"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "model_id is required".to_string(),
+                    })?;
+                let model = self.model_library.get_model(model_id).await?;
+                Ok(serde_json::to_value(model)?)
+            }
+            "get_status" => {
+                Ok(serde_json::json!({
+                    "success": true,
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "is_primary": true,
+                }))
+            }
+            "ping" => Ok(serde_json::json!("pong")),
+            _ => Err(PumasError::InvalidParams {
+                message: format!("Unknown IPC method: {}", method),
+            }),
+        }
+    }
 }
 
 /// Internal state for the API.
@@ -310,8 +376,16 @@ impl PumasApiBuilder {
         let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
-        Ok(PumasApi {
-            launcher_root: self.launcher_root,
+        // Best-effort registry connection (failures don't block initialization)
+        let registry = match registry::LibraryRegistry::open() {
+            Ok(reg) => Some(reg),
+            Err(e) => {
+                tracing::warn!("Failed to open global registry (non-fatal): {}", e);
+                None
+            }
+        };
+
+        let primary_state = Arc::new(PrimaryState {
             _state: state,
             network_manager,
             process_manager,
@@ -320,11 +394,135 @@ impl PumasApiBuilder {
             model_mapper,
             hf_client,
             model_importer,
+            server_handle: tokio::sync::Mutex::new(None),
+            registry,
+        });
+
+        Ok(PumasApi {
+            launcher_root: self.launcher_root,
+            inner: ApiInner::Primary(primary_state),
         })
     }
 }
 
 impl PumasApi {
+    /// Get a reference to the primary state, or error if in client mode.
+    fn try_primary(&self) -> Result<&Arc<PrimaryState>> {
+        match &self.inner {
+            ApiInner::Primary(state) => Ok(state),
+            ApiInner::Client { .. } => Err(PumasError::Other(
+                "This method is only available on primary instances".to_string(),
+            )),
+        }
+    }
+
+    /// Get a reference to the primary state. Panics if in client mode.
+    /// Use only for methods that are guaranteed primary-only.
+    fn primary(&self) -> &Arc<PrimaryState> {
+        match &self.inner {
+            ApiInner::Primary(state) => state,
+            ApiInner::Client { .. } => {
+                panic!("BUG: primary-only method called on client instance")
+            }
+        }
+    }
+
+    /// Returns true if this instance is the primary (owns full state).
+    pub fn is_primary(&self) -> bool {
+        matches!(&self.inner, ApiInner::Primary(_))
+    }
+
+    /// Discover and connect to an existing pumas-core instance, or return an error
+    /// if no libraries are registered.
+    ///
+    /// This is the entry point for host applications that don't know the library path.
+    /// It checks the global registry for a registered library and a running instance:
+    /// 1. If a running instance is found (alive PID), connects as a Client.
+    /// 2. If a library is registered but no instance, creates a new Primary.
+    /// 3. If no libraries are registered, returns `NoLibrariesRegistered`.
+    pub async fn discover() -> Result<Self> {
+        let registry = registry::LibraryRegistry::open().map_err(|e| {
+            tracing::warn!("Failed to open registry for discovery: {}", e);
+            PumasError::NoLibrariesRegistered
+        })?;
+
+        // Clean up stale entries first
+        let _ = registry.cleanup_stale();
+
+        let library = registry
+            .get_default()?
+            .ok_or(PumasError::NoLibrariesRegistered)?;
+
+        // Check for a running instance
+        if let Some(instance) = registry.get_instance(&library.path)? {
+            if platform::is_process_alive(instance.pid) {
+                let addr = std::net::SocketAddr::from((
+                    std::net::Ipv4Addr::LOCALHOST,
+                    instance.port,
+                ));
+                match ipc::IpcClient::connect(addr, instance.pid).await {
+                    Ok(client) => {
+                        tracing::info!(
+                            "Connected to existing instance (PID {} on port {})",
+                            instance.pid,
+                            instance.port
+                        );
+                        return Ok(Self {
+                            launcher_root: library.path.clone(),
+                            inner: ApiInner::Client { client },
+                        });
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to connect to instance PID {}: {}, creating new primary",
+                            instance.pid,
+                            e
+                        );
+                        // Stale entry, clean it up
+                        let _ = registry.unregister_instance(&library.path);
+                    }
+                }
+            } else {
+                // PID is dead, clean up
+                let _ = registry.unregister_instance(&library.path);
+            }
+        }
+
+        // No running instance found — create a new Primary
+        Self::new(&library.path).await
+    }
+
+    /// Start the IPC server and register this instance in the global registry.
+    ///
+    /// Call this after creating a Primary instance to enable instance convergence.
+    /// Best-effort: failures are logged but don't affect the API.
+    pub async fn start_ipc_server(&self) -> Result<u16> {
+        let state = self.try_primary()?;
+
+        let handle = ipc::IpcServer::start(state.clone()).await?;
+        let port = handle.port;
+
+        // Register in the global registry
+        if let Some(ref reg) = state.registry {
+            let library_name = self
+                .launcher_root
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("pumas-library");
+            let _ = reg.register(&self.launcher_root, library_name);
+            let _ = reg.register_instance(
+                &self.launcher_root,
+                std::process::id(),
+                port,
+            );
+        }
+
+        *state.server_handle.lock().await = Some(handle);
+        tracing::info!("IPC server started on port {}", port);
+
+        Ok(port)
+    }
+
     /// Create a builder for PumasApi.
     ///
     /// Use the builder for more control over initialization options:
@@ -438,8 +636,16 @@ impl PumasApi {
         let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
-        Ok(Self {
-            launcher_root,
+        // Best-effort registry connection
+        let registry = match registry::LibraryRegistry::open() {
+            Ok(reg) => Some(reg),
+            Err(e) => {
+                tracing::warn!("Failed to open global registry (non-fatal): {}", e);
+                None
+            }
+        };
+
+        let primary_state = Arc::new(PrimaryState {
             _state: state,
             network_manager,
             process_manager,
@@ -448,6 +654,13 @@ impl PumasApi {
             model_mapper,
             hf_client,
             model_importer,
+            server_handle: tokio::sync::Mutex::new(None),
+            registry,
+        });
+
+        Ok(Self {
+            launcher_root,
+            inner: ApiInner::Primary(primary_state),
         })
     }
 
@@ -487,32 +700,32 @@ impl PumasApi {
 
     /// Check if network is currently online.
     pub fn is_online(&self) -> bool {
-        self.network_manager.is_online()
+        self.primary().network_manager.is_online()
     }
 
     /// Get current network connectivity state.
     pub fn connectivity_state(&self) -> network::ConnectivityState {
-        self.network_manager.connectivity()
+        self.primary().network_manager.connectivity()
     }
 
     /// Check network connectivity (performs actual probe).
     pub async fn check_connectivity(&self) -> network::ConnectivityState {
-        self.network_manager.check_connectivity().await
+        self.primary().network_manager.check_connectivity().await
     }
 
     /// Get detailed network status including circuit breaker states.
     pub async fn network_status(&self) -> network::NetworkStatus {
-        self.network_manager.status().await
+        self.primary().network_manager.status().await
     }
 
     /// Get the network manager for advanced operations.
     pub fn network_manager(&self) -> &Arc<network::NetworkManager> {
-        &self.network_manager
+        &self.primary().network_manager
     }
 
     /// Get the model library for direct access.
     pub fn model_library(&self) -> &Arc<model_library::ModelLibrary> {
-        &self.model_library
+        &self.primary().model_library
     }
 
     // ========================================
@@ -532,7 +745,7 @@ impl PumasApi {
 
         // Get app resources for running apps
         let app_resources = {
-            let mgr_lock = self.process_manager.read().await;
+            let mgr_lock = self.primary().process_manager.read().await;
             if let Some(ref mgr) = *mgr_lock {
                 let comfyui_resources = if comfyui_running {
                     mgr.aggregate_app_resources().map(|r| models::AppResourceUsage {
@@ -688,7 +901,7 @@ impl PumasApi {
         };
 
         // GPU - use ResourceTracker's NvidiaSmiMonitor for real GPU stats
-        let gpu = if let Some(ref mgr) = *self.process_manager.read().await {
+        let gpu = if let Some(ref mgr) = *self.primary().process_manager.read().await {
             let tracker = mgr.resource_tracker();
             match tracker.get_system_resources() {
                 Ok(snapshot) => models::GpuResources {
@@ -741,7 +954,7 @@ impl PumasApi {
 
     /// Check if ComfyUI is currently running.
     pub async fn is_comfyui_running(&self) -> bool {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.is_running()
         } else {
@@ -751,7 +964,7 @@ impl PumasApi {
 
     /// Get running processes with resource information.
     pub async fn get_running_processes(&self) -> Vec<process::ProcessInfo> {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.get_processes_with_resources()
         } else {
@@ -765,7 +978,7 @@ impl PumasApi {
     /// from the VersionManager. Without this, PID file detection will only check
     /// the root-level PID file and may miss version-specific PID files.
     pub async fn set_process_version_paths(&self, version_paths: std::collections::HashMap<String, PathBuf>) {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.set_version_paths(version_paths);
         } else {
@@ -775,7 +988,7 @@ impl PumasApi {
 
     /// Stop all running ComfyUI processes.
     pub async fn stop_comfyui(&self) -> Result<bool> {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.stop_all()
         } else {
@@ -785,7 +998,7 @@ impl PumasApi {
 
     /// Check if Ollama is currently running.
     pub async fn is_ollama_running(&self) -> bool {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.is_ollama_running()
         } else {
@@ -795,7 +1008,7 @@ impl PumasApi {
 
     /// Stop Ollama processes.
     pub async fn stop_ollama(&self) -> Result<bool> {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.stop_ollama()
         } else {
@@ -817,7 +1030,7 @@ impl PumasApi {
             });
         }
 
-        let proc_mgr_lock = self.process_manager.read().await;
+        let proc_mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref pm) = *proc_mgr_lock {
             let log_dir = self.launcher_data_dir().join("logs");
             let result = pm.launch_ollama(tag, version_dir, Some(&log_dir));
@@ -852,7 +1065,7 @@ impl PumasApi {
             });
         }
 
-        let proc_mgr_lock = self.process_manager.read().await;
+        let proc_mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref pm) = *proc_mgr_lock {
             let log_dir = self.launcher_data_dir().join("logs");
             let result = pm.launch_version(tag, version_dir, Some(&log_dir));
@@ -875,7 +1088,7 @@ impl PumasApi {
 
     /// Get the last launch log path.
     pub async fn get_last_launch_log(&self) -> Option<String> {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_log().map(|p| p.to_string_lossy().to_string())
         } else {
@@ -885,7 +1098,7 @@ impl PumasApi {
 
     /// Get the last launch error.
     pub async fn get_last_launch_error(&self) -> Option<String> {
-        let mgr_lock = self.process_manager.read().await;
+        let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_error()
         } else {
@@ -899,12 +1112,12 @@ impl PumasApi {
 
     /// Open a path in the file manager.
     pub fn open_path(&self, path: &str) -> Result<()> {
-        self.system_utils.open_path(path)
+        self.primary().system_utils.open_path(path)
     }
 
     /// Open a URL in the default browser.
     pub fn open_url(&self, url: &str) -> Result<()> {
-        self.system_utils.open_url(url)
+        self.primary().system_utils.open_url(url)
     }
 
     /// Open a directory in the file manager.
@@ -917,7 +1130,7 @@ impl PumasApi {
                 resource: format!("Directory: {}", dir.display()),
             });
         }
-        self.system_utils.open_path(&dir.to_string_lossy())
+        self.primary().system_utils.open_path(&dir.to_string_lossy())
     }
 
     // ========================================
@@ -926,12 +1139,12 @@ impl PumasApi {
 
     /// Check if background fetch has completed.
     pub async fn has_background_fetch_completed(&self) -> bool {
-        self._state.read().await.background_fetch_completed
+        self.primary()._state.read().await.background_fetch_completed
     }
 
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
-        self._state.write().await.background_fetch_completed = false;
+        self.primary()._state.write().await.background_fetch_completed = false;
     }
 
     // ========================================
@@ -940,7 +1153,7 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        self.model_library.list_models().await
+        self.primary().model_library.list_models().await
     }
 
     /// Search models using full-text search.
@@ -950,22 +1163,22 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        self.model_library.search_models(query, limit, offset).await
+        self.primary().model_library.search_models(query, limit, offset).await
     }
 
     /// Rebuild the model index from metadata files.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
-        self.model_library.rebuild_index().await
+        self.primary().model_library.rebuild_index().await
     }
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        self.model_library.get_model(model_id).await
+        self.primary().model_library.get_model(model_id).await
     }
 
     /// Mark a model's metadata as manually set (protected from auto-updates).
     pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        self.model_library.mark_metadata_as_manual(model_id).await
+        self.primary().model_library.mark_metadata_as_manual(model_id).await
     }
 
     /// Import a model from a local path.
@@ -973,7 +1186,7 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
-        self.model_importer.import(spec).await
+        self.primary().model_importer.import(spec).await
     }
 
     /// Import multiple models in batch.
@@ -981,7 +1194,7 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
-        self.model_importer.batch_import(specs, None).await
+        self.primary().model_importer.batch_import(specs, None).await
     }
 
     /// Search for models on HuggingFace.
@@ -996,7 +1209,7 @@ impl PumasApi {
         kind: Option<&str>,
         limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             let params = model_library::HfSearchParams {
                 query: query.to_string(),
                 kind: kind.map(String::from),
@@ -1015,10 +1228,10 @@ impl PumasApi {
         &self,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             // Determine destination directory
             let model_type = request.model_type.as_deref().unwrap_or("unknown");
-            let dest_dir = self.model_library.build_model_path(
+            let dest_dir = self.primary().model_library.build_model_path(
                 model_type,
                 &request.family,
                 &model_library::normalize_name(&request.official_name),
@@ -1036,7 +1249,7 @@ impl PumasApi {
         &self,
         download_id: &str,
     ) -> Option<models::ModelDownloadProgress> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             client.get_download_progress(download_id).await
         } else {
             None
@@ -1045,7 +1258,7 @@ impl PumasApi {
 
     /// Cancel a HuggingFace download.
     pub async fn cancel_hf_download(&self, download_id: &str) -> Result<bool> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             client.cancel_download(download_id).await
         } else {
             Ok(false)
@@ -1057,7 +1270,7 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             let path = std::path::Path::new(file_path);
             let filename = path.file_name()
                 .and_then(|n| n.to_str())
@@ -1073,7 +1286,7 @@ impl PumasApi {
         &self,
         repo_id: &str,
     ) -> Result<model_library::RepoFileTree> {
-        if let Some(ref client) = self.hf_client {
+        if let Some(ref client) = self.primary().hf_client {
             client.get_repo_files(repo_id).await
         } else {
             Err(PumasError::Config {
@@ -1090,7 +1303,7 @@ impl PumasApi {
     ///
     /// Returns information about total links, healthy links, broken links, etc.
     pub async fn get_link_health(&self, _version_tag: Option<&str>) -> Result<models::LinkHealthResponse> {
-        let registry = self.model_library.link_registry().read().await;
+        let registry = self.primary().model_library.link_registry().read().await;
         let all_links = registry.get_all().await;
 
         let mut healthy = 0;
@@ -1129,7 +1342,7 @@ impl PumasApi {
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
-        let registry = self.model_library.link_registry().write().await;
+        let registry = self.primary().model_library.link_registry().write().await;
         let broken = registry.cleanup_broken().await?;
 
         // Also remove the actual broken symlinks from the filesystem
@@ -1147,7 +1360,7 @@ impl PumasApi {
 
     /// Get all links for a specific model.
     pub async fn get_links_for_model(&self, model_id: &str) -> Result<models::LinksForModelResponse> {
-        let registry = self.model_library.link_registry().read().await;
+        let registry = self.primary().model_library.link_registry().read().await;
         let links = registry.get_links_for_model(model_id).await;
 
         let link_info: Vec<models::LinkInfo> = links
@@ -1170,7 +1383,7 @@ impl PumasApi {
 
     /// Delete a model and cascade delete all its links.
     pub async fn delete_model_with_cascade(&self, model_id: &str) -> Result<models::DeleteModelResponse> {
-        self.model_library.delete_model(model_id, true).await?;
+        self.primary().model_library.delete_model(model_id, true).await?;
         Ok(models::DeleteModelResponse {
             success: true,
             error: None,
@@ -1194,7 +1407,7 @@ impl PumasApi {
             });
         }
 
-        let preview = self.model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
+        let preview = self.primary().model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
 
         Ok(models::MappingPreviewResponse {
             success: true,
@@ -1221,7 +1434,7 @@ impl PumasApi {
             std::fs::create_dir_all(models_path)?;
         }
 
-        let result = self.model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
+        let result = self.primary().model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
 
         Ok(models::MappingApplyResponse {
             success: true,
@@ -1323,6 +1536,18 @@ impl PumasApi {
     /// Check if setproctitle Python package is available.
     pub fn check_setproctitle(&self) -> system::SystemCheckResult {
         system::check_setproctitle()
+    }
+}
+
+impl Drop for PumasApi {
+    fn drop(&mut self) {
+        if let ApiInner::Primary(ref state) = self.inner {
+            // Best-effort: unregister instance from the global registry
+            if let Some(ref reg) = state.registry {
+                let _ = reg.unregister_instance(&self.launcher_root);
+            }
+            // Server handle is dropped automatically via IpcServerHandle::drop
+        }
     }
 }
 

@@ -138,6 +138,14 @@ pub enum PumasError {
     #[error("Invalid parameters: {message}")]
     InvalidParams { message: String },
 
+    // Instance convergence errors
+    #[error("Shared pumas-core instance lost (PID {pid} on port {port}). \
+             The host application was using a shared instance that is no longer running.")]
+    SharedInstanceLost { pid: u32, port: u16 },
+
+    #[error("No libraries registered. Initialize with an explicit path first.")]
+    NoLibrariesRegistered,
+
     // Generic errors
     #[error("{0}")]
     Other(String),
@@ -250,6 +258,9 @@ impl PumasError {
             | PumasError::HashMismatch { .. } => -32005,
 
             PumasError::InvalidParams { .. } => -32602, // Standard JSON-RPC invalid params
+
+            PumasError::SharedInstanceLost { .. } => -32006,
+            PumasError::NoLibrariesRegistered => -32007,
 
             // All other errors are internal errors
             _ => -32603,

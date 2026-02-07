@@ -185,6 +185,29 @@ pub fn command_exists(cmd: &str) -> bool {
     }
 }
 
+/// Get the Pumas global configuration directory.
+///
+/// This is the well-known location for cross-process shared state
+/// like the library registry database.
+///
+/// # Platform Behavior
+/// - **Linux**: `~/.config/pumas` (XDG_CONFIG_HOME)
+/// - **Windows**: `%APPDATA%\pumas`
+/// - **macOS**: `~/Library/Application Support/pumas`
+pub fn pumas_config_dir() -> Result<PathBuf> {
+    let config_dir = dirs::config_dir().ok_or_else(|| PumasError::Config {
+        message: "Could not determine platform config directory".to_string(),
+    })?;
+    Ok(config_dir.join(crate::config::RegistryConfig::APP_CONFIG_DIR_NAME))
+}
+
+/// Get the path to the global library registry database.
+///
+/// Returns `{pumas_config_dir}/registry.db`.
+pub fn registry_db_path() -> Result<PathBuf> {
+    Ok(pumas_config_dir()?.join(crate::config::RegistryConfig::DB_FILENAME))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +264,25 @@ mod tests {
         let result = desktop_dir();
         // May fail in headless environments, so just check it doesn't panic
         let _ = result;
+    }
+
+    #[test]
+    fn test_pumas_config_dir_contains_pumas() {
+        let dir = pumas_config_dir().unwrap();
+        assert!(
+            dir.to_string_lossy().contains("pumas"),
+            "Config dir should contain 'pumas': {:?}",
+            dir
+        );
+    }
+
+    #[test]
+    fn test_registry_db_path_ends_with_db() {
+        let path = registry_db_path().unwrap();
+        assert!(
+            path.to_string_lossy().ends_with("registry.db"),
+            "Registry path should end with registry.db: {:?}",
+            path
+        );
     }
 }

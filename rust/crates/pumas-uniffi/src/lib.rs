@@ -224,6 +224,12 @@ impl From<pumas_library::PumasError> for FfiError {
                 message: format!("Invalid version tag: {}", tag),
             },
             PumasError::InvalidParams { message } => FfiError::Validation { message },
+            PumasError::SharedInstanceLost { pid, port } => FfiError::Other(
+                format!("Shared instance lost (PID {} on port {})", pid, port),
+            ),
+            PumasError::NoLibrariesRegistered => FfiError::Config {
+                message: "No libraries registered".to_string(),
+            },
             PumasError::Other(message) => FfiError::Other(message),
         }
     }

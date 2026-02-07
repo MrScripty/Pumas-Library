@@ -103,6 +103,11 @@ impl ModelLibrary {
         &self.link_registry
     }
 
+    /// Get a reference to the model index.
+    pub fn index(&self) -> &ModelIndex {
+        &self.index
+    }
+
     // ========================================
     // Directory Structure
     // ========================================

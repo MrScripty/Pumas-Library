@@ -910,6 +910,7 @@ mod tests {
             downloads: Some(1000),
             total_size_bytes: Some(4_000_000_000),
             quant_sizes: None,
+            compatible_engines: vec![],
         }
     }
 

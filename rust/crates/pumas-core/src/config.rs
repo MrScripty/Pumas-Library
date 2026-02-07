@@ -83,6 +83,24 @@ impl PathsConfig {
     pub const LOGS_DIR_NAME: &'static str = "logs";
 }
 
+/// Configuration for the global library registry and IPC.
+pub struct RegistryConfig;
+
+impl RegistryConfig {
+    /// Name of the Pumas config directory under the platform config root.
+    pub const APP_CONFIG_DIR_NAME: &'static str = "pumas";
+    /// Filename for the SQLite registry database.
+    pub const DB_FILENAME: &'static str = "registry.db";
+    /// SQLite busy timeout for cross-process contention (milliseconds).
+    pub const BUSY_TIMEOUT_MS: u32 = 5000;
+    /// Timeout for IPC client connection attempts.
+    pub const IPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+    /// Maximum concurrent IPC connections the server will accept.
+    pub const MAX_IPC_CONNECTIONS: usize = 64;
+    /// Maximum size of a single IPC message frame (16 MiB).
+    pub const MAX_IPC_MESSAGE_SIZE: usize = 16 * 1024 * 1024;
+}
+
 /// App-specific configurations for multi-app support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppId {

@@ -6,7 +6,7 @@
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-green.svg)
 ![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
 
-Available as a desktop GUI for end-users, and as a headless Rust crate for embeddable API use.
+Available as a desktop GUI for end-users, and as a headless Rust crate with language bindings for embeddable API use.
 
 Pumas Library is an easy to use AI model library that downloads, organizes, and serves AI model weights and metadata to other apps. Instead of having models duplicated or scattered across applications, Pumas Library provides a standardized central source that is automatically maintained. When integrated into other software via the Rust crate, it eliminates the need for a slew of file, network, and remote API boilerplate and smart logic.
 

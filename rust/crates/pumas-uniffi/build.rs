@@ -1,4 +1,5 @@
 fn main() {
-    // UniFFI build script - generates bindings scaffolding
-    uniffi::generate_scaffolding("src/pumas.udl").unwrap();
+    // No-op: all types use proc-macro annotations (#[derive(uniffi::Record)], etc.)
+    // so UDL-based scaffolding is not needed. The uniffi::setup_scaffolding!() macro
+    // in lib.rs handles the FFI glue code generation.
 }

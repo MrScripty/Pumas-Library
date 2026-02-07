@@ -116,4 +116,4 @@ pumas-app-manager = { path = "crates/pumas-app-manager" }
 [profile.release]
 lto = true
 codegen-units = 1
-strip = true
+strip = "debuginfo"

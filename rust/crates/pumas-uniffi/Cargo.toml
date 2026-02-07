@@ -17,17 +17,29 @@ name = "pumas_uniffi"
 # Core library with UniFFI feature enabled
 pumas-library = { path = "../pumas-core", features = ["uniffi"] }
 
-# UniFFI runtime
-uniffi = { workspace = true }
+# UniFFI runtime (tokio feature required for async method export)
+uniffi = { workspace = true, features = ["tokio"] }
 
 # Async runtime for bridging async functions
 tokio = { workspace = true }
 
+# Serialization (for HashMap/Value → JSON string conversion at FFI boundary)
+serde_json = { workspace = true }
+
 # Error handling
 thiserror = { workspace = true }
+
+[[bin]]
+name = "pumas-uniffi-bindgen"
+path = "src/bin/uniffi_bindgen.rs"
+required-features = ["cli"]
 
 [build-dependencies]
 uniffi = { workspace = true, features = ["build"] }
 
+[dev-dependencies]
+uniffi = { workspace = true, features = ["bindgen-tests"] }
+
 [features]
 default = []
+cli = ["uniffi/cli"]

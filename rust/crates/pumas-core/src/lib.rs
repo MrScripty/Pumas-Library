@@ -349,12 +349,22 @@ impl PumasApiBuilder {
                 }
             };
 
+            // Initialize download persistence
+            let data_dir = self.launcher_root.join("launcher-data");
+            let download_persistence = std::sync::Arc::new(
+                model_library::DownloadPersistence::new(&data_dir)
+            );
+
             match model_library::HuggingFaceClient::new(&hf_cache_dir) {
                 Ok(mut client) => {
                     // Attach search cache if available
                     if let Some(cache) = search_cache {
                         client.set_search_cache(cache);
                     }
+                    // Attach download persistence
+                    client.set_persistence(download_persistence);
+                    // Restore persisted downloads from previous session
+                    client.restore_persisted_downloads().await;
                     Some(client)
                 }
                 Err(e) => {
@@ -612,12 +622,22 @@ impl PumasApi {
             }
         };
 
+        // Initialize download persistence
+        let data_dir = launcher_root.join("launcher-data");
+        let download_persistence = std::sync::Arc::new(
+            model_library::DownloadPersistence::new(&data_dir)
+        );
+
         let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
             Ok(mut client) => {
                 // Attach search cache if available
                 if let Some(cache) = search_cache {
                     client.set_search_cache(cache);
                 }
+                // Attach download persistence
+                client.set_persistence(download_persistence);
+                // Restore persisted downloads from previous session
+                client.restore_persisted_downloads().await;
                 Some(client)
             }
             Err(e) => {
@@ -1262,6 +1282,33 @@ impl PumasApi {
             client.cancel_download(download_id).await
         } else {
             Ok(false)
+        }
+    }
+
+    /// Pause a HuggingFace download, preserving the `.part` file for later resume.
+    pub async fn pause_hf_download(&self, download_id: &str) -> Result<bool> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.pause_download(download_id).await
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Resume a paused or errored HuggingFace download.
+    pub async fn resume_hf_download(&self, download_id: &str) -> Result<bool> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.resume_download(download_id).await
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// List all HuggingFace downloads (active, paused, completed, etc.).
+    pub async fn list_hf_downloads(&self) -> Vec<models::ModelDownloadProgress> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.list_downloads().await
+        } else {
+            vec![]
         }
     }
 

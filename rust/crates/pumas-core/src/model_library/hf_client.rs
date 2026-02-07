@@ -8,6 +8,7 @@
 
 use crate::error::{PumasError, Result};
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::hf_cache::HfSearchCache;
 use crate::model_library::naming::extract_base_name;
@@ -50,6 +51,8 @@ pub struct HuggingFaceClient {
     downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
     /// SQLite search cache (optional)
     search_cache: Option<Arc<HfSearchCache>>,
+    /// Download persistence for crash recovery (optional)
+    persistence: Option<Arc<DownloadPersistence>>,
 }
 
 impl std::fmt::Debug for HuggingFaceClient {
@@ -57,6 +60,7 @@ impl std::fmt::Debug for HuggingFaceClient {
         f.debug_struct("HuggingFaceClient")
             .field("cache_dir", &self.cache_dir)
             .field("has_search_cache", &self.search_cache.is_some())
+            .field("has_persistence", &self.persistence.is_some())
             .finish()
     }
 }
@@ -79,8 +83,16 @@ struct DownloadState {
     speed: f64,
     /// Cancellation flag
     cancel_flag: Arc<AtomicBool>,
+    /// Pause flag -- signals graceful stop without deleting .part file
+    pause_flag: Arc<AtomicBool>,
     /// Error message if failed
     error: Option<String>,
+    /// Destination directory (needed for resume after restart)
+    dest_dir: PathBuf,
+    /// Filename being downloaded (needed for resume after restart)
+    filename: String,
+    /// Original download request (needed for persistence/resume)
+    download_request: Option<DownloadRequest>,
 }
 
 impl std::fmt::Debug for DownloadState {
@@ -131,6 +143,7 @@ impl HuggingFaceClient {
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,
+            persistence: None,
         })
     }
 
@@ -154,6 +167,82 @@ impl HuggingFaceClient {
     /// Get a reference to the search cache if available.
     pub fn search_cache(&self) -> Option<&Arc<HfSearchCache>> {
         self.search_cache.as_ref()
+    }
+
+    /// Set the download persistence store.
+    pub fn set_persistence(&mut self, persistence: Arc<DownloadPersistence>) {
+        self.persistence = Some(persistence);
+    }
+
+    /// Restore persisted downloads from disk.
+    ///
+    /// Called during startup to recover paused/errored downloads from a previous session.
+    /// Only restores entries whose `.part` file still exists on disk.
+    pub async fn restore_persisted_downloads(&self) {
+        let persistence = match &self.persistence {
+            Some(p) => p,
+            None => return,
+        };
+
+        let entries = persistence.load_all();
+        if entries.is_empty() {
+            return;
+        }
+
+        info!("Restoring {} persisted downloads", entries.len());
+        let mut downloads = self.downloads.write().await;
+
+        for entry in entries {
+            let part_path = entry.dest_dir.join(format!(
+                "{}{}",
+                entry.filename,
+                crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+            ));
+
+            if !part_path.exists() {
+                // .part file was cleaned up externally, remove from persistence
+                info!(
+                    "Removing stale persisted download {} (no .part file)",
+                    entry.download_id
+                );
+                let _ = persistence.remove(&entry.download_id);
+                continue;
+            }
+
+            // Get actual file size for accurate progress
+            let downloaded_bytes = std::fs::metadata(&part_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            let progress = entry
+                .total_bytes
+                .map(|total| downloaded_bytes as f32 / total as f32)
+                .unwrap_or(0.0);
+
+            info!(
+                "Restoring download {}: {} ({} bytes on disk, status {:?})",
+                entry.download_id, entry.repo_id, downloaded_bytes, entry.status
+            );
+
+            downloads.insert(
+                entry.download_id.clone(),
+                DownloadState {
+                    download_id: entry.download_id,
+                    repo_id: entry.repo_id,
+                    status: entry.status,
+                    progress,
+                    downloaded_bytes,
+                    total_bytes: entry.total_bytes,
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    dest_dir: entry.dest_dir,
+                    filename: entry.filename,
+                    download_request: Some(entry.download_request),
+                },
+            );
+        }
     }
 
     // ========================================
@@ -806,6 +895,8 @@ impl HuggingFaceClient {
             .find(|f| f.filename == filename)
             .map(|f| f.size);
 
+        let pause_flag = Arc::new(AtomicBool::new(false));
+
         // Create download state
         let state = DownloadState {
             download_id: download_id.clone(),
@@ -816,7 +907,11 @@ impl HuggingFaceClient {
             total_bytes,
             speed: 0.0,
             cancel_flag: cancel_flag.clone(),
+            pause_flag: pause_flag.clone(),
             error: None,
+            dest_dir: dest_dir.to_path_buf(),
+            filename: filename.clone(),
+            download_request: Some(request.clone()),
         };
 
         self.downloads
@@ -824,12 +919,27 @@ impl HuggingFaceClient {
             .await
             .insert(download_id.clone(), state);
 
+        // Persist download metadata for crash recovery
+        if let Some(ref persistence) = self.persistence {
+            let _ = persistence.save(&PersistedDownload {
+                download_id: download_id.clone(),
+                repo_id: request.repo_id.clone(),
+                filename: filename.clone(),
+                dest_dir: dest_dir.to_path_buf(),
+                total_bytes,
+                status: DownloadStatus::Queued,
+                download_request: request.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            });
+        }
+
         // Spawn download task (uses download_client which has no total timeout)
         let client = self.download_client.clone();
         let downloads = self.downloads.clone();
         let download_id_clone = download_id.clone();
         let repo_id = request.repo_id.clone();
         let dest_dir = dest_dir.to_path_buf();
+        let persistence = self.persistence.clone();
 
         tokio::spawn(async move {
             let result = Self::run_download(
@@ -840,23 +950,32 @@ impl HuggingFaceClient {
                 &filename,
                 &dest_dir,
                 cancel_flag,
+                pause_flag,
+                persistence.clone(),
             )
             .await;
 
             if let Err(e) = result {
+                // DownloadPaused is not a real error -- status already set by run_download
+                if matches!(e, PumasError::DownloadPaused) {
+                    info!("Download paused for {}/{}", repo_id, filename);
+                    // Persistence already updated in run_download
+                    return;
+                }
                 error!("Download failed for {}/{}: {}", repo_id, filename, e);
-                // Clean up .part file on failure
-                let part_path = dest_dir.join(format!(
-                    "{}{}",
-                    filename,
-                    crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
-                ));
-                let _ = tokio::fs::remove_file(&part_path).await;
-
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
                     state.error = Some(e.to_string());
+                }
+                // Update persistence with error status (preserve for resume)
+                if let Some(ref persistence) = persistence {
+                    if let Ok(mut entries) = Ok::<Vec<_>, ()>(persistence.load_all()) {
+                        if let Some(entry) = entries.iter_mut().find(|d| d.download_id == download_id_clone) {
+                            entry.status = DownloadStatus::Error;
+                            let _ = persistence.save(entry);
+                        }
+                    }
                 }
             }
         });
@@ -864,7 +983,7 @@ impl HuggingFaceClient {
         Ok(download_id)
     }
 
-    /// Run the download in the background.
+    /// Run the download in the background with retry and resume support.
     async fn run_download(
         client: Client,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
@@ -873,7 +992,12 @@ impl HuggingFaceClient {
         filename: &str,
         dest_dir: &Path,
         cancel_flag: Arc<AtomicBool>,
+        pause_flag: Arc<AtomicBool>,
+        persistence: Option<Arc<DownloadPersistence>>,
     ) -> Result<()> {
+        use crate::config::NetworkConfig;
+        use crate::network::RetryConfig;
+
         // Update status to downloading
         {
             let mut downloads = downloads.write().await;
@@ -884,43 +1008,226 @@ impl HuggingFaceClient {
 
         let url = format!("{}/{}/resolve/main/{}", HF_HUB_BASE, repo_id, filename);
 
-        let response = client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| PumasError::DownloadFailed {
-                url: url.clone(),
-                message: e.to_string(),
-            })?;
+        std::fs::create_dir_all(dest_dir)?;
+        let dest_path = dest_dir.join(filename);
+        let part_path = dest_dir.join(format!(
+            "{}{}",
+            filename,
+            NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+        ));
 
-        if !response.status().is_success() {
+        // Get total_bytes from DownloadState (set by start_download from repo tree)
+        let total_bytes_expected = {
+            let downloads = downloads.read().await;
+            downloads.get(download_id).and_then(|s| s.total_bytes)
+        };
+
+        let retry_config = RetryConfig::new()
+            .with_max_attempts(NetworkConfig::HF_DOWNLOAD_MAX_RETRIES)
+            .with_base_delay(NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY);
+
+        let mut last_error: Option<PumasError> = None;
+
+        for attempt in 0..retry_config.max_attempts {
+            // Check cancellation before each attempt
+            if cancel_flag.load(Ordering::Relaxed) {
+                let _ = tokio::fs::remove_file(&part_path).await;
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.status = DownloadStatus::Cancelled;
+                }
+                if let Some(ref persistence) = persistence {
+                    let _ = persistence.remove(download_id);
+                }
+                return Err(PumasError::DownloadCancelled);
+            }
+
+            // Check pause before each attempt
+            if pause_flag.load(Ordering::Relaxed) {
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.status = DownloadStatus::Paused;
+                }
+                if let Some(ref persistence) = persistence {
+                    Self::persist_status_update(persistence, download_id, DownloadStatus::Paused);
+                }
+                return Err(PumasError::DownloadPaused);
+            }
+
+            // Determine resume offset from existing .part file
+            let resume_from_byte = tokio::fs::metadata(&part_path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(0);
+
+            if attempt > 0 {
+                warn!(
+                    "Retry {}/{} for {}/{} (resuming from byte {})",
+                    attempt + 1,
+                    retry_config.max_attempts,
+                    repo_id,
+                    filename,
+                    resume_from_byte
+                );
+
+                // Reset status to Downloading for the retry
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.status = DownloadStatus::Downloading;
+                    state.error = None;
+                }
+            }
+
+            match Self::download_attempt(
+                &client,
+                &downloads,
+                download_id,
+                &url,
+                &part_path,
+                total_bytes_expected,
+                resume_from_byte,
+                &cancel_flag,
+                &pause_flag,
+            )
+            .await
+            {
+                Ok(_) => {
+                    // Rename .part to final path atomically
+                    tokio::fs::rename(&part_path, &dest_path).await.map_err(
+                        |e| PumasError::DownloadFailed {
+                            url: url.clone(),
+                            message: format!("Failed to rename temp file: {}", e),
+                        },
+                    )?;
+
+                    // Update status to completed
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.status = DownloadStatus::Completed;
+                        state.progress = 1.0;
+                    }
+
+                    // Remove from persistence -- download is done
+                    if let Some(ref persistence) = persistence {
+                        let _ = persistence.remove(download_id);
+                    }
+
+                    return Ok(());
+                }
+                Err(e) => {
+                    // Paused -- .part preserved, not a real error
+                    if matches!(e, PumasError::DownloadPaused) {
+                        if let Some(ref persistence) = persistence {
+                            Self::persist_status_update(persistence, download_id, DownloadStatus::Paused);
+                        }
+                        return Err(e);
+                    }
+
+                    if !e.is_retryable() || cancel_flag.load(Ordering::Relaxed) {
+                        // Only delete .part on cancel; preserve on other errors for resume
+                        if cancel_flag.load(Ordering::Relaxed) {
+                            let _ = tokio::fs::remove_file(&part_path).await;
+                            if let Some(ref persistence) = persistence {
+                                let _ = persistence.remove(download_id);
+                            }
+                        }
+                        return Err(e);
+                    }
+
+                    warn!(
+                        "Download attempt {}/{} failed for {}/{}: {}",
+                        attempt + 1,
+                        retry_config.max_attempts,
+                        repo_id,
+                        filename,
+                        e
+                    );
+                    last_error = Some(e);
+
+                    if attempt + 1 < retry_config.max_attempts {
+                        let delay = retry_config.calculate_delay(attempt);
+                        debug!("Waiting {:?} before retry", delay);
+                        tokio::time::sleep(delay).await;
+                    }
+                }
+            }
+        }
+
+        // All retries exhausted -- preserve .part for potential resume
+        Err(last_error.unwrap_or_else(|| PumasError::DownloadFailed {
+            url,
+            message: "All retry attempts exhausted".to_string(),
+        }))
+    }
+
+    /// Execute a single download attempt, optionally resuming from a byte offset.
+    async fn download_attempt(
+        client: &Client,
+        downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
+        download_id: &str,
+        url: &str,
+        part_path: &Path,
+        total_bytes_expected: Option<u64>,
+        resume_from_byte: u64,
+        cancel_flag: &Arc<AtomicBool>,
+        pause_flag: &Arc<AtomicBool>,
+    ) -> Result<()> {
+        use futures::StreamExt;
+
+        let mut request = client.get(url);
+        if resume_from_byte > 0 {
+            request = request.header("Range", format!("bytes={}-", resume_from_byte));
+            info!("Resuming download from byte {}", resume_from_byte);
+        }
+
+        let response = request.send().await.map_err(|e| PumasError::Network {
+            message: format!("Download request failed: {}", e),
+            cause: Some(e.to_string()),
+        })?;
+
+        let status = response.status();
+
+        // Check for non-success responses (but 206 Partial Content is expected for resume)
+        if !status.is_success() && status != reqwest::StatusCode::PARTIAL_CONTENT {
             return Err(PumasError::DownloadFailed {
-                url,
-                message: format!("HTTP {}", response.status()),
+                url: url.to_string(),
+                message: format!("HTTP {}", status),
             });
         }
 
-        let total_bytes = response.content_length();
+        // Determine if we're actually resuming
+        let is_resuming =
+            resume_from_byte > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
+        if resume_from_byte > 0 && !is_resuming {
+            warn!("Server does not support Range requests, restarting from zero");
+        }
 
-        use crate::config::NetworkConfig;
+        // For resumed downloads, content_length is the remaining bytes.
+        // Use total_bytes_expected for progress tracking.
+        let effective_total = if is_resuming {
+            total_bytes_expected
+        } else {
+            response.content_length().or(total_bytes_expected)
+        };
 
-        // Create destination directory and write to .part temp file
-        std::fs::create_dir_all(dest_dir)?;
-        let dest_path = dest_dir.join(filename);
-        let part_path = dest_dir.join(format!("{}{}", filename, NetworkConfig::DOWNLOAD_TEMP_SUFFIX));
-        let mut file = tokio::fs::File::create(&part_path).await?;
+        // Open file: append for resume, create for fresh start
+        let mut file = if is_resuming {
+            tokio::fs::OpenOptions::new()
+                .append(true)
+                .open(part_path)
+                .await?
+        } else {
+            tokio::fs::File::create(part_path).await?
+        };
 
-        // Download with progress tracking
-        let mut downloaded: u64 = 0;
+        let mut downloaded: u64 = if is_resuming { resume_from_byte } else { 0 };
         let mut stream = response.bytes_stream();
         let start_time = std::time::Instant::now();
 
-        use futures::StreamExt;
         while let Some(chunk) = stream.next().await {
-            // Check cancellation
             if cancel_flag.load(Ordering::Relaxed) {
                 drop(file);
-                let _ = tokio::fs::remove_file(&part_path).await;
+                let _ = tokio::fs::remove_file(part_path).await;
 
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(download_id) {
@@ -930,9 +1237,22 @@ impl HuggingFaceClient {
                 return Err(PumasError::DownloadCancelled);
             }
 
-            let chunk = chunk.map_err(|e| PumasError::DownloadFailed {
-                url: url.clone(),
-                message: e.to_string(),
+            if pause_flag.load(Ordering::Relaxed) {
+                file.flush().await?;
+                drop(file);
+                // Preserve .part file for resume
+
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.status = DownloadStatus::Paused;
+                }
+
+                return Err(PumasError::DownloadPaused);
+            }
+
+            let chunk = chunk.map_err(|e| PumasError::Network {
+                message: format!("Download stream error: {}", e),
+                cause: Some(e.to_string()),
             })?;
 
             file.write_all(&chunk).await?;
@@ -946,7 +1266,7 @@ impl HuggingFaceClient {
                 0.0
             };
 
-            let progress = if let Some(total) = total_bytes {
+            let progress = if let Some(total) = effective_total {
                 downloaded as f32 / total as f32
             } else {
                 0.0
@@ -955,7 +1275,7 @@ impl HuggingFaceClient {
             let mut downloads = downloads.write().await;
             if let Some(state) = downloads.get_mut(download_id) {
                 state.downloaded_bytes = downloaded;
-                state.total_bytes = total_bytes;
+                state.total_bytes = effective_total;
                 state.progress = progress;
                 state.speed = speed;
             }
@@ -964,38 +1284,33 @@ impl HuggingFaceClient {
         file.flush().await?;
         drop(file);
 
-        // Verify download completeness before finalizing
-        if let Some(total) = total_bytes {
+        // Verify download completeness
+        if let Some(total) = effective_total {
             if downloaded != total {
-                let _ = tokio::fs::remove_file(&part_path).await;
-                return Err(PumasError::DownloadFailed {
-                    url,
+                return Err(PumasError::Network {
                     message: format!(
                         "Incomplete download: got {} of {} bytes",
                         downloaded, total
                     ),
+                    cause: None,
                 });
             }
         }
 
-        // Rename .part to final path atomically
-        tokio::fs::rename(&part_path, &dest_path).await.map_err(|e| {
-            PumasError::DownloadFailed {
-                url: url.clone(),
-                message: format!("Failed to rename temp file: {}", e),
-            }
-        })?;
-
-        // Update status to completed
-        {
-            let mut downloads = downloads.write().await;
-            if let Some(state) = downloads.get_mut(download_id) {
-                state.status = DownloadStatus::Completed;
-                state.progress = 1.0;
-            }
-        }
-
         Ok(())
+    }
+
+    /// Helper: update status in persistence store (best-effort).
+    fn persist_status_update(
+        persistence: &DownloadPersistence,
+        download_id: &str,
+        status: DownloadStatus,
+    ) {
+        let entries = persistence.load_all();
+        if let Some(mut entry) = entries.into_iter().find(|d| d.download_id == download_id) {
+            entry.status = status;
+            let _ = persistence.save(&entry);
+        }
     }
 
     /// Get download progress.
@@ -1024,13 +1339,17 @@ impl HuggingFaceClient {
         let downloads = self.downloads.read().await;
         if let Some(state) = downloads.get(download_id) {
             state.cancel_flag.store(true, Ordering::Relaxed);
+            // Remove from persistence -- cancelled downloads don't survive restart
+            if let Some(ref persistence) = self.persistence {
+                let _ = persistence.remove(download_id);
+            }
             Ok(true)
         } else {
             Ok(false)
         }
     }
 
-    /// List active downloads.
+    /// List all downloads (active, paused, completed, etc.).
     pub async fn list_downloads(&self) -> Vec<ModelDownloadProgress> {
         let downloads = self.downloads.read().await;
         downloads
@@ -1043,10 +1362,113 @@ impl HuggingFaceClient {
                 downloaded_bytes: Some(state.downloaded_bytes),
                 total_bytes: state.total_bytes,
                 speed: Some(state.speed),
-                eta_seconds: None,
+                eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
+                    let remaining = state.total_bytes.unwrap().saturating_sub(state.downloaded_bytes);
+                    Some(remaining as f64 / state.speed)
+                } else {
+                    None
+                },
                 error: state.error.clone(),
             })
             .collect()
+    }
+
+    /// Pause an active download. Preserves the `.part` file for later resume.
+    pub async fn pause_download(&self, download_id: &str) -> Result<bool> {
+        let downloads = self.downloads.read().await;
+        if let Some(state) = downloads.get(download_id) {
+            if state.status == DownloadStatus::Downloading
+                || state.status == DownloadStatus::Queued
+            {
+                state.pause_flag.store(true, Ordering::Relaxed);
+                drop(downloads);
+                // Set transitional Pausing status
+                let mut downloads = self.downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.status = DownloadStatus::Pausing;
+                }
+                Ok(true)
+            } else {
+                Ok(false)
+            }
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Resume a paused or errored download from its `.part` file.
+    pub async fn resume_download(&self, download_id: &str) -> Result<bool> {
+        let (repo_id, filename, dest_dir, cancel_flag, pause_flag) = {
+            let mut downloads = self.downloads.write().await;
+            let state = match downloads.get_mut(download_id) {
+                Some(s) => s,
+                None => return Ok(false),
+            };
+
+            if state.status != DownloadStatus::Paused && state.status != DownloadStatus::Error {
+                return Ok(false);
+            }
+
+            // Reset flags and status for re-download
+            state.pause_flag.store(false, Ordering::Relaxed);
+            state.cancel_flag.store(false, Ordering::Relaxed);
+            state.status = DownloadStatus::Queued;
+            state.error = None;
+            state.speed = 0.0;
+
+            (
+                state.repo_id.clone(),
+                state.filename.clone(),
+                state.dest_dir.clone(),
+                state.cancel_flag.clone(),
+                state.pause_flag.clone(),
+            )
+        };
+
+        // Update persistence to Queued status
+        if let Some(ref persistence) = self.persistence {
+            Self::persist_status_update(persistence, download_id, DownloadStatus::Queued);
+        }
+
+        // Re-spawn the download task
+        let client = self.download_client.clone();
+        let downloads = self.downloads.clone();
+        let download_id_clone = download_id.to_string();
+        let persistence = self.persistence.clone();
+
+        tokio::spawn(async move {
+            let result = Self::run_download(
+                client,
+                downloads.clone(),
+                &download_id_clone,
+                &repo_id,
+                &filename,
+                &dest_dir,
+                cancel_flag,
+                pause_flag,
+                persistence.clone(),
+            )
+            .await;
+
+            if let Err(e) = result {
+                if matches!(e, PumasError::DownloadPaused) {
+                    info!("Download paused for {}/{}", repo_id, filename);
+                    return;
+                }
+                error!("Download failed for {}/{}: {}", repo_id, filename, e);
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(&download_id_clone) {
+                    state.status = DownloadStatus::Error;
+                    state.error = Some(e.to_string());
+                }
+                // Update persistence with error status
+                if let Some(ref persistence) = persistence {
+                    Self::persist_status_update(persistence, &download_id_clone, DownloadStatus::Error);
+                }
+            }
+        });
+
+        Ok(true)
     }
 
     // ========================================

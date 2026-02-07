@@ -66,6 +66,10 @@ impl NetworkConfig {
     pub const GITHUB_RELEASES_PER_PAGE: u32 = 100;
     pub const GITHUB_RELEASES_MAX_PAGES: u32 = 10;
     pub const GITHUB_RELEASES_TTL: Duration = Duration::from_secs(3600);
+    /// Maximum retry attempts for HuggingFace model downloads.
+    pub const HF_DOWNLOAD_MAX_RETRIES: u32 = 3;
+    /// Base delay between download retries (longer to let network recover).
+    pub const HF_DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
 }
 
 /// Shared directory and path configurations.

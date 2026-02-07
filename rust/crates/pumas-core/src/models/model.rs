@@ -289,6 +289,8 @@ pub struct DownloadOption {
 pub enum DownloadStatus {
     Queued,
     Downloading,
+    Pausing,
+    Paused,
     Cancelling,
     Completed,
     Cancelled,

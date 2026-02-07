@@ -32,6 +32,7 @@ mod naming;
 mod hashing;
 mod link_registry;
 mod watcher;
+pub mod download_store;
 pub mod merge;
 pub mod sharding;
 
@@ -46,4 +47,5 @@ pub use naming::normalize_name;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub use link_registry::LinkRegistry;
 pub use watcher::{ModelLibraryWatcher, ChangeCallback};
+pub use download_store::DownloadPersistence;
 pub use merge::{LibraryMerger, MergeResult};

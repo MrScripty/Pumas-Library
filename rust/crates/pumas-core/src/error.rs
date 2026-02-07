@@ -108,6 +108,9 @@ pub enum PumasError {
     #[error("Download cancelled")]
     DownloadCancelled,
 
+    #[error("Download paused")]
+    DownloadPaused,
+
     #[error("Hash mismatch: expected {expected}, got {actual}")]
     HashMismatch { expected: String, actual: String },
 
@@ -249,7 +252,9 @@ impl PumasError {
             | PumasError::ImportFailed { .. }
             | PumasError::DownloadFailed { .. } => -32003,
 
-            PumasError::InstallationCancelled | PumasError::DownloadCancelled => -32004,
+            PumasError::InstallationCancelled
+            | PumasError::DownloadCancelled
+            | PumasError::DownloadPaused => -32004,
 
             PumasError::Validation { .. }
             | PumasError::InvalidVersionTag { .. }

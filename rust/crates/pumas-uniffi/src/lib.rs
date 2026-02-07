@@ -196,7 +196,7 @@ impl From<pumas_library::PumasError> for FfiError {
             PumasError::DownloadFailed { url, message } => FfiError::Download {
                 message: format!("{}: {}", url, message),
             },
-            PumasError::DownloadCancelled => FfiError::Cancelled,
+            PumasError::DownloadCancelled | PumasError::DownloadPaused => FfiError::Cancelled,
             PumasError::HashMismatch { expected, actual } => FfiError::Validation {
                 message: format!("Hash mismatch: expected {}, got {}", expected, actual),
             },

@@ -27,7 +27,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// HuggingFace API base URL.
 const HF_API_BASE: &str = "https://huggingface.co/api";
@@ -40,8 +40,10 @@ const REPO_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
-    /// HTTP client
+    /// HTTP client for API requests (has total timeout)
     client: Client,
+    /// HTTP client for downloads (connect timeout only, no total timeout)
+    download_client: Client,
     /// Cache directory for LFS file info (legacy JSON cache)
     cache_dir: PathBuf,
     /// Active downloads
@@ -111,8 +113,21 @@ impl HuggingFaceClient {
                 cause: None,
             })?;
 
+        // Separate client for downloads: connect timeout only, no total timeout.
+        // The total timeout would kill multi-gigabyte downloads that take longer
+        // than 30 seconds. The stream loop handles progress and cancellation.
+        let download_client = Client::builder()
+            .connect_timeout(Duration::from_secs(30))
+            .user_agent("pumas-library/1.0")
+            .build()
+            .map_err(|e| PumasError::Network {
+                message: format!("Failed to create download HTTP client: {}", e),
+                cause: None,
+            })?;
+
         Ok(Self {
             client,
+            download_client,
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,
@@ -809,8 +824,8 @@ impl HuggingFaceClient {
             .await
             .insert(download_id.clone(), state);
 
-        // Spawn download task
-        let client = self.client.clone();
+        // Spawn download task (uses download_client which has no total timeout)
+        let client = self.download_client.clone();
         let downloads = self.downloads.clone();
         let download_id_clone = download_id.clone();
         let repo_id = request.repo_id.clone();
@@ -829,6 +844,15 @@ impl HuggingFaceClient {
             .await;
 
             if let Err(e) = result {
+                error!("Download failed for {}/{}: {}", repo_id, filename, e);
+                // Clean up .part file on failure
+                let part_path = dest_dir.join(format!(
+                    "{}{}",
+                    filename,
+                    crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+                ));
+                let _ = tokio::fs::remove_file(&part_path).await;
+
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
@@ -878,10 +902,13 @@ impl HuggingFaceClient {
 
         let total_bytes = response.content_length();
 
-        // Create destination file
+        use crate::config::NetworkConfig;
+
+        // Create destination directory and write to .part temp file
         std::fs::create_dir_all(dest_dir)?;
         let dest_path = dest_dir.join(filename);
-        let mut file = tokio::fs::File::create(&dest_path).await?;
+        let part_path = dest_dir.join(format!("{}{}", filename, NetworkConfig::DOWNLOAD_TEMP_SUFFIX));
+        let mut file = tokio::fs::File::create(&part_path).await?;
 
         // Download with progress tracking
         let mut downloaded: u64 = 0;
@@ -892,9 +919,8 @@ impl HuggingFaceClient {
         while let Some(chunk) = stream.next().await {
             // Check cancellation
             if cancel_flag.load(Ordering::Relaxed) {
-                // Clean up partial file
                 drop(file);
-                let _ = tokio::fs::remove_file(&dest_path).await;
+                let _ = tokio::fs::remove_file(&part_path).await;
 
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(download_id) {
@@ -936,6 +962,29 @@ impl HuggingFaceClient {
         }
 
         file.flush().await?;
+        drop(file);
+
+        // Verify download completeness before finalizing
+        if let Some(total) = total_bytes {
+            if downloaded != total {
+                let _ = tokio::fs::remove_file(&part_path).await;
+                return Err(PumasError::DownloadFailed {
+                    url,
+                    message: format!(
+                        "Incomplete download: got {} of {} bytes",
+                        downloaded, total
+                    ),
+                });
+            }
+        }
+
+        // Rename .part to final path atomically
+        tokio::fs::rename(&part_path, &dest_path).await.map_err(|e| {
+            PumasError::DownloadFailed {
+                url: url.clone(),
+                message: format!("Failed to rename temp file: {}", e),
+            }
+        })?;
 
         // Update status to completed
         {

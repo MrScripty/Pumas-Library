@@ -32,7 +32,7 @@ export interface ModelInfo {
   relatedAvailable?: boolean;
   isDownloading?: boolean;
   downloadProgress?: number;
-  downloadStatus?: 'queued' | 'downloading' | 'cancelling';
+  downloadStatus?: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'error';
   downloadRepoId?: string;
   downloadTotalBytes?: number;
 }

@@ -75,12 +75,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   const {
     downloadStatusByRepo,
-    downloadError,
-    downloadRepoId,
+    downloadErrors,
+    hasActiveDownloads,
     startDownload,
     cancelDownload,
-    setDownloadError,
-    setDownloadRepoId,
+    pauseDownload,
+    resumeDownload,
+    setDownloadErrors,
   } = useModelDownloads();
 
   // Network status for offline/rate limit indicators
@@ -89,7 +90,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   // Computed Values
   const downloadingModels = useMemo(() => {
     return Object.entries(downloadStatusByRepo)
-      .filter(([, status]) => ['queued', 'downloading', 'cancelling'].includes(status.status))
+      .filter(([, status]) => ['queued', 'downloading', 'cancelling', 'pausing', 'paused', 'error'].includes(status.status))
       .map(([repoId, status]) => {
         const name = status.modelName || repoId.split('/').pop() || repoId;
         return {
@@ -177,12 +178,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     return groups;
   }, [localModelGroups, searchQuery, selectedCategory]);
 
-  const hasActiveDownloads = useMemo(() => {
-    return Object.values(downloadStatusByRepo).some((status) =>
-      ['queued', 'downloading', 'cancelling'].includes(status.status)
-    );
-  }, [downloadStatusByRepo]);
-
   // Filter remote results
   const filteredRemoteResults = useMemo(() => {
     const filtered =
@@ -228,9 +223,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   const handleStartRemoteDownload = async (model: any, quant?: string | null) => {
     if (!isAPIAvailable()) {
-      const errorMsg = 'Download is unavailable.';
       logger.error('Download API not available');
-      setDownloadError(errorMsg);
       return;
     }
 
@@ -240,8 +233,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     const modelType = resolveDownloadModelType(model.kind || '');
 
     logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant });
-    setDownloadError(null);
-    setDownloadRepoId(repoId);
+    // Clear any previous error for this download
+    setDownloadErrors((prev) => {
+      if (!prev[repoId]) return prev;
+      const next = { ...prev };
+      delete next[repoId];
+      return next;
+    });
     try {
       if (!isAPIAvailable()) return;
       const result = await api.start_model_download_from_hf(
@@ -255,7 +253,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       if (!result.success || !result.download_id) {
         const errorMsg = result.error || 'Download failed.';
         logger.error('Remote download failed', { error: errorMsg, repoId });
-        setDownloadError(errorMsg);
+        setDownloadErrors((prev) => ({ ...prev, [repoId]: errorMsg }));
         return;
       }
       logger.info('Remote download started successfully', { repoId, downloadId: result.download_id });
@@ -271,7 +269,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       } else {
         logger.error('Unknown error starting remote download', { error, repoId });
       }
-      setDownloadError(message);
+      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
     }
   };
 
@@ -481,10 +479,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               error={remoteError}
               searchQuery={searchQuery}
               downloadStatusByRepo={downloadStatusByRepo}
-              downloadError={downloadError}
-              downloadRepoId={downloadRepoId}
+              downloadErrors={downloadErrors}
               onStartDownload={handleStartRemoteDownload}
               onCancelDownload={cancelDownload}
+              onPauseDownload={pauseDownload}
+              onResumeDownload={resumeDownload}
               onOpenUrl={openRemoteUrl}
               onSearchDeveloper={handleSearchDeveloper}
               onClearFilters={handleClearRemoteFilters}
@@ -506,6 +505,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 expandedRelated={expandedRelated}
                 onToggleRelated={handleToggleRelated}
                 onOpenRelatedUrl={openRemoteUrl}
+                onResumeDownload={resumeDownload}
+                onCancelDownload={cancelDownload}
               />
               {/* Link Health Status */}
               <div className="mt-4">

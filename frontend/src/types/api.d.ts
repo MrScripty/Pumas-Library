@@ -125,12 +125,18 @@ export interface ModelDownloadResponse extends BaseResponse {
 }
 
 export interface ModelDownloadStatusResponse extends BaseResponse {
-  download_id?: string;
-  repo_id?: string;
+  downloadId?: string;
+  repoId?: string;
   status?: string;
   progress?: number;
-  downloaded_bytes?: number;
-  total_bytes?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  speed?: number;
+  etaSeconds?: number;
+}
+
+export interface ListModelDownloadsResponse extends BaseResponse {
+  downloads: ModelDownloadStatusResponse[];
 }
 
 export interface ScanSharedStorageResponse extends BaseResponse {
@@ -916,6 +922,9 @@ export interface PyWebViewAPI {
   ): Promise<ModelDownloadResponse>;
   get_model_download_status(downloadId: string): Promise<ModelDownloadStatusResponse>;
   cancel_model_download(downloadId: string): Promise<BaseResponse>;
+  pause_model_download(downloadId: string): Promise<BaseResponse>;
+  resume_model_download(downloadId: string): Promise<BaseResponse>;
+  list_model_downloads(): Promise<ListModelDownloadsResponse>;
 
   /**
    * Get metadata for a library model (both stored and embedded)

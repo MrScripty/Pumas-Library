@@ -35,10 +35,11 @@ interface RemoteModelsListProps {
   error: string | null;
   searchQuery: string;
   downloadStatusByRepo: Record<string, DownloadStatus>;
-  downloadError: string | null;
-  downloadRepoId: string | null;
+  downloadErrors: Record<string, string>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null) => Promise<void>;
   onCancelDownload: (repoId: string) => Promise<void>;
+  onPauseDownload: (repoId: string) => Promise<void>;
+  onResumeDownload: (repoId: string) => Promise<void>;
   onOpenUrl: (url: string) => void;
   onSearchDeveloper?: (developer: string) => void;
   onClearFilters?: () => void;
@@ -51,10 +52,11 @@ export function RemoteModelsList({
   error,
   searchQuery,
   downloadStatusByRepo,
-  downloadError,
-  downloadRepoId,
+  downloadErrors,
   onStartDownload,
   onCancelDownload,
+  onPauseDownload,
+  onResumeDownload,
   onOpenUrl,
   onSearchDeveloper,
   onClearFilters,
@@ -143,9 +145,13 @@ export function RemoteModelsList({
       {models.map((model) => {
         const downloadStatus = downloadStatusByRepo[model.repoId];
         const isDownloading = downloadStatus
-          ? ['queued', 'downloading', 'cancelling'].includes(downloadStatus.status)
+          ? ['queued', 'downloading', 'cancelling', 'pausing'].includes(downloadStatus.status)
           : false;
+        const isPaused = downloadStatus?.status === 'paused';
+        const isErrored = downloadStatus?.status === 'error';
         const isQueued = downloadStatus?.status === 'queued';
+        const isPausing = downloadStatus?.status === 'pausing';
+        const modelError = downloadErrors[model.repoId];
         const progressValue = downloadStatus?.progress ?? 0;
         const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
         const ringDegrees = isQueued ? 60 : progressDegrees;
@@ -233,9 +239,9 @@ export function RemoteModelsList({
                     ))}
                   </div>
                 )}
-                {downloadError && downloadRepoId === model.repoId && (
+                {modelError && (
                   <div className="mt-1.5 text-xs text-[hsl(var(--accent-error))]">
-                    {downloadError}
+                    {modelError}
                   </div>
                 )}
               </div>
@@ -246,10 +252,33 @@ export function RemoteModelsList({
                   onClick={() => onOpenUrl(model.url)}
                   size="sm"
                 />
+                {/* Pause button (when actively downloading) */}
+                {isDownloading && !isQueued && !isPausing && (
+                  <IconButton
+                    icon={<span className="text-[10px] font-bold">| |</span>}
+                    tooltip="Pause download"
+                    onClick={() => void onPauseDownload(model.repoId)}
+                    size="sm"
+                  />
+                )}
+                {/* Resume button (when paused or errored) */}
+                {(isPaused || isErrored) && (
+                  <IconButton
+                    icon={<Download />}
+                    tooltip={isPaused ? 'Resume download' : 'Retry download'}
+                    onClick={() => void onResumeDownload(model.repoId)}
+                    size="sm"
+                  />
+                )}
                 <button
                   onClick={() => {
                     if (isDownloading) {
                       setOpenQuantMenuRepoId(null);
+                      void onCancelDownload(model.repoId);
+                      return;
+                    }
+                    if (isPaused || isErrored) {
+                      // Cancel removes the .part file
                       void onCancelDownload(model.repoId);
                       return;
                     }
@@ -266,31 +295,35 @@ export function RemoteModelsList({
                       ? 'text-[hsl(var(--launcher-accent-primary))]'
                       : 'text-[hsl(var(--text-muted))] hover:text-[hsl(var(--launcher-accent-primary))]'
                   }`}
-                  title={isDownloading ? 'Cancel download' : 'Download options'}
-                  aria-label={isDownloading ? 'Cancel download' : 'Download options'}
+                  title={isDownloading ? 'Cancel download' : isPaused ? 'Cancel (delete partial)' : 'Download options'}
+                  aria-label={isDownloading ? 'Cancel download' : isPaused ? 'Cancel' : 'Download options'}
                   aria-pressed={openQuantMenuRepoId === model.repoId}
                 >
                   <span className="relative flex h-4 w-4 items-center justify-center">
-                    {isDownloading && (
+                    {(isDownloading || isPaused) && (
                       <>
                         <span
-                          className={`download-progress-ring ${isQueued ? 'is-waiting' : ''}`}
+                          className={`download-progress-ring ${isQueued ? 'is-waiting' : ''} ${isPaused ? 'is-paused' : ''}`}
                           style={
                             {
                               '--progress': `${ringDegrees}deg`,
                             } as React.CSSProperties
                           }
                         />
-                        {!isQueued && <span className="download-scan-ring" />}
+                        {!isQueued && !isPaused && <span className="download-scan-ring" />}
                       </>
                     )}
-                    <Download
-                      className={`h-4 w-4 transition-opacity ${
-                        isDownloading ? 'group-hover:opacity-30' : ''
-                      }`}
-                    />
-                    {isDownloading && (
-                      <X className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                    {isDownloading || isPaused ? (
+                      <>
+                        <Download
+                          className={`h-4 w-4 transition-opacity ${
+                            isDownloading ? 'group-hover:opacity-30' : ''
+                          }`}
+                        />
+                        <X className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
+                      </>
+                    ) : (
+                      <Download className="h-4 w-4" />
                     )}
                   </span>
                 </button>

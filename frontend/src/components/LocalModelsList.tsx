@@ -38,6 +38,8 @@ interface LocalModelsListProps {
   expandedRelated: Set<string>;
   onToggleRelated: (modelId: string) => void;
   onOpenRelatedUrl: (url: string) => void;
+  onResumeDownload?: (repoId: string) => void;
+  onCancelDownload?: (repoId: string) => void;
 }
 
 export function LocalModelsList({
@@ -54,6 +56,8 @@ export function LocalModelsList({
   expandedRelated,
   onToggleRelated,
   onOpenRelatedUrl,
+  onResumeDownload,
+  onCancelDownload,
 }: LocalModelsListProps) {
   // State for metadata modal
   const [metadataModal, setMetadataModal] = useState<{
@@ -115,6 +119,7 @@ export function LocalModelsList({
               const isLoadingRelated = relatedStatus === 'loading' || relatedStatus === 'idle';
               const progressValue = Math.min(1, Math.max(0, model.downloadProgress ?? 0));
               const isQueued = model.downloadStatus === 'queued';
+              const isPaused = model.downloadStatus === 'paused';
               const progressDegrees = Math.round(progressValue * 360);
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
               return (
@@ -169,18 +174,30 @@ export function LocalModelsList({
                         />
                       )}
                       {isDownloading ? (
-                        <div className="relative flex h-4 w-4 items-center justify-center text-[hsl(var(--text-muted))]">
+                        <button
+                          className={`relative flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent ${
+                            isPaused || model.downloadStatus === 'error'
+                              ? 'cursor-pointer download-resume-btn'
+                              : 'cursor-default'
+                          } text-[hsl(var(--text-muted))]`}
+                          title={isPaused ? 'Resume download' : model.downloadStatus === 'error' ? 'Retry download' : undefined}
+                          onClick={
+                            (isPaused || model.downloadStatus === 'error') && onResumeDownload && model.downloadRepoId
+                              ? () => onResumeDownload(model.downloadRepoId!)
+                              : undefined
+                          }
+                        >
                           <span
-                            className={`download-progress-ring ${isQueued ? 'is-waiting' : ''}`}
+                            className={`download-progress-ring ${isQueued ? 'is-waiting' : ''} ${isPaused ? 'is-paused' : ''}`}
                             style={
                               {
                                 '--progress': `${ringDegrees}deg`,
                               } as CSSProperties
                             }
                           />
-                          {!isQueued && <span className="download-scan-ring" />}
+                          {!isQueued && !isPaused && <span className="download-scan-ring" />}
                           <Download className="h-3.5 w-3.5" />
-                        </div>
+                        </button>
                       ) : (
                         <IconButton
                           icon={

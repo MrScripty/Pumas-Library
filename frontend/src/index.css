@@ -405,6 +405,27 @@
     animation: download-waiting-pulse 1.4s ease-in-out infinite;
   }
 
+  .download-progress-ring.is-paused {
+    background: conic-gradient(
+      hsl(var(--text-muted)/0.6) var(--progress, 0deg),
+      hsl(var(--launcher-border)/0.4) 0deg
+    );
+    opacity: 0.7;
+    transition: opacity 0.15s ease;
+  }
+
+  .download-resume-btn:hover .download-progress-ring.is-paused {
+    background: conic-gradient(
+      hsl(var(--launcher-accent-primary)/0.8) var(--progress, 0deg),
+      hsl(var(--launcher-border)/0.4) 0deg
+    );
+    opacity: 1;
+  }
+
+  .download-resume-btn:hover {
+    color: hsl(var(--launcher-accent-primary));
+  }
+
   /* Drop zone pulse border animation */
   @keyframes pulse-border {
     0%, 100% {
@@ -454,5 +475,14 @@
 
   *::-webkit-scrollbar-corner {
     background: hsl(var(--launcher-bg-primary));
+  }
+
+  /* Window drag region for Electron frameless window */
+  .app-region-drag {
+    -webkit-app-region: drag;
+  }
+
+  .app-region-no-drag {
+    -webkit-app-region: no-drag;
   }
 }

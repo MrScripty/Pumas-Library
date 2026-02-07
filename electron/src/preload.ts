@@ -142,6 +142,12 @@ const electronAPI = {
     apiCall('get_model_download_status', { download_id: downloadId }),
   cancel_model_download: (downloadId: string) =>
     apiCall('cancel_model_download', { download_id: downloadId }),
+  pause_model_download: (downloadId: string) =>
+    apiCall('pause_model_download', { download_id: downloadId }),
+  resume_model_download: (downloadId: string) =>
+    apiCall('resume_model_download', { download_id: downloadId }),
+  list_model_downloads: () =>
+    apiCall('list_model_downloads'),
   get_model_overrides: (relPath: string) => apiCall('get_model_overrides', { rel_path: relPath }),
   update_model_overrides: (relPath: string, overrides: Record<string, unknown>) =>
     apiCall('update_model_overrides', { rel_path: relPath, overrides }),

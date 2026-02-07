@@ -4,6 +4,7 @@
 ![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-green.svg)
+![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
 
 Available as a desktop GUI for end-users, and as a headless Rust crate for embeddable API use.
 

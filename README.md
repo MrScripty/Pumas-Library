@@ -12,23 +12,96 @@ Pumas Library is an easy to use AI model library that downloads, organizes, and 
 
 ## Features
 
-- A single portable model library with rich metadata
-- Links your apps to your library, no manual setup required (GUI only, use API for direct integration with the Rust crate)
-- System and per-app resource monitoring (partial Rust crate integration)
-- Search and download new models into your library
-- Install and run different app versions with ease (GUI only)
-- Smart system shortcuts that don't require the launcher to work (GUI only)
-- Ghost bust the background servers when closing apps (GUI only)
-- And other technical mumbo-jumbo
+### Core Library
+
+- Single portable model library with rich metadata and full-text search (SQLite FTS5)
+- HuggingFace integration — search, download with progress tracking, metadata lookup, cached search (24hr TTL)
+- Model import with automatic type detection and dual-hash verification (SHA256 + BLAKE3)
+- Model mapping — symlink/hardlink models into app directories with health tracking
+- Instance convergence — multiple processes share a single primary via local TCP IPC
+- Cross-process library discovery via global SQLite registry
+- Resilient networking — per-domain circuit breaker, exponential backoff, rate limit handling
+- Library merging with hash-based deduplication
+
+**Supported Model Types**: LLM, Diffusion, Embedding, Audio, Vision
+**Supported Subtypes**: Checkpoints, LoRAs, VAE, ControlNet, Embeddings, Upscale, CLIP, T5
+**Compatible Engines**: Ollama, llama.cpp, Candle, Transformers, Diffusers, ONNX Runtime, TensorRT
+
+### Desktop GUI (Electron)
+
+- Link your apps to your library, no manual setup required
+- System and per-app resource monitoring
+- Install and run different app versions (ComfyUI, Ollama, OpenWebUI, InvokeAI, KritaDiffusion)
+- Smart system shortcuts that don't require the launcher to work
+- Plugin system for JSON-based app definitions
 
 ## Architecture
 
-Pumas Library uses a modern **Electron + Rust backend** architecture:
+### Core Library
+
+The Rust crate (`pumas-library`) operates in one of two transparent modes:
+
+- **Primary** — owns the full state and runs a local IPC server. Holds all subsystems: model library, network manager, process manager, HuggingFace client, model importer, model mapper, IPC server, and registry.
+- **Client** — discovers a running primary via the global registry and proxies calls over TCP IPC. The public API is identical in both modes.
+
+Key internals:
+
+- **Registry**: SQLite database at `~/.config/pumas/registry.db` for cross-process library and instance discovery
+- **IPC Protocol**: JSON-RPC 2.0 over length-prefixed TCP frames on localhost
+- **Search Index**: SQLite FTS5 for model metadata full-text search
+- **Best-effort design**: registry and IPC failures never block API initialization
+- **Feature flags**: `full` (default), `hf-client`, `process-manager`, `gpu-monitor`, `uniffi`
+
+### Desktop Application
 
 - **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
 - **Desktop Shell**: Electron 38+ (with native Wayland support on Linux)
-- **Backend**: Rust running as a sidecar process
-- **IPC**: JSON-RPC communication between Electron and backend
+- **Backend**: Rust `pumas-rpc` binary running as a sidecar (Axum HTTP server, JSON-RPC)
+- **IPC**: JSON-RPC communication between Electron and the Rust backend
+
+## Quick Start (Rust Crate)
+
+Add the dependency:
+
+```toml
+[dependencies]
+pumas-library = { path = "rust/crates/pumas-core" }
+
+# Or with specific features only
+pumas-library = { path = "rust/crates/pumas-core", features = ["hf-client"] }
+```
+
+Basic usage:
+
+```rust
+use pumas_library::PumasApi;
+
+#[tokio::main]
+async fn main() -> pumas_library::Result<()> {
+    // Standard initialization
+    let api = PumasApi::new("/path/to/pumas").await?;
+
+    // Or use the builder for more control
+    let api = PumasApi::builder("./my-models")
+        .auto_create_dirs(true)
+        .with_hf_client(false)
+        .build()
+        .await?;
+
+    // Or discover an existing instance from the global registry
+    let api = PumasApi::discover().await?;
+
+    // List models in the library
+    let models = api.list_models().await?;
+    println!("Found {} models", models.len());
+
+    // Search for models
+    let search = api.search_models("llama", 10, 0).await?;
+    println!("Search found {} results", search.total_count);
+
+    Ok(())
+}
+```
 
 ## Supported Platforms
 
@@ -36,7 +109,7 @@ Pumas Library uses a modern **Electron + Rust backend** architecture:
 | ------------- | ----------------- | -------------------------------------------------------- |
 | Linux (x64)   | Full support      | Debian/Ubuntu recommended, AppImage and .deb packages    |
 | Windows (x64) | Full support      | NSIS installer and portable versions                     |
-| macOS         | Theoreticly Works | Architecture ready, builds available via CI. Not tested. |
+| macOS         | Theoretically Works | Architecture ready, builds available via CI. Not tested. |
 
 ## Installation
 
@@ -274,17 +347,17 @@ npm start
 
 ```text
 Pumas-Library/
-├── rust/                    # Rust backend
+├── rust/                       # Rust workspace
 │   └── crates/
-│       ├── pumas-core/      # Core library (headless)
-│       ├── pumas-app-manager/  # Version management
-│       ├── pumas-rpc/       # JSON-RPC server
-│       ├── pumas-uniffi/    # Python, C#, Kotlin, Swift bindings (UniFFI)
-│       └── pumas-rustler/   # Elixir/Erlang NIFs (Rustler)
-├── frontend/                # React frontend
-├── electron/                # Electron shell
-├── bindings/                # Generated language bindings (not committed)
-└── .github/workflows/       # CI/CD
+│       ├── pumas-core/         # Core headless library (model library, IPC, registry, networking)
+│       ├── pumas-app-manager/  # App version and extension management (ComfyUI, Ollama)
+│       ├── pumas-rpc/          # Axum JSON-RPC server (Electron backend)
+│       ├── pumas-uniffi/       # Python, C#, Kotlin, Swift, Ruby bindings (UniFFI)
+│       └── pumas-rustler/      # Elixir/Erlang NIFs (Rustler)
+├── frontend/                   # React 19 + Vite frontend
+├── electron/                   # Electron 38+ shell
+├── bindings/                   # Generated language bindings (not committed)
+└── .github/workflows/          # CI/CD
 ```
 
 ### Platform-Specific Code
@@ -295,11 +368,13 @@ All platform-specific code is centralized in `rust/crates/pumas-core/src/platfor
 - `permissions.rs` - File permission handling
 - `process.rs` - Process management
 
-To find platform code:
+### Managed Applications
 
-```bash
-grep -rn "cfg(.*os\|unix\|windows)" rust/crates/*/src/ --include="*.rs"
-```
+Process management, version installation, and model mapping are supported for:
+
+ComfyUI, Ollama, OpenWebUI, InvokeAI, and KritaDiffusion.
+
+Additional apps can be defined via the JSON plugin system without code changes.
 
 ---
 
@@ -400,7 +475,3 @@ pumas-library = { path = "rust/crates/pumas-core" }
 # Use pumas-core with UniFFI derives enabled
 pumas-library = { path = "rust/crates/pumas-core", features = ["uniffi"] }
 ```
-
----
-
-## More Details Later (WIP)

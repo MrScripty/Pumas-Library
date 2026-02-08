@@ -1739,6 +1739,37 @@ async fn dispatch_method(
         }
 
         // ====================================================================
+        // Library Maintenance
+        // ====================================================================
+        "adopt_orphan_models" => {
+            let result = api.adopt_orphan_models().await?;
+            Ok(serde_json::to_value(result)?)
+        }
+
+        "import_model_in_place" => {
+            let model_dir = require_str_param!(params, "model_dir", "modelDir");
+            let official_name = require_str_param!(params, "official_name", "officialName");
+            let family = require_str_param!(params, "family", "family");
+            let model_type = get_str_param!(params, "model_type", "modelType").map(String::from);
+            let repo_id = get_str_param!(params, "repo_id", "repoId").map(String::from);
+            let known_sha256 = get_str_param!(params, "known_sha256", "knownSha256").map(String::from);
+            let compute_hashes = get_bool_param!(params, "compute_hashes", "computeHashes").unwrap_or(false);
+
+            let spec = pumas_library::model_library::InPlaceImportSpec {
+                model_dir: std::path::PathBuf::from(model_dir),
+                official_name,
+                family,
+                model_type,
+                repo_id,
+                known_sha256,
+                compute_hashes,
+            };
+
+            let result = api.import_model_in_place(&spec).await?;
+            Ok(serde_json::to_value(result)?)
+        }
+
+        // ====================================================================
         // System Checks
         // ====================================================================
         "check_git" => {

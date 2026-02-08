@@ -12,6 +12,7 @@ use crate::model_library::types::{
     BatchImportProgress, FileFormat, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
     ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -951,7 +952,7 @@ pub struct InPlaceImportSpec {
 }
 
 /// Result of an orphan recovery scan.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct OrphanScanResult {
     /// Number of orphan directories found.
     pub orphans_found: usize,

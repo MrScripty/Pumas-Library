@@ -39,6 +39,25 @@ const HF_HUB_BASE: &str = "https://huggingface.co";
 /// Cache TTL for repository file trees (24 hours).
 const REPO_CACHE_TTL_SECS: u64 = 24 * 60 * 60;
 
+/// Information passed to the download completion callback.
+#[derive(Debug, Clone)]
+pub struct DownloadCompletionInfo {
+    /// Download ID.
+    pub download_id: String,
+    /// Directory where the model file was placed.
+    pub dest_dir: PathBuf,
+    /// Filename of the downloaded model.
+    pub filename: String,
+    /// Original download request with model metadata.
+    pub download_request: DownloadRequest,
+    /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation).
+    pub known_sha256: Option<String>,
+}
+
+/// Callback invoked when a download completes successfully.
+pub type DownloadCompletionCallback =
+    Arc<dyn Fn(DownloadCompletionInfo) + Send + Sync + 'static>;
+
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
     /// HTTP client for API requests (has total timeout)
@@ -53,6 +72,8 @@ pub struct HuggingFaceClient {
     search_cache: Option<Arc<HfSearchCache>>,
     /// Download persistence for crash recovery (optional)
     persistence: Option<Arc<DownloadPersistence>>,
+    /// Optional callback invoked when a download completes successfully.
+    completion_callback: Option<DownloadCompletionCallback>,
 }
 
 impl std::fmt::Debug for HuggingFaceClient {
@@ -93,6 +114,8 @@ struct DownloadState {
     filename: String,
     /// Original download request (needed for persistence/resume)
     download_request: Option<DownloadRequest>,
+    /// Known SHA256 from HuggingFace LFS metadata.
+    known_sha256: Option<String>,
 }
 
 impl std::fmt::Debug for DownloadState {
@@ -144,6 +167,7 @@ impl HuggingFaceClient {
             downloads: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,
             persistence: None,
+            completion_callback: None,
         })
     }
 
@@ -172,6 +196,13 @@ impl HuggingFaceClient {
     /// Set the download persistence store.
     pub fn set_persistence(&mut self, persistence: Arc<DownloadPersistence>) {
         self.persistence = Some(persistence);
+    }
+
+    /// Set a callback that fires when a download completes successfully.
+    ///
+    /// Used to trigger in-place import (metadata creation + indexing) after download.
+    pub fn set_completion_callback(&mut self, callback: DownloadCompletionCallback) {
+        self.completion_callback = Some(callback);
     }
 
     /// Restore persisted downloads from disk.
@@ -240,6 +271,7 @@ impl HuggingFaceClient {
                     dest_dir: entry.dest_dir,
                     filename: entry.filename,
                     download_request: Some(entry.download_request),
+                    known_sha256: entry.known_sha256,
                 },
             );
         }
@@ -889,11 +921,13 @@ impl HuggingFaceClient {
                 })?
         };
 
-        let total_bytes = tree
+        let lfs_file = tree
             .lfs_files
             .iter()
-            .find(|f| f.filename == filename)
-            .map(|f| f.size);
+            .find(|f| f.filename == filename);
+
+        let total_bytes = lfs_file.map(|f| f.size);
+        let known_sha256 = lfs_file.map(|f| f.sha256.clone());
 
         let pause_flag = Arc::new(AtomicBool::new(false));
 
@@ -912,6 +946,7 @@ impl HuggingFaceClient {
             dest_dir: dest_dir.to_path_buf(),
             filename: filename.clone(),
             download_request: Some(request.clone()),
+            known_sha256: known_sha256.clone(),
         };
 
         self.downloads
@@ -930,6 +965,7 @@ impl HuggingFaceClient {
                 status: DownloadStatus::Queued,
                 download_request: request.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
+                known_sha256: known_sha256.clone(),
             });
         }
 
@@ -940,6 +976,7 @@ impl HuggingFaceClient {
         let repo_id = request.repo_id.clone();
         let dest_dir = dest_dir.to_path_buf();
         let persistence = self.persistence.clone();
+        let completion_callback = self.completion_callback.clone();
 
         tokio::spawn(async move {
             let result = Self::run_download(
@@ -952,6 +989,7 @@ impl HuggingFaceClient {
                 cancel_flag,
                 pause_flag,
                 persistence.clone(),
+                completion_callback,
             )
             .await;
 
@@ -994,6 +1032,7 @@ impl HuggingFaceClient {
         cancel_flag: Arc<AtomicBool>,
         pause_flag: Arc<AtomicBool>,
         persistence: Option<Arc<DownloadPersistence>>,
+        completion_callback: Option<DownloadCompletionCallback>,
     ) -> Result<()> {
         use crate::config::NetworkConfig;
         use crate::network::RetryConfig;
@@ -1100,11 +1139,33 @@ impl HuggingFaceClient {
                         },
                     )?;
 
-                    // Update status to completed
-                    let mut downloads = downloads.write().await;
-                    if let Some(state) = downloads.get_mut(download_id) {
-                        state.status = DownloadStatus::Completed;
-                        state.progress = 1.0;
+                    // Update status to completed and extract callback info
+                    let completion_info = {
+                        let mut downloads = downloads.write().await;
+                        if let Some(state) = downloads.get_mut(download_id) {
+                            state.status = DownloadStatus::Completed;
+                            state.progress = 1.0;
+
+                            // Build completion info from state
+                            state.download_request.as_ref().map(|req| {
+                                DownloadCompletionInfo {
+                                    download_id: download_id.to_string(),
+                                    dest_dir: state.dest_dir.clone(),
+                                    filename: state.filename.clone(),
+                                    download_request: req.clone(),
+                                    known_sha256: state.known_sha256.clone(),
+                                }
+                            })
+                        } else {
+                            None
+                        }
+                    };
+
+                    // Invoke completion callback for in-place import
+                    if let (Some(ref callback), Some(info)) =
+                        (&completion_callback, completion_info)
+                    {
+                        callback(info);
                     }
 
                     // Remove from persistence -- download is done
@@ -1435,6 +1496,7 @@ impl HuggingFaceClient {
         let downloads = self.downloads.clone();
         let download_id_clone = download_id.to_string();
         let persistence = self.persistence.clone();
+        let completion_callback = self.completion_callback.clone();
 
         tokio::spawn(async move {
             let result = Self::run_download(
@@ -1447,6 +1509,7 @@ impl HuggingFaceClient {
                 cancel_flag,
                 pause_flag,
                 persistence.clone(),
+                completion_callback,
             )
             .await;
 

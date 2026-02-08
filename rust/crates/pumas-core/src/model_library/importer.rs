@@ -612,6 +612,360 @@ impl ModelImporter {
             last_lookup_attempt: None,
         })
     }
+
+    // ========================================
+    // In-Place Import (downloads & orphans)
+    // ========================================
+
+    /// Import a model in-place (files already in the correct library directory).
+    ///
+    /// Creates `metadata.json` and indexes the model without copying files.
+    /// Idempotent: returns success without overwriting if metadata already exists.
+    ///
+    /// Used for:
+    /// - Post-download finalization (HfClient downloads land in library tree)
+    /// - Orphan recovery (directories with model files but no metadata.json)
+    pub async fn import_in_place(&self, spec: &InPlaceImportSpec) -> Result<ModelImportResult> {
+        let model_dir = &spec.model_dir;
+
+        // Guard: skip if metadata already exists (idempotent)
+        if model_dir.join("metadata.json").exists() {
+            let model_id = self.library.get_model_id(model_dir);
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: true,
+                model_path: model_id,
+                error: None,
+                security_tier: None,
+            });
+        }
+
+        if !model_dir.is_dir() {
+            return Err(PumasError::FileNotFound(model_dir.clone()));
+        }
+
+        // Find primary model file
+        let primary_file = self.choose_primary_file(model_dir)?;
+        if primary_file.is_none() {
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: false,
+                model_path: None,
+                error: Some("No model files found in directory".to_string()),
+                security_tier: None,
+            });
+        }
+        let primary_file = primary_file.unwrap();
+
+        // Detect file type from primary file
+        let type_info = identify_model_type(&primary_file)?;
+
+        // Enumerate existing files (no copy needed)
+        let files = self.enumerate_model_files(model_dir)?;
+
+        // Build hashes from known value or compute
+        let hashes = if let Some(ref sha256) = spec.known_sha256 {
+            Some(DualHash {
+                sha256: sha256.clone(),
+                blake3: String::new(), // Deferred — can be computed later
+            })
+        } else if spec.compute_hashes {
+            Some(compute_dual_hash(&primary_file)?)
+        } else {
+            None
+        };
+
+        // Build a synthetic ModelImportSpec for create_metadata
+        let import_spec = ModelImportSpec {
+            path: model_dir.display().to_string(),
+            family: spec.family.clone(),
+            official_name: spec.official_name.clone(),
+            repo_id: spec.repo_id.clone(),
+            model_type: spec.model_type.clone(),
+            subtype: None,
+            tags: None,
+            security_acknowledged: Some(true),
+        };
+
+        let mut metadata = self.create_metadata(&import_spec, &type_info, &files, hashes)?;
+
+        // Tag the match source based on origin
+        metadata.match_source = Some(if spec.repo_id.is_some() {
+            "download".to_string()
+        } else {
+            "orphan_recovery".to_string()
+        });
+
+        // Save metadata.json
+        self.library.save_metadata(model_dir, &metadata).await?;
+
+        // Index the model
+        if let Err(e) = self.library.index_model_dir(model_dir).await {
+            tracing::warn!("Failed to index in-place imported model: {}", e);
+        }
+
+        let model_id = self.library.get_model_id(model_dir);
+        let security_tier = type_info.format.security_tier();
+
+        Ok(ModelImportResult {
+            path: model_dir.display().to_string(),
+            success: true,
+            model_path: model_id,
+            error: None,
+            security_tier: Some(security_tier),
+        })
+    }
+
+    /// Enumerate model files already present in a directory (no copy).
+    fn enumerate_model_files(&self, dir: &Path) -> Result<Vec<ModelFileInfo>> {
+        let mut files = Vec::new();
+
+        for entry in WalkDir::new(dir)
+            .min_depth(1)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_file() {
+                continue;
+            }
+
+            let filename = entry.file_name().to_string_lossy();
+
+            // Skip metadata and incomplete downloads
+            if filename == "metadata.json" || filename == "overrides.json" {
+                continue;
+            }
+            if filename.ends_with(".part") {
+                continue;
+            }
+
+            let size = entry.metadata().ok().map(|m| m.len());
+
+            files.push(ModelFileInfo {
+                name: filename.to_string(),
+                original_name: Some(filename.to_string()),
+                size,
+                sha256: None,
+                blake3: None,
+            });
+        }
+
+        Ok(files)
+    }
+
+    /// Scan the library tree for orphan model directories and adopt them.
+    ///
+    /// An orphan is a directory that contains model files but no `metadata.json`.
+    /// Metadata is inferred from the directory path structure
+    /// (`{library_root}/{model_type}/{family}/{name}/`).
+    pub async fn adopt_orphans(&self, compute_hashes: bool) -> OrphanScanResult {
+        let mut result = OrphanScanResult::default();
+        let library_root = self.library.library_root();
+
+        let orphan_dirs = self.find_orphan_dirs(library_root);
+        result.orphans_found = orphan_dirs.len();
+
+        if orphan_dirs.is_empty() {
+            tracing::debug!("No orphan model directories found");
+            return result;
+        }
+
+        tracing::info!("Found {} orphan model directories", orphan_dirs.len());
+
+        for orphan_dir in orphan_dirs {
+            let inferred = match self.infer_spec_from_path(&orphan_dir) {
+                Some(s) => s,
+                None => {
+                    result.errors.push((
+                        orphan_dir.clone(),
+                        "Could not infer metadata from directory path".to_string(),
+                    ));
+                    continue;
+                }
+            };
+
+            let spec = InPlaceImportSpec {
+                model_dir: orphan_dir.clone(),
+                official_name: inferred.official_name,
+                family: inferred.family,
+                model_type: inferred.model_type,
+                repo_id: None,
+                known_sha256: None,
+                compute_hashes,
+            };
+
+            match self.import_in_place(&spec).await {
+                Ok(import_result) => {
+                    if import_result.success {
+                        result.adopted += 1;
+                        tracing::info!(
+                            "Adopted orphan model: {:?} -> {:?}",
+                            orphan_dir,
+                            import_result.model_path
+                        );
+                    } else {
+                        result.errors.push((
+                            orphan_dir,
+                            import_result
+                                .error
+                                .unwrap_or_else(|| "Unknown error".to_string()),
+                        ));
+                    }
+                }
+                Err(e) => {
+                    result.errors.push((orphan_dir, e.to_string()));
+                }
+            }
+        }
+
+        tracing::info!(
+            "Orphan scan complete: {} found, {} adopted, {} errors",
+            result.orphans_found,
+            result.adopted,
+            result.errors.len()
+        );
+
+        result
+    }
+
+    /// Find directories with model files but no metadata.json.
+    fn find_orphan_dirs(&self, library_root: &Path) -> Vec<PathBuf> {
+        let mut orphans = Vec::new();
+        let model_extensions: &[&str] =
+            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
+
+        for entry in WalkDir::new(library_root)
+            .min_depth(1)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            let dir = entry.path();
+            let dir_name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            // Skip temp import dirs and hidden dirs
+            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
+                continue;
+            }
+
+            // Skip if metadata.json already exists
+            if dir.join("metadata.json").exists() {
+                continue;
+            }
+
+            // Check directory contents
+            let entries: Vec<_> = match std::fs::read_dir(dir) {
+                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+                Err(_) => continue,
+            };
+
+            // Skip if any .part files present (download in progress)
+            let has_part_files = entries.iter().any(|e| {
+                e.file_name().to_string_lossy().ends_with(".part")
+            });
+            if has_part_files {
+                continue;
+            }
+
+            // Check for at least one model file
+            let has_model_files = entries.iter().any(|e| {
+                if !e.file_type().ok().map_or(false, |ft| ft.is_file()) {
+                    return false;
+                }
+                e.path()
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| model_extensions.contains(&ext.to_lowercase().as_str()))
+                    .unwrap_or(false)
+            });
+
+            if has_model_files {
+                orphans.push(dir.to_path_buf());
+            }
+        }
+
+        orphans
+    }
+
+    /// Infer model metadata from a directory path.
+    ///
+    /// Expects `{library_root}/{model_type}/{family}/{name}/`.
+    /// Falls back gracefully with fewer path components.
+    fn infer_spec_from_path(&self, model_dir: &Path) -> Option<InferredSpec> {
+        let rel_path = model_dir.strip_prefix(self.library.library_root()).ok()?;
+        let components: Vec<&str> = rel_path
+            .components()
+            .filter_map(|c| c.as_os_str().to_str())
+            .collect();
+
+        match components.len() {
+            3 => Some(InferredSpec {
+                model_type: Some(components[0].to_string()),
+                family: components[1].to_string(),
+                official_name: components[2].replace('_', " "),
+            }),
+            2 => Some(InferredSpec {
+                model_type: None,
+                family: components[0].to_string(),
+                official_name: components[1].replace('_', " "),
+            }),
+            1 => Some(InferredSpec {
+                model_type: None,
+                family: "unknown".to_string(),
+                official_name: components[0].replace('_', " "),
+            }),
+            _ => None,
+        }
+    }
+}
+
+/// Specification for in-place import (model files already in final location).
+///
+/// Unlike `ModelImportSpec` which expects a source path to copy FROM,
+/// this describes a directory that already contains model files in the library tree.
+/// Used for post-download finalization and orphan recovery.
+#[derive(Debug, Clone)]
+pub struct InPlaceImportSpec {
+    /// Directory containing the model files (already in library tree).
+    pub model_dir: PathBuf,
+    /// Official model name.
+    pub official_name: String,
+    /// Model family/architecture.
+    pub family: String,
+    /// Model type (llm, diffusion, etc.) — detected from file if None.
+    pub model_type: Option<String>,
+    /// HuggingFace repo ID (present for downloads, absent for orphans).
+    pub repo_id: Option<String>,
+    /// Known SHA256 hash (e.g. from HF LFS metadata) to avoid recomputation.
+    pub known_sha256: Option<String>,
+    /// Whether to compute hashes if not provided (can be slow for large files).
+    pub compute_hashes: bool,
+}
+
+/// Result of an orphan recovery scan.
+#[derive(Debug, Clone, Default)]
+pub struct OrphanScanResult {
+    /// Number of orphan directories found.
+    pub orphans_found: usize,
+    /// Number successfully adopted (metadata created and indexed).
+    pub adopted: usize,
+    /// Errors encountered (directory path, error message).
+    pub errors: Vec<(PathBuf, String)>,
+}
+
+/// Metadata inferred from directory path components.
+struct InferredSpec {
+    model_type: Option<String>,
+    family: String,
+    official_name: String,
 }
 
 /// Progress update during import.

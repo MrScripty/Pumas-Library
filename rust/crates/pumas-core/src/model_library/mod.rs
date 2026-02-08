@@ -38,9 +38,9 @@ pub mod sharding;
 
 pub use types::*;
 pub use library::ModelLibrary;
-pub use importer::ModelImporter;
+pub use importer::{ModelImporter, InPlaceImportSpec, OrphanScanResult};
 pub use mapper::ModelMapper;
-pub use hf_client::HuggingFaceClient;
+pub use hf_client::{HuggingFaceClient, DownloadCompletionInfo, DownloadCompletionCallback};
 pub use hf_cache::{HfSearchCache, HfCacheConfig, CacheStats, CachedRepoDetails};
 pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
 pub use naming::normalize_name;

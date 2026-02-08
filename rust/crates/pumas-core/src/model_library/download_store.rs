@@ -23,6 +23,9 @@ pub struct PersistedDownload {
     pub status: DownloadStatus,
     pub download_request: DownloadRequest,
     pub created_at: String,
+    /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation on import).
+    #[serde(default)]
+    pub known_sha256: Option<String>,
 }
 
 /// All persisted downloads (the JSON root object).
@@ -120,6 +123,7 @@ mod tests {
             status: DownloadStatus::Paused,
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
+            known_sha256: None,
         };
 
         store.save(&entry).unwrap();
@@ -143,6 +147,7 @@ mod tests {
             status: DownloadStatus::Paused,
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
+            known_sha256: None,
         };
 
         store.save(&entry).unwrap();
@@ -168,6 +173,7 @@ mod tests {
             status: DownloadStatus::Paused,
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
+            known_sha256: None,
         };
 
         store.save(&entry).unwrap();

@@ -332,7 +332,7 @@ impl PumasApiBuilder {
             .join("mapping-configs");
 
         // Initialize HuggingFace client (if enabled)
-        let hf_client = if self.enable_hf_client {
+        let mut hf_client = if self.enable_hf_client {
             let cache_dir = self.launcher_root
                 .join("launcher-data")
                 .join(config::PathsConfig::CACHE_DIR_NAME);
@@ -386,6 +386,37 @@ impl PumasApiBuilder {
         let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
+        // Wire download completion -> in-place import (metadata + indexing)
+        if let Some(ref mut client) = hf_client {
+            let lib = model_library.clone();
+            client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
+                let lib = lib.clone();
+                tokio::spawn(async move {
+                    let importer = model_library::ModelImporter::new(lib);
+                    let spec = model_library::InPlaceImportSpec {
+                        model_dir: info.dest_dir,
+                        official_name: info.download_request.official_name,
+                        family: info.download_request.family,
+                        model_type: info.download_request.model_type,
+                        repo_id: Some(info.download_request.repo_id.clone()),
+                        known_sha256: info.known_sha256,
+                        compute_hashes: false,
+                    };
+                    match importer.import_in_place(&spec).await {
+                        Ok(r) if r.success => {
+                            tracing::info!("Post-download import succeeded: {:?}", r.model_path);
+                        }
+                        Ok(r) => {
+                            tracing::warn!("Post-download import failed: {:?}", r.error);
+                        }
+                        Err(e) => {
+                            tracing::error!("Post-download import error: {}", e);
+                        }
+                    }
+                });
+            }));
+        }
+
         // Best-effort registry connection (failures don't block initialization)
         let registry = match registry::LibraryRegistry::open() {
             Ok(reg) => Some(reg),
@@ -394,6 +425,23 @@ impl PumasApiBuilder {
                 None
             }
         };
+
+        // Spawn non-blocking orphan scan to adopt models missing metadata
+        {
+            let lib_clone = model_library.clone();
+            tokio::spawn(async move {
+                let importer = model_library::ModelImporter::new(lib_clone);
+                let result = importer.adopt_orphans(false).await;
+                if result.orphans_found > 0 {
+                    tracing::info!(
+                        "Startup orphan scan: found={}, adopted={}, errors={}",
+                        result.orphans_found,
+                        result.adopted,
+                        result.errors.len()
+                    );
+                }
+            });
+        }
 
         let primary_state = Arc::new(PrimaryState {
             _state: state,
@@ -628,7 +676,7 @@ impl PumasApi {
             model_library::DownloadPersistence::new(&data_dir)
         );
 
-        let hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
+        let mut hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
             Ok(mut client) => {
                 // Attach search cache if available
                 if let Some(cache) = search_cache {
@@ -656,6 +704,37 @@ impl PumasApi {
         let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
+        // Wire download completion -> in-place import (metadata + indexing)
+        if let Some(ref mut client) = hf_client {
+            let lib = model_library.clone();
+            client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
+                let lib = lib.clone();
+                tokio::spawn(async move {
+                    let importer = model_library::ModelImporter::new(lib);
+                    let spec = model_library::InPlaceImportSpec {
+                        model_dir: info.dest_dir,
+                        official_name: info.download_request.official_name,
+                        family: info.download_request.family,
+                        model_type: info.download_request.model_type,
+                        repo_id: Some(info.download_request.repo_id.clone()),
+                        known_sha256: info.known_sha256,
+                        compute_hashes: false,
+                    };
+                    match importer.import_in_place(&spec).await {
+                        Ok(r) if r.success => {
+                            tracing::info!("Post-download import succeeded: {:?}", r.model_path);
+                        }
+                        Ok(r) => {
+                            tracing::warn!("Post-download import failed: {:?}", r.error);
+                        }
+                        Err(e) => {
+                            tracing::error!("Post-download import error: {}", e);
+                        }
+                    }
+                });
+            }));
+        }
+
         // Best-effort registry connection
         let registry = match registry::LibraryRegistry::open() {
             Ok(reg) => Some(reg),
@@ -664,6 +743,23 @@ impl PumasApi {
                 None
             }
         };
+
+        // Spawn non-blocking orphan scan to adopt models missing metadata
+        {
+            let lib_clone = model_library.clone();
+            tokio::spawn(async move {
+                let importer = model_library::ModelImporter::new(lib_clone);
+                let result = importer.adopt_orphans(false).await;
+                if result.orphans_found > 0 {
+                    tracing::info!(
+                        "Startup orphan scan: found={}, adopted={}, errors={}",
+                        result.orphans_found,
+                        result.adopted,
+                        result.errors.len()
+                    );
+                }
+            });
+        }
 
         let primary_state = Arc::new(PrimaryState {
             _state: state,
@@ -1215,6 +1311,25 @@ impl PumasApi {
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
         self.primary().model_importer.batch_import(specs, None).await
+    }
+
+    /// Import a model in-place (files already in library directory).
+    ///
+    /// Creates `metadata.json` and indexes without copying. Idempotent.
+    pub async fn import_model_in_place(
+        &self,
+        spec: &model_library::InPlaceImportSpec,
+    ) -> Result<model_library::ModelImportResult> {
+        self.primary().model_importer.import_in_place(spec).await
+    }
+
+    /// Scan for and adopt orphan model directories.
+    ///
+    /// Finds directories in the library with model files but no `metadata.json`,
+    /// creates metadata from directory structure and file type detection, and
+    /// indexes the models.
+    pub async fn adopt_orphan_models(&self) -> Result<model_library::OrphanScanResult> {
+        Ok(self.primary().model_importer.adopt_orphans(false).await)
     }
 
     /// Search for models on HuggingFace.

@@ -168,16 +168,16 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
 
               return (
                 <React.Fragment key={key}>
-                  <span className="text-muted-foreground truncate" title={key}>
+                  <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
                     {formatFieldName(key)}
                   </span>
-                  <span className="truncate" title={formatMetadataValue(key, value)}>
+                  <span className="text-[hsl(var(--text-secondary))] truncate" title={formatMetadataValue(key, value)}>
                     {urlValue ? (
                       <a
                         href={urlValue}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-primary hover:underline inline-flex items-center gap-1"
+                        className="text-[hsl(var(--accent-link))] hover:underline inline-flex items-center gap-1"
                       >
                         {formatMetadataValue(key, value)}
                         <ExternalLink className="w-3 h-3" />
@@ -193,7 +193,7 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
           {hiddenCount > 0 && (
             <button
               onClick={() => setShowAllFields(!showAllFields)}
-              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+              className="text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] flex items-center gap-1"
             >
               {showAllFields ? (
                 <>
@@ -215,10 +215,10 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-h-80 overflow-y-auto">
         {displayEntries.map(([key, value]) => (
           <React.Fragment key={key}>
-            <span className="text-muted-foreground truncate" title={key}>
+            <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
               {formatFieldName(key)}
             </span>
-            <span className="truncate" title={formatMetadataValue(key, value)}>
+            <span className="text-[hsl(var(--text-secondary))] truncate" title={formatMetadataValue(key, value)}>
               {formatMetadataValue(key, value)}
             </span>
           </React.Fragment>
@@ -230,15 +230,15 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
       <div
-        className="bg-background border border-border rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-hidden"
+        className="bg-[hsl(var(--surface-overlay)/0.95)] border border-[hsl(var(--border-default))] backdrop-blur-md rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-border">
-          <h2 className="text-lg font-semibold truncate">{modelName}</h2>
+        <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
+          <h2 className="text-lg font-semibold truncate text-[hsl(var(--text-primary))]">{modelName}</h2>
           <button
             onClick={onClose}
-            className="p-1 hover:bg-muted rounded"
+            className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))]"
             aria-label="Close"
           >
             <X className="w-5 h-5" />
@@ -249,11 +249,11 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
         <div className="p-4 overflow-y-auto">
           {loading ? (
             <div className="flex items-center justify-center py-8">
-              <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">Loading metadata...</span>
+              <Loader2 className="w-6 h-6 animate-spin text-[hsl(var(--text-muted))]" />
+              <span className="ml-2 text-[hsl(var(--text-muted))]">Loading metadata...</span>
             </div>
           ) : error ? (
-            <div className="text-center py-8 text-destructive">{error}</div>
+            <div className="text-center py-8 text-[hsl(var(--accent-error))]">{error}</div>
           ) : (
             <div className="space-y-4">
               {/* Source toggle */}
@@ -262,8 +262,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
                   onClick={() => setActiveSource('embedded')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
                     activeSource === 'embedded'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted hover:bg-muted/80'
+                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
+                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
                   }`}
                   disabled={!embeddedMetadata}
                 >
@@ -274,8 +274,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
                   onClick={() => setActiveSource('stored')}
                   className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
                     activeSource === 'stored'
-                      ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted hover:bg-muted/80'
+                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
+                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
                   }`}
                   disabled={!storedMetadata}
                 >
@@ -290,16 +290,16 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               ) : activeSource === 'stored' && storedMetadata ? (
                 renderMetadataGrid(storedMetadata, false)
               ) : (
-                <div className="text-center py-4 text-muted-foreground">
+                <div className="text-center py-4 text-[hsl(var(--text-muted))]">
                   No {activeSource} metadata available
                 </div>
               )}
 
               {/* Primary file path */}
               {primaryFile && (
-                <div className="pt-2 border-t border-border">
-                  <span className="text-xs text-muted-foreground">File: </span>
-                  <span className="text-xs font-mono truncate">{primaryFile}</span>
+                <div className="pt-2 border-t border-[hsl(var(--border-default))]">
+                  <span className="text-xs text-[hsl(var(--text-muted))]">File: </span>
+                  <span className="text-xs font-mono truncate text-[hsl(var(--text-secondary))]">{primaryFile}</span>
                 </div>
               )}
             </div>

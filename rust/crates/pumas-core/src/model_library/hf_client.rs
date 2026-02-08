@@ -250,9 +250,22 @@ impl HuggingFaceClient {
                 .map(|total| downloaded_bytes as f32 / total as f32)
                 .unwrap_or(0.0);
 
+            // Normalize status: any non-terminal status becomes Paused since
+            // the download task is no longer running after a restart.
+            let restored_status = match entry.status {
+                DownloadStatus::Queued | DownloadStatus::Downloading => {
+                    info!(
+                        "Download {} was {:?} at shutdown, marking as Paused for resume",
+                        entry.download_id, entry.status
+                    );
+                    DownloadStatus::Paused
+                }
+                other => other,
+            };
+
             info!(
                 "Restoring download {}: {} ({} bytes on disk, status {:?})",
-                entry.download_id, entry.repo_id, downloaded_bytes, entry.status
+                entry.download_id, entry.repo_id, downloaded_bytes, restored_status
             );
 
             downloads.insert(
@@ -260,7 +273,7 @@ impl HuggingFaceClient {
                 DownloadState {
                     download_id: entry.download_id,
                     repo_id: entry.repo_id,
-                    status: entry.status,
+                    status: restored_status,
                     progress,
                     downloaded_bytes,
                     total_bytes: entry.total_bytes,

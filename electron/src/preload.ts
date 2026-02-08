@@ -151,6 +151,8 @@ const electronAPI = {
   get_model_overrides: (relPath: string) => apiCall('get_model_overrides', { rel_path: relPath }),
   update_model_overrides: (relPath: string, overrides: Record<string, unknown>) =>
     apiCall('update_model_overrides', { rel_path: relPath, overrides }),
+  get_library_model_metadata: (modelId: string) =>
+    apiCall('get_library_model_metadata', { model_id: modelId }),
 
   // ========================================
   // Model Library Import (Phase 1A)

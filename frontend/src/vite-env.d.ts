@@ -12,3 +12,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** Build-time feature flag: multi-app sidebar enabled (Linux only) */
+declare const __FEATURE_MULTI_APP__: boolean;

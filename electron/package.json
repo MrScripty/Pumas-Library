@@ -16,8 +16,8 @@
     "lint": "eslint src --ext .ts",
     "package": "npm run build && electron-builder",
     "package:linux": "npm run build && electron-builder --linux",
-    "package:win": "npm run build && electron-builder --win",
-    "package:mac": "npm run build && electron-builder --mac"
+    "package:win": "cd ../frontend && PUMAS_MULTI_APP=false npm run build && cd ../electron && npm run build && electron-builder --win",
+    "package:mac": "cd ../frontend && PUMAS_MULTI_APP=false npm run build && cd ../electron && npm run build && electron-builder --mac"
   },
   "dependencies": {
     "electron-log": "^5.0.0"

@@ -26,7 +26,9 @@ const logger = getLogger('App');
 export default function App() {
   // --- Multi-App State ---
   const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
-  const [selectedAppId, setSelectedAppId] = useState<string | null>(null);
+  const [selectedAppId, setSelectedAppId] = useState<string | null>(
+    __FEATURE_MULTI_APP__ ? null : 'comfyui'
+  );
   const appIds = useMemo(() => apps.map(app => app.id), [apps]);
   const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
 
@@ -500,17 +502,19 @@ export default function App() {
       />
 
       <div className="flex flex-1 relative z-10 overflow-hidden">
-        <AppSidebar
-          apps={apps}
-          selectedAppId={selectedAppId}
-          onSelectApp={setSelectedAppId}
-          onLaunchApp={handleLaunchApp}
-          onStopApp={handleStopApp}
-          onOpenLog={handleOpenLog}
-          onDeleteApp={handleDeleteApp}
-          onReorderApps={handleReorderApps}
-          onAddApp={handleAddApp}
-        />
+        {__FEATURE_MULTI_APP__ && (
+          <AppSidebar
+            apps={apps}
+            selectedAppId={selectedAppId}
+            onSelectApp={setSelectedAppId}
+            onLaunchApp={handleLaunchApp}
+            onStopApp={handleStopApp}
+            onOpenLog={handleOpenLog}
+            onDeleteApp={handleDeleteApp}
+            onReorderApps={handleReorderApps}
+            onAddApp={handleAddApp}
+          />
+        )}
 
         <div className="flex-1 flex flex-col overflow-hidden">
           <AppPanelRenderer

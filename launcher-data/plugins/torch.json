@@ -1,0 +1,38 @@
+{
+  "id": "torch",
+  "displayName": "Torch",
+  "description": "PyTorch inference engine with OpenAI-compatible API",
+  "icon": "flame",
+  "githubRepo": "pumas-ai/torch-server",
+  "installationType": "python-venv",
+  "capabilities": {
+    "hasVersionManagement": true,
+    "supportsShortcuts": false,
+    "hasDependencies": true,
+    "hasConnectionUrl": true,
+    "hasModelLibrary": true,
+    "hasStats": true
+  },
+  "connection": {
+    "defaultPort": 8400,
+    "protocol": "http",
+    "healthEndpoint": "/health"
+  },
+  "modelCompatibility": {
+    "supportedFormats": ["safetensors"]
+  },
+  "pythonConfig": {
+    "requirementsFile": "requirements.txt",
+    "entryPoint": "serve.py",
+    "pythonVersion": "3.10"
+  },
+  "panelLayout": [
+    { "type": "version_manager" },
+    { "type": "connection_info" },
+    { "type": "torch_model_slots" },
+    { "type": "torch_server_config" },
+    { "type": "model_library" }
+  ],
+  "sidebarPriority": 25,
+  "enabledByDefault": true
+}

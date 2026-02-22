@@ -1,7 +1,8 @@
-//! Conversion manager for orchestrating model format conversions.
+//! Conversion manager for orchestrating model format conversions and quantization.
 //!
-//! Manages the Python virtual environment, spawns conversion subprocesses,
-//! tracks progress, and registers converted models in the library.
+//! Manages the Python virtual environment for format conversions, dispatches
+//! quantization operations to registered backends, tracks progress, and
+//! registers output models in the library.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -11,11 +12,16 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
+use super::llama_cpp::LlamaCppBackend;
+use super::nvfp4::Nvfp4Backend;
+use super::sherry::SherryBackend;
+use super::pipeline;
 use super::progress::ConversionProgressTracker;
 use super::scripts;
 use super::types::{
-    ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
-    ConversionStatus, QuantOption, ScriptProgressLine,
+    BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
+    ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
+    ScriptProgressLine,
 };
 use crate::cancel::CancellationToken;
 use crate::model_library::{ModelImporter, ModelLibrary};
@@ -25,7 +31,7 @@ use crate::{PumasError, Result};
 /// Maximum number of concurrent conversions (to avoid OOM on large models).
 const MAX_CONCURRENT: usize = 1;
 
-/// Orchestrates model format conversions between GGUF and Safetensors.
+/// Orchestrates model format conversions and quantization.
 pub struct ConversionManager {
     launcher_root: PathBuf,
     model_library: Arc<ModelLibrary>,
@@ -34,15 +40,23 @@ pub struct ConversionManager {
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
     /// Counter for generating unique conversion IDs.
     id_counter: Mutex<u64>,
+    /// Registered quantization backends (strategy pattern).
+    backends: Vec<Box<dyn QuantizationBackend>>,
 }
 
 impl ConversionManager {
-    /// Create a new ConversionManager.
+    /// Create a new ConversionManager with all quantization backends registered.
     pub fn new(
         launcher_root: PathBuf,
         model_library: Arc<ModelLibrary>,
         model_importer: Arc<ModelImporter>,
     ) -> Self {
+        let backends: Vec<Box<dyn QuantizationBackend>> = vec![
+            Box::new(LlamaCppBackend::new(&launcher_root)),
+            Box::new(Nvfp4Backend::new(&launcher_root)),
+            Box::new(SherryBackend::new(&launcher_root)),
+        ];
+
         Self {
             launcher_root,
             model_library,
@@ -50,8 +64,13 @@ impl ConversionManager {
             progress: ConversionProgressTracker::new(),
             cancel_tokens: Mutex::new(HashMap::new()),
             id_counter: Mutex::new(0),
+            backends,
         }
     }
+
+    // -----------------------------------------------------------------------
+    // Python conversion environment (existing)
+    // -----------------------------------------------------------------------
 
     /// Check if the Python conversion environment is ready.
     pub fn is_environment_ready(&self) -> bool {
@@ -62,7 +81,6 @@ impl ConversionManager {
     ///
     /// Creates the virtual environment and installs required packages if needed.
     pub async fn ensure_environment(&self) -> Result<()> {
-        // Deploy scripts to disk
         scripts::ensure_scripts_deployed(&self.launcher_root)?;
 
         let venv_path = scripts::venv_dir(&self.launcher_root);
@@ -73,9 +91,11 @@ impl ConversionManager {
             return Ok(());
         }
 
-        info!("Creating conversion virtual environment at {}", venv_path.display());
+        info!(
+            "Creating conversion virtual environment at {}",
+            venv_path.display()
+        );
 
-        // Create venv
         let output = Command::new("python3")
             .args(["-m", "venv", &venv_path.to_string_lossy()])
             .output()
@@ -105,7 +125,6 @@ impl ConversionManager {
             );
         }
 
-        // Install requirements
         let requirements_path = scripts::scripts_dir(&self.launcher_root).join("requirements.txt");
         info!("Installing conversion dependencies...");
 
@@ -132,17 +151,68 @@ impl ConversionManager {
         Ok(())
     }
 
-    /// Get the list of supported quantization types.
+    // -----------------------------------------------------------------------
+    // Quantization backend management
+    // -----------------------------------------------------------------------
+
+    /// Get the readiness status of all registered quantization backends.
+    pub fn backend_status(&self) -> Vec<BackendStatus> {
+        self.backends
+            .iter()
+            .map(|b| BackendStatus {
+                backend: b.backend_id(),
+                name: b.name().to_string(),
+                ready: b.is_ready(),
+            })
+            .collect()
+    }
+
+    /// Set up the environment for a specific quantization backend.
+    ///
+    /// # Preconditions
+    /// - The backend must be registered.
+    ///
+    /// # Postconditions
+    /// - The backend's `is_ready()` returns true on success.
+    pub async fn ensure_backend_environment(&self, backend: QuantBackend) -> Result<()> {
+        let b = self
+            .backends
+            .iter()
+            .find(|b| b.backend_id() == backend)
+            .ok_or_else(|| PumasError::InvalidParams {
+                message: format!("Unknown quantization backend: {:?}", backend),
+            })?;
+        b.ensure_environment().await
+    }
+
+    /// Get the list of supported quantization types across all backends.
+    ///
+    /// Includes the base F16 conversion option (always available) plus
+    /// quantization types from any ready backends.
     pub fn supported_quant_types(&self) -> Vec<QuantOption> {
-        vec![QuantOption {
+        let mut types = vec![QuantOption {
             name: "F16".to_string(),
             description: "Half-precision float, no quality loss".to_string(),
             bits_per_weight: 16.0,
             recommended: true,
-        }]
+            backend: Some(QuantBackend::PythonConversion),
+            imatrix_recommended: false,
+        }];
+
+        for backend in &self.backends {
+            if backend.is_ready() {
+                types.extend(backend.supported_quant_types());
+            }
+        }
+
+        types
     }
 
-    /// Start a model format conversion.
+    // -----------------------------------------------------------------------
+    // Starting operations
+    // -----------------------------------------------------------------------
+
+    /// Start a model format conversion or quantization.
     ///
     /// Returns a conversion ID that can be used to track progress.
     pub async fn start_conversion(&self, request: ConversionRequest) -> Result<String> {
@@ -151,16 +221,7 @@ impl ConversionManager {
             .progress
             .list_all()
             .iter()
-            .filter(|p| {
-                matches!(
-                    p.status,
-                    ConversionStatus::SettingUp
-                        | ConversionStatus::Validating
-                        | ConversionStatus::Converting
-                        | ConversionStatus::Writing
-                        | ConversionStatus::Importing
-                )
-            })
+            .filter(|p| is_active_status(p.status))
             .count();
 
         if active_count >= MAX_CONCURRENT {
@@ -181,9 +242,8 @@ impl ConversionManager {
                 model_id: request.model_id.clone(),
             })?;
 
-        // Validate format matches direction
-        let metadata: ModelMetadata = serde_json::from_value(model.metadata.clone())
-            .unwrap_or_default();
+        let metadata: ModelMetadata =
+            serde_json::from_value(model.metadata.clone()).unwrap_or_default();
 
         // Generate conversion ID
         let conversion_id = {
@@ -207,6 +267,9 @@ impl ConversionManager {
             target_quant: request.target_quant.clone(),
             error: None,
             output_model_id: None,
+            pipeline_step: None,
+            pipeline_steps_total: None,
+            pipeline_step_label: None,
         };
         self.progress.insert(progress);
 
@@ -217,7 +280,7 @@ impl ConversionManager {
             tokens.insert(conversion_id.clone(), cancel_token.clone());
         }
 
-        // Spawn the conversion task
+        // Spawn the conversion/quantization task
         let conv_id = conversion_id.clone();
         let launcher_root = self.launcher_root.clone();
         let model_path = PathBuf::from(&model.path);
@@ -231,33 +294,176 @@ impl ConversionManager {
         let target_quant = request.target_quant.clone();
         let source_model_id = request.model_id.clone();
 
-        tokio::spawn(async move {
-            let result = run_conversion(
-                &conv_id,
-                direction,
-                &launcher_root,
-                &model_path,
-                &source_model_id,
-                target_quant.as_deref(),
-                metadata,
-                progress_ref,
-                &cancel_token,
-                &library,
-                &importer,
-            )
-            .await;
+        match direction {
+            // Existing Python-based format conversions
+            ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => {
+                tokio::spawn(async move {
+                    let result = run_conversion(
+                        &conv_id,
+                        direction,
+                        &launcher_root,
+                        &model_path,
+                        &source_model_id,
+                        target_quant.as_deref(),
+                        metadata,
+                        progress_ref,
+                        &cancel_token,
+                        &library,
+                        &importer,
+                    )
+                    .await;
 
-            if let Err(e) = result {
-                error!("Conversion {} failed: {}", conv_id, e);
-                progress_ref.set_error(&conv_id, e.to_string());
+                    if let Err(e) = result {
+                        error!("Conversion {} failed: {}", conv_id, e);
+                        progress_ref.set_error(&conv_id, e.to_string());
+                    }
+                });
             }
+            // Quantization via backend — route to the appropriate backend by direction
+            ConversionDirection::SafetensorsToQuantizedGguf
+            | ConversionDirection::GgufToQuantizedGguf => {
+                let (backend_ref, params) = self.prepare_backend_quantization(
+                    QuantBackend::LlamaCpp,
+                    "llama.cpp",
+                    &conv_id,
+                    &model_path,
+                    &source_model_id,
+                    target_quant,
+                    &request,
+                )?;
 
-            // Clean up cancel token
-            // Note: We can't access self here, but the token will be dropped when the
-            // HashMap entry is removed on the next cancel_conversion or list_conversions call
-        });
+                tokio::spawn(async move {
+                    let result = run_quantization(
+                        &conv_id,
+                        backend_ref,
+                        params,
+                        &source_model_id,
+                        metadata,
+                        progress_ref,
+                        &cancel_token,
+                        &library,
+                    )
+                    .await;
+
+                    if let Err(e) = result {
+                        error!("Quantization {} failed: {}", conv_id, e);
+                        progress_ref.set_error(&conv_id, e.to_string());
+                    }
+                });
+            }
+            ConversionDirection::SafetensorsToNvfp4 => {
+                let (backend_ref, params) = self.prepare_backend_quantization(
+                    QuantBackend::Nvfp4,
+                    "nvfp4",
+                    &conv_id,
+                    &model_path,
+                    &source_model_id,
+                    target_quant,
+                    &request,
+                )?;
+
+                tokio::spawn(async move {
+                    let result = run_quantization(
+                        &conv_id,
+                        backend_ref,
+                        params,
+                        &source_model_id,
+                        metadata,
+                        progress_ref,
+                        &cancel_token,
+                        &library,
+                    )
+                    .await;
+
+                    if let Err(e) = result {
+                        error!("Quantization {} failed: {}", conv_id, e);
+                        progress_ref.set_error(&conv_id, e.to_string());
+                    }
+                });
+            }
+            ConversionDirection::SafetensorsToSherryQat => {
+                let (backend_ref, params) = self.prepare_backend_quantization(
+                    QuantBackend::Sherry,
+                    "sherry",
+                    &conv_id,
+                    &model_path,
+                    &source_model_id,
+                    target_quant,
+                    &request,
+                )?;
+
+                tokio::spawn(async move {
+                    let result = run_quantization(
+                        &conv_id,
+                        backend_ref,
+                        params,
+                        &source_model_id,
+                        metadata,
+                        progress_ref,
+                        &cancel_token,
+                        &library,
+                    )
+                    .await;
+
+                    if let Err(e) = result {
+                        error!("Quantization {} failed: {}", conv_id, e);
+                        progress_ref.set_error(&conv_id, e.to_string());
+                    }
+                });
+            }
+        }
 
         Ok(conversion_id)
+    }
+
+    /// Prepare a backend reference and QuantizeParams for a quantization task.
+    ///
+    /// Finds the backend by ID, builds params from the request, and returns
+    /// a static reference suitable for use in a spawned task.
+    fn prepare_backend_quantization(
+        &self,
+        backend_id: QuantBackend,
+        backend_name: &str,
+        conv_id: &str,
+        model_path: &Path,
+        source_model_id: &str,
+        target_quant: Option<String>,
+        request: &ConversionRequest,
+    ) -> Result<(&'static dyn QuantizationBackend, QuantizeParams)> {
+        let quant_type = target_quant.unwrap_or_else(|| match backend_id {
+            QuantBackend::LlamaCpp => "Q4_K_M".to_string(),
+            QuantBackend::Nvfp4 => "NVFP4".to_string(),
+            QuantBackend::Sherry => "Sherry-1.25bit".to_string(),
+            QuantBackend::PythonConversion => "F16".to_string(),
+        });
+        let calibration_file = request.imatrix_calibration_file.as_ref().map(PathBuf::from);
+        let force_imatrix = request.force_imatrix.unwrap_or(false);
+
+        let backend_ptr = self
+            .backends
+            .iter()
+            .find(|b| b.backend_id() == backend_id)
+            .map(|b| b.as_ref() as *const dyn QuantizationBackend);
+
+        let backend_ptr = backend_ptr.ok_or_else(|| PumasError::QuantizationEnvNotReady {
+            backend: backend_name.to_string(),
+            message: format!("No {} backend registered", backend_name),
+        })?;
+
+        // SAFETY: The backends vec lives as long as ConversionManager which is held
+        // in an Arc for the application lifetime.
+        let backend_ref: &'static dyn QuantizationBackend = unsafe { &*backend_ptr };
+
+        let params = QuantizeParams {
+            conversion_id: conv_id.to_string(),
+            model_path: model_path.to_path_buf(),
+            source_model_id: source_model_id.to_string(),
+            target_quant: quant_type,
+            calibration_file,
+            force_imatrix,
+        };
+
+        Ok((backend_ref, params))
     }
 
     /// Get progress for a specific conversion.
@@ -274,7 +480,8 @@ impl ConversionManager {
 
         if let Some(token) = token {
             token.cancel();
-            self.progress.set_status(conversion_id, ConversionStatus::Cancelled);
+            self.progress
+                .set_status(conversion_id, ConversionStatus::Cancelled);
             info!("Cancelled conversion {}", conversion_id);
             Ok(true)
         } else {
@@ -304,7 +511,89 @@ impl ConversionManager {
     }
 }
 
-/// Execute the actual conversion in a spawned task.
+/// Check whether a status indicates an active (in-progress) operation.
+fn is_active_status(status: ConversionStatus) -> bool {
+    matches!(
+        status,
+        ConversionStatus::SettingUp
+            | ConversionStatus::Validating
+            | ConversionStatus::Converting
+            | ConversionStatus::Writing
+            | ConversionStatus::Importing
+            | ConversionStatus::BuildingToolchain
+            | ConversionStatus::GeneratingF16Gguf
+            | ConversionStatus::ComputingImatrix
+            | ConversionStatus::Quantizing
+            | ConversionStatus::Calibrating
+            | ConversionStatus::Training
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Quantization pipeline (delegates to backend)
+// ---------------------------------------------------------------------------
+
+/// Run a quantization operation via a backend, then import the result.
+async fn run_quantization(
+    conversion_id: &str,
+    backend: &dyn QuantizationBackend,
+    params: QuantizeParams,
+    source_model_id: &str,
+    source_metadata: ModelMetadata,
+    progress: &ConversionProgressTracker,
+    cancel_token: &CancellationToken,
+    library: &ModelLibrary,
+) -> Result<()> {
+    info!(
+        "Starting quantization {} via {}: {} → {}",
+        conversion_id,
+        backend.name(),
+        source_model_id,
+        params.target_quant,
+    );
+
+    // Delegate to backend
+    let output_dir = backend.quantize(&params, progress, cancel_token).await?;
+
+    // Determine source/target format for metadata based on backend
+    let (source_format, target_format) = match backend.backend_id() {
+        QuantBackend::LlamaCpp => {
+            // llama.cpp backend — source could be safetensors or gguf
+            let src = if output_dir.to_string_lossy().contains("-gguf-") {
+                "safetensors"
+            } else {
+                "gguf"
+            };
+            (src, "gguf")
+        }
+        QuantBackend::Nvfp4 => ("safetensors", "safetensors"),
+        QuantBackend::Sherry => ("safetensors", "safetensors"),
+        QuantBackend::PythonConversion => ("safetensors", "gguf"),
+    };
+
+    // Write metadata and index
+    pipeline::write_quantized_metadata(
+        conversion_id,
+        source_model_id,
+        source_format,
+        target_format,
+        &params.target_quant,
+        &source_metadata,
+        &output_dir,
+        progress,
+        library,
+    )
+    .await?;
+
+    info!("Quantization {} completed successfully", conversion_id);
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Existing format conversion (Python-based, unchanged logic)
+// ---------------------------------------------------------------------------
+
+/// Execute the existing Python-based format conversion in a spawned task.
 async fn run_conversion(
     conversion_id: &str,
     direction: ConversionDirection,
@@ -318,7 +607,6 @@ async fn run_conversion(
     library: &ModelLibrary,
     _importer: &ModelImporter,
 ) -> Result<()> {
-    // Ensure environment is ready
     let python_path = scripts::venv_python(launcher_root);
     if !python_path.exists() {
         return Err(PumasError::ConversionFailed {
@@ -327,35 +615,37 @@ async fn run_conversion(
         });
     }
 
-    // Deploy scripts (in case they were updated)
     scripts::ensure_scripts_deployed(launcher_root)?;
 
     progress.set_status(conversion_id, ConversionStatus::Validating);
 
-    // Find model files in the source directory
     let model_files = find_model_files(model_path, direction)?;
     if model_files.is_empty() {
         return Err(PumasError::ConversionFailed {
-            message: format!("No {} files found in {}", source_extension(direction), model_path.display()),
+            message: format!(
+                "No {} files found in {}",
+                source_extension(direction),
+                model_path.display()
+            ),
         });
     }
 
-    // Determine output location
     let output_dir = determine_output_dir(model_path, direction)?;
     let temp_dir = output_dir.with_extension("converting");
 
-    // Clean up any previous temp dir
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir).ok();
     }
     std::fs::create_dir_all(&temp_dir)
         .map_err(|e| PumasError::io("creating temp conversion dir", &temp_dir, e))?;
 
-    // Build script command
     let scripts_dir = scripts::scripts_dir(launcher_root);
     let (script_name, args) = match direction {
         ConversionDirection::GgufToSafetensors => {
-            let mut args = vec!["--output-dir".to_string(), temp_dir.to_string_lossy().to_string()];
+            let mut args = vec![
+                "--output-dir".to_string(),
+                temp_dir.to_string_lossy().to_string(),
+            ];
             args.push("--input".to_string());
             for f in &model_files {
                 args.push(f.to_string_lossy().to_string());
@@ -369,7 +659,6 @@ async fn run_conversion(
                 output_file.to_string_lossy().to_string(),
             ];
 
-            // Add config.json path if available
             let config_path = model_path.join("config.json");
             if config_path.exists() {
                 args.push("--config".to_string());
@@ -387,6 +676,8 @@ async fn run_conversion(
             }
             ("convert_safetensors_to_gguf.py", args)
         }
+        // Quantization directions are handled by run_quantization, not run_conversion.
+        _ => unreachable!("run_conversion called with quantization direction"),
     };
 
     let script_path = scripts_dir.join(script_name);
@@ -398,7 +689,6 @@ async fn run_conversion(
         model_files.len()
     );
 
-    // Spawn Python subprocess
     let mut child = Command::new(&python_path)
         .arg(&script_path)
         .args(&args)
@@ -413,7 +703,6 @@ async fn run_conversion(
     let stdout = child.stdout.take().expect("stdout was piped");
     let mut reader = BufReader::new(stdout).lines();
 
-    // Read progress lines from stdout, checking cancellation between lines
     loop {
         if cancel_token.is_cancelled() {
             child.kill().await.ok();
@@ -429,7 +718,7 @@ async fn run_conversion(
                     debug!("Non-JSON output from conversion script: {}", line);
                 }
             }
-            Ok(None) => break, // EOF
+            Ok(None) => break,
             Err(e) => {
                 warn!("Error reading conversion output: {}", e);
                 break;
@@ -437,19 +726,21 @@ async fn run_conversion(
         }
     }
 
-    // Wait for process exit
-    let status = child.wait().await.map_err(|e| PumasError::ConversionFailed {
-        message: format!("Conversion process error: {e}"),
-    })?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| PumasError::ConversionFailed {
+            message: format!("Conversion process error: {e}"),
+        })?;
 
     if !status.success() {
-        // Clean up temp dir
         std::fs::remove_dir_all(&temp_dir).ok();
-        // Check if we already have an error from the script
         if let Some(p) = progress.get(conversion_id) {
             if p.status == ConversionStatus::Error {
                 return Err(PumasError::ConversionFailed {
-                    message: p.error.unwrap_or_else(|| "Conversion script failed".to_string()),
+                    message: p
+                        .error
+                        .unwrap_or_else(|| "Conversion script failed".to_string()),
                 });
             }
         }
@@ -458,26 +749,8 @@ async fn run_conversion(
         });
     }
 
-    // Rename temp dir to final output dir
-    if output_dir.exists() {
-        // Add suffix to avoid collision
-        let mut suffix = 2u32;
-        let base = output_dir.clone();
-        let mut final_dir = base.clone();
-        while final_dir.exists() {
-            final_dir = base.with_file_name(format!(
-                "{}-v{}",
-                base.file_name().unwrap_or_default().to_string_lossy(),
-                suffix
-            ));
-            suffix += 1;
-        }
-        std::fs::rename(&temp_dir, &final_dir)
-            .map_err(|e| PumasError::io("renaming conversion output", &temp_dir, e))?;
-    } else {
-        std::fs::rename(&temp_dir, &output_dir)
-            .map_err(|e| PumasError::io("renaming conversion output", &temp_dir, e))?;
-    }
+    // Rename temp dir to final
+    pipeline::finalize_output_dir(&temp_dir, &output_dir)?;
 
     // Build conversion source metadata
     let is_dequantized = direction == ConversionDirection::GgufToSafetensors
@@ -485,22 +758,14 @@ async fn run_conversion(
     let conversion_source = ConversionSource {
         source_model_id: source_model_id.to_string(),
         source_format: source_extension(direction).to_string(),
-        source_quant: None, // TODO: detect from GGUF metadata
+        source_quant: None,
         target_format: target_extension(direction).to_string(),
         target_quant: target_quant.map(|s| s.to_string()),
         was_dequantized: is_dequantized,
         conversion_date: chrono::Utc::now().to_rfc3339(),
     };
 
-    // Write metadata.json for the converted model
     progress.set_status(conversion_id, ConversionStatus::Importing);
-
-    let final_output_dir = if output_dir.exists() {
-        output_dir.clone()
-    } else {
-        // Find the actual dir (may have been renamed with suffix)
-        output_dir.clone()
-    };
 
     let converted_metadata = ModelMetadata {
         model_id: source_metadata.model_id.clone(),
@@ -526,16 +791,13 @@ async fn run_conversion(
         ..Default::default()
     };
 
-    // Save metadata and index
-    library
-        .save_metadata(&final_output_dir, &converted_metadata)
-        .await?;
-    library.index_model_dir(&final_output_dir).await?;
+    library.save_metadata(&output_dir, &converted_metadata).await?;
+    library.index_model_dir(&output_dir).await?;
 
     let output_model_id = library
-        .get_relative_path(&final_output_dir)
+        .get_relative_path(&output_dir)
         .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| final_output_dir.to_string_lossy().to_string());
+        .unwrap_or_else(|| output_dir.to_string_lossy().to_string());
 
     progress.set_output_model_id(conversion_id, output_model_id);
     progress.set_status(conversion_id, ConversionStatus::Completed);
@@ -543,6 +805,10 @@ async fn run_conversion(
     info!("Conversion {} completed successfully", conversion_id);
     Ok(())
 }
+
+// ---------------------------------------------------------------------------
+// Helpers (existing, for Python format conversions)
+// ---------------------------------------------------------------------------
 
 /// Find model files of the appropriate format in the model directory.
 fn find_model_files(model_path: &Path, direction: ConversionDirection) -> Result<Vec<PathBuf>> {
@@ -569,20 +835,27 @@ fn find_model_files(model_path: &Path, direction: ConversionDirection) -> Result
 /// Get the source file extension for a conversion direction.
 fn source_extension(direction: ConversionDirection) -> &'static str {
     match direction {
-        ConversionDirection::GgufToSafetensors => "gguf",
-        ConversionDirection::SafetensorsToGguf => "safetensors",
+        ConversionDirection::GgufToSafetensors | ConversionDirection::GgufToQuantizedGguf => "gguf",
+        ConversionDirection::SafetensorsToGguf
+        | ConversionDirection::SafetensorsToQuantizedGguf
+        | ConversionDirection::SafetensorsToNvfp4
+        | ConversionDirection::SafetensorsToSherryQat => "safetensors",
     }
 }
 
 /// Get the target file extension for a conversion direction.
 fn target_extension(direction: ConversionDirection) -> &'static str {
     match direction {
-        ConversionDirection::GgufToSafetensors => "safetensors",
-        ConversionDirection::SafetensorsToGguf => "gguf",
+        ConversionDirection::GgufToSafetensors
+        | ConversionDirection::SafetensorsToNvfp4
+        | ConversionDirection::SafetensorsToSherryQat => "safetensors",
+        ConversionDirection::SafetensorsToGguf
+        | ConversionDirection::SafetensorsToQuantizedGguf
+        | ConversionDirection::GgufToQuantizedGguf => "gguf",
     }
 }
 
-/// Determine the output directory for a conversion.
+/// Determine the output directory for a format conversion.
 fn determine_output_dir(model_path: &Path, direction: ConversionDirection) -> Result<PathBuf> {
     let dir_name = model_path
         .file_name()
@@ -594,12 +867,15 @@ fn determine_output_dir(model_path: &Path, direction: ConversionDirection) -> Re
     let suffix = match direction {
         ConversionDirection::GgufToSafetensors => "safetensors",
         ConversionDirection::SafetensorsToGguf => "gguf-f16",
+        _ => unreachable!("determine_output_dir not used for quantization directions"),
     };
 
     let output_name = format!("{}-{}", dir_name, suffix);
-    let parent = model_path.parent().ok_or_else(|| PumasError::ConversionFailed {
-        message: format!("Model path has no parent: {}", model_path.display()),
-    })?;
+    let parent = model_path
+        .parent()
+        .ok_or_else(|| PumasError::ConversionFailed {
+            message: format!("Model path has no parent: {}", model_path.display()),
+        })?;
 
     Ok(parent.join(output_name))
 }

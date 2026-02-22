@@ -232,6 +232,7 @@ impl From<pumas_library::PumasError> for FfiError {
             },
             PumasError::ConversionFailed { message } => FfiError::Model { message },
             PumasError::ConversionCancelled => FfiError::Cancelled,
+            PumasError::QuantizationEnvNotReady { message, .. } => FfiError::Config { message },
             PumasError::Other(message) => FfiError::Other(message),
         }
     }

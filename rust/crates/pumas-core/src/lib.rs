@@ -204,6 +204,27 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let types = self.conversion_manager.supported_quant_types();
                 Ok(serde_json::to_value(types)?)
             }
+            // Quantization backend methods
+            "backend_status" => {
+                let status = self.conversion_manager.backend_status();
+                Ok(serde_json::to_value(status)?)
+            }
+            "ensure_backend_environment" => {
+                let backend_str = params["backend"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "backend is required".to_string(),
+                    })?;
+                let backend: conversion::QuantBackend =
+                    serde_json::from_value(serde_json::json!(backend_str))
+                        .map_err(|e| PumasError::InvalidParams {
+                            message: format!("Invalid backend: {e}"),
+                        })?;
+                self.conversion_manager
+                    .ensure_backend_environment(backend)
+                    .await?;
+                Ok(serde_json::json!({ "success": true }))
+            }
             _ => Err(PumasError::InvalidParams {
                 message: format!("Unknown IPC method: {}", method),
             }),
@@ -1972,6 +1993,22 @@ impl PumasApi {
     /// Get the list of supported quantization types for conversion.
     pub fn supported_quant_types(&self) -> Vec<conversion::QuantOption> {
         self.primary().conversion_manager.supported_quant_types()
+    }
+
+    /// Get the readiness status of all quantization backends.
+    pub fn backend_status(&self) -> Vec<conversion::BackendStatus> {
+        self.primary().conversion_manager.backend_status()
+    }
+
+    /// Ensure a specific quantization backend's environment is set up.
+    pub async fn ensure_backend_environment(
+        &self,
+        backend: conversion::QuantBackend,
+    ) -> Result<()> {
+        self.primary()
+            .conversion_manager
+            .ensure_backend_environment(backend)
+            .await
     }
 
     // ========================================

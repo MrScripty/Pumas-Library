@@ -156,6 +156,9 @@ pub enum PumasError {
     #[error("Model conversion cancelled")]
     ConversionCancelled,
 
+    #[error("Quantization environment not ready ({backend}): {message}")]
+    QuantizationEnvNotReady { backend: String, message: String },
+
     // Generic errors
     #[error("{0}")]
     Other(String),
@@ -258,7 +261,8 @@ impl PumasError {
             | PumasError::LaunchFailed { .. }
             | PumasError::ImportFailed { .. }
             | PumasError::DownloadFailed { .. }
-            | PumasError::ConversionFailed { .. } => -32003,
+            | PumasError::ConversionFailed { .. }
+            | PumasError::QuantizationEnvNotReady { .. } => -32003,
 
             PumasError::InstallationCancelled
             | PumasError::DownloadCancelled

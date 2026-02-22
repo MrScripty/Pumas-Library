@@ -136,6 +136,7 @@ pub struct StatusResponse {
     pub message: String,
     pub comfyui_running: bool,
     pub ollama_running: bool,
+    pub torch_running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_launch_error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -511,6 +512,7 @@ mod tests {
             message: "Ready".into(),
             comfyui_running: false,
             ollama_running: false,
+            torch_running: false,
             last_launch_error: None,
             last_launch_log: None,
             app_resources: None,

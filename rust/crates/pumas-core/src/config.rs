@@ -113,6 +113,7 @@ pub enum AppId {
     OpenWebUI,
     InvokeAI,
     KritaDiffusion,
+    Torch,
 }
 
 impl AppId {
@@ -123,6 +124,7 @@ impl AppId {
             AppId::OpenWebUI => "openwebui",
             AppId::InvokeAI => "invokeai",
             AppId::KritaDiffusion => "kritadiffusion",
+            AppId::Torch => "torch",
         }
     }
 
@@ -133,6 +135,7 @@ impl AppId {
             AppId::OpenWebUI => "open-webui/open-webui",
             AppId::InvokeAI => "invoke-ai/InvokeAI",
             AppId::KritaDiffusion => "Acly/krita-ai-diffusion",
+            AppId::Torch => "pumas-ai/torch-server",
         }
     }
 
@@ -143,6 +146,7 @@ impl AppId {
             AppId::OpenWebUI => "openwebui-versions",
             AppId::InvokeAI => "invokeai-versions",
             AppId::KritaDiffusion => "kritadiffusion-versions",
+            AppId::Torch => "torch-versions",
         }
     }
 
@@ -153,6 +157,7 @@ impl AppId {
             "openwebui" => Some(AppId::OpenWebUI),
             "invokeai" => Some(AppId::InvokeAI),
             "kritadiffusion" => Some(AppId::KritaDiffusion),
+            "torch" => Some(AppId::Torch),
             _ => None,
         }
     }
@@ -182,6 +187,7 @@ mod tests {
             AppId::OpenWebUI,
             AppId::InvokeAI,
             AppId::KritaDiffusion,
+            AppId::Torch,
         ] {
             let s = app_id.as_str();
             let parsed = AppId::from_str(s).expect("Should parse");

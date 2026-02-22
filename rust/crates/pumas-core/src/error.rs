@@ -149,6 +149,16 @@ pub enum PumasError {
     #[error("No libraries registered. Initialize with an explicit path first.")]
     NoLibrariesRegistered,
 
+    // Torch inference errors
+    #[error("Torch inference error: {message}")]
+    TorchInference { message: String },
+
+    #[error("Model slot not found: {slot_id}")]
+    SlotNotFound { slot_id: String },
+
+    #[error("Device not available: {device}")]
+    DeviceNotAvailable { device: String },
+
     // Model conversion errors
     #[error("Model conversion failed: {message}")]
     ConversionFailed { message: String },
@@ -279,6 +289,9 @@ impl PumasError {
 
             PumasError::SharedInstanceLost { .. } => -32006,
             PumasError::NoLibrariesRegistered => -32007,
+            PumasError::TorchInference { .. } => -32008,
+            PumasError::SlotNotFound { .. } => -32009,
+            PumasError::DeviceNotAvailable { .. } => -32010,
 
             // All other errors are internal errors
             _ => -32603,

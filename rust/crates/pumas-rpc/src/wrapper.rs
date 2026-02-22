@@ -126,7 +126,20 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_links_for_model"
         | "delete_model_with_cascade"
         | "get_sandbox_info"
-        | "validate_installations" => result,
+        | "validate_installations"
+        | "ollama_list_models"
+        | "ollama_create_model"
+        | "ollama_delete_model"
+        | "ollama_load_model"
+        | "ollama_unload_model"
+        | "ollama_list_running"
+        | "start_model_conversion"
+        | "get_conversion_progress"
+        | "cancel_model_conversion"
+        | "list_model_conversions"
+        | "check_conversion_environment"
+        | "setup_conversion_environment"
+        | "get_supported_quant_types" => result,
 
         // Bool methods
         "install_version"

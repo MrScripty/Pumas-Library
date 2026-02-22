@@ -61,6 +61,9 @@ sha2 = "0.10"
 blake3 = "1"
 hex = "0.4"
 
+# Byte buffers
+bytes = "1"
+
 # URL encoding
 urlencoding = "2"
 

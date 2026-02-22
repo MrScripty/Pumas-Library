@@ -12,12 +12,14 @@
 
 pub mod api_proxy;
 pub mod custom_nodes;
+pub mod ollama_client;
 pub mod process;
 pub mod version_manager;
 
 // Re-export commonly used types
 pub use api_proxy::PluginApiProxy;
 pub use custom_nodes::{CustomNodesManager, InstalledCustomNode, InstallResult, UpdateResult};
+pub use ollama_client::{OllamaClient, OllamaModel, RunningModel, derive_ollama_name};
 pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use version_manager::{
     ReleaseSize, SizeBreakdown, SizeCalculator, VersionManager,

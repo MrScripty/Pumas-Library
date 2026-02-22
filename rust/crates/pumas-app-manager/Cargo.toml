@@ -46,6 +46,12 @@ regex = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true }
 
+# Hashing (for Ollama blob uploads)
+sha2 = { workspace = true }
+
+# Byte buffers (for streaming uploads)
+bytes = { workspace = true }
+
 # Platform-specific: Unix
 [target.'cfg(unix)'.dependencies]
 nix = { workspace = true }

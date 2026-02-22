@@ -1878,6 +1878,12 @@ async fn dispatch_method(
             let known_sha256 = get_str_param!(params, "known_sha256", "knownSha256").map(String::from);
             let compute_hashes = get_bool_param!(params, "compute_hashes", "computeHashes").unwrap_or(false);
 
+            let expected_files: Option<Vec<String>> = params
+                .get("expected_files")
+                .or_else(|| params.get("expectedFiles"))
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|v| v.as_str().map(String::from)).collect());
+
             let spec = pumas_library::model_library::InPlaceImportSpec {
                 model_dir: std::path::PathBuf::from(model_dir),
                 official_name,
@@ -1886,6 +1892,7 @@ async fn dispatch_method(
                 repo_id,
                 known_sha256,
                 compute_hashes,
+                expected_files,
             };
 
             let result = api.import_model_in_place(&spec).await?;
@@ -1918,6 +1925,8 @@ async fn dispatch_method(
             let direction = require_str_param!(params, "direction", "direction");
             let target_quant = get_str_param!(params, "target_quant", "targetQuant").map(String::from);
             let output_name = get_str_param!(params, "output_name", "outputName").map(String::from);
+            let imatrix_calibration_file = get_str_param!(params, "imatrix_calibration_file", "imatrixCalibrationFile").map(String::from);
+            let force_imatrix = get_bool_param!(params, "force_imatrix", "forceImatrix");
 
             let direction = match direction.as_str() {
                 "gguf_to_safetensors" | "GgufToSafetensors" => {
@@ -1925,6 +1934,18 @@ async fn dispatch_method(
                 }
                 "safetensors_to_gguf" | "SafetensorsToGguf" => {
                     pumas_library::conversion::ConversionDirection::SafetensorsToGguf
+                }
+                "safetensors_to_quantized_gguf" | "SafetensorsToQuantizedGguf" => {
+                    pumas_library::conversion::ConversionDirection::SafetensorsToQuantizedGguf
+                }
+                "gguf_to_quantized_gguf" | "GgufToQuantizedGguf" => {
+                    pumas_library::conversion::ConversionDirection::GgufToQuantizedGguf
+                }
+                "safetensors_to_nvfp4" | "SafetensorsToNvfp4" => {
+                    pumas_library::conversion::ConversionDirection::SafetensorsToNvfp4
+                }
+                "safetensors_to_sherry_qat" | "SafetensorsToSherryQat" => {
+                    pumas_library::conversion::ConversionDirection::SafetensorsToSherryQat
                 }
                 _ => {
                     return Err(pumas_library::PumasError::InvalidParams {
@@ -1938,6 +1959,8 @@ async fn dispatch_method(
                 direction,
                 target_quant,
                 output_name,
+                imatrix_calibration_file,
+                force_imatrix,
             };
 
             let conversion_id = api.start_conversion(request).await?;
@@ -1993,6 +2016,36 @@ async fn dispatch_method(
             Ok(json!({
                 "success": true,
                 "quant_types": types
+            }))
+        }
+
+        "get_backend_status" => {
+            let status = api.backend_status();
+            Ok(json!({
+                "success": true,
+                "backends": status
+            }))
+        }
+
+        "setup_quantization_backend" => {
+            let backend = require_str_param!(params, "backend", "backend");
+            let backend = match backend.as_str() {
+                "llama_cpp" | "LlamaCpp" => pumas_library::conversion::QuantBackend::LlamaCpp,
+                "nvfp4" | "Nvfp4" => pumas_library::conversion::QuantBackend::Nvfp4,
+                "sherry" | "Sherry" => pumas_library::conversion::QuantBackend::Sherry,
+                "python_conversion" | "PythonConversion" => {
+                    pumas_library::conversion::QuantBackend::PythonConversion
+                }
+                _ => {
+                    return Err(pumas_library::PumasError::InvalidParams {
+                        message: format!("Unknown quantization backend: {}", backend),
+                    });
+                }
+            };
+
+            api.ensure_backend_environment(backend).await?;
+            Ok(json!({
+                "success": true
             }))
         }
 

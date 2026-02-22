@@ -95,6 +95,33 @@ const electronAPI = {
   launch_ollama: () => apiCall('launch_ollama'),
   stop_ollama: () => apiCall('stop_ollama'),
 
+  // Ollama Model Management
+  ollama_list_models: (connectionUrl?: string) =>
+    apiCall('ollama_list_models', { connection_url: connectionUrl }),
+  ollama_create_model: (modelId: string, modelName?: string, connectionUrl?: string) =>
+    apiCall('ollama_create_model', {
+      model_id: modelId,
+      model_name: modelName,
+      connection_url: connectionUrl,
+    }),
+  ollama_delete_model: (modelName: string, connectionUrl?: string) =>
+    apiCall('ollama_delete_model', {
+      model_name: modelName,
+      connection_url: connectionUrl,
+    }),
+  ollama_load_model: (modelName: string, connectionUrl?: string) =>
+    apiCall('ollama_load_model', {
+      model_name: modelName,
+      connection_url: connectionUrl,
+    }),
+  ollama_unload_model: (modelName: string, connectionUrl?: string) =>
+    apiCall('ollama_unload_model', {
+      model_name: modelName,
+      connection_url: connectionUrl,
+    }),
+  ollama_list_running: (connectionUrl?: string) =>
+    apiCall('ollama_list_running', { connection_url: connectionUrl }),
+
   // ========================================
   // Model Management
   // ========================================
@@ -236,6 +263,30 @@ const electronAPI = {
     apiCall('update_custom_node', { node_name: nodeName, version_tag: versionTag }),
   remove_custom_node: (nodeName: string, versionTag: string) =>
     apiCall('remove_custom_node', { node_name: nodeName, version_tag: versionTag }),
+
+  // ========================================
+  // Model Format Conversion
+  // ========================================
+  start_model_conversion: (
+    modelId: string,
+    direction: string,
+    targetQuant?: string | null,
+    outputName?: string | null
+  ) =>
+    apiCall('start_model_conversion', {
+      model_id: modelId,
+      direction,
+      target_quant: targetQuant,
+      output_name: outputName,
+    }),
+  get_conversion_progress: (conversionId: string) =>
+    apiCall('get_conversion_progress', { conversion_id: conversionId }),
+  cancel_model_conversion: (conversionId: string) =>
+    apiCall('cancel_model_conversion', { conversion_id: conversionId }),
+  list_model_conversions: () => apiCall('list_model_conversions'),
+  check_conversion_environment: () => apiCall('check_conversion_environment'),
+  setup_conversion_environment: () => apiCall('setup_conversion_environment'),
+  get_supported_quant_types: () => apiCall('get_supported_quant_types'),
 
   // ========================================
   // Size Calculation

@@ -109,6 +109,49 @@ impl ConversionProgressTracker {
         let mut state = self.state.lock().expect("progress lock poisoned");
         state.remove(conversion_id);
     }
+
+    /// Update pipeline step information for multi-step operations.
+    ///
+    /// Resets per-step progress fields (progress, tensor counts, current tensor)
+    /// when transitioning between pipeline steps.
+    pub fn update_pipeline(
+        &self,
+        conversion_id: &str,
+        step: u32,
+        total: u32,
+        label: &str,
+    ) {
+        let mut state = self.state.lock().expect("progress lock poisoned");
+        if let Some(progress) = state.get_mut(conversion_id) {
+            progress.pipeline_step = Some(step);
+            progress.pipeline_steps_total = Some(total);
+            progress.pipeline_step_label = Some(label.to_string());
+            // Reset per-step progress when entering a new step.
+            progress.progress = Some(0.0);
+            progress.tensors_completed = None;
+            progress.tensors_total = None;
+            progress.current_tensor = None;
+        }
+    }
+
+    /// Update tensor-level progress (used by llama-quantize output parser).
+    pub fn update_tensor_progress(
+        &self,
+        conversion_id: &str,
+        completed: u32,
+        total: u32,
+        tensor_name: &str,
+    ) {
+        let mut state = self.state.lock().expect("progress lock poisoned");
+        if let Some(progress) = state.get_mut(conversion_id) {
+            progress.tensors_completed = Some(completed);
+            progress.tensors_total = Some(total);
+            progress.current_tensor = Some(tensor_name.to_string());
+            if total > 0 {
+                progress.progress = Some(completed as f32 / total as f32);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -131,6 +174,9 @@ mod tests {
             target_quant: None,
             error: None,
             output_model_id: None,
+            pipeline_step: None,
+            pipeline_steps_total: None,
+            pipeline_step_label: None,
         }
     }
 
@@ -223,5 +269,45 @@ mod tests {
         tracker.remove("conv-1");
 
         assert!(tracker.get("conv-1").is_none());
+    }
+
+    #[test]
+    fn test_update_pipeline_resets_per_step_fields() {
+        let tracker = ConversionProgressTracker::new();
+        let mut p = make_progress("conv-1");
+        p.tensors_completed = Some(50);
+        p.tensors_total = Some(100);
+        p.current_tensor = Some("layer.5.weight".to_string());
+        p.progress = Some(0.5);
+        tracker.insert(p);
+
+        tracker.update_pipeline("conv-1", 2, 3, "Quantizing to Q4_K_M");
+        let result = tracker.get("conv-1").unwrap();
+
+        assert_eq!(result.pipeline_step, Some(2));
+        assert_eq!(result.pipeline_steps_total, Some(3));
+        assert_eq!(result.pipeline_step_label.as_deref(), Some("Quantizing to Q4_K_M"));
+        // Per-step fields should be reset
+        assert_eq!(result.progress, Some(0.0));
+        assert_eq!(result.tensors_completed, None);
+        assert_eq!(result.tensors_total, None);
+        assert_eq!(result.current_tensor, None);
+    }
+
+    #[test]
+    fn test_update_tensor_progress() {
+        let tracker = ConversionProgressTracker::new();
+        tracker.insert(make_progress("conv-1"));
+
+        tracker.update_tensor_progress("conv-1", 25, 100, "model.layers.10.attn_k.weight");
+        let result = tracker.get("conv-1").unwrap();
+
+        assert_eq!(result.tensors_completed, Some(25));
+        assert_eq!(result.tensors_total, Some(100));
+        assert_eq!(
+            result.current_tensor.as_deref(),
+            Some("model.layers.10.attn_k.weight")
+        );
+        assert!((result.progress.unwrap() - 0.25).abs() < 0.01);
     }
 }

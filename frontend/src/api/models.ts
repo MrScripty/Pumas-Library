@@ -64,6 +64,11 @@ class ModelsAPI {
     return await api.cancel_model_download(downloadId);
   }
 
+  async deleteModel(modelId: string) {
+    const api = this.getAPI();
+    return await api.delete_model_with_cascade(modelId);
+  }
+
   /**
    * Get metadata for a library model (both stored and embedded).
    */

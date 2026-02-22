@@ -63,6 +63,7 @@ export function useModels() {
           const fileName = path.split('/').pop() || path;
           const displayName = modelData.officialName || modelData.cleanedName || fileName;
 
+          const conversionSource = modelData.metadata?.conversion_source;
           const modelInfo: ModelInfo = {
             id: path,
             name: displayName,
@@ -71,6 +72,8 @@ export function useModels() {
             size: modelData.size,
             date: modelData.addedDate,
             relatedAvailable: Boolean(modelData.relatedAvailable),
+            wasDequantized: conversionSource?.was_dequantized ?? false,
+            convertedFrom: conversionSource?.source_format,
           };
 
           if (!categoryMap.has(category)) {

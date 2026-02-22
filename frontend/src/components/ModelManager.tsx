@@ -413,6 +413,22 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   }, [onModelsImported]);
 
   // Handler for file picker import button
+  const handleDeleteModel = useCallback(async (modelId: string) => {
+    try {
+      const result = await modelsAPI.deleteModel(modelId);
+      if (result.success) {
+        logger.info('Model deleted', { modelId });
+        onModelsImported?.();
+      } else {
+        logger.error('Failed to delete model', { modelId, error: result.error });
+      }
+    } catch (error) {
+      if (error instanceof Error) {
+        logger.error('Error deleting model', { modelId, error: error.message });
+      }
+    }
+  }, [onModelsImported]);
+
   const handleImportClick = useCallback(async () => {
     if (!isAPIAvailable()) {
       logger.warn('open_model_import_dialog API not available');
@@ -507,6 +523,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onOpenRelatedUrl={openRemoteUrl}
                 onResumeDownload={resumeDownload}
                 onCancelDownload={cancelDownload}
+                onDeleteModel={handleDeleteModel}
               />
               {/* Link Health Status */}
               <div className="mt-4">

@@ -21,7 +21,7 @@ import {
 import type { ModelCategory, RelatedModelsState } from '../types/apps';
 import { formatSize, formatDate } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
-import { EmptyState, IconButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
+import { EmptyState, IconButton, HoldToDeleteButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
 import { ModelMetadataModal } from './ModelMetadataModal';
 
 interface LocalModelsListProps {
@@ -40,6 +40,7 @@ interface LocalModelsListProps {
   onOpenRelatedUrl: (url: string) => void;
   onResumeDownload?: (repoId: string) => void;
   onCancelDownload?: (repoId: string) => void;
+  onDeleteModel?: (modelId: string) => void;
 }
 
 export function LocalModelsList({
@@ -58,6 +59,7 @@ export function LocalModelsList({
   onOpenRelatedUrl,
   onResumeDownload,
   onCancelDownload,
+  onDeleteModel,
 }: LocalModelsListProps) {
   // State for metadata modal
   const [metadataModal, setMetadataModal] = useState<{
@@ -147,6 +149,16 @@ export function LocalModelsList({
                           title="Ctrl+click to view metadata"
                         >
                           {model.name}
+                          {model.wasDequantized && (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
+                                bg-[hsl(var(--launcher-accent-warning)/0.15)]
+                                text-[hsl(var(--launcher-accent-warning))]"
+                              title="Dequantized from quantized GGUF - may have reduced precision"
+                            >
+                              DQ
+                            </span>
+                          )}
                         </span>
                         {/* Metadata row */}
                         <MetadataRow>
@@ -199,28 +211,35 @@ export function LocalModelsList({
                           <Download className="h-3.5 w-3.5" />
                         </button>
                       ) : (
-                        <IconButton
-                          icon={
-                            <svg
-                              width="16"
-                              height="16"
-                              viewBox="0 0 16 16"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.5"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                            >
-                              <path d="M7 3.5L9 1.5C10.1 0.4 11.9 0.4 13 1.5C14.1 2.6 14.1 4.4 13 5.5L11 7.5" />
-                              <path d="M9 12.5L7 14.5C5.9 15.6 4.1 15.6 3 14.5C1.9 13.4 1.9 11.6 3 10.5L5 8.5" />
-                              <path d="M10 6L6 10" />
-                            </svg>
-                          }
-                          tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : 'Link to app'}
-                          onClick={() => onToggleLink(model.id)}
-                          size="sm"
-                          active={isLinked}
-                        />
+                        <>
+                          <IconButton
+                            icon={
+                              <svg
+                                width="16"
+                                height="16"
+                                viewBox="0 0 16 16"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              >
+                                <path d="M7 3.5L9 1.5C10.1 0.4 11.9 0.4 13 1.5C14.1 2.6 14.1 4.4 13 5.5L11 7.5" />
+                                <path d="M9 12.5L7 14.5C5.9 15.6 4.1 15.6 3 14.5C1.9 13.4 1.9 11.6 3 10.5L5 8.5" />
+                                <path d="M10 6L6 10" />
+                              </svg>
+                            }
+                            tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : 'Link to app'}
+                            onClick={() => onToggleLink(model.id)}
+                            size="sm"
+                            active={isLinked}
+                          />
+                          {onDeleteModel && (
+                            <HoldToDeleteButton
+                              onDelete={() => onDeleteModel(model.id)}
+                            />
+                          )}
+                        </>
                       )}
                     </div>
                   </ListItemContent>

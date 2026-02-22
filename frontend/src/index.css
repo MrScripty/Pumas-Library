@@ -426,6 +426,28 @@
     color: hsl(var(--launcher-accent-primary));
   }
 
+  /* Hold-to-delete ring */
+  .delete-hold-ring {
+    position: absolute;
+    inset: -5px;
+    border-radius: 9999px;
+    background: conic-gradient(
+      hsl(var(--launcher-accent-error)) var(--progress, 0deg),
+      hsl(var(--launcher-border)/0.4) 0deg
+    );
+    -webkit-mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 2px),
+      #000 calc(100% - 2px)
+    );
+    mask: radial-gradient(
+      farthest-side,
+      transparent calc(100% - 2px),
+      #000 calc(100% - 2px)
+    );
+    pointer-events: none;
+  }
+
   /* Drop zone pulse border animation */
   @keyframes pulse-border {
     0%, 100% {

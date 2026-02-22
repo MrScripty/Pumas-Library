@@ -5,7 +5,7 @@
  * Includes drag-and-drop import support.
  */
 
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
@@ -86,6 +86,26 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Network status for offline/rate limit indicators
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
+
+  // Auto-refresh model list when downloads complete
+  const prevDownloadStatusRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const prev = prevDownloadStatusRef.current;
+    let anyNewlyCompleted = false;
+    for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
+      if (status.status === 'completed' && prev[repoId] && prev[repoId] !== 'completed') {
+        anyNewlyCompleted = true;
+        logger.info('Download completed, will refresh model list', { repoId });
+      }
+    }
+    prevDownloadStatusRef.current = Object.fromEntries(
+      Object.entries(downloadStatusByRepo).map(([k, v]) => [k, v.status])
+    );
+    if (anyNewlyCompleted) {
+      // Delay to allow backend import_in_place indexing to finish
+      setTimeout(() => onModelsImported?.(), 1000);
+    }
+  }, [downloadStatusByRepo, onModelsImported]);
 
   // Computed Values
   const downloadingModels = useMemo(() => {
@@ -429,6 +449,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   }, [onModelsImported]);
 
+  const handleConvertModel = useCallback((modelId: string) => {
+    logger.info('Convert model requested', { modelId });
+    // TODO: Open conversion dialog with format/quant options
+  }, []);
+
   const handleImportClick = useCallback(async () => {
     if (!isAPIAvailable()) {
       logger.warn('open_model_import_dialog API not available');
@@ -521,9 +546,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 expandedRelated={expandedRelated}
                 onToggleRelated={handleToggleRelated}
                 onOpenRelatedUrl={openRemoteUrl}
+                onPauseDownload={pauseDownload}
                 onResumeDownload={resumeDownload}
                 onCancelDownload={cancelDownload}
                 onDeleteModel={handleDeleteModel}
+                onConvertModel={handleConvertModel}
               />
               {/* Link Health Status */}
               <div className="mt-4">

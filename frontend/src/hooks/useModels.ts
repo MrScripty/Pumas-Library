@@ -64,6 +64,22 @@ export function useModels() {
           const displayName = modelData.officialName || modelData.cleanedName || fileName;
 
           const conversionSource = modelData.metadata?.conversion_source;
+          const expectedFiles = modelData.metadata?.expected_files as string[] | undefined;
+          const actualFiles = modelData.metadata?.files as unknown[] | undefined;
+          const incomplete = expectedFiles
+            ? expectedFiles.length > (actualFiles?.length ?? 0)
+            : false;
+          // Determine primary format from path/name heuristics or metadata
+          const pathLower = path.toLowerCase();
+          const nameLower = fileName.toLowerCase();
+          const targetFmt = conversionSource?.target_format as string | undefined;
+          let primaryFormat: 'gguf' | 'safetensors' | undefined;
+          if (targetFmt === 'gguf' || pathLower.includes('gguf') || nameLower.endsWith('.gguf')) {
+            primaryFormat = 'gguf';
+          } else if (targetFmt === 'safetensors' || pathLower.includes('safetensors') || nameLower.includes('safetensors')) {
+            primaryFormat = 'safetensors';
+          }
+
           const modelInfo: ModelInfo = {
             id: path,
             name: displayName,
@@ -74,6 +90,9 @@ export function useModels() {
             relatedAvailable: Boolean(modelData.relatedAvailable),
             wasDequantized: conversionSource?.was_dequantized ?? false,
             convertedFrom: conversionSource?.source_format,
+            incomplete,
+            repoId: modelData.metadata?.repo_id as string | undefined,
+            primaryFormat,
           };
 
           if (!categoryMap.has(category)) {

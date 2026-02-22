@@ -17,6 +17,8 @@ import {
   ChevronRight,
   ExternalLink,
   Download,
+  Pause,
+  ArrowRightLeft,
 } from 'lucide-react';
 import type { ModelCategory, RelatedModelsState } from '../types/apps';
 import { formatSize, formatDate } from '../utils/modelFormatters';
@@ -38,9 +40,11 @@ interface LocalModelsListProps {
   expandedRelated: Set<string>;
   onToggleRelated: (modelId: string) => void;
   onOpenRelatedUrl: (url: string) => void;
+  onPauseDownload?: (repoId: string) => void;
   onResumeDownload?: (repoId: string) => void;
   onCancelDownload?: (repoId: string) => void;
   onDeleteModel?: (modelId: string) => void;
+  onConvertModel?: (modelId: string) => void;
 }
 
 export function LocalModelsList({
@@ -57,9 +61,11 @@ export function LocalModelsList({
   expandedRelated,
   onToggleRelated,
   onOpenRelatedUrl,
+  onPauseDownload,
   onResumeDownload,
   onCancelDownload,
   onDeleteModel,
+  onConvertModel,
 }: LocalModelsListProps) {
   // State for metadata modal
   const [metadataModal, setMetadataModal] = useState<{
@@ -113,6 +119,7 @@ export function LocalModelsList({
               const isStarred = starredModels.has(model.id);
               const isLinked = linkedModels.has(model.id);
               const isDownloading = Boolean(model.isDownloading);
+              const isConvertible = !isDownloading && Boolean(model.primaryFormat);
               const isExpanded = expandedRelated.has(model.id);
               const relatedState = relatedModelsById[model.id];
               const relatedModels = relatedState?.models ?? [];
@@ -124,6 +131,8 @@ export function LocalModelsList({
               const isPaused = model.downloadStatus === 'paused';
               const progressDegrees = Math.round(progressValue * 360);
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
+              const canPause = isDownloading && (model.downloadStatus === 'downloading' || model.downloadStatus === 'queued') && Boolean(onPauseDownload) && Boolean(model.downloadRepoId);
+              const canResume = isDownloading && (isPaused || model.downloadStatus === 'error') && Boolean(onResumeDownload) && Boolean(model.downloadRepoId);
               return (
                 <ListItem key={model.id} highlighted={isLinked}>
                   {/* Main row */}
@@ -159,6 +168,16 @@ export function LocalModelsList({
                               DQ
                             </span>
                           )}
+                          {model.incomplete && (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
+                                bg-[hsl(var(--launcher-accent-error)/0.15)]
+                                text-[hsl(var(--launcher-accent-error))]"
+                              title="Missing files - model may not work correctly"
+                            >
+                              Incomplete
+                            </span>
+                          )}
                         </span>
                         {/* Metadata row */}
                         <MetadataRow>
@@ -188,14 +207,16 @@ export function LocalModelsList({
                       {isDownloading ? (
                         <button
                           className={`relative flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent ${
-                            isPaused || model.downloadStatus === 'error'
-                              ? 'cursor-pointer download-resume-btn'
+                            canResume || canPause
+                              ? 'cursor-pointer'
                               : 'cursor-default'
-                          } text-[hsl(var(--text-muted))]`}
-                          title={isPaused ? 'Resume download' : model.downloadStatus === 'error' ? 'Retry download' : undefined}
+                          } ${canResume ? 'download-resume-btn' : ''} text-[hsl(var(--text-muted))]`}
+                          title={canPause ? 'Pause download' : isPaused ? 'Resume download' : model.downloadStatus === 'error' ? 'Retry download' : undefined}
                           onClick={
-                            (isPaused || model.downloadStatus === 'error') && onResumeDownload && model.downloadRepoId
-                              ? () => onResumeDownload(model.downloadRepoId!)
+                            canPause
+                              ? () => onPauseDownload!(model.downloadRepoId!)
+                              : canResume
+                              ? () => onResumeDownload!(model.downloadRepoId!)
                               : undefined
                           }
                         >
@@ -208,7 +229,14 @@ export function LocalModelsList({
                             }
                           />
                           {!isQueued && !isPaused && <span className="download-scan-ring" />}
-                          <Download className="h-3.5 w-3.5" />
+                          {canPause ? (
+                            <>
+                              <Download className="h-3.5 w-3.5 group-hover:hidden" />
+                              <Pause className="h-3.5 w-3.5 hidden group-hover:block" />
+                            </>
+                          ) : (
+                            <Download className="h-3.5 w-3.5" />
+                          )}
                         </button>
                       ) : (
                         <>
@@ -234,6 +262,18 @@ export function LocalModelsList({
                             size="sm"
                             active={isLinked}
                           />
+                          {isConvertible && onConvertModel && (
+                            <IconButton
+                              icon={<ArrowRightLeft />}
+                              tooltip={
+                                model.primaryFormat === 'safetensors'
+                                  ? 'Convert / Quantize'
+                                  : 'Convert / Re-quantize'
+                              }
+                              onClick={() => onConvertModel(model.id)}
+                              size="sm"
+                            />
+                          )}
                           {onDeleteModel && (
                             <HoldToDeleteButton
                               onDelete={() => onDeleteModel(model.id)}

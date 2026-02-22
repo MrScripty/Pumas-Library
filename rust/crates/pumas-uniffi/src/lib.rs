@@ -230,6 +230,15 @@ impl From<pumas_library::PumasError> for FfiError {
             PumasError::NoLibrariesRegistered => FfiError::Config {
                 message: "No libraries registered".to_string(),
             },
+            PumasError::TorchInference { message } => FfiError::Process {
+                message: format!("Torch inference: {}", message),
+            },
+            PumasError::SlotNotFound { slot_id } => FfiError::NotFound {
+                resource: format!("Model slot: {}", slot_id),
+            },
+            PumasError::DeviceNotAvailable { device } => FfiError::Config {
+                message: format!("Device not available: {}", device),
+            },
             PumasError::ConversionFailed { message } => FfiError::Model { message },
             PumasError::ConversionCancelled => FfiError::Cancelled,
             PumasError::QuantizationEnvNotReady { message, .. } => FfiError::Config { message },
@@ -388,6 +397,65 @@ impl From<HuggingFaceModel> for FfiHuggingFaceModel {
             compatible_engines: m.compatible_engines,
         }
     }
+}
+
+// =============================================================================
+// Torch Inference FFI Types
+//
+// FFI-safe wrappers for Torch inference server types.
+// These mirror the types in pumas-app-manager::torch_client but are
+// independently defined for the FFI boundary.
+// =============================================================================
+
+/// Compute device for model loading.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiComputeDevice {
+    Cpu,
+    Cuda { index: u32 },
+    Mps,
+    Auto,
+}
+
+/// State of a model slot.
+#[derive(Debug, Clone, uniffi::Enum)]
+pub enum FfiSlotState {
+    Unloaded,
+    Loading,
+    Ready,
+    Unloading,
+    Error,
+}
+
+/// A loaded model slot in the Torch inference server.
+#[derive(uniffi::Record)]
+pub struct FfiModelSlot {
+    pub slot_id: String,
+    pub model_name: String,
+    pub model_path: String,
+    pub device: FfiComputeDevice,
+    pub state: FfiSlotState,
+    pub gpu_memory_bytes: Option<u64>,
+    pub ram_memory_bytes: Option<u64>,
+    pub model_type: Option<String>,
+}
+
+/// Configuration for the Torch inference server.
+#[derive(uniffi::Record)]
+pub struct FfiTorchServerConfig {
+    pub api_port: u16,
+    pub host: String,
+    pub max_loaded_models: u32,
+    pub lan_access: bool,
+}
+
+/// Information about a compute device.
+#[derive(uniffi::Record)]
+pub struct FfiDeviceInfo {
+    pub device_id: String,
+    pub name: String,
+    pub memory_total: u64,
+    pub memory_available: u64,
+    pub is_available: bool,
 }
 
 // =============================================================================
@@ -636,6 +704,22 @@ impl FfiPumasApi {
             .get_system_resources()
             .await
             .map_err(FfiError::from)
+    }
+
+    // ========================================
+    // Torch Inference Methods
+    // ========================================
+
+    /// Check if the Torch inference server is running.
+    pub async fn is_torch_running(&self) -> bool {
+        self.inner.is_torch_running().await
+    }
+
+    /// Stop the Torch inference server.
+    ///
+    /// Returns `true` if the server was running and was stopped.
+    pub async fn torch_stop(&self) -> Result<bool, FfiError> {
+        self.inner.stop_torch().await.map_err(FfiError::from)
     }
 }
 

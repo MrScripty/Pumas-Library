@@ -17,7 +17,12 @@ use tracing::{debug, warn};
 pub struct PersistedDownload {
     pub download_id: String,
     pub repo_id: String,
+    /// Primary filename (first file or legacy single-file download).
     pub filename: String,
+    /// All filenames in this download (for multi-file models).
+    /// Empty means legacy single-file download (use `filename` field).
+    #[serde(default)]
+    pub filenames: Vec<String>,
     pub dest_dir: PathBuf,
     pub total_bytes: Option<u64>,
     pub status: DownloadStatus,
@@ -118,6 +123,7 @@ mod tests {
             download_id: "dl-1".to_string(),
             repo_id: "test/model".to_string(),
             filename: "model.gguf".to_string(),
+            filenames: vec!["model.gguf".to_string()],
             dest_dir: tmp.path().to_path_buf(),
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,
@@ -142,6 +148,7 @@ mod tests {
             download_id: "dl-1".to_string(),
             repo_id: "test/model".to_string(),
             filename: "model.gguf".to_string(),
+            filenames: vec!["model.gguf".to_string()],
             dest_dir: tmp.path().to_path_buf(),
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,
@@ -168,6 +175,7 @@ mod tests {
             download_id: "dl-1".to_string(),
             repo_id: "test/model".to_string(),
             filename: "model.gguf".to_string(),
+            filenames: vec!["model.gguf".to_string()],
             dest_dir: tmp.path().to_path_buf(),
             total_bytes: Some(1000),
             status: DownloadStatus::Paused,

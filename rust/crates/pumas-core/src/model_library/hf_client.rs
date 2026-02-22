@@ -46,8 +46,10 @@ pub struct DownloadCompletionInfo {
     pub download_id: String,
     /// Directory where the model file was placed.
     pub dest_dir: PathBuf,
-    /// Filename of the downloaded model.
+    /// Filename of the downloaded model (primary/largest file).
     pub filename: String,
+    /// All filenames in this download (for multi-file provenance).
+    pub filenames: Vec<String>,
     /// Original download request with model metadata.
     pub download_request: DownloadRequest,
     /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation).
@@ -86,6 +88,14 @@ impl std::fmt::Debug for HuggingFaceClient {
     }
 }
 
+/// A single file to download as part of a (possibly multi-file) model download.
+#[derive(Debug, Clone)]
+struct FileToDownload {
+    filename: String,
+    size: Option<u64>,
+    sha256: Option<String>,
+}
+
 /// Internal state for an active download.
 struct DownloadState {
     /// Download ID
@@ -96,9 +106,9 @@ struct DownloadState {
     status: DownloadStatus,
     /// Progress (0.0-1.0)
     progress: f32,
-    /// Downloaded bytes
+    /// Downloaded bytes (across all files)
     downloaded_bytes: u64,
-    /// Total bytes
+    /// Total bytes (sum across all files)
     total_bytes: Option<u64>,
     /// Download speed (bytes/sec)
     speed: f64,
@@ -110,11 +120,15 @@ struct DownloadState {
     error: Option<String>,
     /// Destination directory (needed for resume after restart)
     dest_dir: PathBuf,
-    /// Filename being downloaded (needed for resume after restart)
+    /// Current filename being downloaded
     filename: String,
+    /// All files in this download (for multi-file models)
+    files: Vec<FileToDownload>,
+    /// Number of files completed so far
+    files_completed: usize,
     /// Original download request (needed for persistence/resume)
     download_request: Option<DownloadRequest>,
-    /// Known SHA256 from HuggingFace LFS metadata.
+    /// Known SHA256 from HuggingFace LFS metadata (primary file).
     known_sha256: Option<String>,
 }
 
@@ -224,26 +238,52 @@ impl HuggingFaceClient {
         let mut downloads = self.downloads.write().await;
 
         for entry in entries {
-            let part_path = entry.dest_dir.join(format!(
-                "{}{}",
-                entry.filename,
-                crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
-            ));
+            // For multi-file downloads, check if any file or .part exists.
+            // For single-file downloads (legacy), check the primary .part file.
+            let all_filenames = if entry.filenames.is_empty() {
+                vec![entry.filename.clone()]
+            } else {
+                entry.filenames.clone()
+            };
 
-            if !part_path.exists() {
-                // .part file was cleaned up externally, remove from persistence
+            let has_any_file = all_filenames.iter().any(|f| {
+                let part = entry.dest_dir.join(format!(
+                    "{}{}",
+                    f,
+                    crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+                ));
+                let completed = entry.dest_dir.join(f);
+                part.exists() || completed.exists()
+            });
+
+            if !has_any_file {
                 info!(
-                    "Removing stale persisted download {} (no .part file)",
+                    "Removing stale persisted download {} (no files on disk)",
                     entry.download_id
                 );
                 let _ = persistence.remove(&entry.download_id);
                 continue;
             }
 
-            // Get actual file size for accurate progress
-            let downloaded_bytes = std::fs::metadata(&part_path)
-                .map(|m| m.len())
-                .unwrap_or(0);
+            // Sum bytes from completed files + current .part file for progress
+            let downloaded_bytes: u64 = all_filenames
+                .iter()
+                .map(|f| {
+                    let completed = entry.dest_dir.join(f);
+                    let part = entry.dest_dir.join(format!(
+                        "{}{}",
+                        f,
+                        crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+                    ));
+                    if completed.exists() {
+                        std::fs::metadata(&completed).map(|m| m.len()).unwrap_or(0)
+                    } else if part.exists() {
+                        std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
+                    } else {
+                        0
+                    }
+                })
+                .sum();
 
             let progress = entry
                 .total_bytes
@@ -268,6 +308,26 @@ impl HuggingFaceClient {
                 entry.download_id, entry.repo_id, downloaded_bytes, restored_status
             );
 
+            // Reconstruct file list from persistence.
+            // New-format entries have filenames; legacy entries fall back to filename.
+            let files: Vec<FileToDownload> = if entry.filenames.is_empty() {
+                vec![FileToDownload {
+                    filename: entry.filename.clone(),
+                    size: entry.total_bytes,
+                    sha256: entry.known_sha256.clone(),
+                }]
+            } else {
+                entry
+                    .filenames
+                    .iter()
+                    .map(|f| FileToDownload {
+                        filename: f.clone(),
+                        size: None, // Not persisted per-file; verified on disk
+                        sha256: None,
+                    })
+                    .collect()
+            };
+
             downloads.insert(
                 entry.download_id.clone(),
                 DownloadState {
@@ -283,6 +343,8 @@ impl HuggingFaceClient {
                     error: None,
                     dest_dir: entry.dest_dir,
                     filename: entry.filename,
+                    files,
+                    files_completed: 0,
                     download_request: Some(entry.download_request),
                     known_sha256: entry.known_sha256,
                 },
@@ -369,9 +431,9 @@ impl HuggingFaceClient {
         let offset = params.offset.unwrap_or(0);
 
         // Build search URL
-        // Note: full=true is required to get lastModified field in response
+        // Note: full=true gets lastModified, config=true gets architectures/model_type
         let mut url = format!(
-            "{}/models?search={}&limit={}&offset={}&full=true",
+            "{}/models?search={}&limit={}&offset={}&full=true&config=true",
             HF_API_BASE,
             urlencoding::encode(&params.query),
             limit,
@@ -420,6 +482,44 @@ impl HuggingFaceClient {
             .collect();
 
         Ok(models)
+    }
+
+    /// Fetch model info directly by repo_id from the HuggingFace API.
+    ///
+    /// Uses `GET /api/models/{repo_id}` which returns the exact model
+    /// without any search or cache involvement.
+    pub async fn get_model_info(&self, repo_id: &str) -> Result<HuggingFaceModel> {
+        // repo_id is "owner/model" — the slash is part of the URL path,
+        // so we must not encode the whole string (that would turn / into %2F).
+        let url = format!("{}/models/{}", HF_API_BASE, repo_id);
+
+        let response = self
+            .client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| PumasError::Network {
+                message: format!("HuggingFace API request failed: {}", e),
+                cause: Some(e.to_string()),
+            })?;
+
+        if !response.status().is_success() {
+            return Err(PumasError::Network {
+                message: format!(
+                    "HuggingFace API returned {} for repo {}",
+                    response.status(),
+                    repo_id
+                ),
+                cause: None,
+            });
+        }
+
+        let result: HfSearchResult = response.json().await.map_err(|e| PumasError::Json {
+            message: format!("Failed to parse HuggingFace response: {}", e),
+            source: None,
+        })?;
+
+        Ok(self.convert_search_result(result))
     }
 
     /// Enrich models with download options (file sizes) from cache or API.
@@ -562,8 +662,11 @@ impl HuggingFaceClient {
             .unwrap_or("")
             .to_string();
 
-        // Determine kind from pipeline_tag (default to "unknown")
-        let kind = result.pipeline_tag.unwrap_or_else(|| "unknown".to_string());
+        // Determine kind: prefer pipeline_tag, fall back to config-based inference
+        let kind = result
+            .pipeline_tag
+            .or_else(|| infer_pipeline_tag_from_config(result.config.as_ref()))
+            .unwrap_or_else(|| "unknown".to_string());
 
         // Extract formats and quants from tags
         let formats: Vec<String> = result
@@ -897,9 +1000,11 @@ impl HuggingFaceClient {
     // Download Operations
     // ========================================
 
-    /// Start a model download.
+    /// Start a model download (supports multi-file models).
     ///
     /// Returns a download ID for tracking progress.
+    /// For multi-shard models or "all files" requests, all files are downloaded
+    /// sequentially under a single download ID.
     pub async fn start_download(
         &self,
         request: &DownloadRequest,
@@ -911,36 +1016,61 @@ impl HuggingFaceClient {
         // Get file info
         let tree = self.get_repo_files(&request.repo_id).await?;
 
-        // Find the file to download
-        let filename = if let Some(ref f) = request.filename {
-            f.clone()
+        // Resolve files to download
+        let files: Vec<FileToDownload> = if let Some(ref f) = request.filename {
+            // Specific file requested
+            let lfs = tree.lfs_files.iter().find(|lf| lf.filename == *f);
+            vec![FileToDownload {
+                filename: f.clone(),
+                size: lfs.map(|l| l.size),
+                sha256: lfs.map(|l| l.sha256.clone()),
+            }]
         } else if let Some(ref quant) = request.quant {
-            // Find file matching quantization
-            tree.lfs_files
+            // All files matching this quantization (handles sharded models)
+            let matching: Vec<FileToDownload> = tree
+                .lfs_files
                 .iter()
-                .find(|f| f.filename.contains(quant))
-                .map(|f| f.filename.clone())
-                .ok_or_else(|| PumasError::ModelNotFound {
+                .filter(|f| f.filename.contains(quant.as_str()))
+                .map(|f| FileToDownload {
+                    filename: f.filename.clone(),
+                    size: Some(f.size),
+                    sha256: Some(f.sha256.clone()),
+                })
+                .collect();
+            if matching.is_empty() {
+                return Err(PumasError::ModelNotFound {
                     model_id: format!("{}:{}", request.repo_id, quant),
-                })?
+                });
+            }
+            matching
         } else {
-            // Get largest model file
+            // All LFS files in the repo
+            if tree.lfs_files.is_empty() {
+                return Err(PumasError::ModelNotFound {
+                    model_id: request.repo_id.clone(),
+                });
+            }
             tree.lfs_files
                 .iter()
-                .max_by_key(|f| f.size)
-                .map(|f| f.filename.clone())
-                .ok_or_else(|| PumasError::ModelNotFound {
-                    model_id: request.repo_id.clone(),
-                })?
+                .map(|f| FileToDownload {
+                    filename: f.filename.clone(),
+                    size: Some(f.size),
+                    sha256: Some(f.sha256.clone()),
+                })
+                .collect()
         };
 
-        let lfs_file = tree
-            .lfs_files
-            .iter()
-            .find(|f| f.filename == filename);
+        // Total bytes across all files
+        let total_bytes: Option<u64> = if files.iter().all(|f| f.size.is_some()) {
+            Some(files.iter().filter_map(|f| f.size).sum())
+        } else {
+            None
+        };
 
-        let total_bytes = lfs_file.map(|f| f.size);
-        let known_sha256 = lfs_file.map(|f| f.sha256.clone());
+        // SHA256 of the primary (largest) file for import metadata
+        let primary_file = files.iter().max_by_key(|f| f.size.unwrap_or(0));
+        let known_sha256 = primary_file.and_then(|f| f.sha256.clone());
+        let first_filename = files[0].filename.clone();
 
         let pause_flag = Arc::new(AtomicBool::new(false));
 
@@ -957,7 +1087,9 @@ impl HuggingFaceClient {
             pause_flag: pause_flag.clone(),
             error: None,
             dest_dir: dest_dir.to_path_buf(),
-            filename: filename.clone(),
+            filename: first_filename.clone(),
+            files: files.clone(),
+            files_completed: 0,
             download_request: Some(request.clone()),
             known_sha256: known_sha256.clone(),
         };
@@ -972,7 +1104,8 @@ impl HuggingFaceClient {
             let _ = persistence.save(&PersistedDownload {
                 download_id: download_id.clone(),
                 repo_id: request.repo_id.clone(),
-                filename: filename.clone(),
+                filename: first_filename.clone(),
+                filenames: files.iter().map(|f| f.filename.clone()).collect(),
                 dest_dir: dest_dir.to_path_buf(),
                 total_bytes,
                 status: DownloadStatus::Queued,
@@ -981,6 +1114,12 @@ impl HuggingFaceClient {
                 known_sha256: known_sha256.clone(),
             });
         }
+
+        info!(
+            "Starting download {} for {} ({} file{})",
+            download_id, request.repo_id, files.len(),
+            if files.len() == 1 { "" } else { "s" }
+        );
 
         // Spawn download task (uses download_client which has no total timeout)
         let client = self.download_client.clone();
@@ -997,7 +1136,7 @@ impl HuggingFaceClient {
                 downloads.clone(),
                 &download_id_clone,
                 &repo_id,
-                &filename,
+                &files,
                 &dest_dir,
                 cancel_flag,
                 pause_flag,
@@ -1009,11 +1148,11 @@ impl HuggingFaceClient {
             if let Err(e) = result {
                 // DownloadPaused is not a real error -- status already set by run_download
                 if matches!(e, PumasError::DownloadPaused) {
-                    info!("Download paused for {}/{}", repo_id, filename);
+                    info!("Download paused for {}", repo_id);
                     // Persistence already updated in run_download
                     return;
                 }
-                error!("Download failed for {}/{}: {}", repo_id, filename, e);
+                error!("Download failed for {}: {}", repo_id, e);
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
@@ -1035,12 +1174,15 @@ impl HuggingFaceClient {
     }
 
     /// Run the download in the background with retry and resume support.
+    ///
+    /// Downloads all files sequentially. Files that already exist on disk
+    /// (from a previous partial download) are skipped automatically.
     async fn run_download(
         client: Client,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
         download_id: &str,
         repo_id: &str,
-        filename: &str,
+        files: &[FileToDownload],
         dest_dir: &Path,
         cancel_flag: Arc<AtomicBool>,
         pause_flag: Arc<AtomicBool>,
@@ -1058,191 +1200,272 @@ impl HuggingFaceClient {
             }
         }
 
-        let url = format!("{}/{}/resolve/main/{}", HF_HUB_BASE, repo_id, filename);
-
         std::fs::create_dir_all(dest_dir)?;
-        let dest_path = dest_dir.join(filename);
-        let part_path = dest_dir.join(format!(
-            "{}{}",
-            filename,
-            NetworkConfig::DOWNLOAD_TEMP_SUFFIX
-        ));
-
-        // Get total_bytes from DownloadState (set by start_download from repo tree)
-        let total_bytes_expected = {
-            let downloads = downloads.read().await;
-            downloads.get(download_id).and_then(|s| s.total_bytes)
-        };
 
         let retry_config = RetryConfig::new()
             .with_max_attempts(NetworkConfig::HF_DOWNLOAD_MAX_RETRIES)
             .with_base_delay(NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY);
 
-        let mut last_error: Option<PumasError> = None;
+        // Download each file sequentially
+        let mut bytes_offset: u64 = 0;
 
-        for attempt in 0..retry_config.max_attempts {
-            // Check cancellation before each attempt
-            if cancel_flag.load(Ordering::Relaxed) {
-                let _ = tokio::fs::remove_file(&part_path).await;
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(download_id) {
-                    state.status = DownloadStatus::Cancelled;
-                }
-                if let Some(ref persistence) = persistence {
-                    let _ = persistence.remove(download_id);
-                }
-                return Err(PumasError::DownloadCancelled);
-            }
+        for (file_idx, file_info) in files.iter().enumerate() {
+            let filename = &file_info.filename;
+            let dest_path = dest_dir.join(filename);
+            let part_path = dest_dir.join(format!(
+                "{}{}",
+                filename,
+                NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+            ));
 
-            // Check pause before each attempt
-            if pause_flag.load(Ordering::Relaxed) {
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(download_id) {
-                    state.status = DownloadStatus::Paused;
-                }
-                if let Some(ref persistence) = persistence {
-                    Self::persist_status_update(persistence, download_id, DownloadStatus::Paused);
-                }
-                return Err(PumasError::DownloadPaused);
-            }
-
-            // Determine resume offset from existing .part file
-            let resume_from_byte = tokio::fs::metadata(&part_path)
-                .await
-                .map(|m| m.len())
-                .unwrap_or(0);
-
-            if attempt > 0 {
-                warn!(
-                    "Retry {}/{} for {}/{} (resuming from byte {})",
-                    attempt + 1,
-                    retry_config.max_attempts,
-                    repo_id,
-                    filename,
-                    resume_from_byte
+            // Skip files that already exist (completed from previous run)
+            if dest_path.exists() {
+                let existing_size = tokio::fs::metadata(&dest_path)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                bytes_offset += existing_size;
+                info!(
+                    "Skipping already-downloaded file {}/{} ({} bytes)",
+                    repo_id, filename, existing_size
                 );
 
-                // Reset status to Downloading for the retry
+                // Update state
+                {
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.files_completed = file_idx + 1;
+                        state.downloaded_bytes = bytes_offset;
+                        if let Some(total) = state.total_bytes {
+                            state.progress = bytes_offset as f32 / total as f32;
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Update current filename in state
+            {
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(download_id) {
-                    state.status = DownloadStatus::Downloading;
-                    state.error = None;
+                    state.filename = filename.clone();
                 }
             }
 
-            match Self::download_attempt(
-                &client,
-                &downloads,
-                download_id,
-                &url,
-                &part_path,
-                total_bytes_expected,
-                resume_from_byte,
-                &cancel_flag,
-                &pause_flag,
-            )
-            .await
-            {
-                Ok(_) => {
-                    // Rename .part to final path atomically
-                    tokio::fs::rename(&part_path, &dest_path).await.map_err(
-                        |e| PumasError::DownloadFailed {
-                            url: url.clone(),
-                            message: format!("Failed to rename temp file: {}", e),
-                        },
-                    )?;
+            let url = format!("{}/{}/resolve/main/{}", HF_HUB_BASE, repo_id, filename);
 
-                    // Update status to completed and extract callback info
-                    let completion_info = {
-                        let mut downloads = downloads.write().await;
-                        if let Some(state) = downloads.get_mut(download_id) {
-                            state.status = DownloadStatus::Completed;
-                            state.progress = 1.0;
+            let mut last_error: Option<PumasError> = None;
 
-                            // Build completion info from state
-                            state.download_request.as_ref().map(|req| {
-                                DownloadCompletionInfo {
-                                    download_id: download_id.to_string(),
-                                    dest_dir: state.dest_dir.clone(),
-                                    filename: state.filename.clone(),
-                                    download_request: req.clone(),
-                                    known_sha256: state.known_sha256.clone(),
-                                }
-                            })
-                        } else {
-                            None
-                        }
-                    };
-
-                    // Invoke completion callback for in-place import
-                    if let (Some(ref callback), Some(info)) =
-                        (&completion_callback, completion_info)
-                    {
-                        callback(info);
+            let mut file_completed = false;
+            for attempt in 0..retry_config.max_attempts {
+                // Check cancellation before each attempt
+                if cancel_flag.load(Ordering::Relaxed) {
+                    let _ = tokio::fs::remove_file(&part_path).await;
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.status = DownloadStatus::Cancelled;
                     }
-
-                    // Remove from persistence -- download is done
                     if let Some(ref persistence) = persistence {
                         let _ = persistence.remove(download_id);
                     }
-
-                    return Ok(());
+                    return Err(PumasError::DownloadCancelled);
                 }
-                Err(e) => {
-                    // Paused -- .part preserved, not a real error
-                    if matches!(e, PumasError::DownloadPaused) {
-                        if let Some(ref persistence) = persistence {
-                            Self::persist_status_update(persistence, download_id, DownloadStatus::Paused);
-                        }
-                        return Err(e);
-                    }
 
-                    if !e.is_retryable() || cancel_flag.load(Ordering::Relaxed) {
-                        // Only delete .part on cancel; preserve on other errors for resume
-                        if cancel_flag.load(Ordering::Relaxed) {
-                            let _ = tokio::fs::remove_file(&part_path).await;
-                            if let Some(ref persistence) = persistence {
-                                let _ = persistence.remove(download_id);
-                            }
-                        }
-                        return Err(e);
+                // Check pause before each attempt
+                if pause_flag.load(Ordering::Relaxed) {
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.status = DownloadStatus::Paused;
                     }
+                    if let Some(ref persistence) = persistence {
+                        Self::persist_status_update(
+                            persistence,
+                            download_id,
+                            DownloadStatus::Paused,
+                        );
+                    }
+                    return Err(PumasError::DownloadPaused);
+                }
 
+                // Determine resume offset from existing .part file
+                let resume_from_byte = tokio::fs::metadata(&part_path)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+
+                if attempt > 0 {
                     warn!(
-                        "Download attempt {}/{} failed for {}/{}: {}",
+                        "Retry {}/{} for {}/{} (resuming from byte {})",
                         attempt + 1,
                         retry_config.max_attempts,
                         repo_id,
                         filename,
-                        e
+                        resume_from_byte
                     );
-                    last_error = Some(e);
 
-                    if attempt + 1 < retry_config.max_attempts {
-                        let delay = retry_config.calculate_delay(attempt);
-                        debug!("Waiting {:?} before retry", delay);
-                        tokio::time::sleep(delay).await;
+                    // Reset status to Downloading for the retry
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.status = DownloadStatus::Downloading;
+                        state.error = None;
+                    }
+                }
+
+                match Self::download_attempt(
+                    &client,
+                    &downloads,
+                    download_id,
+                    &url,
+                    &part_path,
+                    file_info.size,
+                    resume_from_byte,
+                    bytes_offset,
+                    &cancel_flag,
+                    &pause_flag,
+                )
+                .await
+                {
+                    Ok(_) => {
+                        // Rename .part to final path atomically
+                        tokio::fs::rename(&part_path, &dest_path).await.map_err(
+                            |e| PumasError::DownloadFailed {
+                                url: url.clone(),
+                                message: format!("Failed to rename temp file: {}", e),
+                            },
+                        )?;
+
+                        file_completed = true;
+                        break;
+                    }
+                    Err(e) => {
+                        // Paused -- .part preserved, not a real error
+                        if matches!(e, PumasError::DownloadPaused) {
+                            if let Some(ref persistence) = persistence {
+                                Self::persist_status_update(
+                                    persistence,
+                                    download_id,
+                                    DownloadStatus::Paused,
+                                );
+                            }
+                            return Err(e);
+                        }
+
+                        if !e.is_retryable() || cancel_flag.load(Ordering::Relaxed) {
+                            if cancel_flag.load(Ordering::Relaxed) {
+                                let _ = tokio::fs::remove_file(&part_path).await;
+                                if let Some(ref persistence) = persistence {
+                                    let _ = persistence.remove(download_id);
+                                }
+                            }
+                            return Err(e);
+                        }
+
+                        warn!(
+                            "Download attempt {}/{} failed for {}/{}: {}",
+                            attempt + 1,
+                            retry_config.max_attempts,
+                            repo_id,
+                            filename,
+                            e
+                        );
+                        last_error = Some(e);
+
+                        if attempt + 1 < retry_config.max_attempts {
+                            let delay = retry_config.calculate_delay(attempt);
+                            debug!("Waiting {:?} before retry", delay);
+                            tokio::time::sleep(delay).await;
+                        }
                     }
                 }
             }
+
+            if !file_completed {
+                return Err(last_error.unwrap_or_else(|| PumasError::DownloadFailed {
+                    url,
+                    message: "All retry attempts exhausted".to_string(),
+                }));
+            }
+
+            // File completed -- use actual file size for accurate offset
+            let actual_size = tokio::fs::metadata(&dest_path)
+                .await
+                .map(|m| m.len())
+                .unwrap_or(file_info.size.unwrap_or(0));
+            bytes_offset += actual_size;
+            {
+                let mut downloads = downloads.write().await;
+                if let Some(state) = downloads.get_mut(download_id) {
+                    state.files_completed = file_idx + 1;
+                    state.downloaded_bytes = bytes_offset;
+                }
+            }
+
+            info!(
+                "File {}/{} complete ({}/{})",
+                repo_id,
+                filename,
+                file_idx + 1,
+                files.len()
+            );
         }
 
-        // All retries exhausted -- preserve .part for potential resume
-        Err(last_error.unwrap_or_else(|| PumasError::DownloadFailed {
-            url,
-            message: "All retry attempts exhausted".to_string(),
-        }))
+        // All files completed -- update status and fire callback
+        let completion_info = {
+            let mut downloads = downloads.write().await;
+            if let Some(state) = downloads.get_mut(download_id) {
+                state.status = DownloadStatus::Completed;
+                state.progress = 1.0;
+                state.files_completed = files.len();
+
+                state.download_request.as_ref().map(|req| {
+                    // Use the primary (largest) filename for the completion info
+                    let primary_filename = files
+                        .iter()
+                        .max_by_key(|f| f.size.unwrap_or(0))
+                        .map(|f| f.filename.clone())
+                        .unwrap_or_else(|| state.filename.clone());
+
+                    DownloadCompletionInfo {
+                        download_id: download_id.to_string(),
+                        dest_dir: state.dest_dir.clone(),
+                        filename: primary_filename,
+                        filenames: files.iter().map(|f| f.filename.clone()).collect(),
+                        download_request: req.clone(),
+                        known_sha256: state.known_sha256.clone(),
+                    }
+                })
+            } else {
+                None
+            }
+        };
+
+        // Invoke completion callback for in-place import
+        if let (Some(ref callback), Some(info)) = (&completion_callback, completion_info) {
+            callback(info);
+        }
+
+        // Remove from persistence -- download is done
+        if let Some(ref persistence) = persistence {
+            let _ = persistence.remove(download_id);
+        }
+
+        Ok(())
     }
 
     /// Execute a single download attempt, optionally resuming from a byte offset.
+    ///
+    /// `file_size_expected` is the expected size of this individual file.
+    /// `bytes_offset` is bytes already downloaded from previous files in a multi-file download.
+    /// Overall progress is calculated as `(bytes_offset + file_downloaded) / overall_total`.
     async fn download_attempt(
         client: &Client,
         downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
         download_id: &str,
         url: &str,
         part_path: &Path,
-        total_bytes_expected: Option<u64>,
+        file_size_expected: Option<u64>,
         resume_from_byte: u64,
+        bytes_offset: u64,
         cancel_flag: &Arc<AtomicBool>,
         pause_flag: &Arc<AtomicBool>,
     ) -> Result<()> {
@@ -1276,12 +1499,11 @@ impl HuggingFaceClient {
             warn!("Server does not support Range requests, restarting from zero");
         }
 
-        // For resumed downloads, content_length is the remaining bytes.
-        // Use total_bytes_expected for progress tracking.
-        let effective_total = if is_resuming {
-            total_bytes_expected
+        // Per-file total for completeness verification
+        let file_total = if is_resuming {
+            file_size_expected
         } else {
-            response.content_length().or(total_bytes_expected)
+            response.content_length().or(file_size_expected)
         };
 
         // Open file: append for resume, create for fresh start
@@ -1332,7 +1554,7 @@ impl HuggingFaceClient {
             file.write_all(&chunk).await?;
             downloaded += chunk.len() as u64;
 
-            // Update progress
+            // Update overall progress (bytes_offset accounts for completed files)
             let elapsed = start_time.elapsed().as_secs_f64();
             let speed = if elapsed > 0.0 {
                 downloaded as f64 / elapsed
@@ -1340,26 +1562,25 @@ impl HuggingFaceClient {
                 0.0
             };
 
-            let progress = if let Some(total) = effective_total {
-                downloaded as f32 / total as f32
-            } else {
-                0.0
-            };
+            let overall_downloaded = bytes_offset + downloaded;
 
             let mut downloads = downloads.write().await;
             if let Some(state) = downloads.get_mut(download_id) {
-                state.downloaded_bytes = downloaded;
-                state.total_bytes = effective_total;
-                state.progress = progress;
+                state.downloaded_bytes = overall_downloaded;
                 state.speed = speed;
+                state.progress = if let Some(total) = state.total_bytes {
+                    overall_downloaded as f32 / total as f32
+                } else {
+                    0.0
+                };
             }
         }
 
         file.flush().await?;
         drop(file);
 
-        // Verify download completeness
-        if let Some(total) = effective_total {
+        // Verify this file's download completeness
+        if let Some(total) = file_total {
             if downloaded != total {
                 return Err(PumasError::Network {
                     message: format!(
@@ -1472,7 +1693,7 @@ impl HuggingFaceClient {
 
     /// Resume a paused or errored download from its `.part` file.
     pub async fn resume_download(&self, download_id: &str) -> Result<bool> {
-        let (repo_id, filename, dest_dir, cancel_flag, pause_flag) = {
+        let (repo_id, files, dest_dir, cancel_flag, pause_flag) = {
             let mut downloads = self.downloads.write().await;
             let state = match downloads.get_mut(download_id) {
                 Some(s) => s,
@@ -1492,7 +1713,7 @@ impl HuggingFaceClient {
 
             (
                 state.repo_id.clone(),
-                state.filename.clone(),
+                state.files.clone(),
                 state.dest_dir.clone(),
                 state.cancel_flag.clone(),
                 state.pause_flag.clone(),
@@ -1517,7 +1738,7 @@ impl HuggingFaceClient {
                 downloads.clone(),
                 &download_id_clone,
                 &repo_id,
-                &filename,
+                &files,
                 &dest_dir,
                 cancel_flag,
                 pause_flag,
@@ -1528,10 +1749,10 @@ impl HuggingFaceClient {
 
             if let Err(e) = result {
                 if matches!(e, PumasError::DownloadPaused) {
-                    info!("Download paused for {}/{}", repo_id, filename);
+                    info!("Download paused for {}", repo_id);
                     return;
                 }
-                error!("Download failed for {}/{}: {}", repo_id, filename, e);
+                error!("Download failed for {}: {}", repo_id, e);
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
@@ -1625,6 +1846,85 @@ impl WebSource for HuggingFaceClient {
     }
 }
 
+/// Infer a pipeline_tag from the model config when the API doesn't provide one.
+///
+/// Checks in order:
+/// 1. Architecture class suffix (e.g. `LlamaForCausalLM` → `text-generation`)
+/// 2. Known `model_type` values (e.g. `sdar` → `text-generation`)
+fn infer_pipeline_tag_from_config(config: Option<&HfModelConfig>) -> Option<String> {
+    let config = config?;
+
+    // 1. Check architecture suffix (longest suffixes first to avoid partial matches)
+    if let Some(arch) = config.architectures.first() {
+        let suffix_map: &[(&str, &str)] = &[
+            ("ForConditionalGeneration", "text2text-generation"),
+            ("ForSequenceClassification", "text-classification"),
+            ("ForSemanticSegmentation", "image-segmentation"),
+            ("ForImageClassification", "image-classification"),
+            ("ForAudioClassification", "audio-classification"),
+            ("ForTokenClassification", "token-classification"),
+            ("ForQuestionAnswering", "question-answering"),
+            ("ForFeatureExtraction", "feature-extraction"),
+            ("ForObjectDetection", "object-detection"),
+            ("ForSpeechSeq2Seq", "automatic-speech-recognition"),
+            ("ForCausalLM", "text-generation"),
+            ("ForMaskedLM", "fill-mask"),
+        ];
+
+        for (suffix, tag) in suffix_map {
+            if arch.ends_with(suffix) {
+                return Some(tag.to_string());
+            }
+        }
+    }
+
+    // 2. Fall back to model_type lookup
+    let model_type = config.model_type.as_deref()?;
+    let tag = match model_type {
+        // Text generation (LLMs, DLLMs, SSMs)
+        "llama" | "mistral" | "mixtral" | "gpt2" | "gpt_neo" | "gpt_neox" | "gptj"
+        | "phi" | "phi3" | "phimoe"
+        | "qwen2" | "qwen2_moe" | "qwen3" | "qwen3_moe"
+        | "gemma" | "gemma2" | "gemma3"
+        | "deepseek_v2" | "deepseek_v3"
+        | "falcon" | "falcon_mamba"
+        | "mpt" | "bloom" | "opt" | "codegen" | "starcoder2"
+        | "cohere" | "cohere2" | "command-r"
+        | "internlm2" | "internlm3"
+        | "olmo" | "olmo2"
+        | "rwkv" | "rwkv5" | "rwkv6"
+        | "mamba" | "mamba2" | "jamba"
+        | "sdar" | "recurrentgemma" | "dbrx"
+        | "stablelm" | "persimmon" | "xglm" | "gpt_bigcode" => "text-generation",
+
+        // Seq2seq / conditional generation
+        "t5" | "bart" | "mbart" | "mt5" | "longt5" | "pegasus" | "led"
+        | "bigbird_pegasus" | "flan-t5" => "text2text-generation",
+
+        // Diffusion / image generation
+        "stable_diffusion" | "sdxl" | "kandinsky" | "pixart" => "text-to-image",
+
+        // Speech recognition
+        "whisper" | "wav2vec2" | "hubert" | "wavlm" | "seamless_m4t" => {
+            "automatic-speech-recognition"
+        }
+
+        // Vision-language / zero-shot
+        "clip" | "siglip" | "blip" | "blip2" => "zero-shot-image-classification",
+
+        // Image classification
+        "vit" | "swin" | "convnext" | "deit" | "beit" | "dinov2" => "image-classification",
+
+        // Masked LM / encoders
+        "bert" | "roberta" | "distilbert" | "albert" | "electra"
+        | "deberta" | "deberta_v2" | "xlm_roberta" | "camembert" | "flaubert" => "fill-mask",
+
+        _ => return None,
+    };
+
+    Some(tag.to_string())
+}
+
 /// HuggingFace search result from API.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1644,6 +1944,18 @@ struct HfSearchResult {
     /// File list from repo (available with full=true)
     #[serde(default)]
     siblings: Vec<HfSibling>,
+    /// Model config (available with config=true in search, always in direct endpoint)
+    #[serde(default)]
+    config: Option<HfModelConfig>,
+}
+
+/// Subset of the HuggingFace model config relevant for type inference.
+#[derive(Debug, Deserialize)]
+struct HfModelConfig {
+    #[serde(default)]
+    architectures: Vec<String>,
+    #[serde(default, rename = "model_type")]
+    model_type: Option<String>,
 }
 
 /// HuggingFace sibling file entry from search API.
@@ -1727,6 +2039,7 @@ mod tests {
             last_modified: Some("2024-01-01".to_string()),
             downloads: Some(10000),
             siblings: vec![],
+            config: None,
         };
 
         let model = client.convert_search_result(mock_result);

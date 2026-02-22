@@ -37,10 +37,12 @@ dirs = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# HTTP client (for plugin health checks)
+reqwest = { workspace = true }
+
 # CLI argument parsing
 clap = { version = "4", features = ["derive"] }
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }
-reqwest = { workspace = true }

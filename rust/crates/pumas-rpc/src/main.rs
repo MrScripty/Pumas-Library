@@ -11,7 +11,7 @@ mod wrapper;
 use anyhow::Result;
 use clap::Parser;
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
-use pumas_library::AppId;
+use pumas_library::{AppId, PluginLoader};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tracing::{info, warn, Level};
@@ -107,6 +107,17 @@ async fn main() -> Result<()> {
         }
     }
 
+    // Torch version manager
+    match VersionManager::new(&launcher_root, AppId::Torch).await {
+        Ok(mgr) => {
+            info!("Torch version manager initialized successfully");
+            version_managers.insert("torch".to_string(), mgr);
+        }
+        Err(e) => {
+            warn!("Failed to initialize Torch version manager: {}", e);
+        }
+    }
+
     info!("Initialized {} version manager(s)", version_managers.len());
 
     // Initialize custom nodes manager
@@ -121,12 +132,26 @@ async fn main() -> Result<()> {
     let size_calculator = SizeCalculator::new(cache_dir);
     info!("Size calculator initialized");
 
+    // Initialize plugin loader
+    let plugins_dir = launcher_root.join("launcher-data").join("plugins");
+    let plugin_loader = match PluginLoader::new(&plugins_dir) {
+        Ok(loader) => {
+            info!("Plugin loader initialized ({} plugins)", loader.count());
+            loader
+        }
+        Err(e) => {
+            warn!("Failed to initialize plugin loader: {}, using empty loader", e);
+            PluginLoader::new(std::env::temp_dir().join("pumas-plugins-fallback")).unwrap()
+        }
+    };
+
     // Start the server
     let addr = server::start_server(
         api,
         version_managers,
         custom_nodes_manager,
         size_calculator,
+        plugin_loader,
         launcher_root,
         &args.host,
         args.port,

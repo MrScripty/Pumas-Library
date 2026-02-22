@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use pumas_app_manager::{CustomNodesManager, VersionManager, SizeCalculator};
-use pumas_library::PumasApi;
+use pumas_library::{PumasApi, PluginLoader};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -28,6 +28,8 @@ pub struct AppState {
     pub size_calculator: Arc<RwLock<SizeCalculator>>,
     /// Shortcut manager for desktop/menu shortcuts
     pub shortcut_manager: Arc<RwLock<Option<ShortcutManager>>>,
+    /// Plugin configuration loader
+    pub plugin_loader: Arc<PluginLoader>,
     /// Launcher root directory
     pub launcher_root: PathBuf,
 }
@@ -40,6 +42,7 @@ pub async fn start_server(
     version_managers: HashMap<String, VersionManager>,
     custom_nodes_manager: CustomNodesManager,
     size_calculator: SizeCalculator,
+    plugin_loader: PluginLoader,
     launcher_root: PathBuf,
     host: &str,
     port: u16,
@@ -62,6 +65,7 @@ pub async fn start_server(
         custom_nodes_manager: Arc::new(custom_nodes_manager),
         size_calculator: Arc::new(RwLock::new(size_calculator)),
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
+        plugin_loader: Arc::new(plugin_loader),
         launcher_root,
     });
 
@@ -123,11 +127,16 @@ mod tests {
         let cache_dir = launcher_root.join("launcher-data").join("cache");
         let size_calculator = SizeCalculator::new(cache_dir);
 
+        // Initialize plugin loader
+        let plugins_dir = launcher_root.join("launcher-data").join("plugins");
+        let plugin_loader = PluginLoader::new(&plugins_dir).unwrap();
+
         let addr = start_server(
             api,
             version_managers,
             custom_nodes_manager,
             size_calculator,
+            plugin_loader,
             launcher_root,
             "127.0.0.1",
             0,

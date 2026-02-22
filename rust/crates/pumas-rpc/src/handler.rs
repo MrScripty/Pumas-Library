@@ -979,6 +979,223 @@ async fn dispatch_method(
         }
 
         // ====================================================================
+        // Torch Inference Server
+        // ====================================================================
+        "torch_list_slots" => {
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            let slots = client.list_slots().await?;
+            Ok(json!({
+                "success": true,
+                "slots": slots
+            }))
+        }
+
+        "torch_load_model" => {
+            let model_id = require_str_param!(params, "model_id", "modelId");
+            let device = get_str_param!(params, "device", "device").unwrap_or("auto");
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+
+            // Resolve model path from library
+            let library = api.model_library();
+            let primary_file = library.get_primary_model_file(&model_id);
+            let model_path = match primary_file {
+                Some(path) => path,
+                None => {
+                    // For safetensors, the model directory itself may be the path
+                    let model_dir = library.library_root().join(&model_id);
+                    if model_dir.exists() {
+                        model_dir
+                    } else {
+                        return Ok(json!({
+                            "success": false,
+                            "error": format!("No model found for '{}'", model_id)
+                        }));
+                    }
+                }
+            };
+
+            let model_record = library.get_model(&model_id).await?;
+            let model_name = model_record
+                .as_ref()
+                .map(|r| r.cleaned_name.clone())
+                .unwrap_or_else(|| model_id.split('/').last().unwrap_or(&model_id).to_string());
+
+            let compute_device = pumas_app_manager::ComputeDevice::from_server_string(device);
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            let slot = client.load_model(
+                &model_path.to_string_lossy(),
+                &model_name,
+                &compute_device,
+                None,
+            ).await?;
+
+            Ok(json!({
+                "success": true,
+                "slot": slot
+            }))
+        }
+
+        "torch_unload_model" => {
+            let slot_id = require_str_param!(params, "slot_id", "slotId");
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            client.unload_model(&slot_id).await?;
+
+            Ok(json!({ "success": true }))
+        }
+
+        "torch_get_status" => {
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            let status = client.get_status().await?;
+
+            Ok(json!({
+                "success": true,
+                "status": status
+            }))
+        }
+
+        "torch_list_devices" => {
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            let devices = client.list_devices().await?;
+
+            Ok(json!({
+                "success": true,
+                "devices": devices
+            }))
+        }
+
+        "torch_configure" => {
+            let connection_url = get_str_param!(params, "connection_url", "connectionUrl");
+            let config: pumas_app_manager::TorchServerConfig = serde_json::from_value(
+                params.get("config").cloned().unwrap_or_default()
+            ).map_err(|e| pumas_library::PumasError::InvalidParams {
+                message: format!("Invalid torch config: {}", e),
+            })?;
+
+            let client = pumas_app_manager::TorchClient::new(connection_url);
+            client.configure(&config).await?;
+
+            Ok(json!({ "success": true }))
+        }
+
+        "launch_torch" => {
+            let managers = state.version_managers.read().await;
+            info!("launch_torch: checking for torch version manager");
+            if let Some(vm) = managers.get("torch") {
+                let active = vm.get_active_version().await?;
+                info!("launch_torch: active version: {:?}", active);
+                if let Some(tag) = active {
+                    let version_dir = vm.version_path(&tag);
+                    info!("launch_torch: launching tag={} from {:?}", tag, version_dir);
+                    drop(managers);
+                    let response = api.launch_torch(&tag, &version_dir).await?;
+                    info!("launch_torch: result success={}", response.success);
+                    Ok(serde_json::to_value(response)?)
+                } else {
+                    warn!("launch_torch: no active version set");
+                    Ok(json!({
+                        "success": false,
+                        "error": "No active Torch version set"
+                    }))
+                }
+            } else {
+                warn!("launch_torch: version manager not initialized");
+                Ok(json!({
+                    "success": false,
+                    "error": "Version manager not initialized for torch"
+                }))
+            }
+        }
+
+        "stop_torch" => {
+            let result = api.stop_torch().await?;
+            Ok(json!({ "success": result }))
+        }
+
+        "is_torch_running" => {
+            let running = api.is_torch_running().await;
+            Ok(serde_json::to_value(running)?)
+        }
+
+        // ====================================================================
+        // Plugin System
+        // ====================================================================
+        "get_plugins" => {
+            let plugins = state.plugin_loader.get_enabled();
+            Ok(json!({
+                "success": true,
+                "plugins": serde_json::to_value(plugins)?
+            }))
+        }
+
+        "get_plugin" => {
+            let app_id = require_str_param!(params, "app_id", "appId");
+            let plugin = state.plugin_loader.get(&app_id);
+            match plugin {
+                Some(config) => Ok(json!({
+                    "success": true,
+                    "plugin": serde_json::to_value(config)?
+                })),
+                None => Ok(json!({
+                    "success": false,
+                    "error": format!("Plugin not found: {}", app_id)
+                })),
+            }
+        }
+
+        "check_plugin_health" => {
+            let app_id = require_str_param!(params, "app_id", "appId");
+            let plugin = state.plugin_loader.get(&app_id);
+            match plugin {
+                Some(config) => {
+                    if let Some(conn) = &config.connection {
+                        let health_endpoint = conn.health_endpoint.as_deref().unwrap_or("/health");
+                        let url = format!("{}://localhost:{}{}", conn.protocol, conn.default_port, health_endpoint);
+                        let client = reqwest::Client::builder()
+                            .timeout(std::time::Duration::from_secs(3))
+                            .build()
+                            .unwrap_or_default();
+                        let healthy = client.get(&url).send().await.map(|r| r.status().is_success()).unwrap_or(false);
+                        Ok(json!({
+                            "success": true,
+                            "healthy": healthy
+                        }))
+                    } else {
+                        Ok(json!({
+                            "success": true,
+                            "healthy": false
+                        }))
+                    }
+                }
+                None => Ok(json!({
+                    "success": false,
+                    "error": format!("Plugin not found: {}", app_id),
+                    "healthy": false
+                })),
+            }
+        }
+
+        "get_app_status" => {
+            let app_id = require_str_param!(params, "app_id", "appId");
+            let running = match app_id.as_str() {
+                "comfyui" => api.is_comfyui_running().await,
+                "ollama" => api.is_ollama_running().await,
+                "torch" => api.is_torch_running().await,
+                _ => false,
+            };
+            Ok(json!({
+                "success": true,
+                "running": running
+            }))
+        }
+
+        // ====================================================================
         // Shortcuts (uses version_manager for version_dir)
         // ====================================================================
         "get_version_shortcuts" => {

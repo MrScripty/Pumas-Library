@@ -3,6 +3,8 @@
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 
+use crate::conversion::ConversionSource;
+
 /// Hashes for a model's primary file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -150,6 +152,9 @@ pub struct ModelMetadata {
     pub lookup_attempts: Option<u32>,
     #[serde(default)]
     pub last_lookup_attempt: Option<String>,
+    // Conversion provenance tracking
+    #[serde(default)]
+    pub conversion_source: Option<ConversionSource>,
 }
 
 /// User overrides for model mapping.

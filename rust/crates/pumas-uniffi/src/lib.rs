@@ -230,6 +230,8 @@ impl From<pumas_library::PumasError> for FfiError {
             PumasError::NoLibrariesRegistered => FfiError::Config {
                 message: "No libraries registered".to_string(),
             },
+            PumasError::ConversionFailed { message } => FfiError::Model { message },
+            PumasError::ConversionCancelled => FfiError::Cancelled,
             PumasError::Other(message) => FfiError::Other(message),
         }
     }

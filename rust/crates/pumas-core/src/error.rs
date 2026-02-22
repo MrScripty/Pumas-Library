@@ -149,6 +149,13 @@ pub enum PumasError {
     #[error("No libraries registered. Initialize with an explicit path first.")]
     NoLibrariesRegistered,
 
+    // Model conversion errors
+    #[error("Model conversion failed: {message}")]
+    ConversionFailed { message: String },
+
+    #[error("Model conversion cancelled")]
+    ConversionCancelled,
+
     // Generic errors
     #[error("{0}")]
     Other(String),
@@ -250,11 +257,13 @@ impl PumasError {
             | PumasError::DependencyFailed { .. }
             | PumasError::LaunchFailed { .. }
             | PumasError::ImportFailed { .. }
-            | PumasError::DownloadFailed { .. } => -32003,
+            | PumasError::DownloadFailed { .. }
+            | PumasError::ConversionFailed { .. } => -32003,
 
             PumasError::InstallationCancelled
             | PumasError::DownloadCancelled
-            | PumasError::DownloadPaused => -32004,
+            | PumasError::DownloadPaused
+            | PumasError::ConversionCancelled => -32004,
 
             PumasError::Validation { .. }
             | PumasError::InvalidVersionTag { .. }

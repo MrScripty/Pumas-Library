@@ -611,6 +611,7 @@ impl ModelImporter {
             pending_online_lookup: Some(true), // Mark for HF lookup
             lookup_attempts: Some(0),
             last_lookup_attempt: None,
+            conversion_source: None,
         })
     }
 

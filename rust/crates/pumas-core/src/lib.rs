@@ -34,6 +34,7 @@ uniffi::setup_scaffolding!();
 pub mod cache;
 pub mod cancel;
 pub mod config;
+pub mod conversion;
 pub mod error;
 pub mod index;
 pub mod ipc;
@@ -113,6 +114,7 @@ pub(crate) struct PrimaryState {
     model_mapper: model_library::ModelMapper,
     hf_client: Option<model_library::HuggingFaceClient>,
     model_importer: model_library::ModelImporter,
+    conversion_manager: Arc<conversion::ConversionManager>,
     /// IPC server handle (Primary only). Protected by async Mutex for shutdown.
     server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
     /// Global registry connection (best-effort, None if unavailable).
@@ -159,6 +161,49 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 }))
             }
             "ping" => Ok(serde_json::json!("pong")),
+            // Conversion methods
+            "start_conversion" => {
+                let request: conversion::ConversionRequest =
+                    serde_json::from_value(params).map_err(|e| PumasError::InvalidParams {
+                        message: format!("Invalid conversion request: {e}"),
+                    })?;
+                let id = self.conversion_manager.start_conversion(request).await?;
+                Ok(serde_json::json!({ "conversion_id": id }))
+            }
+            "get_conversion_progress" => {
+                let id = params["conversion_id"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "conversion_id is required".to_string(),
+                    })?;
+                let progress = self.conversion_manager.get_progress(id);
+                Ok(serde_json::to_value(progress)?)
+            }
+            "cancel_conversion" => {
+                let id = params["conversion_id"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "conversion_id is required".to_string(),
+                    })?;
+                let cancelled = self.conversion_manager.cancel_conversion(id).await?;
+                Ok(serde_json::json!({ "cancelled": cancelled }))
+            }
+            "list_conversions" => {
+                let conversions = self.conversion_manager.list_conversions();
+                Ok(serde_json::to_value(conversions)?)
+            }
+            "is_conversion_environment_ready" => {
+                let ready = self.conversion_manager.is_environment_ready();
+                Ok(serde_json::json!({ "ready": ready }))
+            }
+            "ensure_conversion_environment" => {
+                self.conversion_manager.ensure_environment().await?;
+                Ok(serde_json::json!({ "success": true }))
+            }
+            "supported_quant_types" => {
+                let types = self.conversion_manager.supported_quant_types();
+                Ok(serde_json::to_value(types)?)
+            }
             _ => Err(PumasError::InvalidParams {
                 message: format!("Unknown IPC method: {}", method),
             }),
@@ -417,6 +462,13 @@ impl PumasApiBuilder {
             }));
         }
 
+        // Initialize conversion manager
+        let conversion_manager = Arc::new(conversion::ConversionManager::new(
+            self.launcher_root.clone(),
+            model_library.clone(),
+            Arc::new(model_library::ModelImporter::new(model_library.clone())),
+        ));
+
         // Best-effort registry connection (failures don't block initialization)
         let registry = match registry::LibraryRegistry::open() {
             Ok(reg) => Some(reg),
@@ -452,6 +504,7 @@ impl PumasApiBuilder {
             model_mapper,
             hf_client,
             model_importer,
+            conversion_manager,
             server_handle: tokio::sync::Mutex::new(None),
             registry,
         });
@@ -735,6 +788,13 @@ impl PumasApi {
             }));
         }
 
+        // Initialize conversion manager
+        let conversion_manager = Arc::new(conversion::ConversionManager::new(
+            launcher_root.clone(),
+            model_library.clone(),
+            Arc::new(model_library::ModelImporter::new(model_library.clone())),
+        ));
+
         // Best-effort registry connection
         let registry = match registry::LibraryRegistry::open() {
             Ok(reg) => Some(reg),
@@ -770,6 +830,7 @@ impl PumasApi {
             model_mapper,
             hf_client,
             model_importer,
+            conversion_manager,
             server_handle: tokio::sync::Mutex::new(None),
             registry,
         });
@@ -1679,6 +1740,53 @@ impl PumasApi {
 
         let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
         patch_mgr.toggle_patch(tag)
+    }
+
+    // ========================================
+    // Model Format Conversion Methods
+    // ========================================
+
+    /// Start a model format conversion (GGUF <-> Safetensors).
+    ///
+    /// Returns a conversion ID for tracking progress.
+    pub async fn start_conversion(
+        &self,
+        request: conversion::ConversionRequest,
+    ) -> Result<String> {
+        self.primary().conversion_manager.start_conversion(request).await
+    }
+
+    /// Get progress for a specific conversion.
+    pub fn get_conversion_progress(
+        &self,
+        conversion_id: &str,
+    ) -> Option<conversion::ConversionProgress> {
+        self.primary().conversion_manager.get_progress(conversion_id)
+    }
+
+    /// Cancel a running conversion.
+    pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
+        self.primary().conversion_manager.cancel_conversion(conversion_id).await
+    }
+
+    /// List all tracked conversions (active and recently completed).
+    pub fn list_conversions(&self) -> Vec<conversion::ConversionProgress> {
+        self.primary().conversion_manager.list_conversions()
+    }
+
+    /// Check if the Python conversion environment is ready.
+    pub fn is_conversion_environment_ready(&self) -> bool {
+        self.primary().conversion_manager.is_environment_ready()
+    }
+
+    /// Ensure the Python conversion environment is set up.
+    pub async fn ensure_conversion_environment(&self) -> Result<()> {
+        self.primary().conversion_manager.ensure_environment().await
+    }
+
+    /// Get the list of supported quantization types for conversion.
+    pub fn supported_quant_types(&self) -> Vec<conversion::QuantOption> {
+        self.primary().conversion_manager.supported_quant_types()
     }
 
     // ========================================

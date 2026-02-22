@@ -489,16 +489,20 @@ impl ModelLibrary {
     }
 
     /// Update model metadata from HuggingFace.
+    ///
+    /// When `force` is true, updates even if the metadata was manually set.
+    /// This is used for explicit user-initiated refetches.
     pub async fn update_metadata_from_hf(
         &self,
         model_id: &str,
         hf_metadata: &crate::model_library::types::HfMetadataResult,
+        force: bool,
     ) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
         let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
 
-        // Don't overwrite manual metadata
-        if metadata.match_source.as_deref() == Some("manual") {
+        // Don't overwrite manual metadata unless forced
+        if !force && metadata.match_source.as_deref() == Some("manual") {
             return Ok(());
         }
 
@@ -520,6 +524,11 @@ impl ModelLibrary {
         }
         if !hf_metadata.tags.is_empty() {
             metadata.tags = Some(hf_metadata.tags.clone());
+        }
+
+        // Update repo_id if previously missing
+        if metadata.repo_id.is_none() {
+            metadata.repo_id = Some(hf_metadata.repo_id.clone());
         }
 
         // Set match info

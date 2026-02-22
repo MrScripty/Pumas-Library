@@ -8,6 +8,7 @@ use crate::model_library::hashing::{compute_dual_hash, DualHash};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
+use crate::model_library::sharding;
 use crate::model_library::types::{
     BatchImportProgress, FileFormat, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
     ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
@@ -612,6 +613,8 @@ impl ModelImporter {
             lookup_attempts: Some(0),
             last_lookup_attempt: None,
             conversion_source: None,
+            repo_id: None,         // Set by caller (import_in_place) after creation
+            expected_files: None,  // Set by caller (import_in_place) after creation
         })
     }
 
@@ -665,6 +668,46 @@ impl ModelImporter {
         // Enumerate existing files (no copy needed)
         let files = self.enumerate_model_files(model_dir)?;
 
+        // Validate shard completeness — reject if any file is part of an incomplete set.
+        // Uses extract_shard_info per file to catch even single-shard-of-set cases
+        // (which detect_sharded_sets would treat as standalone).
+        for file_info in &files {
+            if let Some((base_name, _idx, Some(total))) =
+                sharding::extract_shard_info(&file_info.name)
+            {
+                if total > 1 {
+                    // Count how many shards of this set we actually have
+                    let found_count = files
+                        .iter()
+                        .filter(|f| {
+                            sharding::extract_shard_info(&f.name)
+                                .map(|(b, _, _)| b == base_name)
+                                .unwrap_or(false)
+                        })
+                        .count();
+                    if found_count < total {
+                        tracing::warn!(
+                            "Incomplete shard set '{}': found {}/{} shards",
+                            base_name,
+                            found_count,
+                            total,
+                        );
+                        return Ok(ModelImportResult {
+                            path: model_dir.display().to_string(),
+                            success: false,
+                            model_path: None,
+                            error: Some(format!(
+                                "Incomplete shard set '{}': have {}/{} shards",
+                                base_name, found_count, total,
+                            )),
+                            security_tier: None,
+                        });
+                    }
+                    break; // Only need to validate once per directory
+                }
+            }
+        }
+
         // Build hashes from known value or compute
         let hashes = if let Some(ref sha256) = spec.known_sha256 {
             Some(DualHash {
@@ -697,6 +740,10 @@ impl ModelImporter {
         } else {
             "orphan_recovery".to_string()
         });
+
+        // Persist download provenance
+        metadata.repo_id = spec.repo_id.clone();
+        metadata.expected_files = spec.expected_files.clone();
 
         // Save metadata.json
         self.library.save_metadata(model_dir, &metadata).await?;
@@ -795,6 +842,7 @@ impl ModelImporter {
                 repo_id: None,
                 known_sha256: None,
                 compute_hashes,
+                expected_files: None,
             };
 
             match self.import_in_place(&spec).await {
@@ -897,6 +945,128 @@ impl ModelImporter {
         orphans
     }
 
+    /// Scan for incomplete sharded models that need recovery downloads.
+    ///
+    /// Finds directories where:
+    /// - No `metadata.json` (shard validation rejected adoption)
+    /// - At least one file matches a shard pattern with a known total (e.g. `-00001-of-00004.`)
+    /// - Fewer files present than the total indicates
+    ///
+    /// Returns a list of recovery descriptors with the reconstructed repo_id
+    /// derived from the directory path (`{family}/{name}` → HF repo).
+    pub fn recover_incomplete_shards(&self) -> Vec<IncompleteShardRecovery> {
+        let library_root = self.library.library_root();
+        let model_extensions: &[&str] =
+            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
+        let mut results = Vec::new();
+
+        for entry in WalkDir::new(library_root)
+            .min_depth(1)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            let dir = entry.path();
+            let dir_name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
+                continue;
+            }
+
+            // Only process directories without metadata.json
+            if dir.join("metadata.json").exists() {
+                continue;
+            }
+
+            // Enumerate model files in this directory
+            let file_entries: Vec<_> = match std::fs::read_dir(dir) {
+                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+                Err(_) => continue,
+            };
+
+            let model_files: Vec<String> = file_entries
+                .iter()
+                .filter(|e| e.file_type().ok().map_or(false, |ft| ft.is_file()))
+                .filter_map(|e| {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    // Skip .part files and metadata
+                    if name.ends_with(".part") || name == "metadata.json" || name == "overrides.json"
+                    {
+                        return None;
+                    }
+                    let ext = e
+                        .path()
+                        .extension()
+                        .and_then(|x| x.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if model_extensions.contains(&ext.as_str()) {
+                        Some(name)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+
+            if model_files.is_empty() {
+                continue;
+            }
+
+            // Check if any file is part of an incomplete shard set
+            for filename in &model_files {
+                if let Some((base_name, _idx, Some(total))) =
+                    sharding::extract_shard_info(filename)
+                {
+                    if total > 1 {
+                        let found_count = model_files
+                            .iter()
+                            .filter(|f| {
+                                sharding::extract_shard_info(f)
+                                    .map(|(b, _, _)| b == base_name)
+                                    .unwrap_or(false)
+                            })
+                            .count();
+
+                        if found_count < total {
+                            // Incomplete shard set — try to reconstruct repo_id from path
+                            if let Some(inferred) = self.infer_spec_from_path(dir) {
+                                let repo_id =
+                                    format!("{}/{}", inferred.family, inferred.official_name);
+                                tracing::info!(
+                                    "Found incomplete shard set in {}: {}/{} shards of '{}', \
+                                     candidate repo: {}",
+                                    dir.display(),
+                                    found_count,
+                                    total,
+                                    base_name,
+                                    repo_id,
+                                );
+                                results.push(IncompleteShardRecovery {
+                                    model_dir: dir.to_path_buf(),
+                                    repo_id,
+                                    family: inferred.family,
+                                    official_name: inferred.official_name,
+                                    model_type: inferred.model_type,
+                                    existing_files: model_files.clone(),
+                                });
+                            }
+                            break; // One detection per directory is enough
+                        }
+                    }
+                }
+            }
+        }
+
+        results
+    }
+
     /// Infer model metadata from a directory path.
     ///
     /// Expects `{library_root}/{model_type}/{family}/{name}/`.
@@ -950,6 +1120,26 @@ pub struct InPlaceImportSpec {
     pub known_sha256: Option<String>,
     /// Whether to compute hashes if not provided (can be slow for large files).
     pub compute_hashes: bool,
+    /// Expected files for this model (from download manifest).
+    /// Stored in metadata to enable incomplete model detection.
+    pub expected_files: Option<Vec<String>>,
+}
+
+/// Descriptor for an incomplete sharded model that needs recovery download.
+#[derive(Debug, Clone)]
+pub struct IncompleteShardRecovery {
+    /// Directory containing the partial shard files.
+    pub model_dir: PathBuf,
+    /// Reconstructed HuggingFace repo ID (`{family}/{name}`).
+    pub repo_id: String,
+    /// Model family (from directory path).
+    pub family: String,
+    /// Official model name (from directory path).
+    pub official_name: String,
+    /// Model type (from directory path).
+    pub model_type: Option<String>,
+    /// Files currently present in the directory.
+    pub existing_files: Vec<String>,
 }
 
 /// Result of an orphan recovery scan.

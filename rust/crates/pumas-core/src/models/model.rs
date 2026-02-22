@@ -155,6 +155,14 @@ pub struct ModelMetadata {
     // Conversion provenance tracking
     #[serde(default)]
     pub conversion_source: Option<ConversionSource>,
+    // Download provenance
+    /// HuggingFace repository ID (e.g. "TheBloke/Llama-2-7B-GGUF").
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    /// Files that should exist for this model to be complete.
+    /// Populated from the download file list; enables incomplete detection.
+    #[serde(default)]
+    pub expected_files: Option<Vec<String>>,
 }
 
 /// User overrides for model mapping.

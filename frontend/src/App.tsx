@@ -543,6 +543,8 @@ export default function App() {
               activeShortcutState,
               diskSpacePercent,
               modelManagerProps,
+              isOllamaRunning: ollamaRunning,
+              modelGroups,
             }}
             fallback={{
               appDisplayName,

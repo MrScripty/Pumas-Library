@@ -1,7 +1,9 @@
 import { AppConnectionInfo } from '../AppConnectionInfo';
 import { ModelManager, type ModelManagerProps } from '../ModelManager';
 import { VersionManagementPanel } from './VersionManagementPanel';
+import { OllamaModelSection } from './sections/OllamaModelSection';
 import type { AppVersionState } from '../../utils/appVersionState';
+import type { ModelCategory } from '../../types/apps';
 
 export interface OllamaPanelProps {
   appDisplayName: string;
@@ -12,6 +14,8 @@ export interface OllamaPanelProps {
   activeShortcutState?: { menu: boolean; desktop: boolean };
   diskSpacePercent: number;
   modelManagerProps: ModelManagerProps;
+  isOllamaRunning: boolean;
+  modelGroups: ModelCategory[];
 }
 
 export function OllamaPanel({
@@ -23,6 +27,8 @@ export function OllamaPanel({
   activeShortcutState,
   diskSpacePercent,
   modelManagerProps,
+  isOllamaRunning,
+  modelGroups,
 }: OllamaPanelProps) {
   const isManagerOpen = versions.isSupported && showVersionManager;
 
@@ -41,6 +47,14 @@ export function OllamaPanel({
           <AppConnectionInfo url={connectionUrl} />
         )}
       </div>
+
+      {!isManagerOpen && connectionUrl && (
+        <OllamaModelSection
+          connectionUrl={connectionUrl}
+          isRunning={isOllamaRunning}
+          modelGroups={modelGroups}
+        />
+      )}
 
       {!isManagerOpen && <ModelManager {...modelManagerProps} />}
     </div>

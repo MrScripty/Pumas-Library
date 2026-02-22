@@ -1,6 +1,9 @@
 [workspace]
 resolver = "2"
 members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi", "crates/pumas-rustler"]
+# pumas-rustler is a cdylib loaded into the BEAM VM; its tests cannot link
+# without the Erlang runtime, so exclude it from default `cargo test`.
+default-members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi"]
 
 [workspace.package]
 version = "0.1.0"

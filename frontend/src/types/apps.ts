@@ -35,6 +35,8 @@ export interface ModelInfo {
   downloadStatus?: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'error';
   downloadRepoId?: string;
   downloadTotalBytes?: number;
+  wasDequantized?: boolean;
+  convertedFrom?: string;
 }
 
 export interface ModelCategory {

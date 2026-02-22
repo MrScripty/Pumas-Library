@@ -582,6 +582,79 @@ export interface CrossFilesystemWarningResponse extends BaseResponse {
 }
 
 // ============================================================================
+// Model Conversion Types
+// ============================================================================
+
+export type ConversionDirection = 'gguf_to_safetensors' | 'safetensors_to_gguf';
+
+export type ConversionStatus =
+  | 'setting_up'
+  | 'validating'
+  | 'converting'
+  | 'writing'
+  | 'importing'
+  | 'completed'
+  | 'cancelled'
+  | 'error';
+
+export interface ConversionProgress {
+  conversion_id: string;
+  source_model_id: string;
+  direction: ConversionDirection;
+  status: ConversionStatus;
+  progress?: number;
+  current_tensor?: string;
+  tensors_completed?: number;
+  tensors_total?: number;
+  bytes_written?: number;
+  estimated_output_size?: number;
+  target_quant?: string;
+  error?: string;
+  output_model_id?: string;
+}
+
+export interface ConversionSource {
+  source_model_id: string;
+  source_format: string;
+  source_quant?: string;
+  target_format: string;
+  target_quant?: string;
+  was_dequantized: boolean;
+  conversion_date: string;
+}
+
+export interface QuantOption {
+  name: string;
+  description: string;
+  bits_per_weight: number;
+  recommended: boolean;
+}
+
+export interface StartConversionResponse extends BaseResponse {
+  conversion_id: string;
+}
+
+export interface GetConversionProgressResponse extends BaseResponse {
+  progress: ConversionProgress | null;
+}
+
+export interface CancelConversionResponse extends BaseResponse {
+  cancelled: boolean;
+}
+
+export interface ListConversionsResponse extends BaseResponse {
+  conversions: ConversionProgress[];
+}
+
+export interface ConversionEnvironmentResponse extends BaseResponse {
+  ready: boolean;
+}
+
+export interface SupportedQuantTypesResponse extends BaseResponse {
+  quant_types: QuantOption[];
+}
+
+// ============================================================================
 // Version Management Types
 // ============================================================================
 
@@ -742,6 +815,33 @@ export interface StopOllamaResponse extends BaseResponse {
   // Empty body on success
 }
 
+export interface OllamaModelInfo {
+  name: string;
+  size: number;
+  digest: string;
+  modified_at: string;
+}
+
+export interface OllamaListModelsResponse extends BaseResponse {
+  models: OllamaModelInfo[];
+}
+
+export interface OllamaCreateModelResponse extends BaseResponse {
+  model_name?: string;
+}
+
+export interface OllamaRunningModel {
+  name: string;
+  size: number;
+  digest: string;
+  size_vram: number;
+  expires_at: string;
+}
+
+export interface OllamaListRunningResponse extends BaseResponse {
+  models: OllamaRunningModel[];
+}
+
 // ============================================================================
 // Shortcuts Types
 // ============================================================================
@@ -892,6 +992,29 @@ export interface PyWebViewAPI {
   stop_comfyui(): Promise<StopComfyUIResponse>;
   launch_ollama(): Promise<LaunchResponse>;
   stop_ollama(): Promise<StopOllamaResponse>;
+
+  // Ollama Model Management
+  ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;
+  ollama_create_model(
+    modelId: string,
+    modelName?: string,
+    connectionUrl?: string
+  ): Promise<OllamaCreateModelResponse>;
+  ollama_delete_model(
+    modelName: string,
+    connectionUrl?: string
+  ): Promise<BaseResponse>;
+  ollama_load_model(
+    modelName: string,
+    connectionUrl?: string
+  ): Promise<BaseResponse>;
+  ollama_unload_model(
+    modelName: string,
+    connectionUrl?: string
+  ): Promise<BaseResponse>;
+  ollama_list_running(
+    connectionUrl?: string
+  ): Promise<OllamaListRunningResponse>;
 
   // ========================================
   // Model Management
@@ -1079,6 +1202,22 @@ export interface PyWebViewAPI {
    * Detects Flatpak, Snap, Docker, AppImage environments
    */
   get_sandbox_info(): Promise<SandboxInfoResponse>;
+
+  // ========================================
+  // Model Format Conversion
+  // ========================================
+  start_model_conversion(
+    modelId: string,
+    direction: string,
+    targetQuant?: string | null,
+    outputName?: string | null
+  ): Promise<StartConversionResponse>;
+  get_conversion_progress(conversionId: string): Promise<GetConversionProgressResponse>;
+  cancel_model_conversion(conversionId: string): Promise<CancelConversionResponse>;
+  list_model_conversions(): Promise<ListConversionsResponse>;
+  check_conversion_environment(): Promise<ConversionEnvironmentResponse>;
+  setup_conversion_environment(): Promise<BaseResponse>;
+  get_supported_quant_types(): Promise<SupportedQuantTypesResponse>;
 
   // ========================================
   // Custom Nodes

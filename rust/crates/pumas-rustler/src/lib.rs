@@ -248,15 +248,15 @@ pub struct ElixirModelImportResult {
 // NIF Functions
 // ============================================================================
 
-/// Get the version of the pumas-rustler bindings.
-#[rustler::nif]
-fn version() -> String {
+// ============================================================================
+// Pure Logic (testable without NIF runtime)
+// ============================================================================
+
+fn version_impl() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Convert a model type string to its enum representation.
-#[rustler::nif]
-fn parse_model_type(type_str: String) -> ElixirModelType {
+fn parse_model_type_impl(type_str: &str) -> ElixirModelType {
     match type_str.to_lowercase().as_str() {
         "llm" => ElixirModelType::Llm,
         "diffusion" => ElixirModelType::Diffusion,
@@ -267,9 +267,7 @@ fn parse_model_type(type_str: String) -> ElixirModelType {
     }
 }
 
-/// Convert a security tier string to its enum representation.
-#[rustler::nif]
-fn parse_security_tier(tier_str: String) -> ElixirSecurityTier {
+fn parse_security_tier_impl(tier_str: &str) -> ElixirSecurityTier {
     match tier_str.to_lowercase().as_str() {
         "safe" => ElixirSecurityTier::Safe,
         "pickle" => ElixirSecurityTier::Pickle,
@@ -277,9 +275,7 @@ fn parse_security_tier(tier_str: String) -> ElixirSecurityTier {
     }
 }
 
-/// Convert a download status string to its enum representation.
-#[rustler::nif]
-fn parse_download_status(status_str: String) -> ElixirDownloadStatus {
+fn parse_download_status_impl(status_str: &str) -> ElixirDownloadStatus {
     match status_str.to_lowercase().as_str() {
         "queued" => ElixirDownloadStatus::Queued,
         "downloading" => ElixirDownloadStatus::Downloading,
@@ -291,9 +287,7 @@ fn parse_download_status(status_str: String) -> ElixirDownloadStatus {
     }
 }
 
-/// Convert a file type string to its enum representation.
-#[rustler::nif]
-fn parse_file_type(type_str: String) -> ElixirDetectedFileType {
+fn parse_file_type_impl(type_str: &str) -> ElixirDetectedFileType {
     match type_str.to_lowercase().as_str() {
         "safetensors" => ElixirDetectedFileType::Safetensors,
         "gguf" => ElixirDetectedFileType::Gguf,
@@ -305,9 +299,7 @@ fn parse_file_type(type_str: String) -> ElixirDetectedFileType {
     }
 }
 
-/// Convert a health status string to its enum representation.
-#[rustler::nif]
-fn parse_health_status(status_str: String) -> ElixirHealthStatus {
+fn parse_health_status_impl(status_str: &str) -> ElixirHealthStatus {
     match status_str.to_lowercase().as_str() {
         "healthy" => ElixirHealthStatus::Healthy,
         "warnings" => ElixirHealthStatus::Warnings,
@@ -316,9 +308,7 @@ fn parse_health_status(status_str: String) -> ElixirHealthStatus {
     }
 }
 
-/// Convert an import stage string to its enum representation.
-#[rustler::nif]
-fn parse_import_stage(stage_str: String) -> ElixirImportStage {
+fn parse_import_stage_impl(stage_str: &str) -> ElixirImportStage {
     match stage_str.to_lowercase().as_str() {
         "copying" => ElixirImportStage::Copying,
         "hashing" => ElixirImportStage::Hashing,
@@ -330,9 +320,7 @@ fn parse_import_stage(stage_str: String) -> ElixirImportStage {
     }
 }
 
-/// Convert a sandbox type string to its enum representation.
-#[rustler::nif]
-fn parse_sandbox_type(type_str: String) -> ElixirSandboxType {
+fn parse_sandbox_type_impl(type_str: &str) -> ElixirSandboxType {
     match type_str.to_lowercase().as_str() {
         "flatpak" => ElixirSandboxType::Flatpak,
         "snap" => ElixirSandboxType::Snap,
@@ -343,17 +331,71 @@ fn parse_sandbox_type(type_str: String) -> ElixirSandboxType {
     }
 }
 
+fn validate_json_impl(json_str: &str) -> Result<(), String> {
+    serde_json::from_str::<serde_json::Value>(json_str)
+        .map(|_| ())
+        .map_err(|e| format!("Invalid JSON: {}", e))
+}
+
+// ============================================================================
+// NIF Wrappers (delegate to pure logic)
+// ============================================================================
+
+/// Get the version of the pumas-rustler bindings.
+#[rustler::nif]
+fn version() -> String {
+    version_impl()
+}
+
+/// Convert a model type string to its enum representation.
+#[rustler::nif]
+fn parse_model_type(type_str: String) -> ElixirModelType {
+    parse_model_type_impl(&type_str)
+}
+
+/// Convert a security tier string to its enum representation.
+#[rustler::nif]
+fn parse_security_tier(tier_str: String) -> ElixirSecurityTier {
+    parse_security_tier_impl(&tier_str)
+}
+
+/// Convert a download status string to its enum representation.
+#[rustler::nif]
+fn parse_download_status(status_str: String) -> ElixirDownloadStatus {
+    parse_download_status_impl(&status_str)
+}
+
+/// Convert a file type string to its enum representation.
+#[rustler::nif]
+fn parse_file_type(type_str: String) -> ElixirDetectedFileType {
+    parse_file_type_impl(&type_str)
+}
+
+/// Convert a health status string to its enum representation.
+#[rustler::nif]
+fn parse_health_status(status_str: String) -> ElixirHealthStatus {
+    parse_health_status_impl(&status_str)
+}
+
+/// Convert an import stage string to its enum representation.
+#[rustler::nif]
+fn parse_import_stage(stage_str: String) -> ElixirImportStage {
+    parse_import_stage_impl(&stage_str)
+}
+
+/// Convert a sandbox type string to its enum representation.
+#[rustler::nif]
+fn parse_sandbox_type(type_str: String) -> ElixirSandboxType {
+    parse_sandbox_type_impl(&type_str)
+}
+
 /// Parse JSON string and validate it.
 /// Returns the JSON string if valid, or an error tuple.
 #[rustler::nif]
 fn validate_json(json_str: String) -> NifResult<String> {
-    match serde_json::from_str::<serde_json::Value>(&json_str) {
-        Ok(_) => Ok(json_str),
-        Err(e) => Err(rustler::Error::Term(Box::new(format!(
-            "Invalid JSON: {}",
-            e
-        )))),
-    }
+    validate_json_impl(&json_str)
+        .map(|_| json_str)
+        .map_err(|msg| rustler::Error::Term(Box::new(msg)))
 }
 
 /// Create a model hashes struct.
@@ -386,21 +428,15 @@ mod tests {
 
     #[test]
     fn test_version() {
-        assert!(!version().is_empty());
+        assert!(!version_impl().is_empty());
     }
 
     #[test]
     fn test_parse_model_type() {
+        assert!(matches!(parse_model_type_impl("llm"), ElixirModelType::Llm));
+        assert!(matches!(parse_model_type_impl("LLM"), ElixirModelType::Llm));
         assert!(matches!(
-            parse_model_type("llm".to_string()),
-            ElixirModelType::Llm
-        ));
-        assert!(matches!(
-            parse_model_type("LLM".to_string()),
-            ElixirModelType::Llm
-        ));
-        assert!(matches!(
-            parse_model_type("unknown_type".to_string()),
+            parse_model_type_impl("unknown_type"),
             ElixirModelType::Unknown
         ));
     }
@@ -408,11 +444,11 @@ mod tests {
     #[test]
     fn test_parse_security_tier() {
         assert!(matches!(
-            parse_security_tier("safe".to_string()),
+            parse_security_tier_impl("safe"),
             ElixirSecurityTier::Safe
         ));
         assert!(matches!(
-            parse_security_tier("pickle".to_string()),
+            parse_security_tier_impl("pickle"),
             ElixirSecurityTier::Pickle
         ));
     }

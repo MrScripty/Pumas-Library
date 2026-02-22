@@ -1048,6 +1048,7 @@ impl PumasApi {
         // Get actual running status
         let comfyui_running = self.is_comfyui_running().await;
         let ollama_running = self.is_ollama_running().await;
+        let torch_running = self.is_torch_running().await;
         let last_launch_error = self.get_last_launch_error().await;
         let last_launch_log = self.get_last_launch_log().await;
 
@@ -1109,11 +1110,14 @@ impl PumasApi {
                 "ComfyUI running".to_string()
             } else if ollama_running {
                 "Ollama running".to_string()
+            } else if torch_running {
+                "Torch running".to_string()
             } else {
                 "Ready".to_string()
             },
             comfyui_running,
             ollama_running,
+            torch_running,
             last_launch_error,
             last_launch_log,
             app_resources,
@@ -1342,6 +1346,61 @@ impl PumasApi {
         if let Some(ref pm) = *proc_mgr_lock {
             let log_dir = self.launcher_data_dir().join("logs");
             let result = pm.launch_ollama(tag, version_dir, Some(&log_dir));
+
+            Ok(models::LaunchResponse {
+                success: result.success,
+                error: result.error,
+                log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+                ready: Some(result.ready),
+            })
+        } else {
+            Ok(models::LaunchResponse {
+                success: false,
+                error: Some("Process manager not initialized".to_string()),
+                log_path: None,
+                ready: None,
+            })
+        }
+    }
+
+    /// Check if the Torch inference server is currently running.
+    pub async fn is_torch_running(&self) -> bool {
+        let mgr_lock = self.primary().process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.is_torch_running()
+        } else {
+            false
+        }
+    }
+
+    /// Stop the Torch inference server.
+    pub async fn stop_torch(&self) -> Result<bool> {
+        let mgr_lock = self.primary().process_manager.read().await;
+        if let Some(ref mgr) = *mgr_lock {
+            mgr.stop_torch()
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Launch the Torch inference server from a given directory.
+    ///
+    /// The caller (RPC layer) is responsible for resolving the version tag to a directory
+    /// using pumas-app-manager's VersionManager.
+    pub async fn launch_torch(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+        if !version_dir.exists() {
+            return Ok(models::LaunchResponse {
+                success: false,
+                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
+                log_path: None,
+                ready: None,
+            });
+        }
+
+        let proc_mgr_lock = self.primary().process_manager.read().await;
+        if let Some(ref pm) = *proc_mgr_lock {
+            let log_dir = self.launcher_data_dir().join("logs");
+            let result = pm.launch_torch(tag, version_dir, Some(&log_dir));
 
             Ok(models::LaunchResponse {
                 success: result.success,

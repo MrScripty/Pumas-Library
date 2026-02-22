@@ -88,6 +88,30 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a new binary launch config for the Torch inference server.
+    ///
+    /// The Torch server is a Python-based FastAPI app launched via its venv Python.
+    pub fn torch(tag: impl Into<String>, version_dir: impl AsRef<Path>) -> Self {
+        let version_dir = version_dir.as_ref().to_path_buf();
+        // The torch server uses a Python venv with serve.py as the entry point.
+        // The "binary" here is the venv's Python interpreter.
+        let binary_path = version_dir.join("venv").join("bin").join("python");
+        let pid_file = version_dir.join("torch.pid");
+
+        Self {
+            tag: tag.into(),
+            version_dir: version_dir.clone(),
+            binary_path,
+            command: None,
+            extra_args: vec!["serve.py".to_string()],
+            env_vars: HashMap::new(),
+            pid_file,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: Some("http://127.0.0.1:8400/health".to_string()),
+        }
+    }
+
     /// Set the log file path.
     pub fn with_log_file(mut self, path: impl AsRef<Path>) -> Self {
         self.log_file = Some(path.as_ref().to_path_buf());

@@ -426,6 +426,155 @@ impl ProcessManager {
         false
     }
 
+    /// Launch the Torch inference server.
+    ///
+    /// # Arguments
+    ///
+    /// * `tag` - Version tag to launch
+    /// * `version_dir` - Path to the version directory containing the torch server
+    /// * `log_dir` - Optional directory for log files
+    pub fn launch_torch(
+        &self,
+        tag: &str,
+        version_dir: &Path,
+        log_dir: Option<&Path>,
+    ) -> LaunchResult {
+        // Clear previous error
+        {
+            let mut error = self.last_launch_error.lock().unwrap();
+            *error = None;
+        }
+
+        // Determine log file path
+        let log_file = log_dir.map(|dir| {
+            let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+            dir.join(format!("torch_{}_{}.log", tag, timestamp))
+        });
+
+        // Build launch config
+        let mut config = BinaryLaunchConfig::torch(tag, version_dir);
+        if let Some(ref log_path) = log_file {
+            config = config.with_log_file(log_path);
+        }
+
+        // Launch
+        let result = match ProcessLauncher::launch_binary(&config) {
+            Ok(r) => r,
+            Err(e) => {
+                let error_msg = format!("Launch error: {}", e);
+                error!("{}", error_msg);
+
+                let mut last_error = self.last_launch_error.lock().unwrap();
+                *last_error = Some(error_msg.clone());
+
+                return LaunchResult {
+                    success: false,
+                    process: None,
+                    log_path: log_file,
+                    error: Some(error_msg),
+                    ready: false,
+                };
+            }
+        };
+
+        // Update state
+        if result.success {
+            let mut log = self.last_launch_log.lock().unwrap();
+            *log = result.log_path.clone();
+        } else if let Some(ref error) = result.error {
+            let mut last_error = self.last_launch_error.lock().unwrap();
+            *last_error = Some(error.clone());
+        }
+
+        result
+    }
+
+    /// Stop Torch server processes.
+    ///
+    /// Looks for torch.pid files in the torch-versions directory and stops those processes.
+    pub fn stop_torch(&self) -> Result<bool> {
+        let timeout_ms = 2000;
+        let mut stopped_any = false;
+
+        // Scan for PID files in torch-versions directory
+        let versions_dir = self.root_dir.join("torch-versions");
+        info!("Scanning for Torch PID files in: {:?}", versions_dir);
+
+        if versions_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&versions_dir) {
+                for entry in entries.flatten() {
+                    let pid_file = entry.path().join("torch.pid");
+                    if pid_file.exists() {
+                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
+                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                                info!("Stopping Torch process {} from {:?}", pid, pid_file);
+                                if ProcessLauncher::stop_process(pid, timeout_ms)? {
+                                    stopped_any = true;
+                                }
+                                if let Err(e) = ProcessLauncher::remove_pid_file(&pid_file) {
+                                    warn!("Failed to remove PID file {:?}: {}", pid_file, e);
+                                } else {
+                                    info!("Removed Torch PID file: {:?}", pid_file);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Also cleanup any orphaned torch serve processes by pattern
+        let orphaned = ProcessLauncher::stop_processes_by_pattern("serve.py", timeout_ms)?;
+        if orphaned > 0 {
+            info!("Stopped {} orphaned torch server processes", orphaned);
+            stopped_any = true;
+        }
+
+        info!("stop_torch completed, stopped_any={}", stopped_any);
+        Ok(stopped_any)
+    }
+
+    /// Check if the Torch inference server is running.
+    pub fn is_torch_running(&self) -> bool {
+        // Check for PID files in torch-versions directory
+        let versions_dir = self.root_dir.join("torch-versions");
+        if versions_dir.exists() {
+            if let Ok(entries) = fs::read_dir(&versions_dir) {
+                for entry in entries.flatten() {
+                    let pid_file = entry.path().join("torch.pid");
+                    if pid_file.exists() {
+                        if let Ok(pid_str) = fs::read_to_string(&pid_file) {
+                            if let Ok(pid) = pid_str.trim().parse::<u32>() {
+                                #[cfg(unix)]
+                                {
+                                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
+                                        return true;
+                                    }
+                                }
+                                #[cfg(windows)]
+                                {
+                                    let handle = unsafe {
+                                        winapi::um::processthreadsapi::OpenProcess(
+                                            winapi::um::winnt::PROCESS_QUERY_INFORMATION,
+                                            0,
+                                            pid,
+                                        )
+                                    };
+                                    if !handle.is_null() {
+                                        unsafe { winapi::um::handleapi::CloseHandle(handle) };
+                                        return true;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        false
+    }
+
     /// Get the last launch log path.
     pub fn last_launch_log(&self) -> Option<PathBuf> {
         self.last_launch_log.lock().unwrap().clone()

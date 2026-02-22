@@ -5,7 +5,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2 } from 'lucide-react';
+import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
 import { modelsAPI } from '../api/models';
 
 interface ModelMetadataModalProps {
@@ -103,6 +103,26 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [primaryFile, setPrimaryFile] = useState<string | null>(null);
   const [activeSource, setActiveSource] = useState<MetadataSource>('embedded');
   const [showAllFields, setShowAllFields] = useState(false);
+  const [refetching, setRefetching] = useState(false);
+  const [refetchError, setRefetchError] = useState<string | null>(null);
+
+  const handleRefetchFromHF = async () => {
+    setRefetching(true);
+    setRefetchError(null);
+    try {
+      const result = await modelsAPI.refetchMetadataFromHF(modelId);
+      if (result.success && result.metadata) {
+        setStoredMetadata(result.metadata);
+        setActiveSource('stored');
+      } else {
+        setRefetchError(result.error || 'Failed to refetch metadata');
+      }
+    } catch (e) {
+      setRefetchError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setRefetching(false);
+    }
+  };
 
   useEffect(() => {
     async function fetchMetadata() {
@@ -236,13 +256,24 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
           <h2 className="text-lg font-semibold truncate text-[hsl(var(--text-primary))]">{modelName}</h2>
-          <button
-            onClick={onClose}
-            className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))]"
-            aria-label="Close"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={handleRefetchFromHF}
+              disabled={refetching || loading}
+              className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))] disabled:opacity-40"
+              aria-label="Refetch metadata from HuggingFace"
+              title="Refetch metadata from HuggingFace"
+            >
+              <RefreshCw className={`w-4 h-4 ${refetching ? 'animate-spin' : ''}`} />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))]"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Content */}
@@ -256,6 +287,13 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
             <div className="text-center py-8 text-[hsl(var(--accent-error))]">{error}</div>
           ) : (
             <div className="space-y-4">
+              {/* Refetch error */}
+              {refetchError && (
+                <div className="text-xs text-[hsl(var(--accent-error))] bg-[hsl(var(--accent-error)/0.1)] px-3 py-1.5 rounded">
+                  {refetchError}
+                </div>
+              )}
+
               {/* Source toggle */}
               <div className="flex gap-2">
                 <button

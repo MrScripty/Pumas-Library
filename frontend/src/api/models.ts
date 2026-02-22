@@ -85,6 +85,22 @@ class ModelsAPI {
     const api = this.getAPI();
     return await api.get_library_model_metadata(modelId);
   }
+
+  /**
+   * Refetch model metadata from HuggingFace.
+   *
+   * Uses the stored repo_id if available, otherwise falls back to
+   * filename-based lookup.
+   */
+  async refetchMetadataFromHF(modelId: string): Promise<{
+    success: boolean;
+    model_id: string;
+    metadata: Record<string, unknown> | null;
+    error?: string;
+  }> {
+    const api = this.getAPI();
+    return await api.refetch_model_metadata_from_hf(modelId);
+  }
 }
 
 export const modelsAPI = new ModelsAPI();

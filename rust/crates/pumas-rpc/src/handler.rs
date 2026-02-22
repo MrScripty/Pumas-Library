@@ -1590,6 +1590,17 @@ async fn dispatch_method(
             }))
         }
 
+        "refetch_model_metadata_from_hf" => {
+            let model_id = require_str_param!(params, "model_id", "modelId");
+
+            let updated = api.refetch_metadata_from_hf(&model_id).await?;
+            Ok(json!({
+                "success": true,
+                "model_id": model_id,
+                "metadata": serde_json::to_value(&updated)?
+            }))
+        }
+
         // ====================================================================
         // Model Overrides
         // ====================================================================

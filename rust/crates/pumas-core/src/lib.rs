@@ -1598,6 +1598,81 @@ impl PumasApi {
         }
     }
 
+    /// Refetch metadata for a library model from HuggingFace.
+    ///
+    /// Uses the stored `repo_id` if available, otherwise falls back to
+    /// filename-based lookup via `lookup_metadata()`. Returns the updated
+    /// metadata on success.
+    pub async fn refetch_metadata_from_hf(
+        &self,
+        model_id: &str,
+    ) -> Result<models::ModelMetadata> {
+        let primary = self.primary();
+        let library = &primary.model_library;
+
+        // Load current metadata
+        let model_dir = library.library_root().join(model_id);
+        let current = library.load_metadata(&model_dir)?;
+
+        // Determine repo_id: from stored metadata or via filename lookup
+        let hf_client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
+            message: "HuggingFace client not initialized".to_string(),
+        })?;
+
+        let repo_id = current.as_ref().and_then(|m| m.repo_id.clone());
+
+        let hf_result = if let Some(ref repo_id) = repo_id {
+            // Fetch model info directly by repo_id (bypasses search cache)
+            let model = hf_client.get_model_info(repo_id).await?;
+            model_library::HfMetadataResult {
+                repo_id: model.repo_id,
+                official_name: Some(model.name),
+                family: None,
+                model_type: Some(model.kind),
+                subtype: None,
+                variant: None,
+                precision: None,
+                tags: vec![],
+                base_model: None,
+                download_url: Some(model.url),
+                description: None,
+                match_confidence: 1.0,
+                match_method: "repo_id".to_string(),
+                requires_confirmation: false,
+                hash_mismatch: false,
+                matched_filename: None,
+                pending_full_verification: false,
+                fast_hash: None,
+                expected_sha256: None,
+            }
+        } else {
+            // Fallback: use filename-based lookup
+            let primary_file = library.get_primary_model_file(model_id);
+            let file_path = primary_file.ok_or_else(|| PumasError::NotFound {
+                resource: format!("primary model file for: {}", model_id),
+            })?;
+            let filename = file_path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            hf_client
+                .lookup_metadata(filename, Some(&file_path), None)
+                .await?
+                .ok_or_else(|| PumasError::NotFound {
+                    resource: format!("HuggingFace metadata for: {}", model_id),
+                })?
+        };
+
+        // Update stored metadata (force=true to bypass manual guard)
+        library
+            .update_metadata_from_hf(model_id, &hf_result, true)
+            .await?;
+
+        // Return the freshly-updated metadata
+        let updated = library.load_metadata(&model_dir)?.unwrap_or_default();
+        Ok(updated)
+    }
+
     /// Look up HuggingFace metadata for a local file.
     pub async fn lookup_hf_metadata_for_file(
         &self,

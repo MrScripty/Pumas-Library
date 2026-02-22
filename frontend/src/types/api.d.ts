@@ -1063,6 +1063,16 @@ export interface PyWebViewAPI {
     primary_file: string | null;
   }>;
 
+  /**
+   * Refetch model metadata from HuggingFace
+   */
+  refetch_model_metadata_from_hf(modelId: string): Promise<{
+    success: boolean;
+    model_id: string;
+    metadata: Record<string, unknown> | null;
+    error?: string;
+  }>;
+
   // ========================================
   // Model Library Import (Phase 1A - Part 6)
   // ========================================

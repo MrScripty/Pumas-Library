@@ -180,6 +180,8 @@ const electronAPI = {
     apiCall('update_model_overrides', { rel_path: relPath, overrides }),
   get_library_model_metadata: (modelId: string) =>
     apiCall('get_library_model_metadata', { model_id: modelId }),
+  refetch_model_metadata_from_hf: (modelId: string) =>
+    apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
 
   // ========================================
   // Model Library Import (Phase 1A)

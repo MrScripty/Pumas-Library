@@ -11,6 +11,7 @@ import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
 import { useOllamaProcess } from './hooks/useOllamaProcess';
+import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
 import { useAppPanelState } from './hooks/useAppPanelState';
 import { api, isAPIAvailable } from './api/adapter';
@@ -59,15 +60,28 @@ export default function App() {
     clearStoppingState: clearOllamaStoppingState,
     openLogPath: openOllamaLogPath
   } = useOllamaProcess();
+  const {
+    launchError: torchLaunchError,
+    launchLogPath: torchLaunchLogPath,
+    isStarting: torchIsStarting,
+    isStopping: torchIsStopping,
+    launchTorch,
+    stopTorch,
+    clearStartingState: clearTorchStartingState,
+    clearStoppingState: clearTorchStoppingState,
+    openLogPath: openTorchLogPath
+  } = useTorchProcess();
   const { modelGroups, scanModels, fetchModels } = useModels();
 
   const comfyVersions = useVersions({ appId: 'comfyui' });
   const ollamaVersions = useVersions({ appId: 'ollama' });
+  const torchVersions = useVersions({ appId: 'torch' });
 
   // Map app IDs to their version hooks - only supported apps have versions
   const activeVersions = useMemo(() => {
     if (selectedAppId === 'comfyui') return comfyVersions;
     if (selectedAppId === 'ollama') return ollamaVersions;
+    if (selectedAppId === 'torch') return torchVersions;
     // For unsupported apps or no selection, return comfyVersions as placeholder
     // (getAppVersionState will return UNSUPPORTED_VERSION_STATE anyway)
     return comfyVersions;
@@ -78,11 +92,13 @@ export default function App() {
   const { installedVersions: comfyInstalledVersions, activeVersion: comfyActiveVersion } =
     comfyVersions;
   const { installedVersions: ollamaInstalledVersions } = ollamaVersions;
+  const { installedVersions: torchInstalledVersions } = torchVersions;
   const installationProgress = appVersions.installationProgress;
   const cacheStatus = appVersions.cacheStatus;
 
   const comfyUIRunning = status?.comfyui_running || false;
   const ollamaRunning = status?.ollama_running || false;
+  const torchRunning = status?.torch_running || false;
   const depsInstalled = status?.deps_ready ?? null;
   const isPatched = status?.patched ?? false;
   const menuShortcut = status?.menu_shortcut ?? false;
@@ -252,6 +268,35 @@ export default function App() {
     }));
   }, [status, systemResources, ollamaInstalledVersions, ollamaRunning, ollamaLaunchError, ollamaIsStarting, ollamaIsStopping]);
 
+  // Update Torch app iconState based on running status and installed versions
+  useEffect(() => {
+    setApps(prevApps => prevApps.map(app => {
+      if (app.id !== 'torch') return app;
+
+      // Determine iconState - transition states have highest priority
+      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
+      if (torchIsStopping) {
+        newIconState = 'stopping';
+      } else if (torchIsStarting) {
+        newIconState = 'starting';
+      } else if (torchRunning) {
+        newIconState = 'running';
+      } else if (torchLaunchError) {
+        newIconState = 'error';
+      } else if (torchInstalledVersions.length > 0) {
+        newIconState = 'offline';
+      } else {
+        newIconState = 'uninstalled';
+      }
+
+      return {
+        ...app,
+        status: torchRunning ? 'running' : 'idle',
+        iconState: newIconState,
+      };
+    }));
+  }, [torchInstalledVersions, torchRunning, torchLaunchError, torchIsStarting, torchIsStopping]);
+
   // Launch error flash effect is handled by AppIndicator component
 
   // Refetch status when active version changes
@@ -326,11 +371,32 @@ export default function App() {
     setTimeout(() => refetchStatus(false, true), 1200);
   };
 
+  const handleLaunchTorch = async () => {
+    if (torchRunning) {
+      try {
+        await stopTorch();
+        await refetchStatus(false, true);
+      } finally {
+        clearTorchStoppingState();
+      }
+    } else {
+      try {
+        await launchTorch();
+        await refetchStatus(false, true);
+      } finally {
+        clearTorchStartingState();
+      }
+    }
+    setTimeout(() => refetchStatus(false, true), 1200);
+  };
+
   const handleLaunchApp = async (appId: string) => {
     if (appId === 'comfyui' && !comfyUIRunning) {
       await handleLaunchComfyUI();
     } else if (appId === 'ollama' && !ollamaRunning) {
       await handleLaunchOllama();
+    } else if (appId === 'torch' && !torchRunning) {
+      await handleLaunchTorch();
     }
   };
 
@@ -339,6 +405,8 @@ export default function App() {
       await handleLaunchComfyUI();
     } else if (appId === 'ollama' && ollamaRunning) {
       await handleLaunchOllama();
+    } else if (appId === 'torch' && torchRunning) {
+      await handleLaunchTorch();
     }
   };
 
@@ -347,6 +415,8 @@ export default function App() {
       await openLogPath(launchLogPath);
     } else if (appId === 'ollama' && ollamaLaunchLogPath) {
       await openOllamaLogPath(ollamaLaunchLogPath);
+    } else if (appId === 'torch' && torchLaunchLogPath) {
+      await openTorchLogPath(torchLaunchLogPath);
     }
   };
 
@@ -544,6 +614,18 @@ export default function App() {
               diskSpacePercent,
               modelManagerProps,
               isOllamaRunning: ollamaRunning,
+              modelGroups,
+            }}
+            torch={{
+              appDisplayName,
+              connectionUrl: selectedApp?.connectionUrl,
+              versions: appVersions,
+              showVersionManager: panelState.showVersionManager,
+              onShowVersionManager: handleShowVersionManager,
+              activeShortcutState,
+              diskSpacePercent,
+              modelManagerProps,
+              isTorchRunning: torchRunning,
               modelGroups,
             }}
             fallback={{

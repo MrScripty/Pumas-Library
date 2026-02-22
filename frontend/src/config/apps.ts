@@ -1,4 +1,4 @@
-import { Zap, MessageSquare, Palette, Image, Cpu } from 'lucide-react';
+import { Zap, MessageSquare, Palette, Image, Cpu, Flame } from 'lucide-react';
 import type { AppConfig } from '../types/apps';
 
 /**
@@ -37,6 +37,18 @@ export const DEFAULT_APPS: AppConfig[] = [
     iconState: 'uninstalled',
     description: 'Local LLM runtime and model server',
     connectionUrl: 'http://localhost:11434',
+    starred: false,
+    linked: false,
+  },
+  {
+    id: 'torch',
+    name: 'torch',
+    displayName: 'Torch',
+    icon: Flame,
+    status: 'idle',
+    iconState: 'uninstalled',
+    description: 'PyTorch inference engine with OpenAI-compatible API',
+    connectionUrl: 'http://localhost:8400',
     starred: false,
     linked: false,
   },

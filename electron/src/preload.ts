@@ -95,6 +95,29 @@ const electronAPI = {
   launch_ollama: () => apiCall('launch_ollama'),
   stop_ollama: () => apiCall('stop_ollama'),
 
+  // Torch Inference Server
+  launch_torch: () => apiCall('launch_torch'),
+  stop_torch: () => apiCall('stop_torch'),
+  torch_list_slots: (connectionUrl?: string) =>
+    apiCall('torch_list_slots', { connection_url: connectionUrl }),
+  torch_load_model: (modelId: string, device?: string, connectionUrl?: string) =>
+    apiCall('torch_load_model', {
+      model_id: modelId,
+      device,
+      connection_url: connectionUrl,
+    }),
+  torch_unload_model: (slotId: string, connectionUrl?: string) =>
+    apiCall('torch_unload_model', {
+      slot_id: slotId,
+      connection_url: connectionUrl,
+    }),
+  torch_get_status: (connectionUrl?: string) =>
+    apiCall('torch_get_status', { connection_url: connectionUrl }),
+  torch_list_devices: (connectionUrl?: string) =>
+    apiCall('torch_list_devices', { connection_url: connectionUrl }),
+  torch_configure: (config: Record<string, unknown>) =>
+    apiCall('torch_configure', config),
+
   // Ollama Model Management
   ollama_list_models: (connectionUrl?: string) =>
     apiCall('ollama_list_models', { connection_url: connectionUrl }),
@@ -350,6 +373,19 @@ const electronAPI = {
 
     return { success: true, paths: result.filePaths };
   },
+
+  // ========================================
+  // Plugin System
+  // ========================================
+  get_plugins: () => apiCall('get_plugins'),
+  get_plugin: (appId: string) => apiCall('get_plugin', { app_id: appId }),
+  call_plugin_endpoint: (appId: string, endpointName: string, params: Record<string, string>) =>
+    apiCall('call_plugin_endpoint', { app_id: appId, endpoint_name: endpointName, params }),
+  check_plugin_health: (appId: string) => apiCall('check_plugin_health', { app_id: appId }),
+  launch_app: (appId: string, versionTag: string) =>
+    apiCall('launch_app', { app_id: appId, version_tag: versionTag }),
+  stop_app: (appId: string) => apiCall('stop_app', { app_id: appId }),
+  get_app_status: (appId: string) => apiCall('get_app_status', { app_id: appId }),
 
   // ========================================
   // Window Controls (Electron-specific)

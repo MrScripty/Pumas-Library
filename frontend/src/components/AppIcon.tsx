@@ -48,14 +48,26 @@ const IconWrapper: React.FC<IconWrapperProps> = ({ isSelected, children }) => {
   );
 };
 
-const getIconPath = (appId: string): string => {
-  const iconMap: Record<string, string> = {
-    'openwebui': './openwebui-icon.png',
-    'ollama': './ollama-icon.png',
-    'invoke': './invoke-icon.png',
-    'krita-diffusion': './krita-diffusion-icon.png',
-  };
-  return iconMap[appId] || './comfyui-icon.png';
+/**
+ * Get the icon path for an app using convention: ./{appId}-icon.png
+ * Falls back to SVG if PNG is not found (handled via onError on <img>).
+ */
+const getIconPath = (appId: string): string => `./${appId}-icon.png`;
+
+/**
+ * Handle icon load error by trying alternative extensions.
+ * Falls back through: .png -> .svg -> .webp -> comfyui-icon.png (default)
+ */
+const handleIconError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+  const img = e.currentTarget;
+  const src = img.src;
+  if (src.endsWith('-icon.png')) {
+    img.src = src.replace('-icon.png', '-icon.svg');
+  } else if (src.endsWith('-icon.svg')) {
+    img.src = src.replace('-icon.svg', '-icon.webp');
+  } else {
+    img.src = './comfyui-icon.png';
+  }
 };
 
 const RunningIcon: React.FC<{ appId: string; ramUsage?: number; gpuUsage?: number; isSelected?: boolean }> = ({
@@ -92,6 +104,7 @@ const RunningIcon: React.FC<{ appId: string; ramUsage?: number; gpuUsage?: numbe
             className="w-full h-full absolute inset-0 object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
             draggable={false}
+            onError={handleIconError}
           />
         </div>
 
@@ -145,6 +158,7 @@ const OfflineIcon: React.FC<{ appId: string; isSelected?: boolean }> = ({ appId,
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
             draggable={false}
+            onError={handleIconError}
           />
         </div>
       </div>
@@ -163,6 +177,7 @@ const ErrorIcon: React.FC<{ appId: string; isSelected?: boolean }> = ({ appId, i
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
             draggable={false}
+            onError={handleIconError}
           />
         </div>
       </div>
@@ -181,6 +196,7 @@ const UninstalledIcon: React.FC<{ appId: string; isSelected?: boolean }> = ({ ap
             className="w-full h-full object-cover"
             style={{ clipPath: 'circle(48% at 50% 50%)' }}
             draggable={false}
+            onError={handleIconError}
           />
         </div>
       </div>

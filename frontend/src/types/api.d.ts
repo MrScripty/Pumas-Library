@@ -35,6 +35,7 @@ export interface StatusResponse extends BaseResponse {
   message: string;
   comfyui_running: boolean;
   ollama_running: boolean;
+  torch_running: boolean;
   last_launch_error: string | null;
   last_launch_log: string | null;
   app_resources?: {
@@ -843,6 +844,66 @@ export interface OllamaListRunningResponse extends BaseResponse {
 }
 
 // ============================================================================
+// Torch Inference Server Types
+// ============================================================================
+
+export type TorchComputeDevice = 'cpu' | 'cuda:0' | 'cuda:1' | 'cuda:2' | 'cuda:3' | 'mps' | 'auto' | string;
+
+export type TorchSlotState = 'unloaded' | 'loading' | 'ready' | 'unloading' | 'error';
+
+export interface TorchModelSlot {
+  slot_id: string;
+  model_name: string;
+  model_path: string;
+  device: TorchComputeDevice;
+  state: TorchSlotState;
+  gpu_memory_bytes?: number;
+  ram_memory_bytes?: number;
+  model_type?: string;
+}
+
+export interface TorchDeviceInfo {
+  device_id: string;
+  name: string;
+  memory_total: number;
+  memory_available: number;
+  is_available: boolean;
+}
+
+export interface TorchServerConfig {
+  api_port: number;
+  host: string;
+  max_loaded_models: number;
+  lan_access: boolean;
+}
+
+export interface TorchListSlotsResponse extends BaseResponse {
+  slots: TorchModelSlot[];
+}
+
+export interface TorchLoadModelResponse extends BaseResponse {
+  slot?: TorchModelSlot;
+}
+
+export interface TorchUnloadModelResponse extends BaseResponse {}
+
+export interface TorchGetStatusResponse extends BaseResponse {
+  running: boolean;
+  slots?: TorchModelSlot[];
+  devices?: TorchDeviceInfo[];
+  api_url?: string;
+  config?: TorchServerConfig;
+}
+
+export interface TorchListDevicesResponse extends BaseResponse {
+  devices: TorchDeviceInfo[];
+}
+
+export interface TorchConfigureResponse extends BaseResponse {}
+
+export interface StopTorchResponse extends BaseResponse {}
+
+// ============================================================================
 // Shortcuts Types
 // ============================================================================
 
@@ -1015,6 +1076,23 @@ export interface PyWebViewAPI {
   ollama_list_running(
     connectionUrl?: string
   ): Promise<OllamaListRunningResponse>;
+
+  // Torch Inference Server
+  launch_torch(): Promise<LaunchResponse>;
+  stop_torch(): Promise<StopTorchResponse>;
+  torch_list_slots(connectionUrl?: string): Promise<TorchListSlotsResponse>;
+  torch_load_model(
+    modelId: string,
+    device?: TorchComputeDevice,
+    connectionUrl?: string
+  ): Promise<TorchLoadModelResponse>;
+  torch_unload_model(
+    slotId: string,
+    connectionUrl?: string
+  ): Promise<TorchUnloadModelResponse>;
+  torch_get_status(connectionUrl?: string): Promise<TorchGetStatusResponse>;
+  torch_list_devices(connectionUrl?: string): Promise<TorchListDevicesResponse>;
+  torch_configure(config: Partial<TorchServerConfig>): Promise<TorchConfigureResponse>;
 
   // ========================================
   // Model Management

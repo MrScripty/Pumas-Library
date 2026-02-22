@@ -437,6 +437,14 @@ impl PumasApiBuilder {
             client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
                 let lib = lib.clone();
                 tokio::spawn(async move {
+                    // Remove stale metadata from any previous partial download
+                    // so import_in_place re-scans all files now present
+                    let metadata_path = info.dest_dir.join("metadata.json");
+                    if metadata_path.exists() {
+                        tracing::info!("Removing stale metadata before re-import: {}", metadata_path.display());
+                        let _ = tokio::fs::remove_file(&metadata_path).await;
+                    }
+
                     let importer = model_library::ModelImporter::new(lib);
                     let spec = model_library::InPlaceImportSpec {
                         model_dir: info.dest_dir,
@@ -446,6 +454,7 @@ impl PumasApiBuilder {
                         repo_id: Some(info.download_request.repo_id.clone()),
                         known_sha256: info.known_sha256,
                         compute_hashes: false,
+                        expected_files: Some(info.filenames.clone()),
                     };
                     match importer.import_in_place(&spec).await {
                         Ok(r) if r.success => {
@@ -508,6 +517,53 @@ impl PumasApiBuilder {
             server_handle: tokio::sync::Mutex::new(None),
             registry,
         });
+
+        // Spawn one-time recovery for incomplete sharded models
+        {
+            let ps = primary_state.clone();
+            tokio::spawn(async move {
+                let recoveries = ps.model_importer.recover_incomplete_shards();
+                if recoveries.is_empty() {
+                    return;
+                }
+                tracing::info!(
+                    "Found {} incomplete sharded model(s) to recover",
+                    recoveries.len()
+                );
+                let Some(ref client) = ps.hf_client else {
+                    tracing::warn!("Cannot recover incomplete shards: HF client not available");
+                    return;
+                };
+                for recovery in recoveries {
+                    let request = model_library::DownloadRequest {
+                        repo_id: recovery.repo_id.clone(),
+                        family: recovery.family,
+                        official_name: recovery.official_name,
+                        model_type: recovery.model_type,
+                        quant: None,     // Download all files for this repo
+                        filename: None,
+                    };
+                    // start_download skips files already on disk, so it will
+                    // only download the missing shards
+                    match client.start_download(&request, &recovery.model_dir).await {
+                        Ok(id) => {
+                            tracing::info!(
+                                "Started shard recovery download {} for repo {}",
+                                id,
+                                recovery.repo_id,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to start shard recovery for {}: {}",
+                                recovery.repo_id,
+                                e,
+                            );
+                        }
+                    }
+                }
+            });
+        }
 
         Ok(PumasApi {
             launcher_root: self.launcher_root,
@@ -763,6 +819,14 @@ impl PumasApi {
             client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
                 let lib = lib.clone();
                 tokio::spawn(async move {
+                    // Remove stale metadata from any previous partial download
+                    // so import_in_place re-scans all files now present
+                    let metadata_path = info.dest_dir.join("metadata.json");
+                    if metadata_path.exists() {
+                        tracing::info!("Removing stale metadata before re-import: {}", metadata_path.display());
+                        let _ = tokio::fs::remove_file(&metadata_path).await;
+                    }
+
                     let importer = model_library::ModelImporter::new(lib);
                     let spec = model_library::InPlaceImportSpec {
                         model_dir: info.dest_dir,
@@ -772,6 +836,7 @@ impl PumasApi {
                         repo_id: Some(info.download_request.repo_id.clone()),
                         known_sha256: info.known_sha256,
                         compute_hashes: false,
+                        expected_files: Some(info.filenames.clone()),
                     };
                     match importer.import_in_place(&spec).await {
                         Ok(r) if r.success => {
@@ -834,6 +899,51 @@ impl PumasApi {
             server_handle: tokio::sync::Mutex::new(None),
             registry,
         });
+
+        // Spawn one-time recovery for incomplete sharded models
+        {
+            let ps = primary_state.clone();
+            tokio::spawn(async move {
+                let recoveries = ps.model_importer.recover_incomplete_shards();
+                if recoveries.is_empty() {
+                    return;
+                }
+                tracing::info!(
+                    "Found {} incomplete sharded model(s) to recover",
+                    recoveries.len()
+                );
+                let Some(ref client) = ps.hf_client else {
+                    tracing::warn!("Cannot recover incomplete shards: HF client not available");
+                    return;
+                };
+                for recovery in recoveries {
+                    let request = model_library::DownloadRequest {
+                        repo_id: recovery.repo_id.clone(),
+                        family: recovery.family,
+                        official_name: recovery.official_name,
+                        model_type: recovery.model_type,
+                        quant: None,
+                        filename: None,
+                    };
+                    match client.start_download(&request, &recovery.model_dir).await {
+                        Ok(id) => {
+                            tracing::info!(
+                                "Started shard recovery download {} for repo {}",
+                                id,
+                                recovery.repo_id,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to start shard recovery for {}: {}",
+                                recovery.repo_id,
+                                e,
+                            );
+                        }
+                    }
+                }
+            });
+        }
 
         Ok(Self {
             launcher_root,

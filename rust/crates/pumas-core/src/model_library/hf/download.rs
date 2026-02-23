@@ -16,6 +16,36 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+/// Regular (non-LFS) files that should be automatically fetched alongside
+/// weight files. These are config/tokenizer files needed by inference engines.
+/// Matched by filename (the last path component).
+const AUXILIARY_FILE_PATTERNS: &[&str] = &[
+    "config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "generation_config.json",
+    "special_tokens_map.json",
+    "tokenizer.model",
+    "vocab.json",
+    "merges.txt",
+    "added_tokens.json",
+    "preprocessor_config.json",
+    "chat_template.jinja",
+    "model.safetensors.index.json",
+];
+
+/// Select auxiliary config/tokenizer files from a repo's regular (non-LFS) file list.
+fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
+    regular_files
+        .iter()
+        .filter(|path| {
+            let filename = path.rsplit('/').next().unwrap_or(path);
+            AUXILIARY_FILE_PATTERNS.iter().any(|pattern| filename == *pattern)
+        })
+        .cloned()
+        .collect()
+}
+
 impl HuggingFaceClient {
     /// Restore persisted downloads from disk.
     ///
@@ -165,16 +195,36 @@ impl HuggingFaceClient {
                 .collect()
         };
 
-        // Total bytes across all files
-        let total_bytes: Option<u64> = if files.iter().all(|f| f.size.is_some()) {
-            Some(files.iter().filter_map(|f| f.size).sum())
-        } else {
-            None
-        };
-
-        // SHA256 of the primary (largest) file for import metadata
+        // SHA256 of the primary (largest) weight file for import metadata
+        // (must be computed before auxiliary files are appended)
         let primary_file = files.iter().max_by_key(|f| f.size.unwrap_or(0));
         let known_sha256 = primary_file.and_then(|f| f.sha256.clone());
+
+        // Append auxiliary config/tokenizer files from the repo's regular file list
+        let auxiliary = select_auxiliary_files(&tree.regular_files);
+        if !auxiliary.is_empty() {
+            info!(
+                "Including {} auxiliary config file(s) for {}",
+                auxiliary.len(),
+                request.repo_id
+            );
+        }
+        let mut files = files;
+        for aux_filename in &auxiliary {
+            files.push(FileToDownload {
+                filename: aux_filename.clone(),
+                size: None,
+                sha256: None,
+            });
+        }
+
+        // Total bytes across all files (sum known sizes; auxiliary files
+        // lack LFS size metadata but are small enough to not materially
+        // affect progress accuracy)
+        let total_bytes: Option<u64> = {
+            let known_sum: u64 = files.iter().filter_map(|f| f.size).sum();
+            if known_sum > 0 { Some(known_sum) } else { None }
+        };
         let first_filename = files[0].filename.clone();
 
         let pause_flag = Arc::new(AtomicBool::new(false));
@@ -871,5 +921,79 @@ impl HuggingFaceClient {
         });
 
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_auxiliary_files_filters_correctly() {
+        let regular_files = vec![
+            ".gitattributes".to_string(),
+            "README.md".to_string(),
+            "config.json".to_string(),
+            "tokenizer.json".to_string(),
+            "tokenizer_config.json".to_string(),
+            "generation_config.json".to_string(),
+            "special_tokens_map.json".to_string(),
+            "modeling_trado.py".to_string(),
+            "tokenizer.model".to_string(),
+            "vocab.json".to_string(),
+            "merges.txt".to_string(),
+            "added_tokens.json".to_string(),
+            "preprocessor_config.json".to_string(),
+            "chat_template.jinja".to_string(),
+            "model.safetensors.index.json".to_string(),
+        ];
+
+        let selected = select_auxiliary_files(&regular_files);
+        assert_eq!(selected.len(), 12);
+        assert!(selected.contains(&"config.json".to_string()));
+        assert!(selected.contains(&"tokenizer.json".to_string()));
+        assert!(selected.contains(&"tokenizer_config.json".to_string()));
+        assert!(selected.contains(&"generation_config.json".to_string()));
+        assert!(selected.contains(&"special_tokens_map.json".to_string()));
+        assert!(selected.contains(&"tokenizer.model".to_string()));
+        assert!(selected.contains(&"vocab.json".to_string()));
+        assert!(selected.contains(&"merges.txt".to_string()));
+        assert!(selected.contains(&"added_tokens.json".to_string()));
+        assert!(selected.contains(&"preprocessor_config.json".to_string()));
+        assert!(selected.contains(&"chat_template.jinja".to_string()));
+        assert!(selected.contains(&"model.safetensors.index.json".to_string()));
+        assert!(!selected.contains(&"README.md".to_string()));
+        assert!(!selected.contains(&".gitattributes".to_string()));
+        assert!(!selected.contains(&"modeling_trado.py".to_string()));
+    }
+
+    #[test]
+    fn test_select_auxiliary_files_empty_input() {
+        let selected = select_auxiliary_files(&[]);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_select_auxiliary_files_no_matches() {
+        let regular_files = vec![
+            ".gitattributes".to_string(),
+            "README.md".to_string(),
+            "modeling_sdar.py".to_string(),
+        ];
+        let selected = select_auxiliary_files(&regular_files);
+        assert!(selected.is_empty());
+    }
+
+    #[test]
+    fn test_select_auxiliary_files_ignores_subdirectory_paths() {
+        let regular_files = vec![
+            "subdir/config.json".to_string(),
+            "tokenizer.json".to_string(),
+        ];
+        let selected = select_auxiliary_files(&regular_files);
+        // Both should match — the subdirectory path matches by filename component
+        assert_eq!(selected.len(), 2);
+        assert!(selected.contains(&"subdir/config.json".to_string()));
+        assert!(selected.contains(&"tokenizer.json".to_string()));
     }
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppIcon } from './AppIcon';
 
@@ -13,8 +13,8 @@ describe('AppIcon', () => {
 
   describe('Basic Rendering', () => {
     it('renders the app icon', () => {
-      render(<AppIcon {...defaultProps} title="Test App" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} title="Test App" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('displays AppIndicator when not a ghost', () => {
@@ -26,9 +26,9 @@ describe('AppIcon', () => {
     it('calls onClick when icon is clicked', async () => {
       const user = userEvent.setup();
       const onClick = vi.fn();
-      render(<AppIcon {...defaultProps} onClick={onClick} />);
+      const { container } = render(<AppIcon {...defaultProps} onClick={onClick} />);
 
-      await user.click(screen.getByRole('button'));
+      await user.click(container.querySelector('button')!);
       expect(onClick).toHaveBeenCalledTimes(1);
     });
 
@@ -41,23 +41,23 @@ describe('AppIcon', () => {
 
   describe('Icon States', () => {
     it('renders RunningIcon for running state', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={30} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={30} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders OfflineIcon for offline state', () => {
-      render(<AppIcon {...defaultProps} state="offline" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="offline" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders ErrorIcon for error state', () => {
-      render(<AppIcon {...defaultProps} state="error" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="error" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders UninstalledIcon for uninstalled state', () => {
-      render(<AppIcon {...defaultProps} state="uninstalled" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="uninstalled" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 
@@ -92,60 +92,53 @@ describe('AppIcon', () => {
 
   describe('Resource Usage Display', () => {
     it('shows RAM arc at correct percentage when running', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={75} gpuUsage={40} />);
-      // RunningIcon renders with RAM and GPU arcs
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={75} gpuUsage={40} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('shows GPU arc at correct percentage when running', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={60} gpuUsage={85} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={60} gpuUsage={85} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles ramUsage = 0 correctly', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={0} gpuUsage={50} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={0} gpuUsage={50} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles ramUsage = 100 correctly', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={100} gpuUsage={50} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={100} gpuUsage={50} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles gpuUsage = 0 correctly', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={0} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={0} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles gpuUsage = 100 correctly', () => {
-      render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={100} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={100} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 
   describe('App Callbacks', () => {
     it('passes onLaunch to AppIndicator', () => {
       const onLaunch = vi.fn();
-      render(<AppIcon {...defaultProps} onLaunch={onLaunch} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} onLaunch={onLaunch} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('passes onStop to AppIndicator', () => {
       const onStop = vi.fn();
-      render(<AppIcon {...defaultProps} state="running" onStop={onStop} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} state="running" onStop={onStop} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('passes onOpenLog to AppIndicator', () => {
       const onOpenLog = vi.fn();
-      render(<AppIcon {...defaultProps} onOpenLog={onOpenLog} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} onOpenLog={onOpenLog} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 
@@ -167,33 +160,28 @@ describe('AppIcon', () => {
 
   describe('Icon Paths', () => {
     it('uses correct icon path for openwebui', () => {
-      render(<AppIcon {...defaultProps} appId="openwebui" />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} appId="openwebui" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('uses correct icon path for ollama', () => {
-      render(<AppIcon {...defaultProps} appId="ollama" />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} appId="ollama" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('uses correct icon path for invoke', () => {
-      render(<AppIcon {...defaultProps} appId="invoke" />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} appId="invoke" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('uses correct icon path for krita-diffusion', () => {
-      render(<AppIcon {...defaultProps} appId="krita-diffusion" />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} appId="krita-diffusion" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('falls back to comfyui icon for unknown appId', () => {
-      render(<AppIcon {...defaultProps} appId="unknown-app" />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<AppIcon {...defaultProps} appId="unknown-app" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 });

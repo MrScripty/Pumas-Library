@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ComfyUIIcon } from './ComfyUIIcon';
 
@@ -12,8 +12,8 @@ describe('ComfyUIIcon', () => {
 
   describe('Basic Rendering', () => {
     it('renders the ComfyUI icon', () => {
-      render(<ComfyUIIcon {...defaultProps} title="ComfyUI" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} title="ComfyUI" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('displays AppIndicator when not a ghost', () => {
@@ -25,9 +25,9 @@ describe('ComfyUIIcon', () => {
     it('calls onClick when icon is clicked', async () => {
       const user = userEvent.setup();
       const onClick = vi.fn();
-      render(<ComfyUIIcon {...defaultProps} onClick={onClick} />);
+      const { container } = render(<ComfyUIIcon {...defaultProps} onClick={onClick} />);
 
-      await user.click(screen.getByRole('button'));
+      await user.click(container.querySelector('button')!);
       expect(onClick).toHaveBeenCalledTimes(1);
     });
 
@@ -40,23 +40,23 @@ describe('ComfyUIIcon', () => {
 
   describe('Icon States', () => {
     it('renders RunningIcon for running state', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={30} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={30} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders OfflineIcon for offline state', () => {
-      render(<ComfyUIIcon {...defaultProps} state="offline" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="offline" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders ErrorIcon for error state', () => {
-      render(<ComfyUIIcon {...defaultProps} state="error" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="error" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('renders UninstalledIcon for uninstalled state', () => {
-      render(<ComfyUIIcon {...defaultProps} state="uninstalled" />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="uninstalled" />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 
@@ -91,53 +91,48 @@ describe('ComfyUIIcon', () => {
 
   describe('Resource Usage Display', () => {
     it('shows RAM and GPU arcs when running', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={75} gpuUsage={40} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={75} gpuUsage={40} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles ramUsage = 0 correctly', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={0} gpuUsage={50} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={0} gpuUsage={50} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles ramUsage = 100 correctly', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={100} gpuUsage={50} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={100} gpuUsage={50} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles gpuUsage = 0 correctly', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={0} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={0} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('handles gpuUsage = 100 correctly', () => {
-      render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={100} />);
-      const button = screen.getByRole('button');
-      expect(button).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" ramUsage={50} gpuUsage={100} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 
   describe('App Callbacks', () => {
     it('passes onLaunch to AppIndicator', () => {
       const onLaunch = vi.fn();
-      render(<ComfyUIIcon {...defaultProps} onLaunch={onLaunch} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} onLaunch={onLaunch} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('passes onStop to AppIndicator', () => {
       const onStop = vi.fn();
-      render(<ComfyUIIcon {...defaultProps} state="running" onStop={onStop} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} state="running" onStop={onStop} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
 
     it('passes onOpenLog to AppIndicator', () => {
       const onOpenLog = vi.fn();
-      render(<ComfyUIIcon {...defaultProps} onOpenLog={onOpenLog} />);
-      expect(screen.getByRole('button')).toBeInTheDocument();
+      const { container } = render(<ComfyUIIcon {...defaultProps} onOpenLog={onOpenLog} />);
+      expect(container.querySelector('button')).toBeInTheDocument();
     });
   });
 

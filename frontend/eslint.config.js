@@ -9,7 +9,7 @@ export default tseslint.config(
   react.configs.flat.recommended,
   jsxA11y.flatConfigs.recommended,
   {
-    ignores: ['dist/**', 'node_modules/**', '*.config.js', '*.config.ts'],
+    ignores: ['dist/**', 'node_modules/**', '*.config.*'],
   },
   {
     files: ['src/**/*.{ts,tsx}'],

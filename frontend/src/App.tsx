@@ -85,7 +85,7 @@ export default function App() {
     // For unsupported apps or no selection, return comfyVersions as placeholder
     // (getAppVersionState will return UNSUPPORTED_VERSION_STATE anyway)
     return comfyVersions;
-  }, [selectedAppId, comfyVersions, ollamaVersions]);
+  }, [selectedAppId, comfyVersions, ollamaVersions, torchVersions]);
 
   const appVersions = getAppVersionState(selectedAppId, activeVersions);
 

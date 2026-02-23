@@ -3,8 +3,12 @@
   "displayName": "Torch",
   "description": "PyTorch inference engine with OpenAI-compatible API",
   "icon": "flame",
-  "githubRepo": "pumas-ai/torch-server",
+  "githubRepo": "pytorch/pytorch",
   "installationType": "python-venv",
+  "versionFilter": {
+    "includePrereleases": false,
+    "excludePatterns": []
+  },
   "capabilities": {
     "hasVersionManagement": true,
     "supportsShortcuts": false,

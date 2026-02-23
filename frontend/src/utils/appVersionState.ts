@@ -43,7 +43,7 @@ export const UNSUPPORTED_VERSION_STATE: AppVersionState = {
   setDefaultVersion: noopVoid,
 };
 
-const VERSION_SUPPORTED_APP_IDS = new Set(['comfyui', 'ollama']);
+const VERSION_SUPPORTED_APP_IDS = new Set(['comfyui', 'ollama', 'torch']);
 const SHORTCUT_SUPPORTED_APP_IDS = new Set(['comfyui']);
 
 export function isVersionSupportedAppId(appId: string | null): boolean {

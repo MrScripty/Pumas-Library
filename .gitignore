@@ -58,6 +58,7 @@ comfyui.db
 # ComfyUI version installations
 comfyui-versions/
 ollama-versions/
+torch-versions/
 
 
 #misc

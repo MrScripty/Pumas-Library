@@ -135,7 +135,7 @@ impl AppId {
             AppId::OpenWebUI => "open-webui/open-webui",
             AppId::InvokeAI => "invoke-ai/InvokeAI",
             AppId::KritaDiffusion => "Acly/krita-ai-diffusion",
-            AppId::Torch => "pumas-ai/torch-server",
+            AppId::Torch => "pytorch/pytorch",
         }
     }
 

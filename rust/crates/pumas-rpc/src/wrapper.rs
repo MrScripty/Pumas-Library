@@ -141,9 +141,11 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "setup_conversion_environment"
         | "get_supported_quant_types" => result,
 
+        // Structured response methods (handler returns {success, ...} directly)
+        "install_version" => result,
+
         // Bool methods
-        "install_version"
-        | "remove_version"
+        "remove_version"
         | "switch_version"
         | "cancel_installation"
         | "install_version_dependencies"

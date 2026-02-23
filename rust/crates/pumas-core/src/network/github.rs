@@ -297,7 +297,14 @@ impl GitHubClient {
                 // ComfyUI uses source zipball, which isn't in assets array
                 // Size estimation handled elsewhere
             }
-            _ => {}
+            _ => {
+                // Default: use the largest asset as the archive size
+                for release in releases.iter_mut() {
+                    if let Some(largest) = release.assets.iter().max_by_key(|a| a.size) {
+                        release.archive_size = Some(largest.size);
+                    }
+                }
+            }
         }
     }
 

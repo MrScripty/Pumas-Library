@@ -146,7 +146,7 @@ impl VersionLauncher {
         }
 
         // Wait for server to be ready
-        let server_url = "http://127.0.0.1:8188";
+        let server_url = AppId::ComfyUI.default_base_url();
         let (ready, error) = self.wait_for_server_ready(server_url, child, 90).await;
 
         Ok(LaunchResult {
@@ -207,7 +207,7 @@ impl VersionLauncher {
         info!("Ollama started with PID {:?}", pid);
 
         // Wait for server to be ready
-        let server_url = "http://127.0.0.1:11434";
+        let server_url = AppId::Ollama.default_base_url();
         let (ready, error) = self.wait_for_server_ready(server_url, child, 30).await;
 
         Ok(LaunchResult {
@@ -375,6 +375,7 @@ impl VersionLauncher {
 
         let venv_python = self.venv_python(tag);
         let profiles_dir = self.launcher_root.join("launcher-data").join("profiles").join(&slug);
+        let server_base_url = AppId::ComfyUI.default_base_url();
 
         let script_content = format!(
             r#"#!/bin/bash
@@ -384,7 +385,7 @@ impl VersionLauncher {
 SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
 VENV_PYTHON="{venv_python}"
 PID_FILE="$SCRIPT_DIR/comfyui.pid"
-SERVER_URL="http://127.0.0.1:8188"
+SERVER_URL="{server_base_url}"
 PROFILE_DIR="{profiles_dir}"
 
 # Stop any existing instance

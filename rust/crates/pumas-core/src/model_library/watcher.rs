@@ -3,6 +3,7 @@
 //! Watches the model library directory for changes and triggers
 //! index rebuilds when files are added, modified, or removed.
 
+use crate::config::NetworkConfig;
 use crate::error::Result;
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, Debouncer};
@@ -82,7 +83,7 @@ impl ModelLibraryWatcher {
                 }
 
                 // Check for file events with timeout
-                match event_rx.recv_timeout(Duration::from_millis(100)) {
+                match event_rx.recv_timeout(NetworkConfig::FILE_WATCHER_DEBOUNCE) {
                     Ok(result) => {
                         if let Ok(events) = result {
                             // Filter for relevant file changes

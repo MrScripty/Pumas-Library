@@ -1,5 +1,6 @@
 //! Process launching functionality.
 
+use crate::config::AppId;
 use crate::error::{PumasError, Result};
 use crate::platform;
 use std::collections::HashMap;
@@ -84,7 +85,7 @@ impl BinaryLaunchConfig {
             pid_file,
             log_file: None,
             ready_timeout: Duration::from_secs(30),
-            health_check_url: Some("http://127.0.0.1:11434".to_string()),
+            health_check_url: Some(AppId::Ollama.default_base_url().to_string()),
         }
     }
 
@@ -108,7 +109,7 @@ impl BinaryLaunchConfig {
             pid_file,
             log_file: None,
             ready_timeout: Duration::from_secs(60),
-            health_check_url: Some("http://127.0.0.1:8400/health".to_string()),
+            health_check_url: Some(format!("{}/health", AppId::Torch.default_base_url())),
         }
     }
 
@@ -143,7 +144,7 @@ impl LaunchConfig {
             pid_file,
             log_file: None,
             ready_timeout: Duration::from_secs(60),
-            health_check_url: Some("http://127.0.0.1:8188".to_string()),
+            health_check_url: Some(AppId::ComfyUI.default_base_url().to_string()),
         }
     }
 
@@ -357,7 +358,9 @@ impl ProcessLauncher {
         if let Some(host_port) = url.strip_prefix("http://") {
             let addr = host_port.split('/').next().unwrap_or(host_port);
             match std::net::TcpStream::connect_timeout(
-                &addr.parse().unwrap_or_else(|_| "127.0.0.1:8188".parse().unwrap()),
+                &addr.parse().unwrap_or_else(|_| {
+                    format!("127.0.0.1:{}", AppId::ComfyUI.default_port()).parse().unwrap()
+                }),
                 Duration::from_secs(1),
             ) {
                 Ok(_) => true,

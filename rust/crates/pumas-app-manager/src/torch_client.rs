@@ -14,13 +14,16 @@
 //! - `/api/devices` — Available compute devices
 //! - `/api/configure` — Update server configuration
 
+use pumas_library::config::AppId;
 use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tracing::{debug, info};
 
-/// Default Torch server API base URL.
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:8400";
+/// Default Torch server API base URL — delegates to [`AppId::Torch`].
+fn default_base_url() -> &'static str {
+    AppId::Torch.default_base_url()
+}
 
 /// Timeout for short API calls (list, status, devices).
 const API_TIMEOUT: Duration = Duration::from_secs(10);
@@ -215,7 +218,7 @@ impl TorchClient {
     /// If `base_url` is `None`, defaults to `http://127.0.0.1:8400`.
     pub fn new(base_url: Option<&str>) -> Self {
         let base_url = base_url
-            .unwrap_or(DEFAULT_BASE_URL)
+            .unwrap_or(default_base_url())
             .trim_end_matches('/')
             .to_string();
 

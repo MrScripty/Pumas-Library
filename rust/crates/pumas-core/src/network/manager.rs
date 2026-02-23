@@ -6,6 +6,7 @@
 //! - WebSource registration and management
 //! - Automatic offline fallback to cached data
 
+use crate::config::NetworkConfig;
 use crate::network::circuit_breaker::{CircuitBreaker, CircuitBreakerStats};
 use crate::network::client::HttpClient;
 use crate::network::web_source::DynWebSource;
@@ -62,7 +63,7 @@ impl Default for ConnectivityConfig {
                 "https://api.github.com".to_string(),
                 "https://huggingface.co/api/models?limit=1".to_string(),
             ],
-            probe_timeout: Duration::from_secs(5),
+            probe_timeout: NetworkConfig::CONNECTIVITY_PROBE_TIMEOUT,
             offline_recheck_interval: Duration::from_secs(30),
             online_verify_interval: Duration::from_secs(300), // 5 minutes
         }

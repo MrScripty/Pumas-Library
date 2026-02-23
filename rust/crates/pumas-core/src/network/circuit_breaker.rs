@@ -5,6 +5,7 @@
 //! - OPEN: Failing, requests are rejected immediately
 //! - HALF_OPEN: Testing recovery, limited requests allowed
 
+use crate::config::NetworkConfig;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
@@ -46,7 +47,7 @@ impl Default for CircuitBreakerConfig {
     fn default() -> Self {
         Self {
             failure_threshold: 5,
-            recovery_timeout: Duration::from_secs(30),
+            recovery_timeout: NetworkConfig::CIRCUIT_BREAKER_RECOVERY_TIMEOUT,
             half_open_max_calls: 1,
         }
     }

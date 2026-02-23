@@ -17,11 +17,18 @@ pub struct CacheConfig {
     pub enable_eviction: bool,
 }
 
+impl CacheConfig {
+    /// Default time-to-live for cache entries (1 day).
+    pub const DEFAULT_TTL_SECS: u64 = 86_400;
+    /// Default maximum cache size (4 GB).
+    pub const DEFAULT_MAX_SIZE_BYTES: u64 = 4_294_967_296;
+}
+
 impl Default for CacheConfig {
     fn default() -> Self {
         Self {
-            default_ttl: Duration::from_secs(24 * 60 * 60), // 24 hours
-            max_size_bytes: 4 * 1024 * 1024 * 1024,         // 4GB
+            default_ttl: Duration::from_secs(CacheConfig::DEFAULT_TTL_SECS),
+            max_size_bytes: CacheConfig::DEFAULT_MAX_SIZE_BYTES,
             enable_eviction: true,
         }
     }

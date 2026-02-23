@@ -3,6 +3,7 @@
 //! Currently generates bash scripts for Linux. Windows support (PowerShell scripts)
 //! can be added by implementing platform-specific script generation.
 
+use pumas_library::config::AppId;
 use pumas_library::error::{PumasError, Result};
 use pumas_library::platform;
 use std::fs;
@@ -33,12 +34,6 @@ impl LaunchScriptGenerator {
             profiles_dir: profiles_dir.as_ref().to_path_buf(),
             server_start_delay: 5,
         }
-    }
-
-    /// Set the server start delay.
-    pub fn with_server_start_delay(mut self, delay: u32) -> Self {
-        self.server_start_delay = delay;
-        self
     }
 
     /// Generate a launch script for a version.
@@ -110,7 +105,7 @@ VERSION_DIR="{version_dir_str}"
 VENV_PATH="$VERSION_DIR/venv"
 MAIN_PY="$VERSION_DIR/main.py"
 PID_FILE="$VERSION_DIR/comfyui.pid"
-URL="http://127.0.0.1:8188"
+URL="{comfyui_url}"
 WINDOW_CLASS="ComfyUI-{slug}"
 PROFILE_DIR="{profile_dir_str}"
 SERVER_START_DELAY={delay}
@@ -195,6 +190,7 @@ wait $SERVER_PID
             profile_dir_str = profile_dir_str,
             delay = self.server_start_delay,
             tag = tag,
+            comfyui_url = AppId::ComfyUI.default_base_url(),
         )
     }
 
@@ -213,10 +209,6 @@ wait $SERVER_PID
         Ok(())
     }
 
-    /// Get the path to a launch script.
-    pub fn script_path(&self, slug: &str) -> PathBuf {
-        self.scripts_dir.join(format!("launch-{}.sh", slug))
-    }
 }
 
 #[cfg(test)]
@@ -233,8 +225,7 @@ mod tests {
 
         fs::create_dir_all(&version_dir).unwrap();
 
-        let generator = LaunchScriptGenerator::new(&scripts_dir, &profiles_dir)
-            .with_server_start_delay(3);
+        let generator = LaunchScriptGenerator::new(&scripts_dir, &profiles_dir);
 
         let script_path = generator.generate("v1.0.0", &version_dir, "v1-0-0").unwrap();
 
@@ -243,7 +234,7 @@ mod tests {
         let content = fs::read_to_string(&script_path).unwrap();
         assert!(content.contains("#!/bin/bash"));
         assert!(content.contains("ComfyUI v1.0.0"));
-        assert!(content.contains("SERVER_START_DELAY=3"));
+        assert!(content.contains("SERVER_START_DELAY=5"));
 
         // Check permissions (Unix only)
         #[cfg(unix)]

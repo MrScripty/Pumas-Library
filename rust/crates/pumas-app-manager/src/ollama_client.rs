@@ -10,6 +10,7 @@
 //! 4. Create model via `POST /api/create` with `files` mapping
 
 use futures::stream;
+use pumas_library::config::AppId;
 use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -19,8 +20,10 @@ use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, info};
 
-/// Default Ollama API base URL.
-const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434";
+/// Default Ollama API base URL — delegates to [`AppId::Ollama`].
+fn default_base_url() -> &'static str {
+    AppId::Ollama.default_base_url()
+}
 
 /// Timeout for short API calls (list, delete, blob check).
 const API_TIMEOUT: Duration = Duration::from_secs(10);
@@ -94,7 +97,7 @@ impl OllamaClient {
     /// If `base_url` is `None`, defaults to `http://127.0.0.1:11434`.
     pub fn new(base_url: Option<&str>) -> Self {
         let base_url = base_url
-            .unwrap_or(DEFAULT_BASE_URL)
+            .unwrap_or(default_base_url())
             .trim_end_matches('/')
             .to_string();
 

@@ -2,6 +2,7 @@
 //!
 //! Manages launcher updates via git, checking for new commits and applying updates.
 
+use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
 use crate::models::CommitInfo;
 use chrono::{DateTime, Duration, Utc};
@@ -255,7 +256,7 @@ impl LauncherUpdater {
 
         let client = match reqwest::Client::builder()
             .user_agent("pumas-launcher")
-            .timeout(std::time::Duration::from_secs(10))
+            .timeout(NetworkConfig::LAUNCHER_UPDATE_TIMEOUT)
             .build()
         {
             Ok(c) => c,

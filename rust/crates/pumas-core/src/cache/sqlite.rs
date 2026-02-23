@@ -157,12 +157,18 @@ impl SqliteCache {
             .unwrap_or_else(|_| default.to_string())
         };
 
-        let default_ttl_secs: u64 = get_value("default_ttl_seconds", "86400")
+        let default_ttl_secs: u64 = get_value(
+                "default_ttl_seconds",
+                &CacheConfig::DEFAULT_TTL_SECS.to_string(),
+            )
             .parse()
-            .unwrap_or(86400);
-        let max_size_bytes: u64 = get_value("max_size_bytes", "4294967296")
+            .unwrap_or(CacheConfig::DEFAULT_TTL_SECS);
+        let max_size_bytes: u64 = get_value(
+                "max_size_bytes",
+                &CacheConfig::DEFAULT_MAX_SIZE_BYTES.to_string(),
+            )
             .parse()
-            .unwrap_or(4 * 1024 * 1024 * 1024);
+            .unwrap_or(CacheConfig::DEFAULT_MAX_SIZE_BYTES);
         let enable_eviction: bool = get_value("enable_eviction", "true")
             .parse()
             .unwrap_or(true);
@@ -752,7 +758,7 @@ mod tests {
     fn test_cache_creation() {
         let (_temp, cache) = create_test_cache();
         let config = cache.get_config().unwrap();
-        assert_eq!(config.max_size_bytes, 4 * 1024 * 1024 * 1024);
+        assert_eq!(config.max_size_bytes, CacheConfig::DEFAULT_MAX_SIZE_BYTES);
     }
 
     #[test]

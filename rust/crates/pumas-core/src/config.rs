@@ -70,6 +70,18 @@ impl NetworkConfig {
     pub const HF_DOWNLOAD_MAX_RETRIES: u32 = 3;
     /// Base delay between download retries (longer to let network recover).
     pub const HF_DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
+    /// Timeout for HuggingFace API metadata requests.
+    pub const HF_API_TIMEOUT: Duration = Duration::from_secs(30);
+    /// Connect timeout for HuggingFace download client.
+    pub const HF_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+    /// How long the circuit breaker stays open before attempting recovery.
+    pub const CIRCUIT_BREAKER_RECOVERY_TIMEOUT: Duration = Duration::from_secs(30);
+    /// Timeout for individual connectivity probe requests.
+    pub const CONNECTIVITY_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+    /// Timeout for launcher update check HTTP requests.
+    pub const LAUNCHER_UPDATE_TIMEOUT: Duration = Duration::from_secs(10);
+    /// Debounce interval for model library file watcher events.
+    pub const FILE_WATCHER_DEBOUNCE: Duration = Duration::from_millis(100);
 }
 
 /// Shared directory and path configurations.
@@ -117,6 +129,7 @@ pub enum AppId {
 }
 
 impl AppId {
+    /// Return the lowercase string identifier for this app (e.g. `"comfyui"`, `"ollama"`).
     pub fn as_str(&self) -> &'static str {
         match self {
             AppId::ComfyUI => "comfyui",
@@ -128,6 +141,7 @@ impl AppId {
         }
     }
 
+    /// Return the GitHub `owner/repo` path for this app's upstream repository.
     pub fn github_repo(&self) -> &'static str {
         match self {
             AppId::ComfyUI => "comfyanonymous/ComfyUI",
@@ -139,6 +153,7 @@ impl AppId {
         }
     }
 
+    /// Return the directory name used to store installed versions of this app.
     pub fn versions_dir_name(&self) -> &'static str {
         match self {
             AppId::ComfyUI => "comfyui-versions",
@@ -150,6 +165,27 @@ impl AppId {
         }
     }
 
+    /// Default network port for this app's local server, or 0 if none.
+    pub fn default_port(&self) -> u16 {
+        match self {
+            AppId::ComfyUI => 8188,
+            AppId::Ollama => 11434,
+            AppId::Torch => 8400,
+            _ => 0, // No default port
+        }
+    }
+
+    /// Default base URL for this app's local server API, or empty if none.
+    pub fn default_base_url(&self) -> &'static str {
+        match self {
+            AppId::ComfyUI => "http://127.0.0.1:8188",
+            AppId::Ollama => "http://127.0.0.1:11434",
+            AppId::Torch => "http://127.0.0.1:8400",
+            _ => "",
+        }
+    }
+
+    /// Parse a case-insensitive string into an `AppId`, returning `None` if unrecognized.
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "comfyui" => Some(AppId::ComfyUI),

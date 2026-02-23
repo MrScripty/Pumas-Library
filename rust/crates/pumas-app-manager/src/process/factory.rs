@@ -348,12 +348,12 @@ impl AppProcessManager for PythonProcessManager {
         let pid_file = self.launcher_root.join(format!("{}.pid", self.plugin.id));
         if pid_file.exists() {
             if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                if let Ok(pid) = pid_str.trim().parse::<i32>() {
+                if let Ok(_pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
                         use nix::sys::signal::{self, Signal};
                         use nix::unistd::Pid;
-                        let _ = signal::kill(Pid::from_raw(pid), Signal::SIGTERM);
+                        let _ = signal::kill(Pid::from_raw(_pid), Signal::SIGTERM);
                     }
                     std::fs::remove_file(&pid_file).ok();
                     return Ok(true);

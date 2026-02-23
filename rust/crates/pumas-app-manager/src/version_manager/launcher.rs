@@ -121,8 +121,8 @@ impl VersionLauncher {
         })?;
 
         // Spawn process
-        let child = Command::new(&venv_python)
-            .args(&args)
+        let mut cmd = Command::new(&venv_python);
+        cmd.args(&args)
             .current_dir(version_path)
             .env("SKIP_BROWSER", "1")
             .stdout(Stdio::from(log_output.try_clone().map_err(|e| PumasError::Io {
@@ -130,10 +130,11 @@ impl VersionLauncher {
                 path: Some(log_file.clone()),
                 source: Some(e),
             })?))
-            .stderr(Stdio::from(log_output))
-            // Start in new process group for clean termination
-            .process_group(0)
-            .spawn()
+            .stderr(Stdio::from(log_output));
+        // Unix: start in new process group for clean termination
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let child = cmd.spawn()
             .map_err(|e| PumasError::Other(format!("Failed to spawn ComfyUI: {}", e)))?;
 
         let pid = child.id();
@@ -190,17 +191,19 @@ impl VersionLauncher {
         })?;
 
         // Spawn process
-        let child = Command::new(&ollama_bin)
-            .args(&args)
+        let mut cmd = Command::new(&ollama_bin);
+        cmd.args(&args)
             .current_dir(version_path)
             .stdout(Stdio::from(log_output.try_clone().map_err(|e| PumasError::Io {
                 message: format!("Failed to clone log handle: {}", e),
                 path: Some(log_file.clone()),
                 source: Some(e),
             })?))
-            .stderr(Stdio::from(log_output))
-            .process_group(0)
-            .spawn()
+            .stderr(Stdio::from(log_output));
+        // Unix: start in new process group for clean termination
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let child = cmd.spawn()
             .map_err(|e| PumasError::Other(format!("Failed to spawn Ollama: {}", e)))?;
 
         let pid = child.id();
@@ -345,14 +348,14 @@ impl VersionLauncher {
         }
 
         if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-            if let Ok(pid) = pid_str.trim().parse::<i32>() {
+            if let Ok(_pid) = pid_str.trim().parse::<i32>() {
                 #[cfg(unix)]
                 {
                     use nix::sys::signal::kill;
                     use nix::unistd::Pid;
 
                     // Check if process exists by sending signal 0 (None = signal 0)
-                    let process_pid = Pid::from_raw(pid);
+                    let process_pid = Pid::from_raw(_pid);
                     return kill(process_pid, None).is_ok();
                 }
 

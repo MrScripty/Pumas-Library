@@ -435,10 +435,10 @@ impl VersionInstaller {
             version_dir.join("ollama"),
         ];
 
-        let binary_path = possible_paths.iter().find(|p| p.exists());
+        let _binary_path = possible_paths.iter().find(|p| p.exists());
 
         #[cfg(unix)]
-        if let Some(binary) = binary_path {
+        if let Some(binary) = _binary_path {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(binary)
                 .map_err(|e| PumasError::Io {

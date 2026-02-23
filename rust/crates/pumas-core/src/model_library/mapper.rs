@@ -738,28 +738,26 @@ impl ModelMapper {
 
     /// Check if library and app are on the same filesystem.
     pub fn check_cross_filesystem(&self, app_models_root: &Path) -> Result<bool> {
-        let library_stat = std::fs::metadata(self.library.library_root())?;
-        let app_stat = std::fs::metadata(app_models_root).or_else(|_| {
-            // If app dir doesn't exist, check parent
-            app_models_root
-                .parent()
-                .map(std::fs::metadata)
-                .unwrap_or_else(|| Err(std::io::Error::new(
-                    std::io::ErrorKind::NotFound,
-                    "Cannot determine app filesystem",
-                )))
-        })?;
-
-        // On Unix, compare device IDs
+        // On Unix, compare device IDs from filesystem metadata
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
+            let library_stat = std::fs::metadata(self.library.library_root())?;
+            let app_stat = std::fs::metadata(app_models_root).or_else(|_| {
+                app_models_root
+                    .parent()
+                    .map(std::fs::metadata)
+                    .unwrap_or_else(|| Err(std::io::Error::new(
+                        std::io::ErrorKind::NotFound,
+                        "Cannot determine app filesystem",
+                    )))
+            })?;
             Ok(library_stat.dev() != app_stat.dev())
         }
 
+        // On Windows, compare drive letter / path prefix
         #[cfg(not(unix))]
         {
-            // On Windows, compare volume serial numbers via path prefix
             let lib_root = self.library.library_root().components().next();
             let app_root = app_models_root.components().next();
             Ok(lib_root != app_root)

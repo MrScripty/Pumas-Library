@@ -141,7 +141,7 @@ jobs:
           path: rust/target/package/pumas-library-*.crate
 
       - name: Install uniffi-bindgen
-        run: cargo install uniffi-bindgen-cli
+        run: cargo install uniffi_bindgen --version 0.28.3
 
       - name: Install uniffi-bindgen-cs
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3

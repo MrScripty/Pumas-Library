@@ -73,7 +73,7 @@ export interface PluginConfig {
   versionFilter?: VersionFilter;
   modelCompatibility?: ModelCompatibility;
   pythonConfig?: PythonConfig;
-  api: Record<string, ApiEndpoint>;
+  api?: Record<string, ApiEndpoint>;
   panelLayout: PanelSection[];
   sidebarPriority: number;
   enabledByDefault: boolean;

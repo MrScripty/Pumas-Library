@@ -7,9 +7,26 @@
 
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
+import type { VersionReleaseInfo } from '../types/api';
 import type { VersionRelease, VersionStatus, CacheStatus } from '../types/versions';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
+
+/** Map API wire format (snake_case) to UI type (camelCase). */
+function mapVersionRelease(v: VersionReleaseInfo): VersionRelease {
+  return {
+    tagName: v.tag_name,
+    name: v.name,
+    publishedAt: v.published_at,
+    prerelease: v.prerelease,
+    body: v.body,
+    htmlUrl: v.html_url,
+    totalSize: v.total_size,
+    archiveSize: v.archive_size,
+    dependenciesSize: v.dependencies_size,
+    installing: v.installing,
+  };
+}
 
 const logger = getLogger('useVersionFetching');
 
@@ -177,13 +194,14 @@ export function useVersionFetching({
       const result = await api.get_available_versions(forceRefresh, resolvedAppId);
       logger.debug('Available versions result received', { versionsCount: result.versions?.length });
       if (result.success) {
-        setAvailableVersions(result.versions || []);
+        const mapped = (result.versions || []).map(mapVersionRelease);
+        setAvailableVersions(mapped);
         setIsRateLimited(false);
         setRateLimitRetryAfter(null);
-        logger.debug('Set available versions', { count: result.versions?.length });
+        logger.debug('Set available versions', { count: mapped.length });
 
         // If backend flags an installing release, update local state
-        const installingRelease = (result.versions || []).find((r: VersionRelease) => r.installing);
+        const installingRelease = mapped.find((r) => r.installing);
         if (installingRelease?.tagName && onInstallingTagUpdate) {
           onInstallingTagUpdate(installingRelease.tagName);
         }

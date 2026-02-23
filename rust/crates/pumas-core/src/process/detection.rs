@@ -247,9 +247,10 @@ mod tests {
 
         let detector = ProcessDetector::new(temp_dir.path(), version_paths);
 
+        let version_path = temp_dir.path().join("versions").join("v1.0.0");
         let cmdline = format!(
-            "python {}/versions/v1.0.0/main.py",
-            temp_dir.path().display()
+            "python {}/main.py",
+            version_path.display()
         );
         let tag = detector.infer_tag_from_cmdline(&cmdline);
 

@@ -202,9 +202,18 @@ async function initializeBackend(): Promise<void> {
     ? path.join(process.resourcesPath, binaryName)
     : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
 
-  const launcherRoot = app.isPackaged
-    ? process.resourcesPath
-    : path.join(__dirname, '..', '..');
+  // Data root: portable (next to AppImage) or project root in dev
+  let launcherRoot: string;
+  if (process.env.APPIMAGE) {
+    // AppImage: store data next to the .AppImage file
+    launcherRoot = path.join(path.dirname(process.env.APPIMAGE), 'pumas-data');
+  } else if (app.isPackaged) {
+    // Other packaged formats (.deb, etc.): use standard user data path
+    launcherRoot = app.getPath('userData');
+  } else {
+    // Development mode: project root
+    launcherRoot = path.join(__dirname, '..', '..');
+  }
 
   pythonBridge = new PythonBridge({
     port: 0,

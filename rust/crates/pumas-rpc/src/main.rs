@@ -80,7 +80,12 @@ async fn main() -> Result<()> {
     info!("Launcher root: {}", launcher_root.display());
 
     // Create the core API instance (model library, system utilities)
-    let api = pumas_library::PumasApi::new(&launcher_root).await?;
+    // Use builder with auto_create_dirs so first-run (e.g. portable AppImage)
+    // creates the directory structure automatically.
+    let api = pumas_library::PumasApi::builder(&launcher_root)
+        .auto_create_dirs(true)
+        .build()
+        .await?;
 
     // Initialize version managers for all supported apps
     let mut version_managers: HashMap<String, VersionManager> = HashMap::new();

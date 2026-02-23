@@ -59,23 +59,65 @@ jobs:
             rust/target/${{ matrix.target }}/release/pumas_uniffi.dll
           if-no-files-found: ignore
 
-  # Build Electron app for each platform
+  # Build and test frontend
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: ./frontend
+        run: npm run check:types
+
+      - name: Lint
+        working-directory: ./frontend
+        run: npm run lint
+
+      - name: Run tests
+        working-directory: ./frontend
+        run: npm run test:run
+
+      - name: Build
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Upload frontend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist/
+
+  # Package Electron app for each platform
   build-electron:
-    name: Build Electron (${{ matrix.os }})
-    needs: build-rust
+    name: Package Electron (${{ matrix.platform }})
+    needs: [build-rust, build-frontend]
     strategy:
       fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
-            target: linux
-            rust-artifact: rust-x86_64-unknown-linux-gnu
+            platform: linux
+            rust-target: x86_64-unknown-linux-gnu
+            binary-name: pumas-rpc
           - os: windows-latest
-            target: win
-            rust-artifact: rust-x86_64-pc-windows-msvc
+            platform: win
+            rust-target: x86_64-pc-windows-msvc
+            binary-name: pumas-rpc.exe
           - os: macos-latest
-            target: mac
-            rust-artifact: rust-aarch64-apple-darwin
+            platform: mac
+            rust-target: aarch64-apple-darwin
+            binary-name: pumas-rpc
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -89,44 +131,53 @@ jobs:
       - name: Download Rust artifact
         uses: actions/download-artifact@v4
         with:
-          name: ${{ matrix.rust-artifact }}
-          path: rust/target/release/
+          name: rust-${{ matrix.rust-target }}
+          path: rust-artifact
 
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: npm ci
+      - name: Download frontend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-dist
+          path: frontend/dist
 
-      - name: Build frontend
-        working-directory: ./frontend
-        run: npm run build
+      - name: Stage Rust binary
+        run: |
+          mkdir -p electron/resources/bin
+          cp "rust-artifact/${{ matrix.binary-name }}" "electron/resources/bin/${{ matrix.binary-name }}"
+          chmod +x "electron/resources/bin/${{ matrix.binary-name }}"
+        shell: bash
 
       - name: Install Electron dependencies
         working-directory: ./electron
         run: npm ci
 
-      - name: Build and package Electron
+      - name: Build Electron TypeScript
         working-directory: ./electron
-        run: npm run package:${{ matrix.target }}
+        run: npm run build
+
+      - name: Package Electron app
+        working-directory: ./electron
+        run: npx electron-builder --${{ matrix.platform }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Electron artifact
         uses: actions/upload-artifact@v4
         with:
-          name: electron-${{ matrix.target }}
+          name: electron-${{ matrix.platform }}
           path: |
             electron/release/*.AppImage
             electron/release/*.deb
             electron/release/*.exe
             electron/release/*.dmg
             electron/release/*.zip
-          if-no-files-found: ignore
+          if-no-files-found: warn
 
   # Create release when a tag is pushed
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-electron
+    needs: [build-rust, build-frontend, build-electron]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -163,9 +214,17 @@ jobs:
             done
           done
 
-          # Electron artifacts (keep original names — they already include version)
-          for dir in artifacts/electron-*/; do
-            cp "$dir"* release-artifacts/ 2>/dev/null || true
+          # Frontend dist (zip it up for release)
+          cd artifacts/frontend-dist
+          zip -r "../../release-artifacts/pumas-frontend-${VERSION}.zip" .
+          cd ../..
+
+          # Electron installers (already named with version by electron-builder)
+          for electron_dir in artifacts/electron-*/; do
+            for file in "$electron_dir"*; do
+              [ -f "$file" ] || continue
+              cp "$file" "release-artifacts/"
+            done
           done
 
       - name: List release artifacts

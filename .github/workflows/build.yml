@@ -162,9 +162,7 @@ jobs:
 
       - name: Package Electron app
         working-directory: ./electron
-        run: npx electron-builder --${{ matrix.platform }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --${{ matrix.platform }} --publish never
 
       - name: Upload Electron artifact
         uses: actions/upload-artifact@v4

@@ -7,6 +7,9 @@ dist/
 # Packaging output
 release/
 
+# Staged binaries for packaging
+resources/bin/
+
 # Logs
 *.log
 npm-debug.log*

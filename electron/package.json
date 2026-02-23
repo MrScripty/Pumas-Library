@@ -41,6 +41,11 @@
         "from": "../frontend/dist",
         "to": "frontend",
         "filter": ["**/*"]
+      },
+      {
+        "from": "resources/bin",
+        "to": ".",
+        "filter": ["pumas-rpc", "pumas-rpc.exe"]
       }
     ],
     "linux": {
@@ -55,8 +60,7 @@
         }
       ],
       "category": "Development",
-      "maintainer": "Pumas Library Team",
-      "icon": "../frontend/public/icon.png"
+      "maintainer": "Pumas Library Team"
     },
     "win": {
       "target": [
@@ -69,7 +73,6 @@
           "arch": ["x64"]
         }
       ],
-      "icon": "../frontend/public/icon.ico",
       "publisherName": "Pumas Library Team"
     },
     "nsis": {
@@ -83,10 +86,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["x64", "arm64"]
+          "arch": ["arm64"]
         }
       ],
-      "icon": "../frontend/public/icon.icns",
       "category": "public.app-category.developer-tools"
     }
   }

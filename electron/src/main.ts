@@ -191,23 +191,30 @@ function registerIPCHandlers(): void {
 }
 
 /**
- * Initialize the Python sidecar process
+ * Initialize the Rust backend sidecar process
  */
-async function initializePythonBridge(): Promise<void> {
-  log.info('Initializing Python bridge...');
+async function initializeBackend(): Promise<void> {
+  log.info('Initializing backend bridge...');
 
-  const backendPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'backend')
-    : path.join(__dirname, '..', '..', 'backend');
+  const binaryName = process.platform === 'win32' ? 'pumas-rpc.exe' : 'pumas-rpc';
+
+  const rustBinaryPath = app.isPackaged
+    ? path.join(process.resourcesPath, binaryName)
+    : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
+
+  const launcherRoot = app.isPackaged
+    ? process.resourcesPath
+    : path.join(__dirname, '..', '..');
 
   pythonBridge = new PythonBridge({
-    backendPath,
-    port: 0, // Auto-assign port
+    port: 0,
     debug: process.argv.includes('--dev') || process.argv.includes('--debug'),
+    rustBinaryPath,
+    launcherRoot,
   });
 
   await pythonBridge.start();
-  log.info('Python bridge initialized');
+  log.info('Backend bridge initialized');
 }
 
 /**
@@ -232,8 +239,8 @@ app.whenReady().then(async () => {
   log.info('App ready');
 
   try {
-    // Initialize Python bridge first
-    await initializePythonBridge();
+    // Initialize Rust backend first
+    await initializeBackend();
 
     // Register IPC handlers
     registerIPCHandlers();

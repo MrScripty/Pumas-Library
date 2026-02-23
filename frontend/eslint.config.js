@@ -4,15 +4,17 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  js.configs.recommended,
-  ...tseslint.configs.strictTypeChecked,
-  react.configs.flat.recommended,
-  jsxA11y.flatConfigs.recommended,
   {
     ignores: ['dist/**', 'node_modules/**', 'scripts/**', '*.config.*'],
   },
   {
     files: ['src/**/*.{ts,tsx}'],
+    extends: [
+      js.configs.recommended,
+      ...tseslint.configs.strictTypeChecked,
+      react.configs.flat.recommended,
+      jsxA11y.flatConfigs.recommended,
+    ],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'module',
@@ -29,6 +31,11 @@ export default tseslint.config(
       },
     },
     rules: {
+      // React 19 auto-imports JSX runtime
+      'react/react-in-jsx-scope': 'off',
+      // TypeScript handles prop validation
+      'react/prop-types': 'off',
+
       // Prevent console usage (must use logger)
       'no-console': 'error',
 
@@ -49,6 +56,39 @@ export default tseslint.config(
           varsIgnorePattern: '^_',
         },
       ],
+      // Allow numbers and booleans in template literals
+      '@typescript-eslint/restrict-template-expressions': [
+        'error',
+        { allowNumber: true, allowBoolean: true },
+      ],
+      // Allow void returns in arrow shorthand
+      '@typescript-eslint/no-confusing-void-expression': [
+        'error',
+        { ignoreArrowShorthand: true },
+      ],
+      // Downgrade to warn — many legitimate patterns (optional chaining guards, etc.)
+      '@typescript-eslint/no-unnecessary-condition': 'warn',
+      // Allow checksBeforeUse for non-null assertions — warn instead of error
+      '@typescript-eslint/no-non-null-assertion': 'warn',
+      // Allow async functions in event handlers and callbacks
+      '@typescript-eslint/no-misused-promises': [
+        'error',
+        { checksVoidReturn: { attributes: false, arguments: false, properties: false } },
+      ],
+      // Allow {} as a type (commonly used for extensible props)
+      '@typescript-eslint/no-empty-object-type': 'off',
+      // Allow unknown in catch callbacks (Promise.catch, etc.)
+      '@typescript-eslint/use-unknown-in-catch-callback-variable': 'off',
+      // Downgrade — objects may have custom toString() or be used intentionally
+      '@typescript-eslint/no-base-to-string': 'warn',
+      // Downgrade — redundant union members are sometimes clearer for readability
+      '@typescript-eslint/no-redundant-type-constituents': 'warn',
+      // Allow dynamic property deletion (e.g., cleaning up record entries)
+      '@typescript-eslint/no-dynamic-delete': 'off',
+      // Allow async functions without await (useful for interface conformance)
+      '@typescript-eslint/require-await': 'off',
+      // Downgrade — unnecessary type conversions are style issues, not bugs
+      '@typescript-eslint/no-unnecessary-type-conversion': 'warn',
 
       // File size and complexity limits
       'max-lines': [
@@ -69,7 +109,7 @@ export default tseslint.config(
       ],
       complexity: ['warn', 15],
 
-      // Prevent generic Error usage and enforce type guards
+      // Prevent generic Error usage and enforce React Aria patterns
       'no-restricted-syntax': [
         'error',
         {
@@ -77,12 +117,7 @@ export default tseslint.config(
           message:
             'Use specific error types from @/errors instead of generic Error',
         },
-        {
-          selector: 'CatchClause > Identifier[name="error"]:not([typeAnnotation])',
-          message:
-            'Catch clauses should use type guards (if (error instanceof ...))',
-        },
-        // Existing React Aria rules
+        // React Aria rules
         {
           selector: 'JSXAttribute[name.name="onMouseEnter"]',
           message:

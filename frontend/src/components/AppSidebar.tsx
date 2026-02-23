@@ -317,9 +317,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       ref={sidebarRef}
       className="flex flex-col items-center p-3 gap-3 border-[hsl(var(--launcher-border))] transition-all duration-300 relative py-1 h-auto font-normal font-mono shadow-none border-r-0 mx-0 px-1 w-16 overflow-visible bg-[hsl(var(--launcher-bg-secondary)/0.5)]"
       onClick={handleSidebarClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSidebarClick(e as unknown as React.MouseEvent); }}
-      role="button"
-      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Escape') handleSidebarClick(e as unknown as React.MouseEvent); }}
+      role="toolbar"
+      tabIndex={-1}
     >
       {/* Plus indicator - show on hover when not dragging */}
       {!draggedId && floatingState === null && mousePos.y > 0 && sidebarRef.current && (

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppSidebar } from './AppSidebar';
 import type { AppConfig } from '../types/apps';
@@ -52,8 +52,8 @@ describe('AppSidebar', () => {
 
   it('renders all app icons', () => {
     render(<AppSidebar {...defaultProps} />);
-    const buttons = screen.getAllByRole('button');
-    expect(buttons.length).toBe(mockApps.length);
+    const appButtons = mockApps.map(app => screen.getByTitle(app.displayName));
+    expect(appButtons.length).toBe(mockApps.length);
   });
 
   it('calls onSelectApp when icon is clicked', async () => {
@@ -61,8 +61,8 @@ describe('AppSidebar', () => {
     const onSelectApp = vi.fn();
     render(<AppSidebar {...defaultProps} onSelectApp={onSelectApp} />);
 
-    const buttons = screen.getAllByRole('button');
-    await user.click(buttons[0]!);
+    const firstApp = screen.getByTitle(mockApps[0]!.displayName);
+    await user.click(firstApp);
 
     expect(onSelectApp).toHaveBeenCalled();
   });
@@ -81,22 +81,24 @@ describe('AppSidebar', () => {
   });
 
   it('calls onAddApp with nearest index when Plus is clicked', async () => {
-    const user = userEvent.setup();
     const onAddApp = vi.fn();
     const { container } = render(<AppSidebar {...defaultProps} onAddApp={onAddApp} />);
 
-    window.dispatchEvent(new MouseEvent('mousemove', {
-      clientX: 10,
-      clientY: LIST_TOP_PADDING + TOTAL_HEIGHT,
-    }));
+    act(() => {
+      window.dispatchEvent(new MouseEvent('mousemove', {
+        clientX: 10,
+        clientY: LIST_TOP_PADDING + TOTAL_HEIGHT,
+      }));
+    });
 
     await waitFor(() => {
       const plusIcon = container.querySelector('svg.lucide-plus');
       expect(plusIcon).toBeInTheDocument();
     });
 
-    const plusContainer = container.querySelector('svg.lucide-plus')?.parentElement as HTMLElement;
-    await user.click(plusContainer);
+    // The plus icon is inside a clickable div with role="button"
+    const plusButton = container.querySelector('svg.lucide-plus')?.closest('[role="button"]') as HTMLElement;
+    fireEvent.click(plusButton);
 
     expect(onAddApp).toHaveBeenCalledWith(1);
   });

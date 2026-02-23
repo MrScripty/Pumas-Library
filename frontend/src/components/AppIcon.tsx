@@ -219,9 +219,9 @@ export const AppIcon: React.FC<AppIconProps> = ({
   onOpenLog,
   dragOpacity = 1.0,
   shakeStyle = {},
-  _disableShake = false,
+  _disableShake: _1 = false,
   isGhost = false,
-}) => {
+}) => { void _1;
   return (
     <button
       onClick={onClick}

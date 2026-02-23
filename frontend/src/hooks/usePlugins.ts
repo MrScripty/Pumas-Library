@@ -55,7 +55,7 @@ export function usePlugins(): UsePluginsResult {
       const result = await api.get_plugins();
 
       if (result.success && result.plugins) {
-        setPlugins(result.plugins);
+        setPlugins(result.plugins as PluginConfig[]);
         logger.debug('Loaded plugins', { count: result.plugins.length });
       } else {
         setError(result.error || 'Failed to load plugins');

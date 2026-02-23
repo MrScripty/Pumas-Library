@@ -12,7 +12,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   X,
   FolderSymlink,
-  AlertTriangle,
   HardDrive,
   Package,
 } from 'lucide-react';

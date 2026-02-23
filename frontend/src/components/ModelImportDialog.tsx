@@ -537,12 +537,13 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
 
             if (embeddedResult.success && embeddedResult.metadata) {
               // Store embedded metadata for later use
+              const metadata = embeddedResult.metadata;
               setFiles(prev => prev.map(f => {
                 if (f.path !== file.path) return f;
                 return {
                   ...f,
-                  embeddedMetadata: embeddedResult.metadata,
-                  embeddedMetadataStatus: 'loaded',
+                  embeddedMetadata: metadata ?? undefined,
+                  embeddedMetadataStatus: 'loaded' as const,
                 };
               }));
 
@@ -580,11 +581,13 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
               ...f,
               hfMetadata: {
                 repo_id: embeddedRepoId!,
-                match_method: 'embedded',
+                official_name: file.filename,
+                family: '',
+                match_method: 'filename_exact',
                 match_confidence: 0.9, // High confidence from embedded metadata
                 requires_confirmation: false,
               },
-              metadataStatus: 'found',
+              metadataStatus: 'found' as const,
             };
           }));
           continue; // Skip HF API search

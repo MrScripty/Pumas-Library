@@ -25,7 +25,7 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [statusData, setStatusData] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingDeps, setIsCheckingDeps] = useState(true);
-  const [systemResources, setSystemResources] = useState<SystemResources | null>(null);
+  const [systemResources, setSystemResources] = useState<SystemResources | undefined>(undefined);
   const isPolling = useRef(false);
   const lastResourcesFetch = useRef(0);
 

@@ -19,7 +19,6 @@ import {
 } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { ProgressRing } from './ProgressRing';
-import { formatSpeed } from '../utils/formatters';
 import { formatVersionDate, formatGB } from '../utils/installationFormatters';
 import { IconButton } from './ui';
 
@@ -84,9 +83,6 @@ export function VersionListItem({
       ? downloadPercent ?? stagePercent ?? overallPercent
       : overallPercent ?? stagePercent;
 
-  const _speedLabel = progress?.download_speed !== null && progress?.download_speed !== undefined
-    ? formatSpeed(progress.download_speed)
-    : 'Waiting...';
   const packageLabel = progress?.dependency_count !== null && progress?.dependency_count !== undefined && progress?.completed_dependencies !== null
     ? `${progress.completed_dependencies}/${progress.dependency_count}`
     : progress?.stage === 'dependencies'
@@ -251,9 +247,11 @@ export function VersionListItem({
             ) : (
               <>
                 <Download size={16} />
-                <span className="text-xs truncate whitespace-nowrap flex-1 min-w-0">
-                  {totalBytes ? formatGB(totalBytes) : 'Size TBD'}
-                </span>
+                {totalBytes && (
+                  <span className="text-xs truncate whitespace-nowrap flex-1 min-w-0">
+                    {formatGB(totalBytes)}
+                  </span>
+                )}
               </>
             )}
           </motion.button>

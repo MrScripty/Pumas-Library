@@ -1,9 +1,10 @@
 import React from 'react';
 import { useSmoothResource } from '../hooks/useSmoothResource';
 import { AppIndicator } from './AppIndicator';
+import type { AppIconState } from '../types/apps';
 
 interface ComfyUIIconProps {
-  state: 'running' | 'offline' | 'uninstalled' | 'error';
+  state: AppIconState;
   isSelected?: boolean;
   onClick?: () => void;
   title?: string;
@@ -189,9 +190,9 @@ export const ComfyUIIcon: React.FC<ComfyUIIconProps> = ({
   onOpenLog,
   dragOpacity = 1.0,
   shakeStyle = {},
-  _disableShake = false,
+  _disableShake: _1 = false,
   isGhost = false,
-}) => {
+}) => { void _1;
   return (
     <button
       onClick={onClick}

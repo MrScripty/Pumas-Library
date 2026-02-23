@@ -231,13 +231,11 @@ export function useModelDownloads() {
     const status = downloadStatusRef.current[repoId];
     if (!status || !isAPIAvailable()) return;
 
-    setDownloadStatusByRepo((prev) => ({
-      ...prev,
-      [repoId]: {
-        ...prev[repoId],
-        status: 'pausing' as const,
-      },
-    }));
+    setDownloadStatusByRepo((prev) => {
+      const existing = prev[repoId];
+      if (!existing) return prev;
+      return { ...prev, [repoId]: { ...existing, status: 'pausing' as const } };
+    });
 
     try {
       await api.pause_model_download(status.downloadId);
@@ -253,15 +251,11 @@ export function useModelDownloads() {
     const status = downloadStatusRef.current[repoId];
     if (!status || !isAPIAvailable()) return;
 
-    setDownloadStatusByRepo((prev) => ({
-      ...prev,
-      [repoId]: {
-        ...prev[repoId],
-        status: 'queued' as const,
-        speed: undefined,
-        etaSeconds: undefined,
-      },
-    }));
+    setDownloadStatusByRepo((prev) => {
+      const existing = prev[repoId];
+      if (!existing) return prev;
+      return { ...prev, [repoId]: { ...existing, status: 'queued' as const, speed: undefined, etaSeconds: undefined } };
+    });
     setDownloadErrors((prev) => {
       if (!prev[repoId]) return prev;
       const next = { ...prev };

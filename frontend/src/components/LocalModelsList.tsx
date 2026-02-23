@@ -205,6 +205,7 @@ export function LocalModelsList({
                         />
                       )}
                       {isDownloading ? (
+                        <>
                         <button
                           className={`relative flex h-6 w-6 items-center justify-center rounded-md border-0 bg-transparent ${
                             canResume || canPause
@@ -238,6 +239,13 @@ export function LocalModelsList({
                             <Download className="h-3.5 w-3.5" />
                           )}
                         </button>
+                        {onCancelDownload && model.downloadRepoId && (
+                          <HoldToDeleteButton
+                            onDelete={() => onCancelDownload(model.downloadRepoId!)}
+                            tooltip="Hold to remove download"
+                          />
+                        )}
+                        </>
                       ) : (
                         <>
                           <IconButton

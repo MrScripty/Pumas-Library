@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box, Loader2, Play, Square, AlertCircle, Cpu, Monitor, Trash2 } from 'lucide-react';
+import { Box, Loader2, Play, Square, AlertCircle, Monitor } from 'lucide-react';
 import { api, isAPIAvailable } from '../../../api/adapter';
 import type { ModelCategory } from '../../../types/apps';
 import type { TorchModelSlot, TorchDeviceInfo } from '../../../types/api';
@@ -354,7 +354,7 @@ function SlotStateBadge({ state }: { state: string }) {
   };
 
   return (
-    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${styles[state] || styles.unloaded}`}>
+    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${styles[state] || styles['unloaded']}`}>
       {state.toUpperCase()}
     </span>
   );

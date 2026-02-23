@@ -37,7 +37,7 @@ interface InstallDialogProps {
   installingTag?: string | null;
   installationProgress?: InstallationProgress | null;
   installNetworkStatus?: 'idle' | 'downloading' | 'stalled' | 'failed';
-  onRefreshProgress?: () => Promise<void>;
+  onRefreshProgress?: () => Promise<unknown>;
   appDisplayName?: string;
   appId?: string;
   /** True when GitHub API rate limit was hit */

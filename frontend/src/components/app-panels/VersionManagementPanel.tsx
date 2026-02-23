@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { VersionSelector } from '../VersionSelector';
 import { InstallDialog } from '../InstallDialog';
@@ -18,7 +17,7 @@ interface VersionManagementPanelProps {
 
 export function VersionManagementPanel({
   appDisplayName,
-  backLabel,
+  backLabel: _backLabel,
   versions,
   showManager,
   onShowManager,

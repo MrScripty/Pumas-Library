@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
+import { api } from '../api/adapter';
 import type { InstallationProgress } from './useVersions';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -17,7 +17,7 @@ interface UseInstallationProgressOptions {
   appId?: string;
   installingVersion: string | null;
   externalProgress?: InstallationProgress | null;
-  onRefreshProgress?: () => Promise<void>;
+  onRefreshProgress?: () => Promise<unknown>;
 }
 
 interface UseInstallationProgressResult {
@@ -89,7 +89,7 @@ export function useInstallationProgress({
     const fetchProgress = async () => {
       try {
         const result = await api.get_installation_progress(resolvedAppId);
-        setProgress(result);
+        setProgress(result as InstallationProgress | null);
 
         // Stop polling if installation is complete
         if (result?.completed_at) {

@@ -3,7 +3,7 @@
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
-![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows-green.svg)
+![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-green.svg)
 ![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
 
 Available as a desktop GUI for end-users, and as a headless Rust crate with language bindings for embeddable API use.
@@ -22,6 +22,7 @@ Pumas Library is an easy to use AI model library that downloads, organizes, and 
 - Cross-process library discovery via global SQLite registry
 - Resilient networking — per-domain circuit breaker, exponential backoff, rate limit handling
 - Library merging with hash-based deduplication
+- Torch inference server — Python backend for running models with GPU slot management
 
 **Supported Model Types**: LLM, Diffusion, Embedding, Audio, Vision
 **Supported Subtypes**: Checkpoints, LoRAs, VAE, ControlNet, Embeddings, Upscale, CLIP, T5
@@ -105,11 +106,11 @@ async fn main() -> pumas_library::Result<()> {
 
 ## Supported Platforms
 
-| Platform      | Status            | Notes                                                    |
-| ------------- | ----------------- | -------------------------------------------------------- |
-| Linux (x64)   | Full support      | Debian/Ubuntu recommended, AppImage and .deb packages    |
-| Windows (x64) | Full support      | NSIS installer and portable versions                     |
-| macOS         | Theoretically Works | Architecture ready, builds available via CI. Not tested. |
+| Platform      | Status       | Notes                                                 |
+| ------------- | ------------ | ----------------------------------------------------- |
+| Linux (x64)   | Full support | Debian/Ubuntu recommended, AppImage and .deb packages |
+| Windows (x64) | Full support | NSIS installer and portable versions                  |
+| macOS (ARM)   | Best-effort  | ARM builds via CI, not regularly tested               |
 
 ## Installation
 

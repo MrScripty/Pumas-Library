@@ -140,8 +140,8 @@ jobs:
           name: pumas-core-crate
           path: rust/target/package/pumas-library-*.crate
 
-      - name: Install uniffi CLI
-        run: cargo install uniffi --version 0.28.3
+      - name: Install uniffi-bindgen
+        run: cargo install --path rust/crates/pumas-uniffi --bin pumas-uniffi-bindgen --features cli
 
       - name: Install uniffi-bindgen-cs
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
@@ -149,7 +149,7 @@ jobs:
       - name: Generate Python bindings
         run: |
           mkdir -p bindings/python
-          uniffi-bindgen generate \
+          pumas-uniffi-bindgen generate \
             --library \
             --language python \
             --out-dir bindings/python \
@@ -158,7 +158,7 @@ jobs:
       - name: Generate Kotlin bindings
         run: |
           mkdir -p bindings/kotlin
-          uniffi-bindgen generate \
+          pumas-uniffi-bindgen generate \
             --library \
             --language kotlin \
             --out-dir bindings/kotlin \
@@ -167,7 +167,7 @@ jobs:
       - name: Generate Swift bindings
         run: |
           mkdir -p bindings/swift
-          uniffi-bindgen generate \
+          pumas-uniffi-bindgen generate \
             --library \
             --language swift \
             --out-dir bindings/swift \
@@ -176,7 +176,7 @@ jobs:
       - name: Generate Ruby bindings
         run: |
           mkdir -p bindings/ruby
-          uniffi-bindgen generate \
+          pumas-uniffi-bindgen generate \
             --library \
             --language ruby \
             --out-dir bindings/ruby \

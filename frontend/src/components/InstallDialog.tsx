@@ -186,13 +186,13 @@ export function InstallDialog({
       await onRefreshAll(false);
     };
 
-    calculateSizes().catch(error => {
+    calculateSizes().catch((error: unknown) => {
       if (error instanceof APIError) {
         logger.error('API error during background size calculation', { error: error.message, endpoint: error.endpoint });
       } else if (error instanceof Error) {
         logger.error('Error during background size calculation', { error: error.message });
       } else {
-        logger.error('Unknown error during background size calculation', { error });
+        logger.error('Unknown error during background size calculation', { error: String(error) });
       }
     });
   }, [appId, isOpen, availableVersions, onRefreshAll]);
@@ -346,6 +346,7 @@ export function InstallDialog({
     : 'w-full max-w-3xl max-h-[80vh] flex flex-col';
 
   const dialogContent = (
+    // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- modal content wrapper
     <div className={containerClasses} onClick={(e) => !isPageMode && e.stopPropagation()}>
       {/* Header */}
       {!isPageMode && (
@@ -450,20 +451,20 @@ export function InstallDialog({
                   installNetworkStatus={installNetworkStatus}
                   failedLogPath={stickyFailedTag === release.tagName ? stickyFailedLogPath : null}
                   onInstall={() => handleInstall(release.tagName)}
-                  onRemove={() => onRemoveVersion(release.tagName).catch(error => {
+                  onRemove={() => onRemoveVersion(release.tagName).catch((error: unknown) => {
                     if (error instanceof APIError) {
                       logger.error('API error removing version', { error: error.message, endpoint: error.endpoint, tag: release.tagName });
                     } else if (error instanceof Error) {
                       logger.error('Failed to remove version', { error: error.message, tag: release.tagName });
                     } else {
-                      logger.error('Unknown error removing version', { error, tag: release.tagName });
+                      logger.error('Unknown error removing version', { error: String(error), tag: release.tagName });
                     }
                   })}
                   onCancel={handleCancelInstallation}
                   onOpenUrl={openReleaseLink}
                   onOpenLogPath={openLogPath}
-                  onMouseEnter={() => setHoveredTag(release.tagName)}
-                  onMouseLeave={() => setHoveredTag(null)}
+                  onHoverStart={() => setHoveredTag(release.tagName)}
+                  onHoverEnd={() => setHoveredTag(null)}
                   onCancelMouseEnter={() => setCancelHoverTag(release.tagName)}
                   onCancelMouseLeave={() => setCancelHoverTag(null)}
                 />

@@ -6,6 +6,8 @@
  */
 
 import type { PyWebViewAPI } from '../types/api';
+import { APIError } from '../errors';
+import { getLogger } from '../utils/logger';
 
 /**
  * Runtime environment detection
@@ -79,10 +81,11 @@ export const api: PyWebViewAPI = new Proxy({} as PyWebViewAPI, {
     if (!instance) {
       // Return a function that throws an error
       return async () => {
-        throw new Error(
+        throw new APIError(
           `API not available: ${prop}. ` +
             `Current environment: ${detectEnvironment()}. ` +
-            'Make sure you are running in Electron or PyWebView.'
+            'Make sure you are running in Electron or PyWebView.',
+          prop
         );
       };
     }
@@ -120,7 +123,7 @@ export async function safeAPICall<T>(
   try {
     return await call();
   } catch (error) {
-    console.error('API call failed:', error);
+    getLogger('adapter').error('API call failed:', error);
     return fallback;
   }
 }

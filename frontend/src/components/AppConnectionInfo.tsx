@@ -7,25 +7,7 @@ interface AppConnectionInfoProps {
 }
 
 const copyToClipboard = async (text: string) => {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text);
-    return;
-  }
-
-  const textarea = document.createElement('textarea');
-  textarea.value = text;
-  textarea.setAttribute('readonly', 'true');
-  textarea.style.position = 'fixed';
-  textarea.style.top = '-9999px';
-  textarea.style.left = '-9999px';
-  document.body.appendChild(textarea);
-  textarea.select();
-  const success = document.execCommand('copy');
-  document.body.removeChild(textarea);
-
-  if (!success) {
-    throw new Error('Copy failed');
-  }
+  await navigator.clipboard.writeText(text);
 };
 
 export const AppConnectionInfo: React.FC<AppConnectionInfoProps> = ({ url, label = 'Connection URL' }) => {

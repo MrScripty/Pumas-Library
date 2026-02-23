@@ -196,7 +196,7 @@ export interface ValidationResult extends BaseResponse {
  * Type guard to check if response is successful
  */
 export function isSuccessResponse(response: BaseResponse): boolean {
-  return response.success === true;
+  return response.success;
 }
 
 /**
@@ -258,14 +258,14 @@ export function Err<E>(error: E): Result<never, E> {
  * Type guard to check if result is ok
  */
 export function isOk<T, E>(result: Result<T, E>): result is { ok: true; value: T } {
-  return result.ok === true;
+  return result.ok;
 }
 
 /**
  * Type guard to check if result is error
  */
 export function isErr<T, E>(result: Result<T, E>): result is { ok: false; error: E } {
-  return result.ok === false;
+  return !result.ok;
 }
 
 // ============================================================================
@@ -332,6 +332,14 @@ export interface SystemResourcesResponse extends BaseResponse {
 // Model Types
 // ============================================================================
 
+export interface ModelDataMetadata {
+  conversion_source?: ConversionSource;
+  expected_files?: string[];
+  files?: string[];
+  repo_id?: string;
+  [key: string]: unknown;
+}
+
 export interface ModelData {
   modelType: string;
   officialName?: string;
@@ -339,6 +347,7 @@ export interface ModelData {
   size?: number;
   addedDate?: string;
   relatedAvailable?: boolean;
+  metadata?: ModelDataMetadata;
 }
 
 export interface ModelsResponse extends BaseResponse {

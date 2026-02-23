@@ -29,7 +29,7 @@ const originalFactory = rootLogger.methodFactory;
 rootLogger.methodFactory = function (methodName, logLevel, loggerName) {
   const rawMethod = originalFactory(methodName, logLevel, loggerName);
 
-  return function (message, ...args) {
+  return function (message: string, ...args: unknown[]) {
     const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
     const componentName = String(loggerName || 'Unknown');
     const level = String(methodName).toUpperCase();
@@ -68,7 +68,7 @@ export function getLogger(componentName: string) {
   componentLogger.methodFactory = function (methodName, logLevel, loggerName) {
     const rawMethod = originalFactory(methodName, logLevel, loggerName);
 
-    return function (message, ...args) {
+    return function (message: string, ...args: unknown[]) {
       const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
       const level = String(methodName).toUpperCase();
       const prefix = `${timestamp} - ${componentName} - ${level}`;

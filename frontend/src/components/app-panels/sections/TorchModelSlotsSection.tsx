@@ -96,8 +96,8 @@ export function TorchModelSlotsSection({
 
   useEffect(() => {
     if (isRunning) {
-      fetchTorchState();
-      const interval = setInterval(fetchTorchState, 5000);
+      void fetchTorchState();
+      const interval = setInterval(() => void fetchTorchState(), 5000);
       return () => clearInterval(interval);
     }
     setSlots([]);

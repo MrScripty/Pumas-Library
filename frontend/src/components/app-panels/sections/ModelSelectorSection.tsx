@@ -95,8 +95,8 @@ export function ModelSelectorSection({
 
   useEffect(() => {
     if (isRunning) {
-      fetchLoadedModels();
-      const interval = setInterval(fetchLoadedModels, 10000);
+      void fetchLoadedModels();
+      const interval = setInterval(() => void fetchLoadedModels(), 10000);
       return () => clearInterval(interval);
     }
     setLoadedModels([]);

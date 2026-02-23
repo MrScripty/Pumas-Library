@@ -298,7 +298,7 @@ describe('AppIndicator', () => {
       const parentClick = vi.fn();
 
       render(
-        <div onClick={parentClick}>
+        <div onClick={parentClick} onKeyDown={() => {}} role="button" tabIndex={0}>
           <AppIndicator {...defaultProps} state="offline" hasInstall={true} onLaunch={onLaunch} />
         </div>
       );

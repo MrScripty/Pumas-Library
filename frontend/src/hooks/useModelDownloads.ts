@@ -75,7 +75,7 @@ export function useModelDownloads() {
         logger.warn('Failed to restore downloads on startup', { error });
       }
     };
-    restoreDownloads();
+    void restoreDownloads();
   }, []);
 
   // Stable polling interval -- created once, never torn down by state changes

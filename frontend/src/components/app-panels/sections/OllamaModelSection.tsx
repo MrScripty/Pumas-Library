@@ -102,8 +102,8 @@ export function OllamaModelSection({
 
   useEffect(() => {
     if (isRunning) {
-      fetchOllamaState();
-      const interval = setInterval(fetchOllamaState, 10000);
+      void fetchOllamaState();
+      const interval = setInterval(() => void fetchOllamaState(), 10000);
       return () => clearInterval(interval);
     }
     setOllamaModels([]);

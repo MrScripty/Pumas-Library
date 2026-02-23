@@ -362,7 +362,7 @@ export const usePhysicsDrag = ({
       const xAnim = animate(dragX, targetX, { type: 'spring', stiffness, damping });
       const yAnim = animate(dragY, targetY, { type: 'spring', stiffness, damping });
 
-      Promise.all([xAnim.finished, yAnim.finished]).then(() => {
+      void Promise.all([xAnim.finished, yAnim.finished]).then(() => {
         resetFloating();
       });
     },

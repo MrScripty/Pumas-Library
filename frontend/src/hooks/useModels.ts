@@ -10,6 +10,7 @@ import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
 import type { ModelCategory, ModelInfo } from '../types/apps';
+import type { ModelData } from '../types/api';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 
@@ -58,21 +59,21 @@ export function useModels() {
 
         // Group models by category
         const modelEntries = Object.entries(result.models);
-        modelEntries.forEach(([path, modelData]: [string, any]) => {
+        modelEntries.forEach(([path, modelData]: [string, ModelData]) => {
           const category = modelData.modelType || 'uncategorized';
           const fileName = path.split('/').pop() || path;
-          const displayName = modelData.officialName || modelData.cleanedName || fileName;
+          const displayName = modelData.officialName ?? modelData.cleanedName ?? fileName;
 
           const conversionSource = modelData.metadata?.conversion_source;
-          const expectedFiles = modelData.metadata?.expected_files as string[] | undefined;
-          const actualFiles = modelData.metadata?.files as unknown[] | undefined;
+          const expectedFiles = modelData.metadata?.expected_files;
+          const actualFiles = modelData.metadata?.files;
           const incomplete = expectedFiles
             ? expectedFiles.length > (actualFiles?.length ?? 0)
             : false;
           // Determine primary format from path/name heuristics or metadata
           const pathLower = path.toLowerCase();
           const nameLower = fileName.toLowerCase();
-          const targetFmt = conversionSource?.target_format as string | undefined;
+          const targetFmt = conversionSource?.target_format;
           let primaryFormat: 'gguf' | 'safetensors' | undefined;
           if (targetFmt === 'gguf' || pathLower.includes('gguf') || nameLower.endsWith('.gguf')) {
             primaryFormat = 'gguf';
@@ -91,7 +92,7 @@ export function useModels() {
             wasDequantized: conversionSource?.was_dequantized ?? false,
             convertedFrom: conversionSource?.source_format,
             incomplete,
-            repoId: modelData.metadata?.repo_id as string | undefined,
+            repoId: modelData.metadata?.repo_id,
             primaryFormat,
           };
 

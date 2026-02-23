@@ -249,6 +249,9 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
         height: indicatorRadius * 2,
       }}
       onClick={handleClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(e as unknown as React.MouseEvent); }}
+      role="button"
+      tabIndex={0}
     >
       {/* Invisible interaction zone */}
       <div className="absolute inset-0 rounded-full" />

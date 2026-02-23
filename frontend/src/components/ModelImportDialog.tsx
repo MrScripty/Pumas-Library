@@ -371,8 +371,8 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
               return { ...f, embeddedMetadataStatus: 'error' };
             }
           }));
-        }).catch(error => {
-          logger.error('Failed to fetch embedded metadata', { path, error });
+        }).catch((error: unknown) => {
+          logger.error('Failed to fetch embedded metadata', { path, error: String(error) });
           setFiles(prevFiles => prevFiles.map(f =>
             f.path === path ? { ...f, embeddedMetadataStatus: 'error' } : f
           ));
@@ -459,7 +459,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
       }
     };
 
-    detectShards();
+    void detectShards();
   }, [files.length]); // Only run when file count changes
 
   // Check if all pickle files are acknowledged
@@ -580,7 +580,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
             return {
               ...f,
               hfMetadata: {
-                repo_id: embeddedRepoId!,
+                repo_id: embeddedRepoId,
                 official_name: file.filename,
                 family: '',
                 match_method: 'filename_exact',
@@ -696,7 +696,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
 
   // Proceed from review to lookup
   const proceedToLookup = useCallback(() => {
-    performMetadataLookup();
+    void performMetadataLookup();
   }, [performMetadataLookup]);
 
   // Handle close - closes immediately, async operations will be ignored when component unmounts
@@ -977,6 +977,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
 
                   return (
                     <div key={file.path} className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
+                      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- expandable metadata row */}
                       <div
                         className={`flex items-center gap-3 p-3 ${hasMetadata || canShowEmbedded ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
                         onClick={(hasMetadata || canShowEmbedded) ? () => toggleMetadataExpand(file.path) : undefined}
@@ -1055,7 +1056,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  toggleMetadataSource(file.path);
+                                  void toggleMetadataSource(file.path);
                                 }}
                                 className="flex items-center gap-2 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-[hsl(var(--launcher-bg-tertiary))]"
                                 title={isShowingEmbedded ? 'Switch to HuggingFace metadata' : 'Switch to embedded file metadata'}

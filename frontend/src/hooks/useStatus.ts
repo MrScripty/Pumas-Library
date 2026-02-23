@@ -93,13 +93,13 @@ export function useStatus(options: UseStatusOptions = {}) {
 
     const startPolling = () => {
       if (initialLoad) {
-        fetchStatus(true).catch(error => {
+        fetchStatus(true).catch((error: unknown) => {
           if (error instanceof APIError) {
             logger.error('Initial status fetch failed', { error: error.message, endpoint: error.endpoint });
           } else if (error instanceof Error) {
             logger.error('Unexpected error during initial fetch', { error: error.message });
           } else {
-            logger.error('Unknown error during initial fetch', { error });
+            logger.error('Unknown error during initial fetch', { error: String(error) });
           }
           setIsLoading(false);
           setIsCheckingDeps(false);

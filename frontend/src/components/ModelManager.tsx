@@ -8,7 +8,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
-import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
+import type { ModelCategory, ModelInfo, RelatedModelsState, RemoteModelInfo } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -241,7 +241,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     return 'llm';
   };
 
-  const handleStartRemoteDownload = async (model: any, quant?: string | null) => {
+  const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null) => {
     if (!isAPIAvailable()) {
       logger.error('Download API not available');
       return;

@@ -244,9 +244,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       style: {
         ...floatingStyle,
         ...motionStyle,
-        touchAction: 'none',
-        pointerEvents: hideInList ? 'none' : undefined,
-      } as any,
+        touchAction: 'none' as const,
+        pointerEvents: hideInList ? 'none' as const : undefined,
+      },
       animate: isFloating
         ? (isDeleting ? { scale: 0, rotate: -35, opacity: 0 } : undefined)
         : { y: offsetY, opacity: hideInList ? 0 : 1 },
@@ -259,7 +259,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     };
 
     return (
-      // @ts-ignore - Framer Motion transition type incompatibility
+      // @ts-expect-error - Framer Motion transition type incompatibility
       <motion.div key={app.id} {...motionProps}>
         <div className="relative">
           {app.id === 'comfyui' ? (
@@ -317,6 +317,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       ref={sidebarRef}
       className="flex flex-col items-center p-3 gap-3 border-[hsl(var(--launcher-border))] transition-all duration-300 relative py-1 h-auto font-normal font-mono shadow-none border-r-0 mx-0 px-1 w-16 overflow-visible bg-[hsl(var(--launcher-bg-secondary)/0.5)]"
       onClick={handleSidebarClick}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleSidebarClick(e as unknown as React.MouseEvent); }}
+      role="button"
+      tabIndex={0}
     >
       {/* Plus indicator - show on hover when not dragging */}
       {!draggedId && floatingState === null && mousePos.y > 0 && sidebarRef.current && (
@@ -325,6 +328,9 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
             className="absolute left-1/2 transform -translate-x-1/2 z-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
             style={{ top: `${getNearestIconPosition()}px` }}
             onClick={handlePlusClick}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePlusClick(); }}
+            role="button"
+            tabIndex={0}
           >
             <Plus className="w-8 h-8 text-[hsl(var(--accent-primary)/0.5)]" />
           </div>

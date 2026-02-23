@@ -85,8 +85,8 @@ export function StatsSection({
       return;
     }
 
-    fetchStats();
-    const interval = setInterval(fetchStats, pollingIntervalMs);
+    void fetchStats();
+    const interval = setInterval(() => void fetchStats(), pollingIntervalMs);
     return () => clearInterval(interval);
   }, [fetchStats, isRunning, pollingIntervalMs]);
 

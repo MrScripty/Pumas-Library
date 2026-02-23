@@ -117,10 +117,10 @@ export function useInstallationProgress({
     };
 
     // Initial fetch
-    fetchProgress();
+    void fetchProgress();
 
     // Poll every second
-    const interval = setInterval(fetchProgress, 1000);
+    const interval = setInterval(() => void fetchProgress(), 1000);
     setPollInterval(interval);
 
     return () => {

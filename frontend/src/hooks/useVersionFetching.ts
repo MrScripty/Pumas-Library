@@ -213,7 +213,7 @@ export function useVersionFetching({
           }
           followupRefreshRef.current = setTimeout(() => {
             void fetchAvailableVersionsRef.current(false);
-          }, 1500) as any;
+          }, 1500) as unknown as NodeJS.Timeout;
         }
       } else if (result.rate_limited) {
         // Handle rate limit gracefully - show cached data if available

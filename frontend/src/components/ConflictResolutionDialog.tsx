@@ -316,8 +316,10 @@ export const ConflictResolutionDialog: React.FC<ConflictResolutionDialogProps> =
                           {/* Action Descriptions */}
                           <div className="pt-2 border-t border-[hsl(var(--launcher-border)/0.3)]">
                             {actionOptions.map((option) => (
+                              // eslint-disable-next-line jsx-a11y/label-has-associated-control
                               <label
                                 key={option.value}
+                                htmlFor={`resolution-${conflict.model_id}-${option.value}`}
                                 className={`flex items-start gap-2 py-1 cursor-pointer ${
                                   currentResolution === option.value
                                     ? 'opacity-100'
@@ -325,6 +327,7 @@ export const ConflictResolutionDialog: React.FC<ConflictResolutionDialogProps> =
                                 }`}
                               >
                                 <input
+                                  id={`resolution-${conflict.model_id}-${option.value}`}
                                   type="radio"
                                   name={`resolution-${conflict.model_id}`}
                                   value={option.value}

@@ -138,6 +138,7 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
             transition={{ duration: 0.2 }}
             className="fixed inset-0 z-50 flex items-center justify-center p-4"
           >
+            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div
               className="bg-[hsl(var(--launcher-bg-primary))] rounded-lg shadow-xl border border-[hsl(var(--launcher-border))] w-full max-w-2xl max-h-[80vh] flex flex-col"
               onClick={(e) => e.stopPropagation()}
@@ -220,7 +221,7 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
                 {/* Description */}
                 <div className="text-sm text-[hsl(var(--launcher-text-secondary))]">
                   Preview and apply model symlink mappings for this ComfyUI version.
-                  This will create symlinks from your model library to the version's models
+                  This will create symlinks from your model library to the version&apos;s models
                   directory, making your models available in ComfyUI.
                 </div>
 

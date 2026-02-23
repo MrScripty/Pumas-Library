@@ -38,8 +38,8 @@ interface VersionListItemProps {
   onCancel: () => void;
   onOpenUrl: (url: string) => void;
   onOpenLogPath: (path: string) => void;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
+  onHoverStart: () => void;
+  onHoverEnd: () => void;
   onCancelMouseEnter: () => void;
   onCancelMouseLeave: () => void;
 }
@@ -60,11 +60,12 @@ export function VersionListItem({
   onCancel,
   onOpenUrl,
   onOpenLogPath,
-  onMouseEnter,
-  onMouseLeave,
+  onHoverStart,
+  onHoverEnd,
   onCancelMouseEnter,
   onCancelMouseLeave,
 }: VersionListItemProps) {
+
   const displayTag = release.tagName?.replace(/^v/i, '') || release.tagName;
   const releaseUrl = release.htmlUrl;
   const showUninstall = isInstalled && !isInstalling && isHovered;
@@ -130,8 +131,8 @@ export function VersionListItem({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      onMouseEnter={onMouseEnter}
-      onMouseLeave={onMouseLeave}
+      onPointerEnter={onHoverStart}
+      onPointerLeave={onHoverEnd}
       className="w-full p-2 transition-colors"
     >
       <div className="flex items-center justify-between gap-2">
@@ -183,8 +184,8 @@ export function VersionListItem({
         <div className="flex items-center gap-2 flex-shrink-0">
           <motion.button
             onClick={handleButtonClick}
-            onMouseEnter={isInstalling ? onCancelMouseEnter : undefined}
-            onMouseLeave={isInstalling ? onCancelMouseLeave : undefined}
+            onPointerEnter={isInstalling ? onCancelMouseEnter : undefined}
+            onPointerLeave={isInstalling ? onCancelMouseLeave : undefined}
             whileHover={!isInstalling ? { scale: 1.05 } : {}}
             whileTap={!isInstalling ? { scale: 0.96 } : {}}
             className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors border w-[120px] min-w-[120px] overflow-hidden ${

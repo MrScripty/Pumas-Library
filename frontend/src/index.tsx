@@ -5,7 +5,7 @@ import './index.css';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
-  // noqa: generic-error - Fatal initialization error, no recovery possible
+  // eslint-disable-next-line no-restricted-syntax -- Fatal initialization error, no recovery possible
   throw new Error("Could not find root element to mount to");
 }
 

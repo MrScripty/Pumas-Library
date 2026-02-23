@@ -83,23 +83,23 @@ const VersionDropdownItem: React.FC<VersionDropdownItemProps> = ({
                 e.stopPropagation();
                 if (!onMakeDefault) return;
                 if (isDefault) {
-                  onMakeDefault(null).catch((error) => {
+                  onMakeDefault(null).catch((error: unknown) => {
                     if (error instanceof APIError) {
                       logger.error('API error clearing default version', { error: error.message, endpoint: error.endpoint, version });
                     } else if (error instanceof Error) {
                       logger.error('Failed to clear default version', { error: error.message, version });
                     } else {
-                      logger.error('Unknown error clearing default version', { error, version });
+                      logger.error('Unknown error clearing default version', { error: String(error), version });
                     }
                   });
                 } else {
-                  onMakeDefault(version).catch((error) => {
+                  onMakeDefault(version).catch((error: unknown) => {
                     if (error instanceof APIError) {
                       logger.error('API error setting default version', { error: error.message, endpoint: error.endpoint, version });
                     } else if (error instanceof Error) {
                       logger.error('Failed to set default version', { error: error.message, version });
                     } else {
-                      logger.error('Unknown error setting default version', { error, version });
+                      logger.error('Unknown error setting default version', { error: String(error), version });
                     }
                   });
                 }
@@ -417,7 +417,7 @@ export function VersionSelector({
       setShortcutState({});
       return;
     }
-    refreshShortcutStates();
+    void refreshShortcutStates();
   }, [installedVersions, refreshShortcutStates, supportsShortcuts]);
 
   // Keep active version shortcut in sync with main toggle state
@@ -506,13 +506,13 @@ export function VersionSelector({
                       if (!onMakeDefault || !activeVersion) return;
                       const isDefault = defaultVersion === activeVersion;
                       const target = isDefault ? null : activeVersion;
-                      onMakeDefault(target).catch((error) => {
+                      onMakeDefault(target).catch((error: unknown) => {
                         if (error instanceof APIError) {
                           logger.error('API error toggling default version', { error: error.message, endpoint: error.endpoint, version: activeVersion });
                         } else if (error instanceof Error) {
                           logger.error('Failed to toggle default version', { error: error.message, version: activeVersion });
                         } else {
-                          logger.error('Unknown error toggling default version', { error, version: activeVersion });
+                          logger.error('Unknown error toggling default version', { error: String(error), version: activeVersion });
                         }
                       });
                     }}
@@ -603,8 +603,7 @@ export function VersionSelector({
                   )}
                   <Globe
                     size={14}
-                    className={`${
-                      installNetworkStatus === 'downloading'
+                    className={installNetworkStatus === 'downloading'
                         ? 'text-[hsl(var(--accent-success))]'
                         : installNetworkStatus === 'stalled'
                           ? 'animate-pulse text-accent-warning'
@@ -612,8 +611,7 @@ export function VersionSelector({
                             ? 'animate-pulse text-[hsl(var(--accent-error))]'
                             : hasNewVersion
                               ? 'text-[hsl(var(--accent-success))]'
-                              : 'text-[hsl(var(--text-tertiary))]'
-                    }`}
+                              : 'text-[hsl(var(--text-tertiary))]'}
                     style={
                       installNetworkStatus === 'downloading'
                         ? { filter: 'drop-shadow(0 0 6px hsl(var(--accent-success)))' }

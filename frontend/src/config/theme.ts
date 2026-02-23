@@ -156,11 +156,11 @@ export const themeClasses = {
  */
 export function getThemeColor(path: string): string {
   const parts = path.split('.');
-  let value: any = themeColors;
+  let value: Record<string, unknown> | string = themeColors as unknown as Record<string, unknown>;
 
   for (const part of parts) {
     if (value && typeof value === 'object' && part in value) {
-      value = value[part];
+      value = value[part] as Record<string, unknown> | string;
     } else {
       logger.warn('Theme color path not found', { path });
       return 'hsl(0 0% 50%)'; // Fallback gray

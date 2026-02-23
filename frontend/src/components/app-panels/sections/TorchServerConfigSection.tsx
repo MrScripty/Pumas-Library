@@ -45,7 +45,7 @@ export function TorchServerConfigSection({
   }, [connectionUrl]);
 
   useEffect(() => {
-    fetchConfig();
+    void fetchConfig();
   }, [fetchConfig]);
 
   const handleApply = async () => {
@@ -86,8 +86,9 @@ export function TorchServerConfigSection({
       <div className="space-y-3 px-3 py-3 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)]">
         {/* Host */}
         <div className="flex items-center gap-3">
-          <label className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Host</label>
+          <label htmlFor="torch-host" className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Host</label>
           <input
+            id="torch-host"
             type="text"
             value={host}
             onChange={(e) => setHost(e.target.value)}
@@ -97,8 +98,9 @@ export function TorchServerConfigSection({
 
         {/* Port */}
         <div className="flex items-center gap-3">
-          <label className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Port</label>
+          <label htmlFor="torch-port" className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Port</label>
           <input
+            id="torch-port"
             type="number"
             value={port}
             onChange={(e) => setPort(parseInt(e.target.value, 10) || 8400)}
@@ -110,8 +112,9 @@ export function TorchServerConfigSection({
 
         {/* Max Loaded Models */}
         <div className="flex items-center gap-3">
-          <label className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Max Models</label>
+          <label htmlFor="torch-max-models" className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">Max Models</label>
           <input
+            id="torch-max-models"
             type="number"
             value={maxLoadedModels}
             onChange={(e) => setMaxLoadedModels(parseInt(e.target.value, 10) || 1)}
@@ -123,9 +126,10 @@ export function TorchServerConfigSection({
 
         {/* LAN Access Toggle */}
         <div className="flex items-center gap-3">
-          <label className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">LAN Access</label>
+          <label htmlFor="torch-lan-access" className="text-xs text-[hsl(var(--launcher-text-muted))] w-28 shrink-0">LAN Access</label>
           <div className="flex items-center gap-2">
             <button
+              id="torch-lan-access"
               onClick={() => setLanAccess(!lanAccess)}
               className={`relative w-9 h-5 rounded-full transition-colors ${
                 lanAccess

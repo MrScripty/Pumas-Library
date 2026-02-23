@@ -32,7 +32,7 @@ export function DependencyStatusSection({
     );
   }
 
-  if (isInstalled === true) {
+  if (isInstalled) {
     return (
       <div className="w-full flex items-center gap-2 text-[hsl(var(--accent-success))] py-2">
         <CheckCircle className="w-4 h-4" />

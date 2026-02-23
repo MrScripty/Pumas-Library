@@ -129,8 +129,8 @@ describe('usePhysicsDrag', () => {
 
     await waitFor(() => expect(api).not.toBeNull());
 
-    const list = screen.getByTestId('list') as HTMLElement;
-    const item = screen.getByTestId('item-comfyui') as HTMLElement;
+    const list = screen.getByTestId('list');
+    const item = screen.getByTestId('item-comfyui');
 
     list.getBoundingClientRect = () => createMockRect(0, 0, 64, 500);
     item.getBoundingClientRect = () => createMockRect(0, 0, 60, 60);
@@ -190,8 +190,8 @@ describe('usePhysicsDrag', () => {
 
     await waitFor(() => expect(api).not.toBeNull());
 
-    const list = screen.getByTestId('list') as HTMLElement;
-    const item = screen.getByTestId('item-openwebui') as HTMLElement;
+    const list = screen.getByTestId('list');
+    const item = screen.getByTestId('item-openwebui');
 
     list.getBoundingClientRect = () => createMockRect(0, 0, 64, 500);
     item.getBoundingClientRect = () => createMockRect(0, TOTAL_HEIGHT, 60, 60);

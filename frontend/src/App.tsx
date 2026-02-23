@@ -141,7 +141,7 @@ export default function App() {
     const startPolling = () => {
       // Delay update check to not block initial render
       setTimeout(() => {
-        checkLauncherVersion(true).catch(err => {
+        checkLauncherVersion(true).catch((err: unknown) => {
           logger.debug('Background update check failed', { error: err });
         });
       }, 3000);
@@ -215,10 +215,10 @@ export default function App() {
   // Separate effect to avoid coupling with other apps
   useEffect(() => {
     // Debug: log Ollama resources data
-    console.log('Ollama effect - app_resources:', status?.app_resources);
-    console.log('Ollama effect - ollama:', status?.app_resources?.ollama);
-    console.log('Ollama effect - systemResources.ram.total:', systemResources?.ram?.total);
-    console.log('Ollama effect - systemResources.gpu.memory_total:', systemResources?.gpu?.memory_total);
+    logger.debug('Ollama effect - app_resources:', status?.app_resources);
+    logger.debug('Ollama effect - ollama:', status?.app_resources?.ollama);
+    logger.debug('Ollama effect - systemResources.ram.total:', systemResources?.ram?.total);
+    logger.debug('Ollama effect - systemResources.gpu.memory_total:', systemResources?.gpu?.memory_total);
 
     setApps(prevApps => prevApps.map(app => {
       if (app.id !== 'ollama') return app;
@@ -238,7 +238,7 @@ export default function App() {
           ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
         }
         // Debug: log calculated percentages
-        console.log('Ollama effect - calculated ram%:', ramUsagePercent, 'gpu%:', gpuUsagePercent,
+        logger.debug('Ollama effect - calculated ram%:', ramUsagePercent, 'gpu%:', gpuUsagePercent,
           'resources:', resources, 'ramTotal:', ramTotal, 'gpuTotal:', gpuTotal);
       }
 
@@ -347,7 +347,7 @@ export default function App() {
         clearStartingState();
       }
     }
-    setTimeout(() => refetchStatus(false, true), 1200);
+    setTimeout(() => void refetchStatus(false, true), 1200);
   };
 
   const handleLaunchOllama = async () => {
@@ -368,7 +368,7 @@ export default function App() {
         clearOllamaStartingState();
       }
     }
-    setTimeout(() => refetchStatus(false, true), 1200);
+    setTimeout(() => void refetchStatus(false, true), 1200);
   };
 
   const handleLaunchTorch = async () => {
@@ -387,7 +387,7 @@ export default function App() {
         clearTorchStartingState();
       }
     }
-    setTimeout(() => refetchStatus(false, true), 1200);
+    setTimeout(() => void refetchStatus(false, true), 1200);
   };
 
   const handleLaunchApp = async (appId: string) => {
@@ -494,7 +494,7 @@ export default function App() {
 
   const handleImportComplete = useCallback(() => {
     logger.info('Import complete, refreshing model list');
-    fetchModels();
+    void fetchModels();
   }, [fetchModels]);
 
   const handleShowVersionManager = (show: boolean) => {

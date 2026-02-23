@@ -155,6 +155,9 @@ export function LocalModelsList({
                               : 'text-[hsl(var(--text-secondary))]'
                           }`}
                           onClick={(e) => handleModelNameClick(e, model.id, model.name)}
+                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleModelNameClick(e as unknown as React.MouseEvent, model.id, model.name); }}
+                          role="button"
+                          tabIndex={0}
                           title="Ctrl+click to view metadata"
                         >
                           {model.name}

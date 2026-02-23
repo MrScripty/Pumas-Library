@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type { PluginConfig } from '../types/plugins';
+import { APIError } from '../errors';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('usePlugins');
@@ -70,7 +71,7 @@ export function usePlugins(): UsePluginsResult {
   }, []);
 
   useEffect(() => {
-    fetchPlugins();
+    void fetchPlugins();
   }, [fetchPlugins]);
 
   const enabledPlugins = useMemo(() => {
@@ -119,7 +120,7 @@ export function usePluginApi(appId: string) {
       params: Record<string, string> = {}
     ): Promise<unknown> => {
       if (!isAPIAvailable()) {
-        throw new Error('API not available');
+        throw new APIError('API not available', endpointName);
       }
 
       setIsLoading(true);
@@ -128,7 +129,7 @@ export function usePluginApi(appId: string) {
       try {
         const result = await api.call_plugin_endpoint(appId, endpointName, params);
         if (!result.success) {
-          throw new Error(result.error || 'Endpoint call failed');
+          throw new APIError(result.error || 'Endpoint call failed', endpointName);
         }
         return result.data;
       } catch (err) {
@@ -210,8 +211,8 @@ export function usePluginProcess(appId: string) {
   }, [appId]);
 
   useEffect(() => {
-    checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    void checkStatus();
+    const interval = setInterval(() => void checkStatus(), 5000);
     return () => clearInterval(interval);
   }, [checkStatus]);
 

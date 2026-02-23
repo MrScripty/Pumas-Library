@@ -3,7 +3,7 @@
 //! This binary provides a JSON-RPC 2.0 server that wraps the pumas-core library
 //! for communication with the Electron main process.
 
-mod handler;
+mod handlers;
 mod server;
 mod shortcut;
 mod wrapper;

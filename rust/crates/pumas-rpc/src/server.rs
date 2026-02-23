@@ -1,6 +1,6 @@
 //! HTTP server implementation using Axum.
 
-use crate::handler::{handle_health, handle_rpc};
+use crate::handlers::{handle_health, handle_rpc};
 use crate::shortcut::ShortcutManager;
 use axum::{
     routing::{get, post},
@@ -30,8 +30,6 @@ pub struct AppState {
     pub shortcut_manager: Arc<RwLock<Option<ShortcutManager>>>,
     /// Plugin configuration loader
     pub plugin_loader: Arc<PluginLoader>,
-    /// Launcher root directory
-    pub launcher_root: PathBuf,
 }
 
 /// Start the JSON-RPC HTTP server.
@@ -66,7 +64,6 @@ pub async fn start_server(
         size_calculator: Arc::new(RwLock::new(size_calculator)),
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         plugin_loader: Arc::new(plugin_loader),
-        launcher_root,
     });
 
     // Configure CORS for development

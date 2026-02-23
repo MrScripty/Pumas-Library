@@ -82,4 +82,3 @@ bindings/
 
 # Rust
 rust/target/
-rust/Cargo.lock

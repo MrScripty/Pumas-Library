@@ -5,6 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 description = "Elixir/Erlang NIFs for pumas-core via Rustler"
+publish = false
 
 [lib]
 crate-type = ["cdylib"]

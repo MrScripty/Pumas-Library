@@ -147,48 +147,53 @@ jobs:
         run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
 
       - name: Generate Python bindings
+        working-directory: ./rust
         run: |
-          mkdir -p bindings/python
+          mkdir -p ../bindings/python
           pumas-uniffi-bindgen generate \
             --library \
             --language python \
-            --out-dir bindings/python \
-            rust-artifact/libpumas_uniffi.so
+            --out-dir ../bindings/python \
+            ../rust-artifact/libpumas_uniffi.so
 
       - name: Generate Kotlin bindings
+        working-directory: ./rust
         run: |
-          mkdir -p bindings/kotlin
+          mkdir -p ../bindings/kotlin
           pumas-uniffi-bindgen generate \
             --library \
             --language kotlin \
-            --out-dir bindings/kotlin \
-            rust-artifact/libpumas_uniffi.so
+            --out-dir ../bindings/kotlin \
+            ../rust-artifact/libpumas_uniffi.so
 
       - name: Generate Swift bindings
+        working-directory: ./rust
         run: |
-          mkdir -p bindings/swift
+          mkdir -p ../bindings/swift
           pumas-uniffi-bindgen generate \
             --library \
             --language swift \
-            --out-dir bindings/swift \
-            rust-artifact/libpumas_uniffi.so
+            --out-dir ../bindings/swift \
+            ../rust-artifact/libpumas_uniffi.so
 
       - name: Generate Ruby bindings
+        working-directory: ./rust
         run: |
-          mkdir -p bindings/ruby
+          mkdir -p ../bindings/ruby
           pumas-uniffi-bindgen generate \
             --library \
             --language ruby \
-            --out-dir bindings/ruby \
-            rust-artifact/libpumas_uniffi.so
+            --out-dir ../bindings/ruby \
+            ../rust-artifact/libpumas_uniffi.so
 
       - name: Generate C# bindings
+        working-directory: ./rust
         run: |
-          mkdir -p bindings/csharp
+          mkdir -p ../bindings/csharp
           uniffi-bindgen-cs \
             --library \
-            --out-dir bindings/csharp \
-            rust-artifact/libpumas_uniffi.so
+            --out-dir ../bindings/csharp \
+            ../rust-artifact/libpumas_uniffi.so
 
       - name: Upload binding sources
         uses: actions/upload-artifact@v4

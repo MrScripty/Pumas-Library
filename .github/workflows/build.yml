@@ -13,7 +13,7 @@ env:
 jobs:
   # Build and test Rust backend on all platforms
   build-rust:
-    name: Build Rust (${{ matrix.os }})
+    name: Build Rust (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
@@ -23,7 +23,7 @@ jobs:
           - os: windows-latest
             target: x86_64-pc-windows-msvc
           - os: macos-latest
-            target: x86_64-apple-darwin
+            target: aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -50,10 +50,13 @@ jobs:
       - name: Upload Rust artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rust-${{ matrix.os }}
+          name: rust-${{ matrix.target }}
           path: |
             rust/target/${{ matrix.target }}/release/pumas-rpc
             rust/target/${{ matrix.target }}/release/pumas-rpc.exe
+            rust/target/${{ matrix.target }}/release/libpumas_uniffi.so
+            rust/target/${{ matrix.target }}/release/libpumas_uniffi.dylib
+            rust/target/${{ matrix.target }}/release/pumas_uniffi.dll
           if-no-files-found: ignore
 
   # Build Electron app for each platform
@@ -66,13 +69,13 @@ jobs:
         include:
           - os: ubuntu-latest
             target: linux
-            rust-artifact: rust-ubuntu-latest
+            rust-artifact: rust-x86_64-unknown-linux-gnu
           - os: windows-latest
             target: win
-            rust-artifact: rust-windows-latest
+            rust-artifact: rust-x86_64-pc-windows-msvc
           - os: macos-latest
             target: mac
-            rust-artifact: rust-macos-latest
+            rust-artifact: rust-aarch64-apple-darwin
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -134,15 +137,48 @@ jobs:
         with:
           path: artifacts
 
-      - name: List artifacts
-        run: find artifacts -type f
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
+
+      - name: Rename and organize release artifacts
+        run: |
+          mkdir -p release-artifacts
+          VERSION=${{ steps.version.outputs.version }}
+
+          # Rust binaries and shared libraries
+          for target_dir in artifacts/rust-*/; do
+            TARGET=$(basename "$target_dir" | sed 's/^rust-//')
+            for file in "$target_dir"*; do
+              [ -f "$file" ] || continue
+              BASENAME=$(basename "$file")
+              NAME="${BASENAME%.*}"
+              EXT="${BASENAME##*.}"
+              if [ "$NAME" = "$EXT" ]; then
+                # No extension (Linux binary)
+                cp "$file" "release-artifacts/${BASENAME}-${VERSION}-${TARGET}"
+              else
+                cp "$file" "release-artifacts/${NAME}-${VERSION}-${TARGET}.${EXT}"
+              fi
+            done
+          done
+
+          # Electron artifacts (keep original names — they already include version)
+          for dir in artifacts/electron-*/; do
+            cp "$dir"* release-artifacts/ 2>/dev/null || true
+          done
+
+      - name: List release artifacts
+        run: ls -la release-artifacts/
+
+      - name: Generate checksums
+        working-directory: release-artifacts
+        run: sha256sum * > checksums-sha256.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            artifacts/electron-linux/*
-            artifacts/electron-win/*
-            artifacts/electron-mac/*
+          files: release-artifacts/*
           draft: true
           generate_release_notes: true
+          prerelease: ${{ startsWith(github.ref_name, 'v0.') }}

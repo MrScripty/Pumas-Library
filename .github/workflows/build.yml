@@ -43,6 +43,10 @@ jobs:
         working-directory: ./rust
         run: cargo build --release --target ${{ matrix.target }}
 
+      - name: Build Rustler NIF
+        working-directory: ./rust
+        run: cargo build --release --target ${{ matrix.target }} -p pumas_rustler
+
       - name: Run Rust tests
         working-directory: ./rust
         run: cargo test --release --target ${{ matrix.target }}
@@ -52,11 +56,21 @@ jobs:
         with:
           name: rust-${{ matrix.target }}
           path: |
-            rust/target/${{ matrix.target }}/release/pumas-rpc
-            rust/target/${{ matrix.target }}/release/pumas-rpc.exe
             rust/target/${{ matrix.target }}/release/libpumas_uniffi.so
             rust/target/${{ matrix.target }}/release/libpumas_uniffi.dylib
             rust/target/${{ matrix.target }}/release/pumas_uniffi.dll
+            rust/target/${{ matrix.target }}/release/libpumas_rustler.so
+            rust/target/${{ matrix.target }}/release/libpumas_rustler.dylib
+            rust/target/${{ matrix.target }}/release/pumas_rustler.dll
+          if-no-files-found: ignore
+
+      - name: Upload pumas-rpc for Electron packaging
+        uses: actions/upload-artifact@v4
+        with:
+          name: rpc-${{ matrix.target }}
+          path: |
+            rust/target/${{ matrix.target }}/release/pumas-rpc
+            rust/target/${{ matrix.target }}/release/pumas-rpc.exe
           if-no-files-found: ignore
 
   # Build and test frontend
@@ -98,6 +112,90 @@ jobs:
           name: frontend-dist
           path: frontend/dist/
 
+  # Generate binding source files (platform-independent, only needs one OS)
+  generate-bindings:
+    name: Generate Binding Sources
+    needs: [build-rust]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Download Linux Rust artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-x86_64-unknown-linux-gnu
+          path: rust-artifact
+
+      - name: Package pumas-core crate
+        working-directory: ./rust
+        run: cargo package -p pumas-library --allow-dirty
+
+      - name: Upload pumas-core crate
+        uses: actions/upload-artifact@v4
+        with:
+          name: pumas-core-crate
+          path: rust/target/package/pumas-library-*.crate
+
+      - name: Install uniffi-bindgen
+        run: cargo install uniffi-bindgen-cli
+
+      - name: Install uniffi-bindgen-cs
+        run: CARGO_NET_GIT_FETCH_WITH_CLI=true cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
+
+      - name: Generate Python bindings
+        run: |
+          mkdir -p bindings/python
+          uniffi-bindgen generate \
+            --library \
+            --language python \
+            --out-dir bindings/python \
+            rust-artifact/libpumas_uniffi.so
+
+      - name: Generate Kotlin bindings
+        run: |
+          mkdir -p bindings/kotlin
+          uniffi-bindgen generate \
+            --library \
+            --language kotlin \
+            --out-dir bindings/kotlin \
+            rust-artifact/libpumas_uniffi.so
+
+      - name: Generate Swift bindings
+        run: |
+          mkdir -p bindings/swift
+          uniffi-bindgen generate \
+            --library \
+            --language swift \
+            --out-dir bindings/swift \
+            rust-artifact/libpumas_uniffi.so
+
+      - name: Generate Ruby bindings
+        run: |
+          mkdir -p bindings/ruby
+          uniffi-bindgen generate \
+            --library \
+            --language ruby \
+            --out-dir bindings/ruby \
+            rust-artifact/libpumas_uniffi.so
+
+      - name: Generate C# bindings
+        run: |
+          mkdir -p bindings/csharp
+          uniffi-bindgen-cs \
+            --library \
+            --out-dir bindings/csharp \
+            rust-artifact/libpumas_uniffi.so
+
+      - name: Upload binding sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: binding-sources
+          path: bindings/
+
   # Package Electron app for each platform
   build-electron:
     name: Package Electron (${{ matrix.platform }})
@@ -128,10 +226,10 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Download Rust artifact
+      - name: Download pumas-rpc binary
         uses: actions/download-artifact@v4
         with:
-          name: rust-${{ matrix.rust-target }}
+          name: rpc-${{ matrix.rust-target }}
           path: rust-artifact
 
       - name: Download frontend artifact
@@ -180,7 +278,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-rust, build-frontend, build-electron]
+    needs: [build-rust, build-electron, generate-bindings]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -200,27 +298,50 @@ jobs:
           mkdir -p release-artifacts
           VERSION=${{ steps.version.outputs.version }}
 
-          # Rust binaries and shared libraries
+          # --- Per-language binding packages ---
+          # Each package contains the generated source files + native libraries for all platforms
+
+          # --- pumas-core source crate ---
+          cp artifacts/pumas-core-crate/pumas-library-*.crate release-artifacts/
+
+          # Collect native libraries by type
+          mkdir -p staging/uniffi staging/rustler
+
           for target_dir in artifacts/rust-*/; do
             TARGET=$(basename "$target_dir" | sed 's/^rust-//')
+            mkdir -p "staging/uniffi/${TARGET}" "staging/rustler/${TARGET}"
+
             for file in "$target_dir"*; do
               [ -f "$file" ] || continue
               BASENAME=$(basename "$file")
-              NAME="${BASENAME%.*}"
-              EXT="${BASENAME##*.}"
-              if [ "$NAME" = "$EXT" ]; then
-                # No extension (Linux binary)
-                cp "$file" "release-artifacts/${BASENAME}-${VERSION}-${TARGET}"
-              else
-                cp "$file" "release-artifacts/${NAME}-${VERSION}-${TARGET}.${EXT}"
-              fi
+              case "$BASENAME" in
+                libpumas_uniffi.*|pumas_uniffi.dll)
+                  cp "$file" "staging/uniffi/${TARGET}/"
+                  ;;
+                libpumas_rustler.*|pumas_rustler.dll)
+                  cp "$file" "staging/rustler/${TARGET}/"
+                  ;;
+              esac
             done
           done
 
-          # Frontend dist (zip it up for release)
-          cd artifacts/frontend-dist
-          zip -r "../../release-artifacts/pumas-frontend-${VERSION}.zip" .
+          # --- Per-language binding packages ---
+          # Each package contains the generated source files + native libraries for all platforms
+          for lang in python kotlin swift ruby csharp; do
+            mkdir -p "staging/${lang}-pkg/native"
+            cp -r "artifacts/binding-sources/${lang}/." "staging/${lang}-pkg/"
+            cp -r staging/uniffi/* "staging/${lang}-pkg/native/"
+            cd "staging/${lang}-pkg"
+            zip -r "../../release-artifacts/pumas-bindings-${lang}-${VERSION}.zip" .
+            cd ../..
+          done
+
+          # Elixir/Erlang NIF: precompiled native libraries
+          cd staging/rustler
+          zip -r "../../release-artifacts/pumas-nif-elixir-${VERSION}.zip" .
           cd ../..
+
+          # --- Desktop application ---
 
           # Electron installers (already named with version by electron-builder)
           for electron_dir in artifacts/electron-*/; do

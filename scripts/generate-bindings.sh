@@ -3,10 +3,10 @@
 # Generate cross-language bindings for pumas-core.
 #
 # Usage:
-#   ./scripts/generate-bindings.sh [python|csharp|elixir|all]
+#   ./scripts/generate-bindings.sh [python|csharp|kotlin|swift|ruby|elixir|all]
 #
 # Prerequisites:
-#   Python:  cargo install uniffi-bindgen-cli
+#   Python/Kotlin/Swift/Ruby:  cargo install uniffi-bindgen-cli
 #   C#:      cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3
 #   Elixir:  mix deps.get (Rustler compiles NIFs as part of the Mix build)
 
@@ -122,6 +122,104 @@ generate_csharp() {
 }
 
 # ---------------------------------------------------------------------------
+# Kotlin bindings (via uniffi-bindgen)
+# ---------------------------------------------------------------------------
+generate_kotlin() {
+    info "Generating Kotlin bindings..."
+
+    if ! command -v uniffi-bindgen &>/dev/null; then
+        warn "uniffi-bindgen not found. Installing..."
+        cargo install uniffi-bindgen-cli
+        if [ $? -ne 0 ]; then
+            error "Failed to install uniffi-bindgen-cli"
+            return 1
+        fi
+        ok "uniffi-bindgen installed"
+    fi
+
+    local out_dir="$BINDINGS_DIR/kotlin"
+    mkdir -p "$out_dir"
+
+    uniffi-bindgen generate \
+        --library \
+        --language kotlin \
+        --out-dir "$out_dir" \
+        "$CDYLIB_PATH"
+
+    # Copy the shared library next to the generated module
+    cp "$CDYLIB_PATH" "$out_dir/"
+
+    ok "Kotlin bindings generated in $out_dir/"
+    info "Add the generated .kt files to your Kotlin/JVM project and"
+    info "ensure the native library is loadable via System.loadLibrary()."
+}
+
+# ---------------------------------------------------------------------------
+# Swift bindings (via uniffi-bindgen)
+# ---------------------------------------------------------------------------
+generate_swift() {
+    info "Generating Swift bindings..."
+
+    if ! command -v uniffi-bindgen &>/dev/null; then
+        warn "uniffi-bindgen not found. Installing..."
+        cargo install uniffi-bindgen-cli
+        if [ $? -ne 0 ]; then
+            error "Failed to install uniffi-bindgen-cli"
+            return 1
+        fi
+        ok "uniffi-bindgen installed"
+    fi
+
+    local out_dir="$BINDINGS_DIR/swift"
+    mkdir -p "$out_dir"
+
+    uniffi-bindgen generate \
+        --library \
+        --language swift \
+        --out-dir "$out_dir" \
+        "$CDYLIB_PATH"
+
+    # Copy the shared library next to the generated module
+    cp "$CDYLIB_PATH" "$out_dir/"
+
+    ok "Swift bindings generated in $out_dir/"
+    info "Add the generated .swift files and modulemap to your Xcode project."
+}
+
+# ---------------------------------------------------------------------------
+# Ruby bindings (via uniffi-bindgen)
+# ---------------------------------------------------------------------------
+generate_ruby() {
+    info "Generating Ruby bindings..."
+
+    if ! command -v uniffi-bindgen &>/dev/null; then
+        warn "uniffi-bindgen not found. Installing..."
+        cargo install uniffi-bindgen-cli
+        if [ $? -ne 0 ]; then
+            error "Failed to install uniffi-bindgen-cli"
+            return 1
+        fi
+        ok "uniffi-bindgen installed"
+    fi
+
+    local out_dir="$BINDINGS_DIR/ruby"
+    mkdir -p "$out_dir"
+
+    uniffi-bindgen generate \
+        --library \
+        --language ruby \
+        --out-dir "$out_dir" \
+        "$CDYLIB_PATH"
+
+    # Copy the shared library next to the generated module
+    cp "$CDYLIB_PATH" "$out_dir/"
+
+    ok "Ruby bindings generated in $out_dir/"
+    info "require the generated .rb file and ensure the native library"
+    info "is in Ruby's library search path."
+}
+
+# ---------------------------------------------------------------------------
 # Elixir bindings (Rustler - compiled via Mix)
 # ---------------------------------------------------------------------------
 generate_elixir() {
@@ -170,13 +268,16 @@ generate_elixir() {
 # Main
 # ---------------------------------------------------------------------------
 usage() {
-    echo "Usage: $0 [python|csharp|elixir|all]"
+    echo "Usage: $0 [python|csharp|kotlin|swift|ruby|elixir|all]"
     echo ""
     echo "Generate cross-language bindings for pumas-core."
     echo ""
     echo "Targets:"
     echo "  python   Generate Python bindings via uniffi-bindgen"
     echo "  csharp   Generate C# bindings via uniffi-bindgen-cs"
+    echo "  kotlin   Generate Kotlin bindings via uniffi-bindgen"
+    echo "  swift    Generate Swift bindings via uniffi-bindgen"
+    echo "  ruby     Generate Ruby bindings via uniffi-bindgen"
     echo "  elixir   Build Rustler NIF and print Elixir integration guide"
     echo "  all      Generate all bindings (default)"
     exit 1
@@ -198,6 +299,18 @@ main() {
             build_uniffi
             generate_csharp
             ;;
+        kotlin)
+            build_uniffi
+            generate_kotlin
+            ;;
+        swift)
+            build_uniffi
+            generate_swift
+            ;;
+        ruby)
+            build_uniffi
+            generate_ruby
+            ;;
         elixir)
             generate_elixir
             ;;
@@ -205,6 +318,9 @@ main() {
             build_uniffi
             generate_python
             generate_csharp
+            generate_kotlin
+            generate_swift
+            generate_ruby
             generate_elixir
             ;;
         -h|--help|help)

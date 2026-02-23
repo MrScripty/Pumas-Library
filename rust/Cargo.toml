@@ -14,7 +14,7 @@ repository = "https://github.com/jeremy/pumas-library"
 
 [workspace.dependencies]
 # Async runtime
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1" }
 
 # HTTP server
 axum = "0.7"

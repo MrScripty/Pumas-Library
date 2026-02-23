@@ -12,7 +12,7 @@ readme = "README.md"
 
 [dependencies]
 # Async runtime
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "net", "io-util", "fs", "process", "macros"] }
 
 # HTTP client
 reqwest = { workspace = true }

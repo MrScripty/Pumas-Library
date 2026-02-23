@@ -11,7 +11,7 @@ description = "Application version and custom node management for Pumas Library"
 pumas-library = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "process", "io-util", "fs"] }
 
 # HTTP client (for GitHub API)
 reqwest = { workspace = true }

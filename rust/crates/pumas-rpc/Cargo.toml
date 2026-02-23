@@ -16,7 +16,7 @@ pumas-library = { workspace = true }
 pumas-app-manager = { workspace = true }
 
 # Async runtime
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "net", "macros", "signal"] }
 
 # HTTP server
 axum = { workspace = true }

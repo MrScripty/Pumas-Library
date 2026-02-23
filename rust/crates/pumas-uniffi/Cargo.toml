@@ -21,7 +21,7 @@ pumas-library = { path = "../pumas-core", features = ["uniffi"] }
 uniffi = { workspace = true, features = ["tokio"] }
 
 # Async runtime for bridging async functions
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync"] }
 
 # Serialization (for HashMap/Value → JSON string conversion at FFI boundary)
 serde_json = { workspace = true }

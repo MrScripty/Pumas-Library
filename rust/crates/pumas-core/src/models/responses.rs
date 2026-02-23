@@ -14,6 +14,7 @@ pub struct BaseResponse {
 }
 
 impl BaseResponse {
+    /// Create a successful base response with no error.
     pub fn success() -> Self {
         Self {
             success: true,
@@ -21,6 +22,7 @@ impl BaseResponse {
         }
     }
 
+    /// Create a failed base response with the given error message.
     pub fn error(message: impl Into<String>) -> Self {
         Self {
             success: false,

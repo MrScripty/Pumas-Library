@@ -266,8 +266,10 @@ impl GitHubClient {
         Ok(releases)
     }
 
-    /// Get releases for an app by its ID.
-    /// Also populates archive_size from platform-matched assets for display.
+    /// Get releases for an app by its ID, enriched with platform-specific archive sizes.
+    ///
+    /// Fetches releases from GitHub (with caching) and populates `archive_size`
+    /// from platform-matched assets (e.g., selects the correct Ollama binary).
     pub async fn get_releases_for_app(
         &self,
         app_id: AppId,

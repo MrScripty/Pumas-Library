@@ -247,7 +247,7 @@ impl LinkRegistry {
     }
 }
 
-/// Create a link entry.
+/// Create a new link entry with the current timestamp for tracking in the registry.
 pub fn create_link_entry(
     model_id: &str,
     source: impl Into<PathBuf>,

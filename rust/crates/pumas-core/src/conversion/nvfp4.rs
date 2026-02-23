@@ -27,6 +27,7 @@ pub struct Nvfp4Backend {
 }
 
 impl Nvfp4Backend {
+    /// Create a new backend rooted under `{launcher_root}/launcher-data/nvfp4/`.
     pub fn new(launcher_root: &Path) -> Self {
         Self {
             base_dir: launcher_root.join("launcher-data").join("nvfp4"),

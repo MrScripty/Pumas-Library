@@ -17,9 +17,6 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
 
-/// Default mapping config filename pattern.
-const CONFIG_PATTERN: &str = "{app}_{version}_{variant}.json";
-
 /// Model mapper for creating links between library and applications.
 pub struct ModelMapper {
     /// Reference to the model library
@@ -186,7 +183,10 @@ impl ModelMapper {
         atomic_write_json(&path, config, false)
     }
 
-    /// Create a default ComfyUI mapping configuration.
+    /// Create and persist a default ComfyUI mapping configuration.
+    ///
+    /// Generates rules for standard ComfyUI model directories (checkpoints, loras,
+    /// vae, controlnet, clip, embeddings, upscale_models) and saves the config to disk.
     pub fn create_default_comfyui_config(
         &self,
         version: &str,
@@ -416,7 +416,10 @@ impl ModelMapper {
         Ok(result)
     }
 
-    /// Apply mapping with conflict resolution.
+    /// Apply mapping with per-path conflict resolution strategies.
+    ///
+    /// Like `apply_mapping`, but accepts a map of target paths to resolution
+    /// strategies (Skip, Overwrite, Rename) for handling conflicting files.
     pub async fn apply_mapping_with_resolutions(
         &self,
         app_id: &str,

@@ -29,6 +29,7 @@ pub struct SherryBackend {
 }
 
 impl SherryBackend {
+    /// Create a new backend rooted under `{launcher_root}/launcher-data/sherry/`.
     pub fn new(launcher_root: &Path) -> Self {
         Self {
             base_dir: launcher_root.join("launcher-data").join("sherry"),

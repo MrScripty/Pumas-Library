@@ -36,6 +36,7 @@ pub struct LlamaCppBackend {
 }
 
 impl LlamaCppBackend {
+    /// Create a new backend rooted under `{launcher_root}/launcher-data/llama-cpp/`.
     pub fn new(launcher_root: &Path) -> Self {
         Self {
             base_dir: launcher_root.join("launcher-data").join("llama-cpp"),

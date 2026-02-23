@@ -11,6 +11,7 @@ pub struct ConversionProgressTracker {
 }
 
 impl ConversionProgressTracker {
+    /// Create a new empty progress tracker.
     pub fn new() -> Self {
         Self {
             state: Mutex::new(HashMap::new()),

@@ -33,6 +33,7 @@ pub enum ModelType {
 }
 
 impl ModelType {
+    /// Return the canonical lowercase string for this model type.
     pub fn as_str(&self) -> &'static str {
         match self {
             ModelType::Llm => "llm",
@@ -85,6 +86,7 @@ pub enum ModelSubtype {
 }
 
 impl ModelSubtype {
+    /// Return the canonical lowercase string for this subtype.
     pub fn as_str(&self) -> &str {
         match self {
             ModelSubtype::Checkpoints => "checkpoints",
@@ -140,10 +142,12 @@ impl ModelFamily {
     pub const KOLORS: &'static str = "kolors";
     pub const PIXART: &'static str = "pixart";
 
+    /// Create a new model family, normalizing the name to lowercase.
     pub fn new(name: impl Into<String>) -> Self {
         ModelFamily(name.into().to_lowercase())
     }
 
+    /// Return the lowercase family name.
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -247,6 +251,7 @@ impl FileFormat {
         }
     }
 
+    /// Return the canonical lowercase string for this file format.
     pub fn as_str(&self) -> &'static str {
         match self {
             FileFormat::Safetensors => "safetensors",
@@ -359,14 +364,17 @@ pub struct MappingPreview {
 }
 
 impl MappingPreview {
+    /// Create an empty mapping preview.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Return the number of actionable operations (creates + broken link removals).
     pub fn total_actions(&self) -> usize {
         self.creates.len() + self.broken.len()
     }
 
+    /// Return whether any conflicts exist that require resolution before applying.
     pub fn has_conflicts(&self) -> bool {
         !self.conflicts.is_empty()
     }
@@ -453,6 +461,7 @@ pub struct BatchImportProgress {
 }
 
 impl BatchImportProgress {
+    /// Create a new batch import progress tracker for the given total item count.
     pub fn new(total: usize) -> Self {
         Self {
             total,
@@ -464,6 +473,7 @@ impl BatchImportProgress {
         }
     }
 
+    /// Update progress with the number of completed items, current item name, and stage.
     pub fn update(&mut self, completed: usize, current: Option<String>, stage: ImportStage) {
         self.completed = completed;
         self.current = current;

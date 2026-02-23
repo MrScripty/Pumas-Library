@@ -39,6 +39,35 @@ jobs:
         with:
           workspaces: rust -> target
 
+      - name: Install Erlang (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y erlang-dev
+
+      - name: Install Erlang (macOS)
+        if: runner.os == 'macOS'
+        run: brew install erlang
+
+      - name: Install Erlang (Windows)
+        if: runner.os == 'Windows'
+        run: choco install erlang -y
+
+      - name: Set Erlang include path
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            ERTS_DIR=$(ls -d /usr/lib/erlang/erts-*/include 2>/dev/null | head -1)
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            ERTS_DIR=$(ls -d "$(brew --prefix erlang)"/lib/erlang/erts-*/include 2>/dev/null | head -1)
+          elif [ "$RUNNER_OS" = "Windows" ]; then
+            ERTS_DIR=$(ls -d "/c/Program Files/Erlang OTP"/erts-*/include 2>/dev/null | head -1)
+          fi
+          if [ -n "$ERTS_DIR" ]; then
+            echo "ERTS_INCLUDE_DIR=$ERTS_DIR" >> $GITHUB_ENV
+            echo "Found ERTS include: $ERTS_DIR"
+          else
+            echo "WARNING: Could not find ERTS include directory"
+          fi
+
       - name: Build Rust
         working-directory: ./rust
         run: cargo build --release --target ${{ matrix.target }}

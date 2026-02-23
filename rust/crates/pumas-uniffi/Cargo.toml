@@ -14,20 +14,20 @@ crate-type = ["cdylib", "lib"]
 name = "pumas_uniffi"
 
 [dependencies]
-# Core library with UniFFI feature enabled
-pumas-library = { path = "../pumas-core", features = ["uniffi"] }
+# Core library with UniFFI feature enabled (only needed for the cdylib, not the CLI)
+pumas-library = { path = "../pumas-core", features = ["uniffi"], optional = true }
 
 # UniFFI runtime (tokio feature required for async method export)
 uniffi = { workspace = true, features = ["tokio"] }
 
 # Async runtime for bridging async functions
-tokio = { workspace = true, features = ["rt", "sync"] }
+tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 
 # Serialization (for HashMap/Value → JSON string conversion at FFI boundary)
-serde_json = { workspace = true }
+serde_json = { workspace = true, optional = true }
 
 # Error handling
-thiserror = { workspace = true }
+thiserror = { workspace = true, optional = true }
 
 [[bin]]
 name = "pumas-uniffi-bindgen"
@@ -41,5 +41,6 @@ uniffi = { workspace = true, features = ["build"] }
 uniffi = { workspace = true, features = ["bindgen-tests"] }
 
 [features]
-default = []
+default = ["bindings"]
+bindings = ["dep:pumas-library", "dep:tokio", "dep:serde_json", "dep:thiserror"]
 cli = ["uniffi/cli"]

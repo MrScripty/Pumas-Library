@@ -10,8 +10,6 @@ use blake3::Hasher as Blake3Hasher;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
-use tokio::sync::mpsc;
-
 /// Chunk size for reading files (8MB, optimal for SSDs).
 const CHUNK_SIZE: usize = 8 * 1024 * 1024;
 
@@ -25,17 +23,6 @@ pub struct DualHash {
     pub sha256: String,
     /// BLAKE3 hash as lowercase hex string
     pub blake3: String,
-}
-
-/// Progress update during hashing.
-#[derive(Debug, Clone)]
-pub struct HashProgress {
-    /// Bytes processed so far
-    pub bytes_processed: u64,
-    /// Total file size
-    pub total_bytes: u64,
-    /// Progress percentage (0.0-1.0)
-    pub progress: f32,
 }
 
 /// Compute both SHA256 and BLAKE3 hashes in a single pass.
@@ -74,71 +61,6 @@ pub fn compute_dual_hash(path: impl AsRef<Path>) -> Result<DualHash> {
     let blake3 = blake3_hasher.finalize().to_hex().to_string();
 
     Ok(DualHash { sha256, blake3 })
-}
-
-/// Compute dual hash with progress reporting.
-///
-/// # Arguments
-///
-/// * `path` - Path to the file to hash
-/// * `progress_tx` - Channel for progress updates
-///
-/// # Returns
-///
-/// DualHash containing both hash values.
-pub async fn compute_dual_hash_with_progress(
-    path: impl AsRef<Path>,
-    progress_tx: Option<mpsc::Sender<HashProgress>>,
-) -> Result<DualHash> {
-    let path = path.as_ref().to_path_buf();
-    let progress_tx = progress_tx.clone();
-
-    // Run in blocking task since file I/O is blocking
-    tokio::task::spawn_blocking(move || {
-        let mut file = std::fs::File::open(&path).map_err(|e| PumasError::io_with_path(e, &path))?;
-
-        let total_bytes = file
-            .metadata()
-            .map_err(|e| PumasError::io_with_path(e, &path))?
-            .len();
-
-        let mut sha256_hasher = Sha256::new();
-        let mut blake3_hasher = Blake3Hasher::new();
-
-        let mut buffer = vec![0u8; CHUNK_SIZE];
-        let mut bytes_processed: u64 = 0;
-
-        loop {
-            let bytes_read = file
-                .read(&mut buffer)
-                .map_err(|e| PumasError::io_with_path(e, &path))?;
-            if bytes_read == 0 {
-                break;
-            }
-
-            sha256_hasher.update(&buffer[..bytes_read]);
-            blake3_hasher.update(&buffer[..bytes_read]);
-
-            bytes_processed += bytes_read as u64;
-
-            // Send progress update (non-blocking, ignore errors)
-            if let Some(ref tx) = progress_tx {
-                let progress = HashProgress {
-                    bytes_processed,
-                    total_bytes,
-                    progress: bytes_processed as f32 / total_bytes as f32,
-                };
-                let _ = tx.try_send(progress);
-            }
-        }
-
-        let sha256 = hex::encode(sha256_hasher.finalize());
-        let blake3 = blake3_hasher.finalize().to_hex().to_string();
-
-        Ok(DualHash { sha256, blake3 })
-    })
-    .await
-    .map_err(|e| PumasError::Other(format!("Hash computation task failed: {}", e)))?
 }
 
 /// Compute a fast hash for quick candidate filtering.
@@ -230,7 +152,9 @@ pub fn verify_sha256(path: impl AsRef<Path>, expected: &str) -> Result<()> {
     }
 }
 
-/// Verify a file's BLAKE3 hash matches expected value.
+/// Verify a file's BLAKE3 hash matches an expected value.
+///
+/// Returns `Ok(())` if the hash matches, or `Err(HashMismatch)` if it does not.
 pub fn verify_blake3(path: impl AsRef<Path>, expected: &str) -> Result<()> {
     let path = path.as_ref();
     let mut file = std::fs::File::open(path).map_err(|e| PumasError::io_with_path(e, path))?;
@@ -330,25 +254,4 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[tokio::test]
-    async fn test_dual_hash_with_progress() {
-        let mut file = NamedTempFile::new().unwrap();
-        file.write_all(&vec![0u8; 1024 * 1024]).unwrap(); // 1MB
-        file.flush().unwrap();
-
-        let (tx, mut rx) = mpsc::channel(32);
-        let hash = compute_dual_hash_with_progress(file.path(), Some(tx)).await.unwrap();
-
-        assert!(!hash.sha256.is_empty());
-
-        // Should have received at least one progress update
-        // Note: Small files might complete before any progress is sent
-        let mut progress_received = false;
-        while let Ok(progress) = rx.try_recv() {
-            progress_received = true;
-            assert!(progress.progress >= 0.0 && progress.progress <= 1.0);
-        }
-        // For small files, we might not get progress updates
-        let _ = progress_received;
-    }
 }

@@ -154,45 +154,6 @@ pub fn extract_base_name(filename: &str) -> String {
     name.trim_matches(|c| c == '-' || c == '_').to_string()
 }
 
-/// Detect if a filename is part of a sharded model.
-///
-/// Returns the shard index and total count if detected.
-///
-/// # Examples
-///
-/// ```ignore
-/// use pumas_library::model_library::naming::detect_shard;
-///
-/// assert_eq!(detect_shard("model-00001-of-00005.safetensors"), Some((1, 5)));
-/// assert_eq!(detect_shard("model.gguf"), None);
-/// ```
-pub fn detect_shard(filename: &str) -> Option<(u32, u32)> {
-    static SHARD_PATTERN: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(\d{5})-of-(\d{5})").unwrap());
-
-    if let Some(caps) = SHARD_PATTERN.captures(filename) {
-        let index: u32 = caps.get(1)?.as_str().parse().ok()?;
-        let total: u32 = caps.get(2)?.as_str().parse().ok()?;
-        Some((index, total))
-    } else {
-        None
-    }
-}
-
-/// Group files by their shard base name.
-///
-/// Returns a map of base name -> list of files.
-pub fn group_sharded_files(files: &[String]) -> std::collections::HashMap<String, Vec<String>> {
-    let mut groups: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
-
-    for file in files {
-        let base = extract_base_name(file);
-        groups.entry(base).or_default().push(file.clone());
-    }
-
-    groups
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,13 +212,6 @@ mod tests {
             extract_base_name("model-00001-of-00005.safetensors"),
             "model"
         );
-    }
-
-    #[test]
-    fn test_detect_shard() {
-        assert_eq!(detect_shard("model-00001-of-00005.safetensors"), Some((1, 5)));
-        assert_eq!(detect_shard("model-00003-of-00010.bin"), Some((3, 10)));
-        assert_eq!(detect_shard("model.gguf"), None);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::process::Command;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// GPU information.
 #[derive(Debug, Clone, Default)]
@@ -23,13 +23,6 @@ pub struct GpuInfo {
     pub temperature: Option<f32>,
     /// GPU name/model.
     pub name: Option<String>,
-}
-
-/// Per-process GPU memory information.
-#[derive(Debug, Clone, Default)]
-pub struct ProcessGpuInfo {
-    /// GPU memory used by this process in bytes.
-    pub memory_used: u64,
 }
 
 /// Trait for GPU monitoring implementations.

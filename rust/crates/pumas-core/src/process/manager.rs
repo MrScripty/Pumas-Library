@@ -2,7 +2,7 @@
 
 use super::detection::{DetectedProcess, ProcessDetector, ProcessSource};
 use super::launcher::{BinaryLaunchConfig, LaunchConfig, LaunchResult, ProcessLauncher};
-use crate::error::{PumasError, Result};
+use crate::error::Result;
 use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -384,29 +384,8 @@ impl ProcessManager {
                         // Read PID and check if process is alive
                         if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                // Check if process exists
-                                #[cfg(unix)]
-                                {
-                                    // On Unix, send signal 0 to check if process exists
-                                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
-                                        return true;
-                                    }
-                                }
-                                #[cfg(windows)]
-                                {
-                                    // On Windows, try to open the process
-                                    use std::os::windows::io::AsRawHandle;
-                                    let handle = unsafe {
-                                        winapi::um::processthreadsapi::OpenProcess(
-                                            winapi::um::winnt::PROCESS_QUERY_INFORMATION,
-                                            0,
-                                            pid,
-                                        )
-                                    };
-                                    if !handle.is_null() {
-                                        unsafe { winapi::um::handleapi::CloseHandle(handle) };
-                                        return true;
-                                    }
+                                if crate::platform::is_process_alive(pid) {
+                                    return true;
                                 }
                             }
                         }
@@ -417,7 +396,7 @@ impl ProcessManager {
 
         // Fallback: check for running ollama process by pattern
         let processes = crate::platform::find_processes_by_cmdline("ollama");
-        for (pid, cmdline) in &processes {
+        for (_pid, cmdline) in &processes {
             if cmdline.contains("serve") {
                 return true;
             }
@@ -545,25 +524,8 @@ impl ProcessManager {
                     if pid_file.exists() {
                         if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                             if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                                #[cfg(unix)]
-                                {
-                                    if unsafe { libc::kill(pid as i32, 0) } == 0 {
-                                        return true;
-                                    }
-                                }
-                                #[cfg(windows)]
-                                {
-                                    let handle = unsafe {
-                                        winapi::um::processthreadsapi::OpenProcess(
-                                            winapi::um::winnt::PROCESS_QUERY_INFORMATION,
-                                            0,
-                                            pid,
-                                        )
-                                    };
-                                    if !handle.is_null() {
-                                        unsafe { winapi::um::handleapi::CloseHandle(handle) };
-                                        return true;
-                                    }
+                                if crate::platform::is_process_alive(pid) {
+                                    return true;
                                 }
                             }
                         }

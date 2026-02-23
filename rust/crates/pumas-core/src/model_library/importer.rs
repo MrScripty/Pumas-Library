@@ -10,8 +10,8 @@ use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
-    BatchImportProgress, FileFormat, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
-    ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
+    BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
+    ModelImportSpec, ModelMetadata, SecurityTier,
 };
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -1169,46 +1169,6 @@ pub struct ImportProgress {
     pub progress: f32,
     /// Status message
     pub message: String,
-}
-
-/// Validate files before import.
-///
-/// Checks:
-/// - File exists
-/// - File is readable
-/// - File type is recognized
-pub fn validate_import_path(path: &Path) -> Result<ValidationResult> {
-    if !path.exists() {
-        return Err(PumasError::FileNotFound(path.to_path_buf()));
-    }
-
-    let type_info = identify_model_type(path)?;
-
-    Ok(ValidationResult {
-        path: path.to_path_buf(),
-        format: type_info.format,
-        model_type: type_info.model_type,
-        family: type_info.family.map(|f| f.to_string()),
-        security_tier: type_info.format.security_tier(),
-        is_valid: type_info.format != FileFormat::Unknown,
-    })
-}
-
-/// Result of import validation.
-#[derive(Debug, Clone)]
-pub struct ValidationResult {
-    /// Validated path
-    pub path: PathBuf,
-    /// Detected file format
-    pub format: FileFormat,
-    /// Detected model type
-    pub model_type: ModelType,
-    /// Detected family
-    pub family: Option<String>,
-    /// Security tier
-    pub security_tier: SecurityTier,
-    /// Whether the file is valid for import
-    pub is_valid: bool,
 }
 
 #[cfg(test)]

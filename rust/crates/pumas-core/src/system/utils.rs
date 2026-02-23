@@ -3,7 +3,7 @@
 use crate::error::{PumasError, Result};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use tracing::{debug, error, warn};
+use tracing::{debug, warn};
 
 /// Disk space information.
 #[derive(Debug, Clone)]

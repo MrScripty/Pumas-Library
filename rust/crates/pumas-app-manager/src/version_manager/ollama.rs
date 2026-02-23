@@ -26,8 +26,6 @@ pub struct OllamaVersionManager {
     app_id: AppId,
     /// GitHub repository for Ollama.
     github_repo: String,
-    /// Metadata manager for JSON persistence.
-    metadata_manager: Arc<MetadataManager>,
     /// GitHub client for fetching releases.
     github_client: Arc<GitHubClient>,
     /// Version state tracking.
@@ -59,7 +57,6 @@ impl OllamaVersionManager {
             launcher_root,
             app_id,
             github_repo: "ollama/ollama".to_string(),
-            metadata_manager,
             github_client,
             state: Arc::new(RwLock::new(state)),
             cancel_flag: Arc::new(AtomicBool::new(false)),

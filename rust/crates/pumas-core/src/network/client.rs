@@ -10,7 +10,6 @@ use crate::config::NetworkConfig;
 use crate::{PumasError, Result};
 use reqwest::{header, Client, Response, StatusCode};
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, warn};
 
@@ -66,8 +65,6 @@ pub struct HttpClient {
     rate_limit_remaining: AtomicI64,
     rate_limit_limit: AtomicU64,
     rate_limit_reset: AtomicU64,
-    /// Default timeout for requests.
-    default_timeout: Duration,
     /// Throttle delay when rate limited.
     throttle_delay: Duration,
 }
@@ -94,7 +91,6 @@ impl HttpClient {
             rate_limit_remaining: AtomicI64::new(-1),
             rate_limit_limit: AtomicU64::new(0),
             rate_limit_reset: AtomicU64::new(0),
-            default_timeout: timeout,
             throttle_delay: Duration::from_secs(2), // Increased from 500ms for more effective throttling
         })
     }
@@ -321,29 +317,6 @@ impl Default for HttpClient {
     }
 }
 
-/// Shared HTTP client instance.
-pub struct SharedHttpClient(Arc<HttpClient>);
-
-impl SharedHttpClient {
-    /// Create a new shared HTTP client.
-    pub fn new() -> Result<Self> {
-        Ok(Self(Arc::new(HttpClient::new()?)))
-    }
-
-    /// Get a clone of the Arc for sharing.
-    pub fn clone_inner(&self) -> Arc<HttpClient> {
-        self.0.clone()
-    }
-}
-
-impl std::ops::Deref for SharedHttpClient {
-    type Target = HttpClient;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
 /// Extract domain from a URL.
 pub fn extract_domain(url: &str) -> String {
     url::Url::parse(url)
@@ -442,7 +415,6 @@ mod tests {
     #[tokio::test]
     async fn test_client_with_timeout() {
         let client = HttpClient::with_timeout(Duration::from_secs(5)).unwrap();
-        // Verify the client was created successfully with custom timeout
-        assert_eq!(client.default_timeout, Duration::from_secs(5));
+        assert_eq!(client.rate_limit_state().remaining, None);
     }
 }

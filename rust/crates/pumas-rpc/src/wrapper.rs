@@ -286,10 +286,10 @@ mod tests {
 
     #[test]
     fn test_wrap_bool_method() {
-        let wrapped = wrap_response("install_version", json!(true));
+        let wrapped = wrap_response("remove_version", json!(true));
         assert!(wrapped.get("success").unwrap().as_bool().unwrap());
 
-        let wrapped = wrap_response("install_version", json!(false));
+        let wrapped = wrap_response("remove_version", json!(false));
         assert!(!wrapped.get("success").unwrap().as_bool().unwrap());
     }
 

@@ -464,7 +464,7 @@ impl VersionInstaller {
         &self,
         tag: &str,
         release: &GitHubRelease,
-        version_dir: &PathBuf,
+        _version_dir: &PathBuf,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Finalizing Ollama installation for {}", tag);

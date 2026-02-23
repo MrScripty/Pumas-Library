@@ -180,48 +180,6 @@ impl DesktopEntryBuilder {
         self
     }
 
-    /// Set the entry type.
-    pub fn entry_type(mut self, entry_type: impl Into<String>) -> Self {
-        self.entry.entry_type = entry_type.into();
-        self
-    }
-
-    /// Set categories.
-    pub fn categories(mut self, categories: Vec<String>) -> Self {
-        self.entry.categories = categories;
-        self
-    }
-
-    /// Add a category.
-    pub fn add_category(mut self, category: impl Into<String>) -> Self {
-        self.entry.categories.push(category.into());
-        self
-    }
-
-    /// Set keywords.
-    pub fn keywords(mut self, keywords: Vec<String>) -> Self {
-        self.entry.keywords = keywords;
-        self
-    }
-
-    /// Set whether hidden.
-    pub fn hidden(mut self, hidden: bool) -> Self {
-        self.entry.hidden = hidden;
-        self
-    }
-
-    /// Set whether to not display.
-    pub fn no_display(mut self, no_display: bool) -> Self {
-        self.entry.no_display = no_display;
-        self
-    }
-
-    /// Set the StartupWMClass.
-    pub fn startup_wm_class(mut self, wm_class: impl Into<String>) -> Self {
-        self.entry.startup_wm_class = Some(wm_class.into());
-        self
-    }
-
     /// Build the desktop entry.
     pub fn build(self) -> DesktopEntry {
         self.entry
@@ -247,7 +205,6 @@ mod tests {
             .exec("/usr/bin/myapp")
             .icon("myapp")
             .terminal(false)
-            .add_category("Utility")
             .build();
 
         assert_eq!(entry.name, "My App");
@@ -255,7 +212,6 @@ mod tests {
         assert_eq!(entry.exec, "/usr/bin/myapp");
         assert_eq!(entry.icon, "myapp");
         assert!(!entry.terminal);
-        assert!(entry.categories.contains(&"Utility".to_string()));
     }
 
     #[test]

@@ -14,7 +14,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Default maximum cache size (4GB).
 const DEFAULT_MAX_SIZE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
@@ -54,23 +54,6 @@ impl Default for HfCacheConfig {
             rate_limit_window_seconds: DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
         }
     }
-}
-
-/// Cached search result entry.
-#[derive(Debug, Clone)]
-pub struct CachedSearch {
-    /// Normalized query.
-    pub query_normalized: String,
-    /// Kind filter (None = all).
-    pub kind: Option<String>,
-    /// Result limit.
-    pub limit: usize,
-    /// Result offset.
-    pub offset: usize,
-    /// Ordered list of repo IDs.
-    pub repo_ids: Vec<String>,
-    /// When the search was performed.
-    pub searched_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Cached repository details.

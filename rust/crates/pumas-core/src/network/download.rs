@@ -73,8 +73,6 @@ pub struct DownloadManager {
     last_error_retryable: AtomicBool,
     /// Progress update interval.
     progress_interval: Duration,
-    /// Chunk size for reading.
-    chunk_size: usize,
     /// Temp file suffix.
     temp_suffix: String,
 }
@@ -89,7 +87,6 @@ impl DownloadManager {
             last_error: std::sync::RwLock::new(None),
             last_error_retryable: AtomicBool::new(false),
             progress_interval: NetworkConfig::DOWNLOAD_PROGRESS_INTERVAL,
-            chunk_size: NetworkConfig::DOWNLOAD_CHUNK_SIZE,
             temp_suffix: NetworkConfig::DOWNLOAD_TEMP_SUFFIX.to_string(),
         })
     }
@@ -102,7 +99,6 @@ impl DownloadManager {
             last_error: std::sync::RwLock::new(None),
             last_error_retryable: AtomicBool::new(false),
             progress_interval: NetworkConfig::DOWNLOAD_PROGRESS_INTERVAL,
-            chunk_size: NetworkConfig::DOWNLOAD_CHUNK_SIZE,
             temp_suffix: NetworkConfig::DOWNLOAD_TEMP_SUFFIX.to_string(),
         }
     }

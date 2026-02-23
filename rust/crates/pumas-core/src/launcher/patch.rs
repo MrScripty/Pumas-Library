@@ -9,8 +9,6 @@ use tracing::{debug, info};
 
 /// Manages main.py patching for ComfyUI versions.
 pub struct PatchManager {
-    /// Path to ComfyUI root directory (legacy single installation).
-    comfyui_dir: PathBuf,
     /// Path to main.py (legacy single installation).
     main_py: PathBuf,
     /// Path to versions directory for multi-version support.
@@ -26,12 +24,11 @@ impl PatchManager {
     /// * `main_py` - Path to main.py (legacy single installation)
     /// * `versions_dir` - Optional path to versions directory for multi-version support
     pub fn new(
-        comfyui_dir: impl AsRef<Path>,
+        _comfyui_dir: impl AsRef<Path>,
         main_py: impl AsRef<Path>,
         versions_dir: Option<PathBuf>,
     ) -> Self {
         Self {
-            comfyui_dir: comfyui_dir.as_ref().to_path_buf(),
             main_py: main_py.as_ref().to_path_buf(),
             versions_dir,
         }

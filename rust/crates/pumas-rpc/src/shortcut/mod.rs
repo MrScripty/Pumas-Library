@@ -35,7 +35,4 @@ mod icon;
 mod launch_script;
 mod manager;
 
-pub use desktop_entry::{DesktopEntry, DesktopEntryBuilder};
-pub use icon::IconManager;
-pub use launch_script::LaunchScriptGenerator;
-pub use manager::{ShortcutManager, ShortcutResult, ShortcutState};
+pub use manager::ShortcutManager;

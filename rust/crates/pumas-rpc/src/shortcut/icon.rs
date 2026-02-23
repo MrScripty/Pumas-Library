@@ -9,7 +9,7 @@ use pumas_library::error::{PumasError, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Standard icon sizes for XDG icon theme.
 const ICON_SIZES: [u32; 4] = [256, 128, 64, 48];
@@ -40,11 +40,6 @@ impl IconManager {
             generated_icons_dir: generated_icons_dir.as_ref().to_path_buf(),
             icon_theme_dir,
         }
-    }
-
-    /// Check if the base icon exists.
-    pub fn base_icon_exists(&self) -> bool {
-        self.base_icon.exists()
     }
 
     /// Install the base icon for the application.
@@ -334,22 +329,6 @@ mod tests {
         let base_icon = temp_dir.path().join("icon.png");
         let generated_dir = temp_dir.path().join("generated");
 
-        let manager = IconManager::new(&base_icon, &generated_dir);
-
-        assert!(!manager.base_icon_exists());
-    }
-
-    #[test]
-    fn test_base_icon_exists() {
-        let temp_dir = TempDir::new().unwrap();
-        let base_icon = temp_dir.path().join("icon.png");
-        let generated_dir = temp_dir.path().join("generated");
-
-        // Create a dummy icon
-        fs::write(&base_icon, "dummy").unwrap();
-
-        let manager = IconManager::new(&base_icon, &generated_dir);
-
-        assert!(manager.base_icon_exists());
+        let _manager = IconManager::new(&base_icon, &generated_dir);
     }
 }

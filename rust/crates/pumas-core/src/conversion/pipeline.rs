@@ -11,7 +11,7 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{debug, warn};
 
 use super::progress::ConversionProgressTracker;
-use super::types::{ConversionSource, ConversionStatus, ScriptProgressLine};
+use super::types::{ConversionSource, ConversionStatus};
 use crate::cancel::CancellationToken;
 use crate::model_library::ModelLibrary;
 use crate::models::ModelMetadata;
@@ -20,44 +20,6 @@ use crate::{PumasError, Result};
 // ---------------------------------------------------------------------------
 // Subprocess output streaming
 // ---------------------------------------------------------------------------
-
-/// Stream JSON progress lines from a subprocess's stdout to the progress tracker.
-///
-/// Reads lines from the child's stdout, parses each as a `ScriptProgressLine`,
-/// and calls `update_from_script()` on the tracker. Non-JSON lines are logged
-/// at debug level. Checks cancellation between lines.
-pub async fn stream_subprocess_json_progress(
-    conversion_id: &str,
-    child: &mut tokio::process::Child,
-    progress: &ConversionProgressTracker,
-    cancel_token: &CancellationToken,
-) -> Result<()> {
-    let stdout = child.stdout.take().expect("stdout was piped");
-    let mut reader = BufReader::new(stdout).lines();
-
-    loop {
-        if cancel_token.is_cancelled() {
-            child.kill().await.ok();
-            return Err(PumasError::ConversionCancelled);
-        }
-
-        match reader.next_line().await {
-            Ok(Some(line)) => {
-                if let Ok(script_progress) = serde_json::from_str::<ScriptProgressLine>(&line) {
-                    progress.update_from_script(conversion_id, &script_progress);
-                } else {
-                    debug!("Non-JSON subprocess output: {}", line);
-                }
-            }
-            Ok(None) => break,
-            Err(e) => {
-                warn!("Error reading subprocess stdout: {}", e);
-                break;
-            }
-        }
-    }
-    Ok(())
-}
 
 /// Stream a subprocess's stderr, logging each line at debug level.
 ///

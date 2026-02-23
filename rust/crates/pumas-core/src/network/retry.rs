@@ -176,19 +176,6 @@ where
     unreachable!("Retry loop should have returned")
 }
 
-/// Retry an async operation with default configuration.
-pub async fn retry_async_default<F, Fut, T, E>(
-    operation: F,
-    should_retry: impl Fn(&E) -> bool,
-) -> (Result<T, E>, RetryStats)
-where
-    F: FnMut() -> Fut,
-    Fut: Future<Output = Result<T, E>>,
-    E: std::fmt::Display,
-{
-    retry_async(&RetryConfig::default(), operation, should_retry).await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

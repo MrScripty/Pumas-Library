@@ -29,20 +29,10 @@ pub struct ShortcutState {
 pub struct ShortcutResult {
     /// Whether the operation was successful.
     pub success: bool,
-    /// Whether menu shortcut was created/removed.
-    pub menu: bool,
-    /// Whether desktop shortcut was created/removed.
-    pub desktop: bool,
-    /// Error message if failed.
-    pub error: Option<String>,
-    /// Current shortcut state.
-    pub state: ShortcutState,
 }
 
 /// High-level shortcut manager.
 pub struct ShortcutManager {
-    /// Launcher root directory.
-    script_dir: PathBuf,
     /// Icon manager.
     icon_manager: IconManager,
     /// Launch script generator.
@@ -78,18 +68,12 @@ impl ShortcutManager {
         let desktop_dir = platform::desktop_dir()?;
 
         Ok(Self {
-            script_dir,
             icon_manager: IconManager::new(&base_icon, &generated_icons_dir),
             script_generator: LaunchScriptGenerator::new(&scripts_dir, &profiles_dir),
             apps_dir,
             desktop_dir,
             version_paths: HashMap::new(),
         })
-    }
-
-    /// Set known version paths.
-    pub fn set_version_paths(&mut self, paths: HashMap<String, PathBuf>) {
-        self.version_paths = paths;
     }
 
     /// Convert a version tag to a filesystem-safe slug.
@@ -155,10 +139,6 @@ impl ShortcutManager {
         if !venv_python.exists() || !main_py.exists() {
             return Ok(ShortcutResult {
                 success: false,
-                menu: false,
-                desktop: false,
-                error: Some(format!("Version {} is not installed or incomplete", tag)),
-                state: self.get_version_shortcut_state(tag),
             });
         }
 
@@ -185,7 +165,6 @@ impl ShortcutManager {
 
         let mut menu_created = false;
         let mut desktop_created = false;
-        let mut errors = Vec::new();
 
         // Create menu shortcut
         if create_menu {
@@ -193,7 +172,6 @@ impl ShortcutManager {
                 Ok(()) => menu_created = true,
                 Err(e) => {
                     warn!("Failed to create menu shortcut: {}", e);
-                    errors.push(format!("Menu: {}", e));
                 }
             }
         }
@@ -204,17 +182,11 @@ impl ShortcutManager {
                 Ok(()) => desktop_created = true,
                 Err(e) => {
                     warn!("Failed to create desktop shortcut: {}", e);
-                    errors.push(format!("Desktop: {}", e));
                 }
             }
         }
 
         let success = (menu_created || !create_menu) && (desktop_created || !create_desktop);
-        let error = if errors.is_empty() {
-            None
-        } else {
-            Some(errors.join("; "))
-        };
 
         info!(
             "Created shortcuts for {}: menu={}, desktop={}",
@@ -223,10 +195,6 @@ impl ShortcutManager {
 
         Ok(ShortcutResult {
             success,
-            menu: menu_created,
-            desktop: desktop_created,
-            error,
-            state: self.get_version_shortcut_state(tag),
         })
     }
 
@@ -334,10 +302,6 @@ impl ShortcutManager {
 
         Ok(ShortcutResult {
             success: true,
-            menu: !remove_menu,
-            desktop: !remove_desktop,
-            error: None,
-            state: self.get_version_shortcut_state(tag),
         })
     }
 
@@ -387,10 +351,28 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    /// Create a ShortcutManager that doesn't depend on platform directories,
+    /// so tests work in headless CI environments.
+    fn test_manager(script_dir: &Path) -> ShortcutManager {
+        let launcher_data = script_dir.join("launcher-data");
+        let base_icon = script_dir.join("resources").join("icon.webp");
+        let generated_icons_dir = launcher_data.join("generated-icons");
+        let scripts_dir = launcher_data.join("shortcut-scripts");
+        let profiles_dir = launcher_data.join("profiles");
+
+        ShortcutManager {
+            icon_manager: IconManager::new(&base_icon, &generated_icons_dir),
+            script_generator: LaunchScriptGenerator::new(&scripts_dir, &profiles_dir),
+            apps_dir: script_dir.join("test-apps"),
+            desktop_dir: script_dir.join("test-desktop"),
+            version_paths: HashMap::new(),
+        }
+    }
+
     #[test]
     fn test_slugify_tag() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = ShortcutManager::new(temp_dir.path()).unwrap();
+        let manager = test_manager(temp_dir.path());
 
         assert_eq!(manager.slugify_tag("v1.0.0"), "v1-0-0");
         assert_eq!(manager.slugify_tag("  v2.0.0-beta  "), "v2-0-0-beta");
@@ -400,7 +382,7 @@ mod tests {
     #[test]
     fn test_shortcut_state() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = ShortcutManager::new(temp_dir.path()).unwrap();
+        let manager = test_manager(temp_dir.path());
 
         let state = manager.get_version_shortcut_state("v1.0.0");
 
@@ -412,7 +394,7 @@ mod tests {
     #[test]
     fn test_create_shortcuts_missing_version() {
         let temp_dir = TempDir::new().unwrap();
-        let manager = ShortcutManager::new(temp_dir.path()).unwrap();
+        let manager = test_manager(temp_dir.path());
 
         let version_dir = temp_dir.path().join("versions").join("v1.0.0");
         fs::create_dir_all(&version_dir).unwrap();
@@ -423,6 +405,5 @@ mod tests {
             .unwrap();
 
         assert!(!result.success);
-        assert!(result.error.is_some());
     }
 }

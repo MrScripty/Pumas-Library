@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
-use tracing::debug;
 
 /// System resource snapshot.
 #[derive(Debug, Clone, Default)]

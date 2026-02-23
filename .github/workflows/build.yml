@@ -151,6 +151,11 @@ jobs:
         working-directory: ./electron
         run: npm ci
 
+      - name: Install dmg-license (macOS only)
+        if: matrix.platform == 'mac'
+        working-directory: ./electron
+        run: npm install dmg-license
+
       - name: Build Electron TypeScript
         working-directory: ./electron
         run: npm run build

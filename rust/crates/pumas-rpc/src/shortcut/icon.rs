@@ -253,7 +253,9 @@ impl IconManager {
             source: Some(e),
         })?;
 
-        // Create PNG symlink for compatibility
+        // Create PNG symlink for compatibility (Unix only — symlinks on
+        // Windows require elevated privileges and aren't needed for XDG icons)
+        #[cfg(unix)]
         if extension != "png" {
             let png_link = icon_dir.join(format!("{}.png", name));
             let _ = fs::remove_file(&png_link); // Remove existing if any

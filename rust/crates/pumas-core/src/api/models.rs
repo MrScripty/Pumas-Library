@@ -321,4 +321,14 @@ impl PumasApi {
             errors: result.errors,
         })
     }
+
+    /// Reclassify a single model (re-detect type and relocate directory if needed).
+    pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
+        self.primary().model_library.reclassify_model(model_id).await
+    }
+
+    /// Reclassify all models in the library (re-detect types and relocate directories).
+    pub async fn reclassify_all_models(&self) -> Result<model_library::ReclassifyResult> {
+        self.primary().model_library.reclassify_all_models().await
+    }
 }

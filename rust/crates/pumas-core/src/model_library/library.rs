@@ -773,6 +773,173 @@ impl ModelLibrary {
         let model_dir = self.library_root.join(model_id);
         find_primary_model_file(&model_dir)
     }
+
+    /// Reclassify a model: re-detect its type and move to the correct directory if needed.
+    ///
+    /// Unlike `redetect_model_type()` which only updates metadata in-place,
+    /// this method also relocates the model directory to match the new type,
+    /// maintaining consistency between on-disk layout and metadata.
+    ///
+    /// # Returns
+    ///
+    /// The new model_id if the model was reclassified and moved, None if unchanged.
+    pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
+        let model_dir = self.library_root.join(model_id);
+
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
+
+        // Load current metadata
+        let mut metadata = match self.load_metadata(&model_dir)? {
+            Some(m) => m,
+            None => return Ok(None),
+        };
+
+        let current_type = metadata.model_type.clone().unwrap_or_default();
+        let current_family = metadata.family.clone().unwrap_or_default();
+
+        // Find primary model file and re-detect type
+        let primary_file = match find_primary_model_file(&model_dir) {
+            Some(f) => f,
+            None => return Ok(None),
+        };
+
+        let type_info = identify_model_type(&primary_file)?;
+        let new_type = type_info.model_type.as_str().to_string();
+        let new_family = type_info
+            .family
+            .map(|f| f.as_str().to_string())
+            .unwrap_or_else(|| current_family.clone());
+
+        // Check if anything changed
+        if new_type == current_type && new_family == current_family {
+            return Ok(None);
+        }
+
+        // Update metadata fields
+        metadata.model_type = Some(new_type.clone());
+        metadata.family = Some(new_family.clone());
+
+        let cleaned_name = metadata
+            .cleaned_name
+            .clone()
+            .unwrap_or_else(|| {
+                model_id
+                    .split('/')
+                    .last()
+                    .unwrap_or(model_id)
+                    .to_string()
+            });
+
+        let new_dir = self.build_model_path(&new_type, &new_family, &cleaned_name);
+        let new_model_id = format!("{}/{}/{}", normalize_name(&new_type), normalize_name(&new_family), normalize_name(&cleaned_name));
+
+        metadata.model_id = Some(new_model_id.clone());
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        if new_dir == model_dir {
+            // Path didn't change (directory already correct)
+            self.save_metadata(&model_dir, &metadata).await?;
+            self.index_model_dir(&model_dir).await?;
+            return Ok(Some(new_model_id));
+        }
+
+        // Check for collision at new path
+        if new_dir.exists() {
+            return Err(PumasError::Other(format!(
+                "Cannot reclassify {}: destination {} already exists",
+                model_id,
+                new_dir.display()
+            )));
+        }
+
+        // Save updated metadata to current location first
+        self.save_metadata(&model_dir, &metadata).await?;
+
+        // Remove from index at old ID
+        let _ = self.index.delete(model_id);
+
+        // Move the directory
+        std::fs::create_dir_all(new_dir.parent().unwrap())?;
+        std::fs::rename(&model_dir, &new_dir)?;
+
+        // Clean up empty parent directories left behind
+        if let Some(parent) = model_dir.parent() {
+            let _ = std::fs::remove_dir(parent); // Only removes if empty
+            if let Some(grandparent) = parent.parent() {
+                if grandparent != self.library_root {
+                    let _ = std::fs::remove_dir(grandparent);
+                }
+            }
+        }
+
+        // Re-index at new location
+        self.index_model_dir(&new_dir).await?;
+
+        tracing::info!(
+            "Reclassified model: {} ({}) -> {} ({})",
+            model_id,
+            current_type,
+            new_model_id,
+            new_type
+        );
+
+        Ok(Some(new_model_id))
+    }
+
+    /// Reclassify all models in the library: re-detect types and relocate directories.
+    ///
+    /// Scans every model, re-detects its type from file content, and moves
+    /// any misclassified models to the correct directory.
+    pub async fn reclassify_all_models(&self) -> Result<ReclassifyResult> {
+        tracing::info!("Reclassifying all models in library");
+
+        let mut result = ReclassifyResult::default();
+        // Collect model_dirs first to avoid iterator invalidation during moves
+        let model_dirs: Vec<_> = self.model_dirs().collect();
+        result.total = model_dirs.len();
+
+        for model_dir in &model_dirs {
+            if let Some(model_id) = self.get_model_id(model_dir) {
+                match self.reclassify_model(&model_id).await {
+                    Ok(Some(new_id)) => {
+                        result.reclassified += 1;
+                        result.changes.push((model_id, new_id));
+                    }
+                    Ok(None) => { /* unchanged */ }
+                    Err(e) => {
+                        tracing::warn!("Failed to reclassify {}: {}", model_id, e);
+                        result.errors.push((model_id, e.to_string()));
+                    }
+                }
+            }
+        }
+
+        tracing::info!(
+            "Reclassify complete: {}/{} reclassified, {} errors",
+            result.reclassified,
+            result.total,
+            result.errors.len()
+        );
+
+        Ok(result)
+    }
+}
+
+/// Result of a library-wide reclassification operation.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct ReclassifyResult {
+    /// Total number of models scanned.
+    pub total: usize,
+    /// Number of models that were reclassified and moved.
+    pub reclassified: usize,
+    /// List of (old_model_id, new_model_id) for reclassified models.
+    pub changes: Vec<(String, String)>,
+    /// List of (model_id, error_message) for models that failed.
+    pub errors: Vec<(String, String)>,
 }
 
 /// Find the primary model file in a directory (the largest model file).

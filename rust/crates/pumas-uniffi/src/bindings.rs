@@ -786,6 +786,45 @@ impl From<SearchResult> for FfiSearchResult {
     }
 }
 
+/// A simple key-value pair for FFI (UniFFI does not support tuple fields).
+#[derive(uniffi::Record)]
+pub struct FfiStringPair {
+    pub first: String,
+    pub second: String,
+}
+
+/// Result of a library-wide reclassification operation.
+#[derive(uniffi::Record)]
+pub struct FfiReclassifyResult {
+    /// Total number of models scanned.
+    pub total: u64,
+    /// Number of models that were reclassified and moved.
+    pub reclassified: u64,
+    /// List of (old_model_id, new_model_id) for reclassified models.
+    pub changes: Vec<FfiStringPair>,
+    /// List of (model_id, error_message) for models that failed.
+    pub errors: Vec<FfiStringPair>,
+}
+
+impl From<pumas_library::model_library::ReclassifyResult> for FfiReclassifyResult {
+    fn from(r: pumas_library::model_library::ReclassifyResult) -> Self {
+        Self {
+            total: r.total as u64,
+            reclassified: r.reclassified as u64,
+            changes: r
+                .changes
+                .into_iter()
+                .map(|(f, s)| FfiStringPair { first: f, second: s })
+                .collect(),
+            errors: r
+                .errors
+                .into_iter()
+                .map(|(f, s)| FfiStringPair { first: f, second: s })
+                .collect(),
+        }
+    }
+}
+
 /// FFI-safe wrapper for `HuggingFaceModel`.
 #[derive(uniffi::Record)]
 pub struct FfiHuggingFaceModel {
@@ -1110,6 +1149,31 @@ impl FfiPumasApi {
             .rebuild_model_index()
             .await
             .map(|n| n as u64)
+            .map_err(FfiError::from)
+    }
+
+    /// Re-detect a model's type and move it to the correct directory if misclassified.
+    ///
+    /// Returns the new model_id if the model was reclassified, None if unchanged.
+    pub async fn reclassify_model(
+        &self,
+        model_id: String,
+    ) -> Result<Option<String>, FfiError> {
+        self.inner
+            .reclassify_model(&model_id)
+            .await
+            .map_err(FfiError::from)
+    }
+
+    /// Re-detect and reclassify all models in the library.
+    ///
+    /// Scans every model, re-detects its type from file content, and moves
+    /// any misclassified models to the correct directory.
+    pub async fn reclassify_all_models(&self) -> Result<FfiReclassifyResult, FfiError> {
+        self.inner
+            .reclassify_all_models()
+            .await
+            .map(FfiReclassifyResult::from)
             .map_err(FfiError::from)
     }
 

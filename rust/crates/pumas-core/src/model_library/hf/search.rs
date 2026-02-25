@@ -111,9 +111,12 @@ impl HuggingFaceClient {
         }
 
         // Execute request
-        let response = self
-            .client
-            .get(&url)
+        let mut request = self.client.get(&url);
+        if let Some(auth) = self.auth_header_value().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| PumasError::Network {

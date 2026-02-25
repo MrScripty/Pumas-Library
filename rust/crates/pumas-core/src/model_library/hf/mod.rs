@@ -12,12 +12,15 @@
 //! - [`search`] - Model search with caching and enrichment
 //! - [`metadata`] - Direct model info, repo file trees, and metadata lookup
 //! - [`download`] - Download management with pause/resume/cancel
+//! - [`auth`] - Authentication token management
 
+mod auth;
 mod types;
 mod search;
 mod metadata;
 mod download;
 
+pub use auth::HfAuthStatus;
 pub use types::{DownloadCompletionCallback, DownloadCompletionInfo};
 use types::{DownloadState, REPO_CACHE_TTL_SECS};
 
@@ -34,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 /// Client for HuggingFace Hub API operations.
 pub struct HuggingFaceClient {
@@ -52,6 +55,8 @@ pub struct HuggingFaceClient {
     pub(super) persistence: Option<Arc<DownloadPersistence>>,
     /// Optional callback invoked when a download completes successfully.
     pub(super) completion_callback: Option<DownloadCompletionCallback>,
+    /// Authentication token for accessing gated/private models.
+    pub(super) auth_token: Arc<RwLock<Option<String>>>,
 }
 
 impl std::fmt::Debug for HuggingFaceClient {
@@ -60,6 +65,7 @@ impl std::fmt::Debug for HuggingFaceClient {
             .field("cache_dir", &self.cache_dir)
             .field("has_search_cache", &self.search_cache.is_some())
             .field("has_persistence", &self.persistence.is_some())
+            .field("has_auth_token", &"<redacted>")
             .finish()
     }
 }
@@ -95,6 +101,11 @@ impl HuggingFaceClient {
                 cause: None,
             })?;
 
+        let initial_token = auth::resolve_token_from_disk().map(|(token, source)| {
+            info!("HuggingFace auth token found from {}", source);
+            token
+        });
+
         Ok(Self {
             client,
             download_client,
@@ -103,6 +114,7 @@ impl HuggingFaceClient {
             search_cache: None,
             persistence: None,
             completion_callback: None,
+            auth_token: Arc::new(RwLock::new(initial_token)),
         })
     }
 
@@ -138,6 +150,96 @@ impl HuggingFaceClient {
     /// Used to trigger in-place import (metadata creation + indexing) after download.
     pub fn set_completion_callback(&mut self, callback: DownloadCompletionCallback) {
         self.completion_callback = Some(callback);
+    }
+
+    // ========================================
+    // Authentication
+    // ========================================
+
+    /// Set the HuggingFace authentication token.
+    ///
+    /// Persists to disk at `{pumas_config_dir}/hf_token` and updates the
+    /// in-memory token for immediate use by subsequent API calls.
+    pub async fn set_auth_token(&self, token: &str) -> Result<()> {
+        auth::save_token(token)?;
+        *self.auth_token.write().await = Some(token.trim().to_string());
+        info!("HuggingFace auth token saved");
+        Ok(())
+    }
+
+    /// Clear the HuggingFace authentication token.
+    ///
+    /// Removes the persisted token file and clears the in-memory value.
+    pub async fn clear_auth_token(&self) -> Result<()> {
+        auth::clear_token()?;
+        *self.auth_token.write().await = None;
+        info!("HuggingFace auth token cleared");
+        Ok(())
+    }
+
+    /// Get current authentication status by calling the HF whoami endpoint.
+    ///
+    /// Makes a lightweight API call to validate the token and retrieve
+    /// the associated username. Returns unauthenticated status if no
+    /// token is configured or if the token is invalid.
+    pub async fn get_auth_status(&self) -> Result<HfAuthStatus> {
+        let token = {
+            let guard = self.auth_token.read().await;
+            match guard.as_ref() {
+                Some(t) => t.clone(),
+                None => {
+                    return Ok(HfAuthStatus {
+                        authenticated: false,
+                        username: None,
+                        token_source: None,
+                    });
+                }
+            }
+        };
+
+        let response = self
+            .client
+            .get(auth::HF_WHOAMI_URL)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await;
+
+        match response {
+            Ok(resp) if resp.status().is_success() => {
+                let body: serde_json::Value = resp.json().await.unwrap_or_default();
+                let username = body.get("name").and_then(|v| v.as_str()).map(String::from);
+                let source = self.resolve_token_source().await;
+                Ok(HfAuthStatus {
+                    authenticated: true,
+                    username,
+                    token_source: Some(source),
+                })
+            }
+            _ => Ok(HfAuthStatus {
+                authenticated: false,
+                username: None,
+                token_source: None,
+            }),
+        }
+    }
+
+    /// Get the current Bearer header value for authenticated requests.
+    pub(super) async fn auth_header_value(&self) -> Option<String> {
+        let guard = self.auth_token.read().await;
+        guard.as_ref().map(|t| format!("Bearer {}", t))
+    }
+
+    /// Determine where the current token was resolved from.
+    async fn resolve_token_source(&self) -> String {
+        if let Ok(path) = auth::hf_token_path() {
+            if path.exists() {
+                return "pumas_config".to_string();
+            }
+        }
+        if std::env::var("HF_TOKEN").is_ok() {
+            return "env_var".to_string();
+        }
+        "hf_cache".to_string()
     }
 
     // ========================================

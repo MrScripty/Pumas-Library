@@ -24,9 +24,12 @@ impl HuggingFaceClient {
         // so we must not encode the whole string (that would turn / into %2F).
         let url = format!("{}/models/{}", HF_API_BASE, repo_id);
 
-        let response = self
-            .client
-            .get(&url)
+        let mut request = self.client.get(&url);
+        if let Some(auth) = self.auth_header_value().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| PumasError::Network {
@@ -75,9 +78,12 @@ impl HuggingFaceClient {
         // Fetch from API
         let url = format!("{}/api/models/{}/tree/main", HF_HUB_BASE, repo_id);
 
-        let response = self
-            .client
-            .get(&url)
+        let mut request = self.client.get(&url);
+        if let Some(auth) = self.auth_header_value().await {
+            request = request.header("Authorization", auth);
+        }
+
+        let response = request
             .send()
             .await
             .map_err(|e| PumasError::Network {

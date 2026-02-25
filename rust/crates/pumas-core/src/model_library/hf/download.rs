@@ -284,6 +284,7 @@ impl HuggingFaceClient {
         let dest_dir = dest_dir.to_path_buf();
         let persistence = self.persistence.clone();
         let completion_callback = self.completion_callback.clone();
+        let auth_header = self.auth_header_value().await;
 
         tokio::spawn(async move {
             let result = Self::run_download(
@@ -297,6 +298,7 @@ impl HuggingFaceClient {
                 pause_flag,
                 persistence.clone(),
                 completion_callback,
+                auth_header,
             )
             .await;
 
@@ -343,6 +345,7 @@ impl HuggingFaceClient {
         pause_flag: Arc<AtomicBool>,
         persistence: Option<Arc<DownloadPersistence>>,
         completion_callback: Option<DownloadCompletionCallback>,
+        auth_header: Option<String>,
     ) -> Result<()> {
         use crate::config::NetworkConfig;
         use crate::network::RetryConfig;
@@ -477,6 +480,7 @@ impl HuggingFaceClient {
                     bytes_offset,
                     &cancel_flag,
                     &pause_flag,
+                    auth_header.as_deref(),
                 )
                 .await
                 {
@@ -623,10 +627,14 @@ impl HuggingFaceClient {
         bytes_offset: u64,
         cancel_flag: &Arc<AtomicBool>,
         pause_flag: &Arc<AtomicBool>,
+        auth_header: Option<&str>,
     ) -> Result<()> {
         use futures::StreamExt;
 
         let mut request = client.get(url);
+        if let Some(auth) = auth_header {
+            request = request.header("Authorization", auth);
+        }
         if resume_from_byte > 0 {
             request = request.header("Range", format!("bytes={}-", resume_from_byte));
             info!("Resuming download from byte {}", resume_from_byte);
@@ -886,6 +894,7 @@ impl HuggingFaceClient {
         let download_id_clone = download_id.to_string();
         let persistence = self.persistence.clone();
         let completion_callback = self.completion_callback.clone();
+        let auth_header = self.auth_header_value().await;
 
         tokio::spawn(async move {
             let result = Self::run_download(
@@ -899,6 +908,7 @@ impl HuggingFaceClient {
                 pause_flag,
                 persistence.clone(),
                 completion_callback,
+                auth_header,
             )
             .await;
 

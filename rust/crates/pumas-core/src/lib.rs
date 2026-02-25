@@ -61,8 +61,8 @@ pub use launcher::{LauncherUpdater, PatchManager, UpdateApplyResult, UpdateCheck
 pub use metadata::MetadataManager;
 pub use model_library::sharding::{self, ShardValidation};
 pub use model_library::{
-    BatchImportProgress, DownloadRequest, HfSearchParams, HuggingFaceClient, ModelImporter,
-    ModelLibrary, ModelMapper,
+    BatchImportProgress, DownloadRequest, HfAuthStatus, HfSearchParams, HuggingFaceClient,
+    ModelImporter, ModelLibrary, ModelMapper,
 };
 pub use models::CommitInfo;
 pub use plugins::{PluginConfig, PluginLoader};

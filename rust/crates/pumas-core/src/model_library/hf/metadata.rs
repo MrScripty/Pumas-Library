@@ -10,6 +10,7 @@ use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
     HfMetadataResult, HfSearchParams, HuggingFaceModel, LfsFileInfo, RepoFileTree,
+    REPO_FILE_TREE_VERSION,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -63,12 +64,14 @@ impl HuggingFaceClient {
         // Check cache first
         let cache_file = self.get_cache_path(repo_id, "files");
         if let Some(cached) = self.read_cache::<RepoFileTree>(&cache_file)? {
-            // Check if cache is still valid
-            if let Ok(meta) = std::fs::metadata(&cache_file) {
-                if let Ok(modified) = meta.modified() {
-                    if let Ok(elapsed) = modified.elapsed() {
-                        if elapsed.as_secs() < REPO_CACHE_TTL_SECS {
-                            return Ok(cached);
+            // Reject entries from an older cache format (e.g. pre-recursive)
+            if cached.cache_version >= REPO_FILE_TREE_VERSION {
+                if let Ok(meta) = std::fs::metadata(&cache_file) {
+                    if let Ok(modified) = meta.modified() {
+                        if let Ok(elapsed) = modified.elapsed() {
+                            if elapsed.as_secs() < REPO_CACHE_TTL_SECS {
+                                return Ok(cached);
+                            }
                         }
                     }
                 }
@@ -76,7 +79,10 @@ impl HuggingFaceClient {
         }
 
         // Fetch from API
-        let url = format!("{}/api/models/{}/tree/main", HF_HUB_BASE, repo_id);
+        let url = format!(
+            "{}/api/models/{}/tree/main?recursive=true",
+            HF_HUB_BASE, repo_id
+        );
 
         let mut request = self.client.get(&url);
         if let Some(auth) = self.auth_header_value().await {
@@ -108,6 +114,10 @@ impl HuggingFaceClient {
         let mut regular_files = Vec::new();
 
         for file in files {
+            // Skip directory entries returned by recursive tree listing
+            if file.entry_type.as_deref() == Some("directory") {
+                continue;
+            }
             if let Some(lfs) = file.lfs {
                 lfs_files.push(LfsFileInfo {
                     filename: file.path,
@@ -125,6 +135,7 @@ impl HuggingFaceClient {
             regular_files,
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None, // Would need separate API call to get this
+            cache_version: REPO_FILE_TREE_VERSION,
         };
 
         // Cache the result

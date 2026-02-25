@@ -7,8 +7,9 @@ use super::types::{AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompl
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
+use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -16,8 +17,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
-/// Regular (non-LFS) files that should be automatically fetched alongside
-/// weight files. These are config/tokenizer files needed by inference engines.
+/// Regular (non-LFS) filenames that should be automatically fetched alongside
+/// weight files.  These are config/tokenizer files needed by inference engines.
 /// Matched by filename (the last path component).
 const AUXILIARY_FILE_PATTERNS: &[&str] = &[
     "config.json",
@@ -26,12 +27,15 @@ const AUXILIARY_FILE_PATTERNS: &[&str] = &[
     "generation_config.json",
     "special_tokens_map.json",
     "tokenizer.model",
+    "spiece.model",
     "vocab.json",
     "merges.txt",
     "added_tokens.json",
     "preprocessor_config.json",
     "chat_template.jinja",
     "model.safetensors.index.json",
+    "scheduler_config.json",
+    "model_index.json",
 ];
 
 /// Select auxiliary config/tokenizer files from a repo's regular (non-LFS) file list.
@@ -44,6 +48,71 @@ fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
         })
         .cloned()
         .collect()
+}
+
+/// Enhanced auxiliary selection that is scope-aware.
+///
+/// In addition to the base auxiliary patterns, this also includes:
+/// - Non-weight LFS files (images, READMEs, etc.) from the full repo
+/// - Subdirectory config files whose directory overlaps with selected weight files
+/// - Shard index JSON files (`*.index.json`) in directories containing selected weights
+fn select_auxiliary_files_for_download(
+    regular_files: &[String],
+    all_lfs_files: &[crate::model_library::types::LfsFileInfo],
+    weight_files: &[FileToDownload],
+) -> Vec<FileToDownload> {
+    // Collect directory prefixes from selected weight files.
+    let weight_dirs: HashSet<&str> = weight_files
+        .iter()
+        .filter_map(|f| f.filename.rsplit_once('/').map(|(dir, _)| dir))
+        .collect();
+
+    // Already-selected weight filenames (to avoid duplicating them in aux).
+    let weight_names: HashSet<&str> = weight_files.iter().map(|f| f.filename.as_str()).collect();
+
+    let mut aux: Vec<FileToDownload> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    // 1. Regular (non-LFS) auxiliary files — root-level by pattern.
+    for path in regular_files {
+        let filename = path.rsplit('/').next().unwrap_or(path);
+        let is_root = !path.contains('/');
+        let dir = path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+
+        let include = if is_root {
+            // Root-level: match by auxiliary pattern.
+            AUXILIARY_FILE_PATTERNS.iter().any(|p| filename == *p)
+        } else if weight_dirs.contains(dir) {
+            // Subdirectory that has selected weight files: include configs.
+            AUXILIARY_FILE_PATTERNS.iter().any(|p| filename == *p)
+                || filename.ends_with(".index.json")
+        } else {
+            // Always include globally-useful files regardless of directory.
+            filename == "model_index.json" || filename == "scheduler_config.json"
+        };
+
+        if include && seen.insert(path.clone()) {
+            aux.push(FileToDownload {
+                filename: path.clone(),
+                size: None,
+                sha256: None,
+            });
+        }
+    }
+
+    // 2. Non-weight LFS files — always included (images, READMEs, etc.).
+    let (_weight_groups, non_weight_lfs) = sharding::group_weight_files(all_lfs_files);
+    for lf in &non_weight_lfs {
+        if !weight_names.contains(lf.filename.as_str()) && seen.insert(lf.filename.clone()) {
+            aux.push(FileToDownload {
+                filename: lf.filename.clone(),
+                size: Some(lf.size),
+                sha256: Some(lf.sha256.clone()),
+            });
+        }
+    }
+
+    aux
 }
 
 impl HuggingFaceClient {
@@ -174,8 +243,28 @@ impl HuggingFaceClient {
         // Get file info
         let tree = self.get_repo_files(&request.repo_id).await?;
 
-        // Resolve files to download
-        let files: Vec<FileToDownload> = if let Some(ref f) = request.filename {
+        // Resolve weight files to download.
+        // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
+        let files: Vec<FileToDownload> = if let Some(ref fnames) = request.filenames {
+            // Explicit file list from grouped file selection
+            let name_set: HashSet<&str> = fnames.iter().map(|s| s.as_str()).collect();
+            let matching: Vec<FileToDownload> = tree
+                .lfs_files
+                .iter()
+                .filter(|f| name_set.contains(f.filename.as_str()))
+                .map(|f| FileToDownload {
+                    filename: f.filename.clone(),
+                    size: Some(f.size),
+                    sha256: Some(f.sha256.clone()),
+                })
+                .collect();
+            if matching.is_empty() {
+                return Err(PumasError::ModelNotFound {
+                    model_id: format!("{}:{} files", request.repo_id, fnames.len()),
+                });
+            }
+            matching
+        } else if let Some(ref f) = request.filename {
             // Specific file requested
             let lfs = tree.lfs_files.iter().find(|lf| lf.filename == *f);
             vec![FileToDownload {
@@ -223,24 +312,31 @@ impl HuggingFaceClient {
         let primary_file = files.iter().max_by_key(|f| f.size.unwrap_or(0));
         let known_sha256 = primary_file.and_then(|f| f.sha256.clone());
 
-        // Prepend auxiliary config/tokenizer files so they download first
-        // (gives inference engines the metadata they need sooner)
-        let auxiliary = select_auxiliary_files(&tree.regular_files);
-        if !auxiliary.is_empty() {
+        // Prepend auxiliary files so they download first.
+        // When an explicit file list (filenames) is used, apply scope-aware
+        // auxiliary selection that includes non-weight LFS files and
+        // directory-scoped configs.  Otherwise fall back to the basic
+        // pattern-only selection.
+        let mut aux_files = if request.filenames.is_some() {
+            select_auxiliary_files_for_download(&tree.regular_files, &tree.lfs_files, &files)
+        } else {
+            let auxiliary = select_auxiliary_files(&tree.regular_files);
+            auxiliary
+                .into_iter()
+                .map(|aux_filename| FileToDownload {
+                    filename: aux_filename,
+                    size: None,
+                    sha256: None,
+                })
+                .collect()
+        };
+        if !aux_files.is_empty() {
             info!(
-                "Including {} auxiliary config file(s) for {}",
-                auxiliary.len(),
+                "Including {} auxiliary file(s) for {}",
+                aux_files.len(),
                 request.repo_id
             );
         }
-        let mut aux_files: Vec<FileToDownload> = auxiliary
-            .iter()
-            .map(|aux_filename| FileToDownload {
-                filename: aux_filename.clone(),
-                size: None,
-                sha256: None,
-            })
-            .collect();
         aux_files.extend(files);
         let files = aux_files;
 
@@ -421,6 +517,12 @@ impl HuggingFaceClient {
                 filename,
                 NetworkConfig::DOWNLOAD_TEMP_SUFFIX
             ));
+
+            // Ensure parent directory exists (needed for subdirectory files
+            // like transformer/model.safetensors in diffusion repos)
+            if let Some(parent) = dest_path.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
 
             // Skip files that already exist (completed from previous run)
             if dest_path.exists() {

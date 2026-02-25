@@ -9,8 +9,9 @@ use super::types::{
 };
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
+use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
-use crate::models::DownloadOption;
+use crate::models::{DownloadOption, FileGroup};
 use tracing::{debug, info, warn};
 
 impl HuggingFaceClient {
@@ -166,10 +167,16 @@ impl HuggingFaceClient {
                     // Use cached details
                     if let Ok(Some(cached)) = cache.get_repo_details(&model.repo_id) {
                         if !cached.download_options.is_empty() {
-                            model.download_options = cached.download_options;
-                            model.total_size_bytes = cached.total_size_bytes;
-                            enriched.push(model);
-                            continue;
+                            // For non-quant repos, re-enrich if cached options
+                            // lack file_group data (pre-grouping cache entries).
+                            let needs_regroup = model.quants.is_empty()
+                                && cached.download_options.iter().all(|o| o.file_group.is_none());
+                            if !needs_regroup {
+                                model.download_options = cached.download_options;
+                                model.total_size_bytes = cached.total_size_bytes;
+                                enriched.push(model);
+                                continue;
+                            }
                         }
                     }
                 }
@@ -200,18 +207,36 @@ impl HuggingFaceClient {
     }
 
     /// Extract download options from repo file tree.
+    ///
+    /// For GGUF repos with recognisable quant patterns the options remain
+    /// quant-based (unchanged behaviour).  For non-quant repos (safetensors,
+    /// diffusers layouts) the LFS files are grouped by shard set so that the
+    /// UI shows one entry per logical weight file rather than one per shard.
     fn extract_download_options_from_tree(
+        tree: &RepoFileTree,
+        quants: &[String],
+    ) -> Vec<DownloadOption> {
+        // First try quant-based extraction (GGUF repos, fp16/bf16 variants).
+        let quant_options = Self::extract_quant_based_options(tree, quants);
+        if !quant_options.is_empty() {
+            return quant_options;
+        }
+
+        // No quants detected – use shard-aware grouping.
+        Self::extract_grouped_options(tree)
+    }
+
+    /// Quant-based option extraction for GGUF and precision-variant repos.
+    fn extract_quant_based_options(
         tree: &RepoFileTree,
         quants: &[String],
     ) -> Vec<DownloadOption> {
         let mut options = Vec::new();
 
-        // Build regex for quant pattern matching
-        let quant_pattern = regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
-            .ok();
+        let quant_pattern =
+            regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?").ok();
 
         for lfs_file in &tree.lfs_files {
-            // Only include model files
             if !lfs_file.filename.ends_with(".gguf")
                 && !lfs_file.filename.ends_with(".safetensors")
                 && !lfs_file.filename.ends_with(".bin")
@@ -219,7 +244,6 @@ impl HuggingFaceClient {
                 continue;
             }
 
-            // Try to extract quant from filename
             let quant = if let Some(ref pattern) = quant_pattern {
                 pattern
                     .captures(&lfs_file.filename)
@@ -229,42 +253,59 @@ impl HuggingFaceClient {
                 None
             };
 
-            // If we found a quant, or the file matches a known quant
             if let Some(q) = quant {
                 options.push(DownloadOption {
                     quant: q,
                     size_bytes: Some(lfs_file.size),
+                    file_group: None,
                 });
             } else if quants.iter().any(|q| lfs_file.filename.contains(q)) {
-                // Fallback: check if filename contains any of the known quants
                 for q in quants {
                     if lfs_file.filename.contains(q) {
                         options.push(DownloadOption {
                             quant: q.clone(),
                             size_bytes: Some(lfs_file.size),
+                            file_group: None,
                         });
                         break;
                     }
                 }
-            } else if quants.is_empty() {
-                // No quants specified, include file by name
-                let name = lfs_file
-                    .filename
-                    .rsplit('/')
-                    .next()
-                    .unwrap_or(&lfs_file.filename);
-                options.push(DownloadOption {
-                    quant: name.to_string(),
-                    size_bytes: Some(lfs_file.size),
-                });
             }
         }
 
-        // Sort by quant name for consistent ordering
         options.sort_by(|a, b| a.quant.cmp(&b.quant));
         options.dedup_by(|a, b| a.quant == b.quant);
 
         options
+    }
+
+    /// Shard-aware option extraction for repos without quant patterns.
+    ///
+    /// Groups sharded files into single entries and includes standalone
+    /// weight files as individual options, each with a [`FileGroup`]
+    /// describing the exact files to download.
+    fn extract_grouped_options(tree: &RepoFileTree) -> Vec<DownloadOption> {
+        let (weight_groups, _non_weight) = group_weight_files(&tree.lfs_files);
+
+        weight_groups
+            .into_iter()
+            .map(|g| {
+                let display = if g.shard_count > 1 {
+                    format!("{} ({} shards)", g.label, g.shard_count)
+                } else {
+                    g.label.clone()
+                };
+                DownloadOption {
+                    quant: display,
+                    size_bytes: Some(g.total_size),
+                    file_group: Some(FileGroup {
+                        filenames: g.filenames,
+                        shard_count: g.shard_count,
+                        label: g.label,
+                    }),
+                }
+            })
+            .collect()
     }
 
     /// Convert HF search result to our model type.

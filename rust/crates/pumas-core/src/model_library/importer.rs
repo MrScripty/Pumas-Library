@@ -78,11 +78,19 @@ impl ModelImporter {
         }
 
         // Determine model type and family
+        // Normalize through ModelType to handle HF pipeline_tags (e.g. "text-to-audio" → "audio")
         let model_type = spec
             .model_type
-            .clone()
-            .or_else(|| type_info.model_type.as_str().to_string().into())
-            .unwrap_or_else(|| "unknown".to_string());
+            .as_ref()
+            .and_then(|s| {
+                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                if parsed != crate::model_library::types::ModelType::Unknown {
+                    Some(parsed.as_str().to_string())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| type_info.model_type.as_str().to_string());
 
         let family = type_info
             .family
@@ -200,9 +208,18 @@ impl ModelImporter {
             });
         }
 
+        // Normalize model_type through ModelType to handle HF pipeline_tags
         let model_type = spec
             .model_type
-            .clone()
+            .as_ref()
+            .and_then(|s| {
+                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                if parsed != crate::model_library::types::ModelType::Unknown {
+                    Some(parsed.as_str().to_string())
+                } else {
+                    None
+                }
+            })
             .unwrap_or_else(|| type_info.model_type.as_str().to_string());
         let family = type_info
             .family
@@ -564,9 +581,14 @@ impl ModelImporter {
     ) -> Result<ModelMetadata> {
         let now = chrono::Utc::now().to_rfc3339();
 
+        // Normalize model_type through ModelType to handle HF pipeline_tags
         let model_type = spec
             .model_type
-            .clone()
+            .as_ref()
+            .map(|s| {
+                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                parsed.as_str().to_string()
+            })
             .unwrap_or_else(|| type_info.model_type.as_str().to_string());
 
         let family = type_info

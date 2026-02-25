@@ -514,7 +514,13 @@ impl ModelLibrary {
             metadata.family = Some(family.clone());
         }
         if let Some(ref model_type) = hf_metadata.model_type {
-            metadata.model_type = Some(model_type.clone());
+            // Normalize pipeline_tags (e.g. "text-to-audio") to canonical names (e.g. "audio")
+            let normalized: crate::model_library::types::ModelType = model_type.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+            if normalized != crate::model_library::types::ModelType::Unknown {
+                metadata.model_type = Some(normalized.as_str().to_string());
+            } else {
+                metadata.model_type = Some(model_type.clone());
+            }
         }
         if let Some(ref subtype) = hf_metadata.subtype {
             metadata.subtype = Some(subtype.clone());

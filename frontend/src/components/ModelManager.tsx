@@ -243,24 +243,51 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setSelectedKind('all');
   };
 
-  const resolveDownloadModelType = (kind: string) => {
-    const normalized = kind.toLowerCase();
-    if (
-      normalized.includes('image') ||
-      normalized.includes('video') ||
-      normalized.includes('3d')
-    ) {
-      return 'diffusion';
-    }
-    // Embedding models on HuggingFace are typically feature-extraction or sentence-similarity
-    if (
-      normalized.includes('feature-extraction') ||
-      normalized.includes('sentence-similarity') ||
-      normalized.includes('embedding')
-    ) {
-      return 'embedding';
-    }
-    return 'llm';
+  const resolveDownloadModelType = (kind: string): string => {
+    const PIPELINE_TAG_TO_MODEL_TYPE: Record<string, string> = {
+      // Text generation (LLMs)
+      'text-generation': 'llm',
+      'text2text-generation': 'llm',
+      'question-answering': 'llm',
+      'token-classification': 'llm',
+      'text-classification': 'llm',
+      'fill-mask': 'llm',
+      'translation': 'llm',
+      'summarization': 'llm',
+      'conversational': 'llm',
+      // Diffusion / image & video generation
+      'text-to-image': 'diffusion',
+      'image-to-image': 'diffusion',
+      'unconditional-image-generation': 'diffusion',
+      'image-inpainting': 'diffusion',
+      'text-to-video': 'diffusion',
+      'video-classification': 'diffusion',
+      'text-to-3d': 'diffusion',
+      'image-to-3d': 'diffusion',
+      // Audio
+      'text-to-audio': 'audio',
+      'text-to-speech': 'audio',
+      'automatic-speech-recognition': 'audio',
+      'audio-classification': 'audio',
+      'audio-to-audio': 'audio',
+      'voice-activity-detection': 'audio',
+      // Vision
+      'image-classification': 'vision',
+      'image-segmentation': 'vision',
+      'object-detection': 'vision',
+      'zero-shot-image-classification': 'vision',
+      'depth-estimation': 'vision',
+      'image-feature-extraction': 'vision',
+      'zero-shot-object-detection': 'vision',
+      'image-to-text': 'vision',
+      'visual-question-answering': 'vision',
+      'document-question-answering': 'vision',
+      'video-text-to-text': 'vision',
+      // Embedding
+      'feature-extraction': 'embedding',
+      'sentence-similarity': 'embedding',
+    };
+    return PIPELINE_TAG_TO_MODEL_TYPE[kind.toLowerCase()] ?? 'llm';
   };
 
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null) => {

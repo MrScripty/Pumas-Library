@@ -415,6 +415,14 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
         }
     }
 
+    // Check directory context for audio indicators
+    // Audio models using diffusion architectures would otherwise be mis-detected as Diffusion
+    if model_type == ModelType::Diffusion || model_type == ModelType::Unknown {
+        if is_audio_from_context(path) {
+            model_type = ModelType::Audio;
+        }
+    }
+
     Ok(ModelTypeInfo {
         format: FileFormat::Safetensors,
         model_type,
@@ -441,6 +449,53 @@ fn is_embedding_from_context(path: &Path) -> bool {
     let path_str = path.to_string_lossy().to_lowercase();
     if path_str.contains("embedding") || path_str.contains("embed-") {
         return true;
+    }
+
+    false
+}
+
+/// Check directory context for audio model indicators.
+///
+/// This supplements tensor analysis by checking the parent directory's
+/// `config.json` for audio-specific metadata fields.
+fn is_audio_from_context(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+
+    let config_path = parent.join("config.json");
+    let config_str = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let config: serde_json::Value = match serde_json::from_str(&config_str) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // Check for audio-specific config fields
+    if config.get("sample_rate").is_some()
+        || config.get("audio_channels").is_some()
+        || config.get("num_audio_channels").is_some()
+        || config.get("audio_encoder").is_some()
+        || config.get("mel_channels").is_some()
+    {
+        return true;
+    }
+
+    // Check model_type field for audio-related values
+    if let Some(model_type) = config.get("model_type").and_then(|v| v.as_str()) {
+        let lower = model_type.to_lowercase();
+        if lower.contains("audio")
+            || lower.contains("speech")
+            || lower.contains("whisper")
+            || lower.contains("musicgen")
+            || lower.contains("encodec")
+            || lower.contains("bark")
+        {
+            return true;
+        }
     }
 
     false

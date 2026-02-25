@@ -114,6 +114,11 @@ export class PythonBridge {
       throw new Error(`Backend binary not found at ${cmd}. Run 'cargo build --release' in the rust/ directory.`);
     }
 
+    // Ensure working directory exists
+    if (!fs.existsSync(cwd)) {
+      fs.mkdirSync(cwd, { recursive: true });
+    }
+
     // Spawn process
     this.process = spawn(cmd, args, {
       cwd,

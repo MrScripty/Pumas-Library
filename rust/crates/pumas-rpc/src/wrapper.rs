@@ -125,6 +125,8 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "remove_orphaned_links"
         | "get_links_for_model"
         | "delete_model_with_cascade"
+        | "set_model_link_exclusion"
+        | "get_link_exclusions"
         | "get_sandbox_info"
         | "validate_installations"
         | "ollama_list_models"

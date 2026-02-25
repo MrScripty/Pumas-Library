@@ -292,6 +292,10 @@ const electronAPI = {
   sync_with_resolutions: (versionTag: string, resolutions: Record<string, string>) =>
     apiCall('sync_with_resolutions', { version_tag: versionTag, resolutions }),
   get_sandbox_info: () => apiCall('get_sandbox_info'),
+  set_model_link_exclusion: (modelId: string, appId: string, excluded: boolean) =>
+    apiCall('set_model_link_exclusion', { model_id: modelId, app_id: appId, excluded }),
+  get_link_exclusions: (appId: string) =>
+    apiCall('get_link_exclusions', { app_id: appId }),
 
   // ========================================
   // Custom Nodes

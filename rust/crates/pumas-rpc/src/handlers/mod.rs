@@ -435,6 +435,8 @@ async fn dispatch_method(
         "get_cross_filesystem_warning" => links::get_cross_filesystem_warning(state, params).await,
         "get_file_link_count" => links::get_file_link_count(state, params).await,
         "check_files_writable" => links::check_files_writable(state, params).await,
+        "set_model_link_exclusion" => links::set_model_link_exclusion(state, params).await,
+        "get_link_exclusions" => links::get_link_exclusions(state, params).await,
 
         // Shortcuts
         "get_version_shortcuts" => shortcuts::get_version_shortcuts(state, params).await,

@@ -71,6 +71,7 @@ pub async fn download_model_from_hf(
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
     let quant = get_str_param(params, "quant", "quant").map(String::from);
     let filename = get_str_param(params, "filename", "filename").map(String::from);
+    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,
@@ -79,6 +80,7 @@ pub async fn download_model_from_hf(
         model_type,
         quant,
         filename,
+        pipeline_tag,
     };
 
     match state.api.start_hf_download(&request).await {
@@ -103,6 +105,7 @@ pub async fn start_model_download_from_hf(
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
     let quant = get_str_param(params, "quant", "quant").map(String::from);
     let filename = get_str_param(params, "filename", "filename").map(String::from);
+    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,
@@ -111,6 +114,7 @@ pub async fn start_model_download_from_hf(
         model_type,
         quant,
         filename,
+        pipeline_tag,
     };
 
     match state.api.start_hf_download(&request).await {
@@ -592,6 +596,12 @@ pub async fn import_model_in_place(
                 .collect()
         });
 
+    let pipeline_tag: Option<String> = params
+        .get("pipeline_tag")
+        .or_else(|| params.get("pipelineTag"))
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
     let spec = pumas_library::model_library::InPlaceImportSpec {
         model_dir: std::path::PathBuf::from(model_dir),
         official_name,
@@ -601,6 +611,7 @@ pub async fn import_model_in_place(
         known_sha256,
         compute_hashes,
         expected_files,
+        pipeline_tag,
     };
 
     let result = state.api.import_model_in_place(&spec).await?;

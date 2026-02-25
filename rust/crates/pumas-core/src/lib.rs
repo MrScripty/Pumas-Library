@@ -280,6 +280,7 @@ impl PumasApi {
                         known_sha256: info.known_sha256,
                         compute_hashes: false,
                         expected_files: Some(info.filenames.clone()),
+                        pipeline_tag: info.download_request.pipeline_tag,
                     };
                     match importer.import_in_place(&spec).await {
                         Ok(r) if r.success => {
@@ -367,6 +368,7 @@ impl PumasApi {
                         model_type: recovery.model_type,
                         quant: None,
                         filename: None,
+                        pipeline_tag: None,
                     };
                     match client.start_download(&request, &recovery.model_dir).await {
                         Ok(id) => {

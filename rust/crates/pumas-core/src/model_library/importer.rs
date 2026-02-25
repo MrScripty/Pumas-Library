@@ -11,13 +11,156 @@ use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
     BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
-    ModelImportSpec, ModelMetadata, SecurityTier,
+    ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
 use crate::models::default_inference_settings;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+/// Known dLLM (diffusion LLM) model types from config.json.
+pub(crate) const DLLM_MODEL_TYPES: &[&str] = &["llada", "mdlm", "dream", "mercury", "sedd"];
+
+/// Resolve model type using the priority chain.
+///
+/// Priority (highest to lowest):
+/// 1. `pipeline_tag` — raw HF tag from search/download (most authoritative)
+/// 2. `spec_model_type` — normalized type from download request / user
+/// 3. `config.json` — model_type + architectures fields on disk
+/// 4. `type_info` — file-based tensor/header detection (last resort)
+///
+/// Returns `(ModelType, Option<pipeline_tag_string>)`.
+pub(crate) fn resolve_model_type(
+    pipeline_tag: Option<&str>,
+    spec_model_type: Option<&str>,
+    model_dir: &Path,
+    type_info: &ModelTypeInfo,
+) -> (ModelType, Option<String>) {
+    // 1. Pipeline tag (most authoritative)
+    if let Some(tag) = pipeline_tag {
+        let mt = ModelType::from_pipeline_tag(tag);
+        if mt != ModelType::Unknown {
+            return (mt, Some(tag.to_string()));
+        }
+    }
+
+    // 2. Spec model_type (from download request / frontend)
+    if let Some(mt_str) = spec_model_type {
+        let mt: ModelType = mt_str.parse().unwrap_or(ModelType::Unknown);
+        if mt != ModelType::Unknown {
+            return (mt, pipeline_tag.map(String::from));
+        }
+    }
+
+    // 3. config.json inference
+    if let Some((mt, tag)) = infer_type_from_config_json(model_dir) {
+        return (mt, Some(tag));
+    }
+
+    // 4. File-based detection (last resort)
+    (type_info.model_type, pipeline_tag.map(String::from))
+}
+
+/// Infer model type from a directory's config.json.
+///
+/// Reads config.json and uses the `architectures` and `model_type` fields
+/// to determine the HuggingFace pipeline_tag, then normalizes to our ModelType.
+/// This is the same logic HuggingFace uses to classify models.
+///
+/// Returns `(ModelType, Option<pipeline_tag_string>)`.
+pub(crate) fn infer_type_from_config_json(model_dir: &Path) -> Option<(ModelType, String)> {
+    let config_path = model_dir.join("config.json");
+    let config_str = std::fs::read_to_string(&config_path).ok()?;
+    let config: serde_json::Value = serde_json::from_str(&config_str).ok()?;
+
+    // Extract fields matching HfModelConfig shape
+    let architectures: Vec<String> = config
+        .get("architectures")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let model_type_field = config
+        .get("model_type")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    // 1. Check architecture suffix (same logic as infer_pipeline_tag_from_config)
+    if let Some(arch) = architectures.first() {
+        let suffix_map: &[(&str, &str)] = &[
+            ("ForConditionalGeneration", "text2text-generation"),
+            ("ForSequenceClassification", "text-classification"),
+            ("ForSemanticSegmentation", "image-segmentation"),
+            ("ForImageClassification", "image-classification"),
+            ("ForAudioClassification", "audio-classification"),
+            ("ForTokenClassification", "token-classification"),
+            ("ForQuestionAnswering", "question-answering"),
+            ("ForFeatureExtraction", "feature-extraction"),
+            ("ForObjectDetection", "object-detection"),
+            ("ForSpeechSeq2Seq", "automatic-speech-recognition"),
+            ("ForCTC", "automatic-speech-recognition"),
+            ("ForCausalLM", "text-generation"),
+            ("ForMaskedLM", "fill-mask"),
+        ];
+
+        for (suffix, tag) in suffix_map {
+            if arch.ends_with(suffix) {
+                let mt = ModelType::from_pipeline_tag(tag);
+                if mt != ModelType::Unknown {
+                    return Some((mt, tag.to_string()));
+                }
+            }
+        }
+    }
+
+    // 2. Fall back to model_type field
+    let mt_str = model_type_field.as_deref()?;
+    // Use ModelType::from_str which falls through to from_pipeline_tag
+    let parsed: ModelType = mt_str.parse().unwrap_or(ModelType::Unknown);
+    if parsed != ModelType::Unknown {
+        // Recover a pipeline_tag string from the model_type field
+        return Some((parsed, mt_str.to_string()));
+    }
+
+    None
+}
+
+/// Detect dLLM (diffusion LLM) subtype from config.json.
+///
+/// Returns true if config.json indicates this is a diffusion language model.
+pub(crate) fn detect_dllm_from_config_json(model_dir: &Path) -> bool {
+    let config_path = model_dir.join("config.json");
+    let config_str = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let config: serde_json::Value = match serde_json::from_str(&config_str) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // Check model_type field for known dLLM architectures
+    if let Some(model_type) = config.get("model_type").and_then(|v| v.as_str()) {
+        if DLLM_MODEL_TYPES.contains(&model_type) {
+            return true;
+        }
+    }
+
+    // Check for diffusion-specific configuration fields
+    if config.get("parameterization").and_then(|v| v.as_str()) == Some("subs") {
+        return true;
+    }
+    if config.get("denoising_steps").is_some() || config.get("noise_schedule").is_some() {
+        return true;
+    }
+
+    false
+}
 use tokio::sync::mpsc;
 use walkdir::WalkDir;
 
@@ -644,8 +787,9 @@ impl ModelImporter {
             lookup_attempts: Some(0),
             last_lookup_attempt: None,
             conversion_source: None,
-            repo_id: None,         // Set by caller (import_in_place) after creation
-            expected_files: None,  // Set by caller (import_in_place) after creation
+            repo_id: None,          // Set by caller (import_in_place) after creation
+            expected_files: None,   // Set by caller (import_in_place) after creation
+            pipeline_tag: None,     // Set by caller (import_in_place) after creation
         })
     }
 
@@ -693,8 +837,29 @@ impl ModelImporter {
         }
         let primary_file = primary_file.unwrap();
 
-        // Detect file type from primary file
+        // Detect file type from primary file (lowest-priority fallback)
         let type_info = identify_model_type(&primary_file)?;
+
+        // Resolve model type using priority chain:
+        // 1. pipeline_tag (raw HF tag, most authoritative)
+        // 2. spec.model_type (normalized from frontend/download request)
+        // 3. config.json inference (model_type + architectures fields)
+        // 4. file-based detection (tensor analysis — last resort)
+        let resolved_model_type = resolve_model_type(
+            spec.pipeline_tag.as_deref(),
+            spec.model_type.as_deref(),
+            model_dir,
+            &type_info,
+        );
+
+        // Detect dLLM subtype from config.json
+        let resolved_subtype = if resolved_model_type.0 == ModelType::Llm
+            && detect_dllm_from_config_json(model_dir)
+        {
+            Some("dllm".to_string())
+        } else {
+            None
+        };
 
         // Enumerate existing files (no copy needed)
         let files = self.enumerate_model_files(model_dir)?;
@@ -757,8 +922,8 @@ impl ModelImporter {
             family: spec.family.clone(),
             official_name: spec.official_name.clone(),
             repo_id: spec.repo_id.clone(),
-            model_type: spec.model_type.clone(),
-            subtype: None,
+            model_type: Some(resolved_model_type.0.as_str().to_string()),
+            subtype: resolved_subtype,
             tags: None,
             security_acknowledged: Some(true),
         };
@@ -772,9 +937,11 @@ impl ModelImporter {
             "orphan_recovery".to_string()
         });
 
-        // Persist download provenance
+        // Persist download provenance and HF metadata
         metadata.repo_id = spec.repo_id.clone();
         metadata.expected_files = spec.expected_files.clone();
+        metadata.pipeline_tag = spec.pipeline_tag.clone()
+            .or(resolved_model_type.1);
 
         // Save metadata.json
         self.library.save_metadata(model_dir, &metadata).await?;
@@ -874,6 +1041,7 @@ impl ModelImporter {
                 known_sha256: None,
                 compute_hashes,
                 expected_files: None,
+                pipeline_tag: None,
             };
 
             match self.import_in_place(&spec).await {
@@ -1265,6 +1433,8 @@ pub struct InPlaceImportSpec {
     /// Expected files for this model (from download manifest).
     /// Stored in metadata to enable incomplete model detection.
     pub expected_files: Option<Vec<String>>,
+    /// Raw HuggingFace pipeline_tag for authoritative type classification.
+    pub pipeline_tag: Option<String>,
 }
 
 /// Descriptor for an incomplete sharded model that needs recovery download.

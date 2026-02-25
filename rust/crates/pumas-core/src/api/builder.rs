@@ -292,6 +292,7 @@ impl PumasApiBuilder {
                         known_sha256: info.known_sha256,
                         compute_hashes: false,
                         expected_files: Some(info.filenames.clone()),
+                        pipeline_tag: info.download_request.pipeline_tag,
                     };
                     match importer.import_in_place(&spec).await {
                         Ok(r) if r.success => {
@@ -396,6 +397,7 @@ impl PumasApiBuilder {
                         model_type: recovery.model_type,
                         quant: None,     // Download all files for this repo
                         filename: None,
+                        pipeline_tag: None,
                     };
                     // start_download skips files already on disk, so it will
                     // only download the missing shards
@@ -453,6 +455,7 @@ impl PumasApiBuilder {
                         model_type: item.model_type,
                         quant: None,
                         filename: None,
+                        pipeline_tag: None,
                     };
                     match client.start_download(&request, &item.model_dir).await {
                         Ok(id) => {

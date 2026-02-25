@@ -269,6 +269,10 @@ pub struct ModelMetadata {
     /// Populated from the download file list; enables incomplete detection.
     #[serde(default)]
     pub expected_files: Option<Vec<String>>,
+    /// Raw HuggingFace pipeline_tag (e.g. "automatic-speech-recognition").
+    /// Cached for auditing and reclassification without re-querying HF.
+    #[serde(default)]
+    pub pipeline_tag: Option<String>,
 }
 
 /// User overrides for model mapping.

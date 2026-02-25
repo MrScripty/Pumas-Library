@@ -187,6 +187,7 @@ impl PumasApi {
             model_type,
             quant: None,
             filename: None,
+            pipeline_tag: None,
         };
 
         client.start_download(&request, dest).await

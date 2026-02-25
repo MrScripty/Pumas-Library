@@ -495,6 +495,10 @@ pub struct DownloadRequest {
     /// Specific file to download (if not whole repo)
     #[serde(default)]
     pub filename: Option<String>,
+    /// Raw HuggingFace pipeline_tag (e.g. "automatic-speech-recognition").
+    /// Preserved for authoritative model type classification.
+    #[serde(default)]
+    pub pipeline_tag: Option<String>,
 }
 
 /// Batch import progress tracking.

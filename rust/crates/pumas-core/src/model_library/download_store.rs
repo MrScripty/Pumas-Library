@@ -111,6 +111,7 @@ mod tests {
             model_type: Some("llm".to_string()),
             quant: Some("Q4_K_M".to_string()),
             filename: None,
+            pipeline_tag: None,
         }
     }
 

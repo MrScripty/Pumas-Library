@@ -624,6 +624,7 @@ pub struct FfiDownloadRequest {
     pub model_type: Option<String>,
     pub quant: Option<String>,
     pub filename: Option<String>,
+    pub pipeline_tag: Option<String>,
 }
 
 impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest {
@@ -635,6 +636,7 @@ impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest 
             model_type: r.model_type,
             quant: r.quant,
             filename: r.filename,
+            pipeline_tag: r.pipeline_tag,
         }
     }
 }

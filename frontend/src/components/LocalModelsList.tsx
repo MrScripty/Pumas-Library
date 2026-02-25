@@ -254,16 +254,6 @@ export function LocalModelsList({
                               DQ
                             </span>
                           )}
-                          {model.incomplete && (
-                            <span
-                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
-                                bg-[hsl(var(--launcher-accent-error)/0.15)]
-                                text-[hsl(var(--launcher-accent-error))]"
-                              title="Missing files - model may not work correctly"
-                            >
-                              Incomplete
-                            </span>
-                          )}
                         </span>
                         {/* Metadata row */}
                         <MetadataRow>

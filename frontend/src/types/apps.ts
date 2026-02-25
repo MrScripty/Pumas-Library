@@ -37,7 +37,6 @@ export interface ModelInfo {
   downloadTotalBytes?: number;
   wasDequantized?: boolean;
   convertedFrom?: string;
-  incomplete?: boolean;
   repoId?: string;
   /** Primary model format: 'gguf', 'safetensors', or undefined */
   primaryFormat?: 'gguf' | 'safetensors';

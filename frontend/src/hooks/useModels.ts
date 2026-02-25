@@ -65,11 +65,6 @@ export function useModels() {
           const displayName = modelData.officialName ?? modelData.cleanedName ?? fileName;
 
           const conversionSource = modelData.metadata?.conversion_source;
-          const expectedFiles = modelData.metadata?.expected_files;
-          const actualFiles = modelData.metadata?.files;
-          const incomplete = expectedFiles
-            ? expectedFiles.length > (actualFiles?.length ?? 0)
-            : false;
           // Determine primary format from path/name heuristics or metadata
           const pathLower = path.toLowerCase();
           const nameLower = fileName.toLowerCase();
@@ -91,7 +86,6 @@ export function useModels() {
             relatedAvailable: Boolean(modelData.relatedAvailable),
             wasDequantized: conversionSource?.was_dequantized ?? false,
             convertedFrom: conversionSource?.source_format,
-            incomplete,
             repoId: modelData.metadata?.repo_id,
             primaryFormat,
           };

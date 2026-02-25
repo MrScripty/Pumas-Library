@@ -279,7 +279,9 @@ pub(crate) fn infer_pipeline_tag_from_config(config: Option<&HfModelConfig>) -> 
         | "rwkv" | "rwkv5" | "rwkv6"
         | "mamba" | "mamba2" | "jamba"
         | "sdar" | "recurrentgemma" | "dbrx"
-        | "stablelm" | "persimmon" | "xglm" | "gpt_bigcode" => "text-generation",
+        | "stablelm" | "persimmon" | "xglm" | "gpt_bigcode"
+        // Diffusion LLMs (dLLM) — structurally LLMs with diffusion decoding
+        | "llada" | "mdlm" | "dream" | "mercury" | "sedd" => "text-generation",
 
         // Seq2seq / conditional generation
         "t5" | "bart" | "mbart" | "mt5" | "longt5" | "pegasus" | "led"
@@ -288,8 +290,9 @@ pub(crate) fn infer_pipeline_tag_from_config(config: Option<&HfModelConfig>) -> 
         // Diffusion / image generation
         "stable_diffusion" | "sdxl" | "kandinsky" | "pixart" => "text-to-image",
 
-        // Speech recognition
-        "whisper" | "wav2vec2" | "hubert" | "wavlm" | "seamless_m4t" => {
+        // Audio / speech models
+        "whisper" | "wav2vec2" | "hubert" | "wavlm" | "seamless_m4t"
+        | "bark" | "musicgen" | "encodec" | "speecht5" | "mms" => {
             "automatic-speech-recognition"
         }
 

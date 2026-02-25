@@ -381,6 +381,10 @@ async fn dispatch_method(
         "import_model_in_place" => models::import_model_in_place(state, params).await,
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,
 
+        // Inference Settings
+        "get_inference_settings" => models::get_inference_settings(state, params).await,
+        "update_inference_settings" => models::update_inference_settings(state, params).await,
+
         // HuggingFace Authentication
         "set_hf_token" => models::set_hf_token(state, params).await,
         "clear_hf_token" => models::clear_hf_token(state, params).await,

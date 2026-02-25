@@ -139,7 +139,9 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "list_model_conversions"
         | "check_conversion_environment"
         | "setup_conversion_environment"
-        | "get_supported_quant_types" => result,
+        | "get_supported_quant_types"
+        | "get_inference_settings"
+        | "update_inference_settings" => result,
 
         // Structured response methods (handler returns {success, ...} directly)
         "install_version" => result,

@@ -79,6 +79,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
     recommendation?: string;
   } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [isApplying, setIsApplying] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
@@ -96,6 +97,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
     }
 
     setIsLoading(true);
+    setError(null);
     try {
       // Fetch both preview and cross-filesystem warning in parallel
       const [previewResult, crossFsResult] = await Promise.all([
@@ -105,9 +107,11 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
 
       if (previewResult.success) {
         setPreview(previewResult as MappingPreviewResponse);
+        setError(null);
         onPreviewLoaded?.(previewResult as MappingPreviewResponse);
       } else {
         logger.error('Failed to fetch preview', { error: previewResult.error });
+        setError(previewResult.error || 'Preview returned an error');
       }
 
       if (crossFsResult?.success && crossFsResult.cross_filesystem) {
@@ -115,8 +119,9 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
       } else {
         setCrossFsWarning(null);
       }
-    } catch (error) {
-      logger.error('Error fetching preview', { error });
+    } catch (err) {
+      logger.error('Error fetching preview', { error: err });
+      setError(err instanceof Error ? err.message : 'Failed to load mapping preview');
     } finally {
       setIsLoading(false);
     }
@@ -177,6 +182,30 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
   };
 
   if (!preview && !isLoading) {
+    if (error) {
+      return (
+        <div className="bg-[hsl(var(--launcher-bg-tertiary)/0.3)] rounded-lg border border-[hsl(var(--accent-error)/0.5)] p-4">
+          <div className="flex items-start gap-3">
+            <XCircle className="w-5 h-5 text-[hsl(var(--accent-error))] flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <div className="text-sm font-medium text-[hsl(var(--accent-error))]">
+                Failed to load mapping preview
+              </div>
+              <div className="text-xs text-[hsl(var(--launcher-text-secondary))] mt-1">
+                {error}
+              </div>
+              <button
+                onClick={() => void fetchPreview()}
+                className="mt-3 flex items-center gap-2 px-3 py-1.5 text-xs bg-[hsl(var(--launcher-bg-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] rounded transition-colors"
+              >
+                <RefreshCw className="w-3 h-3" />
+                Retry
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
     return null;
   }
 

@@ -39,7 +39,7 @@ export default function App() {
 
   // Model Manager State
   const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
-  const [linkedModels, setLinkedModels] = useState<Set<string>>(new Set());
+  const [excludedModels, setExcludedModels] = useState<Set<string>>(new Set());
 
   // Model Import State (for app-level drag-drop)
   const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
@@ -108,6 +108,19 @@ export default function App() {
   const panelState = getPanelState(selectedAppId);
   const activeShortcutState =
     selectedAppId === 'comfyui' ? { menu: menuShortcut, desktop: desktopShortcut } : undefined;
+
+  // Load link exclusions from backend on mount and when app changes
+  useEffect(() => {
+    const appId = selectedAppId || 'comfyui';
+    if (!isAPIAvailable()) return;
+    void api.get_link_exclusions(appId).then((result) => {
+      if (result.success) {
+        setExcludedModels(new Set(result.excluded_model_ids));
+      }
+    }).catch((err: unknown) => {
+      logger.error('Failed to load link exclusions', { error: err });
+    });
+  }, [selectedAppId]);
 
   // --- API Helpers ---
   const checkLauncherVersion = async (forceRefresh = false) => {
@@ -469,15 +482,37 @@ export default function App() {
   };
 
   const handleToggleLink = (modelId: string) => {
-    setLinkedModels(prev => {
+    const appId = selectedAppId || 'comfyui';
+    const wasExcluded = excludedModels.has(modelId);
+    const nowExcluded = !wasExcluded;
+
+    // Optimistically update UI
+    setExcludedModels(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(modelId)) {
-        newSet.delete(modelId);
-      } else {
+      if (nowExcluded) {
         newSet.add(modelId);
+      } else {
+        newSet.delete(modelId);
       }
       return newSet;
     });
+
+    // Persist to backend
+    if (isAPIAvailable()) {
+      void api.set_model_link_exclusion(modelId, appId, nowExcluded).catch((err: unknown) => {
+        logger.error('Failed to persist link exclusion', { modelId, error: err });
+        // Revert on failure
+        setExcludedModels(prev => {
+          const newSet = new Set(prev);
+          if (wasExcluded) {
+            newSet.add(modelId);
+          } else {
+            newSet.delete(modelId);
+          }
+          return newSet;
+        });
+      });
+    }
   };
 
   // Model import handlers (app-level drag-drop)
@@ -538,7 +573,7 @@ export default function App() {
   const modelManagerProps: ModelManagerProps = {
     modelGroups,
     starredModels,
-    linkedModels,
+    excludedModels,
     onToggleStar: handleToggleStar,
     onToggleLink: handleToggleLink,
     selectedAppId,

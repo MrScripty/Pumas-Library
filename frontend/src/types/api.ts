@@ -891,6 +891,13 @@ export interface SandboxInfoResponse extends BaseResponse {
 }
 
 /**
+ * Link exclusions response
+ */
+export interface LinkExclusionsResponse extends BaseResponse {
+  excluded_model_ids: string[];
+}
+
+/**
  * Cross-filesystem warning response
  */
 export interface CrossFilesystemWarningResponse extends BaseResponse {
@@ -1632,6 +1639,20 @@ export interface PyWebViewAPI {
    * Detects Flatpak, Snap, Docker, AppImage environments
    */
   get_sandbox_info(): Promise<SandboxInfoResponse>;
+
+  /**
+   * Set whether a model is excluded from app linking
+   */
+  set_model_link_exclusion(
+    modelId: string,
+    appId: string,
+    excluded: boolean
+  ): Promise<BaseResponse>;
+
+  /**
+   * Get all model IDs excluded from linking for a given app
+   */
+  get_link_exclusions(appId: string): Promise<LinkExclusionsResponse>;
 
   // ========================================
   // Model Format Conversion

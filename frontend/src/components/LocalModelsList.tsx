@@ -29,7 +29,7 @@ import { ModelMetadataModal } from './ModelMetadataModal';
 interface LocalModelsListProps {
   modelGroups: ModelCategory[];
   starredModels: Set<string>;
-  linkedModels: Set<string>;
+  excludedModels: Set<string>;
   onToggleStar: (modelId: string) => void;
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
@@ -50,7 +50,7 @@ interface LocalModelsListProps {
 export function LocalModelsList({
   modelGroups,
   starredModels,
-  linkedModels,
+  excludedModels,
   onToggleStar,
   onToggleLink,
   selectedAppId,
@@ -117,7 +117,7 @@ export function LocalModelsList({
           <div className="space-y-1.5">
             {group.models.map((model) => {
               const isStarred = starredModels.has(model.id);
-              const isLinked = linkedModels.has(model.id);
+              const isLinked = !excludedModels.has(model.id);
               const isDownloading = Boolean(model.isDownloading);
               const isConvertible = !isDownloading && Boolean(model.primaryFormat);
               const isExpanded = expandedRelated.has(model.id);
@@ -258,10 +258,11 @@ export function LocalModelsList({
                                 <path d="M10 6L6 10" />
                               </svg>
                             }
-                            tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : 'Link to app'}
+                            tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : `Excluded from ${selectedAppId || 'app'}`}
                             onClick={() => onToggleLink(model.id)}
                             size="sm"
                             active={isLinked}
+                            className={isLinked ? 'text-[hsl(var(--accent-success))]' : 'opacity-40'}
                           />
                           {isConvertible && onConvertModel && (
                             <IconButton

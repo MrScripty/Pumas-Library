@@ -33,7 +33,7 @@ function isAuthRequiredError(errorMessage: string): boolean {
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
   starredModels: Set<string>;
-  linkedModels: Set<string>;
+  excludedModels: Set<string>;
   onToggleStar: (modelId: string) => void;
   onToggleLink: (modelId: string) => void;
   selectedAppId: string | null;
@@ -48,7 +48,7 @@ export interface ModelManagerProps {
 export const ModelManager: React.FC<ModelManagerProps> = ({
   modelGroups,
   starredModels,
-  linkedModels,
+  excludedModels,
   onToggleStar,
   onToggleLink,
   selectedAppId,
@@ -642,7 +642,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               <LocalModelsList
                 modelGroups={filteredGroups}
                 starredModels={starredModels}
-                linkedModels={linkedModels}
+                excludedModels={excludedModels}
                 onToggleStar={onToggleStar}
                 onToggleLink={onToggleLink}
                 selectedAppId={selectedAppId}

@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { FolderSymlink } from 'lucide-react';
 import { DependencySection } from '../DependencySection';
 import { StatusDisplay } from '../StatusDisplay';
+import { MappingPreviewDialog } from '../MappingPreviewDialog';
+import { LinkHealthStatus } from '../LinkHealthStatus';
 import { VersionManagementPanel } from './VersionManagementPanel';
 import type { AppVersionState } from '../../utils/appVersionState';
 
@@ -35,7 +39,9 @@ export function ComfyUIPanel({
   displayStatus,
   isSetupComplete,
 }: ComfyUIPanelProps) {
+  const [showMappingDialog, setShowMappingDialog] = useState(false);
   const isManagerOpen = versions.isSupported && showVersionManager;
+  const activeVersion = versions.activeVersion;
   const versionPanel = (
     <VersionManagementPanel
       appDisplayName={appDisplayName}
@@ -89,10 +95,32 @@ export function ComfyUIPanel({
                     isSetupComplete={isSetupComplete}
                   />
                 )}
+
+                {activeVersion && (
+                  <div className="w-full max-w-md space-y-3">
+                    <button
+                      onClick={() => setShowMappingDialog(true)}
+                      className="w-full flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-[hsl(var(--accent-primary))] hover:bg-[hsl(var(--accent-primary-hover))] text-white rounded-lg transition-colors"
+                    >
+                      <FolderSymlink className="w-4 h-4" />
+                      Sync Library Models
+                    </button>
+
+                    <LinkHealthStatus activeVersion={activeVersion} />
+                  </div>
+                )}
               </motion.div>
             </>
           )}
         </>
+      )}
+
+      {activeVersion && (
+        <MappingPreviewDialog
+          isOpen={showMappingDialog}
+          versionTag={activeVersion}
+          onClose={() => setShowMappingDialog(false)}
+        />
       )}
     </div>
   );

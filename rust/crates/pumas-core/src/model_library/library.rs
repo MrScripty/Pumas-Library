@@ -12,8 +12,9 @@ use crate::index::{ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::identify_model_type;
+use crate::model_library::importer::{detect_dllm_from_config_json, infer_type_from_config_json};
 use crate::model_library::naming::normalize_name;
-use crate::model_library::types::{ModelMetadata, ModelOverrides};
+use crate::model_library::types::{ModelMetadata, ModelOverrides, ModelType};
 use crate::model_library::LinkRegistry;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -801,27 +802,83 @@ impl ModelLibrary {
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
 
-        // Find primary model file and re-detect type
-        let primary_file = match find_primary_model_file(&model_dir) {
-            Some(f) => f,
-            None => return Ok(None),
+        // Re-detect type using priority chain:
+        // 1. Stored pipeline_tag (from HuggingFace metadata)
+        // 2. config.json inference (architectures + model_type fields)
+        // 3. File-based tensor/header detection (last resort)
+        let stored_pipeline_tag = metadata.pipeline_tag.as_deref();
+
+        // Try config.json first (authoritative for HF-sourced models)
+        let config_result = infer_type_from_config_json(&model_dir);
+
+        // File-based detection as fallback
+        let primary_file = find_primary_model_file(&model_dir);
+        let file_type_info = primary_file
+            .as_ref()
+            .and_then(|f| identify_model_type(f).ok());
+
+        // Resolve type with priority chain
+        let new_type = if let Some(tag) = stored_pipeline_tag {
+            let mt = ModelType::from_pipeline_tag(tag);
+            if mt != ModelType::Unknown { mt } else { ModelType::Unknown }
+        } else {
+            ModelType::Unknown
+        };
+        let new_type = if new_type == ModelType::Unknown {
+            config_result
+                .as_ref()
+                .map(|(mt, _)| *mt)
+                .unwrap_or(ModelType::Unknown)
+        } else {
+            new_type
+        };
+        let new_type = if new_type == ModelType::Unknown {
+            file_type_info
+                .as_ref()
+                .map(|ti| ti.model_type)
+                .unwrap_or(ModelType::Unknown)
+        } else {
+            new_type
         };
 
-        let type_info = identify_model_type(&primary_file)?;
-        let new_type = type_info.model_type.as_str().to_string();
-        let new_family = type_info
-            .family
+        let new_type_str = new_type.as_str().to_string();
+
+        // Detect dLLM subtype
+        let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir) {
+            Some("dllm".to_string())
+        } else {
+            None
+        };
+
+        // Update pipeline_tag if config.json provided one and we didn't have it
+        let new_pipeline_tag = stored_pipeline_tag
+            .map(String::from)
+            .or_else(|| config_result.map(|(_, tag)| tag));
+
+        let new_family = file_type_info
+            .as_ref()
+            .and_then(|ti| ti.family.as_ref())
             .map(|f| f.as_str().to_string())
             .unwrap_or_else(|| current_family.clone());
 
-        // Check if anything changed
-        if new_type == current_type && new_family == current_family {
+        // Check if anything changed (type or family)
+        let current_subtype = metadata.subtype.clone();
+        if new_type_str == current_type && new_family == current_family && new_subtype == current_subtype {
+            // Even if type/family didn't change, update pipeline_tag if we discovered one
+            if new_pipeline_tag.is_some() && metadata.pipeline_tag.is_none() {
+                metadata.pipeline_tag = new_pipeline_tag;
+                self.save_metadata(&model_dir, &metadata).await?;
+            }
             return Ok(None);
         }
 
         // Update metadata fields
-        metadata.model_type = Some(new_type.clone());
+        metadata.model_type = Some(new_type_str.clone());
         metadata.family = Some(new_family.clone());
+        metadata.subtype = new_subtype;
+        if new_pipeline_tag.is_some() {
+            metadata.pipeline_tag = new_pipeline_tag;
+        }
 
         let cleaned_name = metadata
             .cleaned_name
@@ -834,8 +891,8 @@ impl ModelLibrary {
                     .to_string()
             });
 
-        let new_dir = self.build_model_path(&new_type, &new_family, &cleaned_name);
-        let new_model_id = format!("{}/{}/{}", normalize_name(&new_type), normalize_name(&new_family), normalize_name(&cleaned_name));
+        let new_dir = self.build_model_path(&new_type_str, &new_family, &cleaned_name);
+        let new_model_id = format!("{}/{}/{}", normalize_name(&new_type_str), normalize_name(&new_family), normalize_name(&cleaned_name));
 
         metadata.model_id = Some(new_model_id.clone());
         metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
@@ -884,7 +941,7 @@ impl ModelLibrary {
             model_id,
             current_type,
             new_model_id,
-            new_type
+            new_type_str
         );
 
         Ok(Some(new_model_id))

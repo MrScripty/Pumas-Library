@@ -41,6 +41,82 @@ impl PumasApi {
         self.primary().model_library.mark_metadata_as_manual(model_id).await
     }
 
+    /// Get inference settings schema for a model.
+    ///
+    /// If the model has persisted settings, returns those. Otherwise,
+    /// lazily computes defaults from the model's type and file format
+    /// without persisting them.
+    pub async fn get_inference_settings(
+        &self,
+        model_id: &str,
+    ) -> Result<Vec<models::InferenceParamSchema>> {
+        let library = &self.primary().model_library;
+        let model_dir = library.library_root().join(model_id);
+
+        if !model_dir.exists() {
+            return Err(crate::error::PumasError::Other(format!(
+                "Model not found: {}",
+                model_id
+            )));
+        }
+
+        let metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+
+        if let Some(settings) = metadata.inference_settings {
+            return Ok(settings);
+        }
+
+        // Lazy defaults: compute from model type + file format without persisting
+        let file_format = library
+            .get_primary_model_file(model_id)
+            .and_then(|p| {
+                p.extension()
+                    .and_then(|e| e.to_str())
+                    .map(|s| s.to_lowercase())
+            })
+            .unwrap_or_default();
+
+        Ok(models::default_inference_settings(
+            metadata.model_type.as_deref().unwrap_or(""),
+            &file_format,
+            metadata.subtype.as_deref(),
+        )
+        .unwrap_or_default())
+    }
+
+    /// Replace the inference settings schema for a model.
+    ///
+    /// Pass an empty `Vec` to clear all settings (reverts to lazy defaults).
+    pub async fn update_inference_settings(
+        &self,
+        model_id: &str,
+        settings: Vec<models::InferenceParamSchema>,
+    ) -> Result<()> {
+        let library = &self.primary().model_library;
+        let model_dir = library.library_root().join(model_id);
+
+        if !model_dir.exists() {
+            return Err(crate::error::PumasError::Other(format!(
+                "Model not found: {}",
+                model_id
+            )));
+        }
+
+        let mut metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+
+        metadata.inference_settings = if settings.is_empty() {
+            None
+        } else {
+            Some(settings)
+        };
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        library.save_metadata(&model_dir, &metadata).await?;
+        library.index_model_dir(&model_dir).await?;
+
+        Ok(())
+    }
+
     /// Import a model from a local path.
     pub async fn import_model(
         &self,

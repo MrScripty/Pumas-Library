@@ -13,6 +13,7 @@ use crate::model_library::types::{
     BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
     ModelImportSpec, ModelMetadata, SecurityTier,
 };
+use crate::models::default_inference_settings;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -585,6 +586,13 @@ impl ModelImporter {
             blake3: Some(h.blake3),
         });
 
+        // Populate default inference settings based on model type and format
+        let inference_settings = default_inference_settings(
+            &model_type,
+            type_info.format.as_str(),
+            spec.subtype.as_deref(),
+        );
+
         Ok(ModelMetadata {
             model_id: Some(model_id),
             family: Some(family),
@@ -598,7 +606,7 @@ impl ModelImporter {
             release_date: None,
             download_url: None,
             model_card: None,
-            inference_settings: None,
+            inference_settings,
             compatible_apps: None,
             hashes: hashes_struct,
             notes: None,

@@ -203,18 +203,43 @@ impl PumasApi {
         model_id: &str,
     ) -> Result<models::ModelMetadata> {
         let primary = self.primary();
+        let hf_client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
+            message: "HuggingFace client not initialized".to_string(),
+        })?;
+
+        // Handle download-in-progress models: extract repo_id and fetch directly
+        if let Some(repo_id) = model_id.strip_prefix("download:") {
+            let model = hf_client.get_model_info(repo_id).await?;
+            return Ok(models::ModelMetadata {
+                repo_id: Some(model.repo_id),
+                official_name: Some(model.name),
+                model_type: Some(model.kind),
+                download_url: Some(model.url),
+                match_source: Some("hf".to_string()),
+                match_method: Some("repo_id".to_string()),
+                match_confidence: Some(1.0),
+                ..Default::default()
+            });
+        }
+
         let library = &primary.model_library;
 
         // Load current metadata
         let model_dir = library.library_root().join(model_id);
         let current = library.load_metadata(&model_dir)?;
 
-        // Determine repo_id: from stored metadata or via filename lookup
-        let hf_client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
-            message: "HuggingFace client not initialized".to_string(),
-        })?;
-
-        let repo_id = current.as_ref().and_then(|m| m.repo_id.clone());
+        let repo_id = current
+            .as_ref()
+            .and_then(|m| m.repo_id.clone())
+            .or_else(|| {
+                // model_id is "{type}/{owner}/{name}" — extract "{owner}/{name}" as repo_id
+                let parts: Vec<&str> = model_id.splitn(3, '/').collect();
+                if parts.len() == 3 {
+                    Some(format!("{}/{}", parts[1], parts[2]))
+                } else {
+                    None
+                }
+            });
 
         let hf_result = if let Some(ref repo_id) = repo_id {
             // Fetch model info directly by repo_id (bypasses search cache)

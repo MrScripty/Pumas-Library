@@ -397,6 +397,7 @@ impl PumasApiBuilder {
                         model_type: recovery.model_type,
                         quant: None,     // Download all files for this repo
                         filename: None,
+                        filenames: None,
                         pipeline_tag: None,
                     };
                     // start_download skips files already on disk, so it will
@@ -455,6 +456,7 @@ impl PumasApiBuilder {
                         model_type: item.model_type,
                         quant: None,
                         filename: None,
+                        filenames: None,
                         pipeline_tag: None,
                     };
                     match client.start_download(&request, &item.model_dir).await {

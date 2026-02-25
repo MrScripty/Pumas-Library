@@ -187,6 +187,7 @@ impl PumasApi {
             model_type,
             quant: None,
             filename: None,
+            filenames: None,
             pipeline_tag: None,
         };
 

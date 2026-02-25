@@ -368,6 +368,7 @@ impl PumasApi {
                         model_type: recovery.model_type,
                         quant: None,
                         filename: None,
+                        filenames: None,
                         pipeline_tag: None,
                     };
                     match client.start_download(&request, &recovery.model_dir).await {

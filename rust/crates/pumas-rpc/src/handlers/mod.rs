@@ -381,6 +381,11 @@ async fn dispatch_method(
         "import_model_in_place" => models::import_model_in_place(state, params).await,
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,
 
+        // HuggingFace Authentication
+        "set_hf_token" => models::set_hf_token(state, params).await,
+        "clear_hf_token" => models::clear_hf_token(state, params).await,
+        "get_hf_auth_status" => models::get_hf_auth_status(state, params).await,
+
         // Process Management
         "is_comfyui_running" => process::is_comfyui_running(state, params).await,
         "stop_comfyui" => process::stop_comfyui(state, params).await,

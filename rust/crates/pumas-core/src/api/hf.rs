@@ -196,6 +196,52 @@ impl PumasApi {
         }
     }
 
+    // ========================================
+    // HuggingFace Authentication
+    // ========================================
+
+    /// Set the HuggingFace authentication token.
+    ///
+    /// Persists to disk and updates the in-memory token for immediate use.
+    pub async fn set_hf_token(&self, token: &str) -> Result<()> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.set_auth_token(token).await
+        } else {
+            Err(PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Clear the HuggingFace authentication token.
+    ///
+    /// Removes the persisted token file and clears the in-memory value.
+    pub async fn clear_hf_token(&self) -> Result<()> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.clear_auth_token().await
+        } else {
+            Err(PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })
+        }
+    }
+
+    /// Get current HuggingFace authentication status.
+    ///
+    /// Makes a lightweight API call to validate the token and retrieve
+    /// the associated username.
+    pub async fn get_hf_auth_status(&self) -> Result<model_library::HfAuthStatus> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.get_auth_status().await
+        } else {
+            Ok(model_library::HfAuthStatus {
+                authenticated: false,
+                username: None,
+                token_source: None,
+            })
+        }
+    }
+
     /// Get repository file tree from HuggingFace.
     pub async fn get_hf_repo_files(
         &self,

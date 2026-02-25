@@ -57,6 +57,11 @@ export interface RemoteModelInfo {
   downloadOptions?: Array<{
     quant: string;
     sizeBytes?: number | null;
+    fileGroup?: {
+      filenames: string[];
+      shardCount: number;
+      label: string;
+    } | null;
   }>;
   url: string;
   releaseDate?: string;

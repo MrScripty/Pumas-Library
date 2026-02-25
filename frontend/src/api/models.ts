@@ -42,7 +42,8 @@ class ModelsAPI {
     officialName: string,
     modelType?: string | null,
     subtype?: string | null,
-    quant?: string | null
+    quant?: string | null,
+    filenames?: string[] | null
   ) {
     const api = this.getAPI();
     return await api.start_model_download_from_hf(
@@ -51,7 +52,8 @@ class ModelsAPI {
       officialName,
       modelType,
       subtype,
-      quant
+      quant,
+      filenames
     );
   }
 

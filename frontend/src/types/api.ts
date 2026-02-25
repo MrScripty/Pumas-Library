@@ -1437,7 +1437,8 @@ export interface PyWebViewAPI {
     officialName: string,
     modelType?: string | null,
     subtype?: string | null,
-    quant?: string | null
+    quant?: string | null,
+    filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;
   download_model_from_hf(
     repoId: string,
@@ -1445,7 +1446,8 @@ export interface PyWebViewAPI {
     officialName: string,
     modelType?: string | null,
     subtype?: string | null,
-    quant?: string | null
+    quant?: string | null,
+    filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;
   get_model_download_status(downloadId: string): Promise<ModelDownloadStatusResponse>;
   cancel_model_download(downloadId: string): Promise<BaseResponse>;

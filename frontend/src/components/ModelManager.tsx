@@ -325,7 +325,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     return PIPELINE_TAG_TO_MODEL_TYPE[kind.toLowerCase()] ?? 'unknown';
   };
 
-  const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null) => {
+  const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => {
     if (!isAPIAvailable()) {
       logger.error('Download API not available');
       return;
@@ -336,7 +336,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     const officialName = model.name || repoId;
     const modelType = resolveDownloadModelType(model.kind || '');
 
-    logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant });
+    logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant, filenames: filenames?.length });
     // Clear any previous error for this download
     setDownloadErrors((prev) => {
       if (!prev[repoId]) return prev;
@@ -352,7 +352,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         officialName,
         modelType,
         model.kind || '',
-        quant || null
+        quant || null,
+        filenames || null
       );
       if (!result.success || !result.download_id) {
         const errorMsg = result.error || 'Download failed.';

@@ -37,7 +37,7 @@ interface RemoteModelsListProps {
   searchQuery: string;
   downloadStatusByRepo: Record<string, DownloadStatus>;
   downloadErrors: Record<string, string>;
-  onStartDownload: (model: RemoteModelInfo, quant?: string | null) => Promise<void>;
+  onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
   onCancelDownload: (repoId: string) => Promise<void>;
   onPauseDownload: (repoId: string) => Promise<void>;
   onResumeDownload: (repoId: string) => Promise<void>;
@@ -66,6 +66,8 @@ export function RemoteModelsList({
   onHfAuthClick,
 }: RemoteModelsListProps) {
   const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
+  // Track selected file groups per repo for multi-select checkbox mode
+  const [selectedGroups, setSelectedGroups] = useState<Record<string, Set<string>>>({});
 
   if (isLoading) {
     return (
@@ -163,8 +165,36 @@ export function RemoteModelsList({
           : model.quants.map((quant) => ({
               quant,
               sizeBytes: model.quantSizes?.[quant] ?? null,
+              fileGroup: null as { filenames: string[]; shardCount: number; label: string } | null | undefined,
             }));
-        const quantLabels = downloadOptions.map((option) => option.quant);
+        const hasFileGroups = downloadOptions.some((o) => o.fileGroup);
+        const quantLabels = hasFileGroups
+          ? downloadOptions.map((o) => o.fileGroup?.label ?? o.quant)
+          : downloadOptions.map((option) => option.quant);
+
+        // Helpers for file-group multi-select
+        const repoSelected = selectedGroups[model.repoId] ?? new Set<string>();
+        const toggleGroup = (label: string) => {
+          setSelectedGroups((prev) => {
+            const cur = new Set(prev[model.repoId] ?? []);
+            if (cur.has(label)) cur.delete(label);
+            else cur.add(label);
+            return { ...prev, [model.repoId]: cur };
+          });
+        };
+        const collectSelectedFilenames = (): string[] => {
+          const fnames: string[] = [];
+          for (const opt of downloadOptions) {
+            const label = opt.fileGroup?.label ?? opt.quant;
+            if (repoSelected.has(label) && opt.fileGroup) {
+              fnames.push(...opt.fileGroup.filenames);
+            }
+          }
+          return fnames;
+        };
+        const selectedTotalBytes = downloadOptions
+          .filter((o) => repoSelected.has(o.fileGroup?.label ?? o.quant))
+          .reduce((sum, o) => sum + (o.sizeBytes ?? 0), 0);
 
         return (
           <ListItem key={model.repoId}>
@@ -341,34 +371,108 @@ export function RemoteModelsList({
                   </span>
                 </button>
                 {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && !isDownloading && (
-                  <div className="absolute right-0 top-full mt-2 min-w-[160px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
-                    {downloadOptions.map((option) => (
-                      <button
-                        key={option.quant}
-                        type="button"
-                        onClick={() => {
-                          setOpenQuantMenuRepoId(null);
-                          void onStartDownload(model, option.quant);
-                        }}
-                        className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
-                      >
-                        {option.quant}
-                        {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
-                          ? ` (${formatDownloadSize(option.sizeBytes)})`
-                          : ' (Unknown)'}
-                      </button>
-                    ))}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOpenQuantMenuRepoId(null);
-                        void onStartDownload(model, null);
-                      }}
-                      className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
-                    >
-                      All files
-                      {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
-                    </button>
+                  <div className="absolute right-0 top-full mt-2 min-w-[200px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
+                    {hasFileGroups ? (
+                      <>
+                        {/* Multi-select checkbox panel for file-group repos */}
+                        {downloadOptions.map((option) => {
+                          const label = option.fileGroup?.label ?? option.quant;
+                          const shardCount = option.fileGroup?.shardCount ?? 1;
+                          const checked = repoSelected.has(label);
+                          return (
+                            <label
+                              key={label}
+                              className="flex items-center gap-2 w-full px-3 py-1.5 text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors cursor-pointer"
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleGroup(label)}
+                                className="accent-[hsl(var(--launcher-accent-primary))]"
+                              />
+                              <span className="flex-1 min-w-0 truncate" title={label}>
+                                {label}
+                                {shardCount > 1 ? ` (${shardCount} shards)` : ''}
+                              </span>
+                              <span className="flex-shrink-0 text-[hsl(var(--text-muted))]">
+                                {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
+                                  ? formatDownloadSize(option.sizeBytes)
+                                  : ''}
+                              </span>
+                            </label>
+                          );
+                        })}
+                        <div className="border-t border-[hsl(var(--launcher-border))] mt-1 pt-1 px-3 pb-2 flex flex-col gap-1.5">
+                          <button
+                            type="button"
+                            disabled={repoSelected.size === 0}
+                            onClick={() => {
+                              setOpenQuantMenuRepoId(null);
+                              const fnames = collectSelectedFilenames();
+                              if (fnames.length > 0) {
+                                void onStartDownload(model, null, fnames);
+                              }
+                              setSelectedGroups((prev) => {
+                                const next = { ...prev };
+                                delete next[model.repoId];
+                                return next;
+                              });
+                            }}
+                            className="w-full py-1.5 text-xs font-medium rounded bg-[hsl(var(--launcher-accent-primary)/0.15)] text-[hsl(var(--launcher-accent-primary))] hover:bg-[hsl(var(--launcher-accent-primary)/0.25)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            Download selected
+                            {selectedTotalBytes > 0 ? ` (${formatDownloadSize(selectedTotalBytes)})` : ''}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setOpenQuantMenuRepoId(null);
+                              void onStartDownload(model, null, null);
+                              setSelectedGroups((prev) => {
+                                const next = { ...prev };
+                                delete next[model.repoId];
+                                return next;
+                              });
+                            }}
+                            className="w-full py-1 text-[10px] text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-secondary))] transition-colors"
+                          >
+                            All files
+                            {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        {/* Single-select quant dropdown (GGUF/quant repos) */}
+                        {downloadOptions.map((option) => (
+                          <button
+                            key={option.quant}
+                            type="button"
+                            onClick={() => {
+                              setOpenQuantMenuRepoId(null);
+                              void onStartDownload(model, option.quant);
+                            }}
+                            className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                          >
+                            {option.quant}
+                            {typeof option.sizeBytes === 'number' && option.sizeBytes > 0
+                              ? ` (${formatDownloadSize(option.sizeBytes)})`
+                              : ' (Unknown)'}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOpenQuantMenuRepoId(null);
+                            void onStartDownload(model, null);
+                          }}
+                          className="w-full px-3 py-2 text-left text-xs text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors"
+                        >
+                          All files
+                          {model.totalSizeBytes ? ` (${formatDownloadSize(model.totalSizeBytes)})` : ''}
+                        </button>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

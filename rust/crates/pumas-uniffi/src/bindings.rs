@@ -815,6 +815,92 @@ impl From<HuggingFaceModel> for FfiHuggingFaceModel {
 }
 
 // =============================================================================
+// Inference Settings FFI Types
+// =============================================================================
+
+/// FFI-safe wrapper for `ParamConstraints`.
+#[derive(uniffi::Record)]
+pub struct FfiParamConstraints {
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    /// JSON-encoded array of allowed values, or None if unconstrained.
+    pub allowed_values_json: Option<String>,
+}
+
+impl From<pumas_library::models::ParamConstraints> for FfiParamConstraints {
+    fn from(c: pumas_library::models::ParamConstraints) -> Self {
+        Self {
+            min: c.min,
+            max: c.max,
+            allowed_values_json: c
+                .allowed_values
+                .map(|v| serde_json::to_string(&v).unwrap_or_default()),
+        }
+    }
+}
+
+impl From<FfiParamConstraints> for pumas_library::models::ParamConstraints {
+    fn from(c: FfiParamConstraints) -> Self {
+        Self {
+            min: c.min,
+            max: c.max,
+            allowed_values: c.allowed_values_json.and_then(|s| serde_json::from_str(&s).ok()),
+        }
+    }
+}
+
+/// FFI-safe wrapper for `InferenceParamSchema`.
+#[derive(uniffi::Record)]
+pub struct FfiInferenceParamSchema {
+    pub key: String,
+    pub label: String,
+    /// One of: "Number", "Integer", "String", "Boolean"
+    pub param_type: String,
+    /// JSON-encoded default value.
+    pub default_json: String,
+    pub description: Option<String>,
+    pub constraints: Option<FfiParamConstraints>,
+}
+
+impl From<pumas_library::models::InferenceParamSchema> for FfiInferenceParamSchema {
+    fn from(s: pumas_library::models::InferenceParamSchema) -> Self {
+        use pumas_library::models::ParamType;
+        Self {
+            key: s.key,
+            label: s.label,
+            param_type: match s.param_type {
+                ParamType::Number => "Number".to_string(),
+                ParamType::Integer => "Integer".to_string(),
+                ParamType::String => "String".to_string(),
+                ParamType::Boolean => "Boolean".to_string(),
+            },
+            default_json: serde_json::to_string(&s.default).unwrap_or_default(),
+            description: s.description,
+            constraints: s.constraints.map(FfiParamConstraints::from),
+        }
+    }
+}
+
+impl From<FfiInferenceParamSchema> for pumas_library::models::InferenceParamSchema {
+    fn from(s: FfiInferenceParamSchema) -> Self {
+        use pumas_library::models::ParamType;
+        Self {
+            key: s.key,
+            label: s.label,
+            param_type: match s.param_type.as_str() {
+                "Integer" => ParamType::Integer,
+                "String" => ParamType::String,
+                "Boolean" => ParamType::Boolean,
+                _ => ParamType::Number,
+            },
+            default: serde_json::from_str(&s.default_json).unwrap_or(serde_json::Value::Null),
+            description: s.description,
+            constraints: s.constraints.map(pumas_library::models::ParamConstraints::from),
+        }
+    }
+}
+
+// =============================================================================
 // Torch Inference FFI Types
 // =============================================================================
 
@@ -1000,6 +1086,39 @@ impl FfiPumasApi {
             .rebuild_model_index()
             .await
             .map(|n| n as u64)
+            .map_err(FfiError::from)
+    }
+
+    /// Get the inference settings schema for a model.
+    ///
+    /// Returns the stored settings if present, otherwise lazily computes
+    /// defaults based on model type and format.
+    pub async fn get_inference_settings(
+        &self,
+        model_id: String,
+    ) -> Result<Vec<FfiInferenceParamSchema>, FfiError> {
+        let settings = self
+            .inner
+            .get_inference_settings(&model_id)
+            .await
+            .map_err(FfiError::from)?;
+        Ok(settings
+            .into_iter()
+            .map(FfiInferenceParamSchema::from)
+            .collect())
+    }
+
+    /// Replace the inference settings schema for a model.
+    pub async fn update_inference_settings(
+        &self,
+        model_id: String,
+        settings: Vec<FfiInferenceParamSchema>,
+    ) -> Result<(), FfiError> {
+        let core_settings: Vec<pumas_library::models::InferenceParamSchema> =
+            settings.into_iter().map(Into::into).collect();
+        self.inner
+            .update_inference_settings(&model_id, core_settings)
+            .await
             .map_err(FfiError::from)
     }
 

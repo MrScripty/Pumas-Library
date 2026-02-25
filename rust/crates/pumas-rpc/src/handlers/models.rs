@@ -71,6 +71,9 @@ pub async fn download_model_from_hf(
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
     let quant = get_str_param(params, "quant", "quant").map(String::from);
     let filename = get_str_param(params, "filename", "filename").map(String::from);
+    let filenames: Option<Vec<String>> = params
+        .get("filenames")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
     let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
 
     let request = pumas_library::DownloadRequest {
@@ -80,6 +83,7 @@ pub async fn download_model_from_hf(
         model_type,
         quant,
         filename,
+        filenames,
         pipeline_tag,
     };
 
@@ -105,6 +109,9 @@ pub async fn start_model_download_from_hf(
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
     let quant = get_str_param(params, "quant", "quant").map(String::from);
     let filename = get_str_param(params, "filename", "filename").map(String::from);
+    let filenames: Option<Vec<String>> = params
+        .get("filenames")
+        .and_then(|v| serde_json::from_value(v.clone()).ok());
     let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
 
     let request = pumas_library::DownloadRequest {
@@ -114,6 +121,7 @@ pub async fn start_model_download_from_hf(
         model_type,
         quant,
         filename,
+        filenames,
         pipeline_tag,
     };
 

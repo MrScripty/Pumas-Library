@@ -162,7 +162,8 @@ const electronAPI = {
     officialName: string,
     modelType?: string | null,
     subtype?: string | null,
-    quant?: string | null
+    quant?: string | null,
+    filenames?: string[] | null
   ) =>
     apiCall('start_model_download_from_hf', {
       repo_id: repoId,
@@ -171,6 +172,7 @@ const electronAPI = {
       model_type: modelType,
       subtype,
       quant,
+      filenames,
     }),
   download_model_from_hf: (
     repoId: string,
@@ -178,7 +180,8 @@ const electronAPI = {
     officialName: string,
     modelType?: string | null,
     subtype?: string | null,
-    quant?: string | null
+    quant?: string | null,
+    filenames?: string[] | null
   ) =>
     apiCall('download_model_from_hf', {
       repo_id: repoId,
@@ -187,6 +190,7 @@ const electronAPI = {
       model_type: modelType,
       subtype,
       quant,
+      filenames,
     }),
   get_model_download_status: (downloadId: string) =>
     apiCall('get_model_download_status', { download_id: downloadId }),

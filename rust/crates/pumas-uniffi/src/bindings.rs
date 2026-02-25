@@ -240,11 +240,30 @@ impl From<pumas_library::models::SecurityTier> for FfiSecurityTier {
     }
 }
 
-/// A download option (quant + optional size).
+/// A group of files forming a single logical download unit.
+#[derive(uniffi::Record)]
+pub struct FfiFileGroup {
+    pub filenames: Vec<String>,
+    pub shard_count: u32,
+    pub label: String,
+}
+
+impl From<pumas_library::models::FileGroup> for FfiFileGroup {
+    fn from(g: pumas_library::models::FileGroup) -> Self {
+        Self {
+            filenames: g.filenames,
+            shard_count: g.shard_count,
+            label: g.label,
+        }
+    }
+}
+
+/// A download option (quant + optional size + optional file group).
 #[derive(uniffi::Record)]
 pub struct FfiDownloadOption {
     pub quant: String,
     pub size_bytes: Option<u64>,
+    pub file_group: Option<FfiFileGroup>,
 }
 
 impl From<pumas_library::models::DownloadOption> for FfiDownloadOption {
@@ -252,6 +271,7 @@ impl From<pumas_library::models::DownloadOption> for FfiDownloadOption {
         Self {
             quant: o.quant,
             size_bytes: o.size_bytes,
+            file_group: o.file_group.map(FfiFileGroup::from),
         }
     }
 }
@@ -624,6 +644,7 @@ pub struct FfiDownloadRequest {
     pub model_type: Option<String>,
     pub quant: Option<String>,
     pub filename: Option<String>,
+    pub filenames: Option<Vec<String>>,
     pub pipeline_tag: Option<String>,
 }
 
@@ -636,6 +657,7 @@ impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest 
             model_type: r.model_type,
             quant: r.quant,
             filename: r.filename,
+            filenames: r.filenames,
             pipeline_tag: r.pipeline_tag,
         }
     }

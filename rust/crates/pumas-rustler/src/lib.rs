@@ -151,12 +151,22 @@ pub struct ElixirModelFileInfo {
     pub blake3: Option<String>,
 }
 
+/// A group of files forming a single logical download unit.
+#[derive(NifStruct)]
+#[module = "Pumas.FileGroup"]
+pub struct ElixirFileGroup {
+    pub filenames: Vec<String>,
+    pub shard_count: u32,
+    pub label: String,
+}
+
 /// Download option as an Elixir struct.
 #[derive(NifStruct)]
 #[module = "Pumas.DownloadOption"]
 pub struct ElixirDownloadOption {
     pub quant: String,
     pub size_bytes: Option<u64>,
+    pub file_group: Option<ElixirFileGroup>,
 }
 
 /// LFS file info as an Elixir struct.
@@ -413,7 +423,7 @@ fn new_base_response(success: bool, error: Option<String>) -> ElixirBaseResponse
 /// Create a download option struct.
 #[rustler::nif]
 fn new_download_option(quant: String, size_bytes: Option<u64>) -> ElixirDownloadOption {
-    ElixirDownloadOption { quant, size_bytes }
+    ElixirDownloadOption { quant, size_bytes, file_group: None }
 }
 
 // ============================================================================

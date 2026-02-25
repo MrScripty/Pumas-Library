@@ -287,7 +287,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       'feature-extraction': 'embedding',
       'sentence-similarity': 'embedding',
     };
-    return PIPELINE_TAG_TO_MODEL_TYPE[kind.toLowerCase()] ?? 'llm';
+    return PIPELINE_TAG_TO_MODEL_TYPE[kind.toLowerCase()] ?? 'unknown';
   };
 
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null) => {

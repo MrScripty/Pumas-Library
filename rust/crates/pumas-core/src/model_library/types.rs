@@ -186,6 +186,20 @@ impl ModelFamily {
     pub const KOLORS: &'static str = "kolors";
     pub const PIXART: &'static str = "pixart";
 
+    // Common audio families
+    pub const WHISPER: &'static str = "whisper";
+    pub const ENCODEC: &'static str = "encodec";
+    pub const BARK: &'static str = "bark";
+    pub const MUSICGEN: &'static str = "musicgen";
+    pub const WAV2VEC: &'static str = "wav2vec";
+
+    // Common vision families
+    pub const CLIP: &'static str = "clip";
+    pub const SIGLIP: &'static str = "siglip";
+    pub const VIT: &'static str = "vit";
+    pub const DINOV2: &'static str = "dinov2";
+    pub const SWIN: &'static str = "swin";
+
     /// Create a new model family, normalizing the name to lowercase.
     pub fn new(name: impl Into<String>) -> Self {
         ModelFamily(name.into().to_lowercase())

@@ -42,8 +42,12 @@ impl PumasApi {
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
         if let Some(ref client) = self.primary().hf_client {
-            // Determine destination directory
-            let model_type = request.model_type.as_deref().unwrap_or("unknown");
+            // Determine destination directory.
+            // Normalize through ModelType to handle raw pipeline_tags (e.g. "text-to-audio" → "audio").
+            let model_type_raw = request.model_type.as_deref().unwrap_or("unknown");
+            let model_type_parsed: crate::model_library::ModelType =
+                model_type_raw.parse().unwrap_or(crate::model_library::ModelType::Unknown);
+            let model_type = model_type_parsed.as_str();
             let dest_dir = self.primary().model_library.build_model_path(
                 model_type,
                 &request.family,

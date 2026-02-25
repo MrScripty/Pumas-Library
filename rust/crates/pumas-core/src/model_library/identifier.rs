@@ -193,7 +193,7 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
 
     let mut info = ModelTypeInfo {
         format: FileFormat::Gguf,
-        model_type: ModelType::Llm, // Default, will be refined based on metadata
+        model_type: ModelType::Unknown, // Refined by detect_model_type_from_gguf_metadata
         family: None,
         extra: HashMap::new(),
     };
@@ -225,27 +225,85 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
 
 /// Detect model type from GGUF metadata fields.
 ///
-/// Checks name, basename for embedding indicators.
+/// Checks architecture, name, and basename to classify the model.
+/// Priority: architecture match > name/basename keywords > default to LLM.
 fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
-    // Check for embedding model indicators in name and basename
-    let check_for_embedding = |s: &str| -> bool {
+    // 1. Check architecture for known non-LLM types
+    if let Some(ref arch) = metadata.architecture {
+        let arch_lower = arch.to_lowercase();
+
+        // Audio architectures
+        if matches!(
+            arch_lower.as_str(),
+            "whisper" | "encodec" | "wav2vec" | "wav2vec2" | "hubert"
+            | "wavlm" | "bark" | "musicgen" | "seamless_m4t"
+        ) {
+            return ModelType::Audio;
+        }
+
+        // Vision architectures
+        if matches!(
+            arch_lower.as_str(),
+            "clip" | "vit" | "siglip" | "dinov2" | "swin"
+            | "convnext" | "deit" | "beit" | "mobilevlm"
+        ) {
+            return ModelType::Vision;
+        }
+
+        // Diffusion architectures
+        if matches!(
+            arch_lower.as_str(),
+            "stable-diffusion" | "stable_diffusion" | "sdxl" | "sd3"
+            | "flux" | "pixart" | "kandinsky"
+        ) {
+            return ModelType::Diffusion;
+        }
+    }
+
+    // 2. Check name and basename for type keywords
+    let check_text = |s: &str| -> Option<ModelType> {
         let lower = s.to_lowercase();
-        lower.contains("embedding") || lower.contains("embed-")
+        // Embedding
+        if lower.contains("embedding") || lower.contains("embed-") {
+            return Some(ModelType::Embedding);
+        }
+        // Audio
+        if lower.contains("whisper") || lower.contains("tts")
+            || lower.contains("speech") || lower.contains("audio")
+            || lower.contains("bark") || lower.contains("musicgen")
+            || lower.contains("encodec")
+        {
+            return Some(ModelType::Audio);
+        }
+        // Vision
+        if lower.contains("vision") || lower.contains("-vit-")
+            || lower.contains("clip") || lower.contains("siglip")
+        {
+            return Some(ModelType::Vision);
+        }
+        // Diffusion
+        if lower.contains("diffusion") || lower.contains("flux")
+            || lower.contains("sdxl") || lower.contains("stable-diffusion")
+            || lower.contains("unet")
+        {
+            return Some(ModelType::Diffusion);
+        }
+        None
     };
 
     if let Some(ref basename) = metadata.basename {
-        if check_for_embedding(basename) {
-            return ModelType::Embedding;
+        if let Some(model_type) = check_text(basename) {
+            return model_type;
         }
     }
 
     if let Some(ref name) = metadata.name {
-        if check_for_embedding(name) {
-            return ModelType::Embedding;
+        if let Some(model_type) = check_text(name) {
+            return model_type;
         }
     }
 
-    // Default to LLM for GGUF files (most common use case)
+    // 3. Default to LLM for GGUF files (most common use case)
     ModelType::Llm
 }
 
@@ -300,6 +358,7 @@ fn extract_gguf_key_metadata<R: Read>(file: &mut R, metadata_count: usize) -> Re
         if metadata.architecture.is_some()
             && metadata.name.is_some()
             && metadata.basename.is_some()
+            && metadata.model_type.is_some()
         {
             break;
         }
@@ -415,11 +474,21 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
         }
     }
 
-    // Check directory context for audio indicators
-    // Audio models using diffusion architectures would otherwise be mis-detected as Diffusion
-    if model_type == ModelType::Diffusion || model_type == ModelType::Unknown {
+    // Check directory context for audio indicators.
+    // Audio models often reuse transformer or diffusion architectures, so we check
+    // for all types except Audio (already correct) and Embedding (has its own context).
+    if model_type != ModelType::Audio && model_type != ModelType::Embedding {
         if is_audio_from_context(path) {
             model_type = ModelType::Audio;
+        }
+    }
+
+    // Check directory context for vision indicators.
+    // Only override Unknown/Diffusion to avoid false positives on VLMs (e.g. LLaVA)
+    // that have vision_config but are fundamentally LLMs with lm_head.
+    if model_type == ModelType::Unknown || model_type == ModelType::Diffusion {
+        if is_vision_from_context(path) {
+            model_type = ModelType::Vision;
         }
     }
 
@@ -498,6 +567,71 @@ fn is_audio_from_context(path: &Path) -> bool {
         }
     }
 
+    // Check preprocessor_config.json for audio feature extractors
+    let preproc_path = parent.join("preprocessor_config.json");
+    if let Ok(preproc_str) = std::fs::read_to_string(&preproc_path) {
+        if let Ok(preproc) = serde_json::from_str::<serde_json::Value>(&preproc_str) {
+            if let Some(fe_type) = preproc
+                .get("feature_extractor_type")
+                .and_then(|v| v.as_str())
+            {
+                let lower = fe_type.to_lowercase();
+                if lower.contains("whisper")
+                    || lower.contains("wav2vec")
+                    || lower.contains("audio")
+                {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+/// Check directory context for vision model indicators.
+///
+/// This supplements tensor analysis by checking the parent directory's
+/// `config.json` for vision-specific metadata fields.
+fn is_vision_from_context(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+
+    let config_path = parent.join("config.json");
+    let config_str = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let config: serde_json::Value = match serde_json::from_str(&config_str) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // Check for vision-specific config fields
+    if config.get("image_size").is_some()
+        || config.get("patch_size").is_some()
+        || config.get("vision_config").is_some()
+    {
+        return true;
+    }
+
+    // Check model_type field for vision-related values
+    if let Some(model_type) = config.get("model_type").and_then(|v| v.as_str()) {
+        let lower = model_type.to_lowercase();
+        if lower.contains("vit")
+            || lower.contains("clip")
+            || lower.contains("siglip")
+            || lower.contains("swin")
+            || lower.contains("dinov2")
+            || lower.contains("convnext")
+            || lower.contains("segformer")
+        {
+            return true;
+        }
+    }
+
     false
 }
 
@@ -514,6 +648,8 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
     let mut llm_indicators = 0;
     let mut diffusion_indicators = 0;
     let mut embedding_indicators = 0;
+    let mut audio_indicators = 0;
+    let mut vision_indicators = 0;
     let mut has_lm_head = false;
 
     // LLM patterns (transformer architecture, but also used by embedding models)
@@ -555,6 +691,27 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
         "projection",
     ];
 
+    // Audio patterns (speech, music, audio processing)
+    let audio_patterns = [
+        "encoder.conv",
+        "mel_",
+        "audio_encoder",
+        "spectrogram",
+        "feature_projection",
+        "masked_spec_embed",
+        "codec",
+    ];
+
+    // Vision patterns (image classification, segmentation, detection)
+    let vision_patterns = [
+        "vision_model",
+        "visual.",
+        "patch_embed",
+        "cls_token",
+        "visual_projection",
+        "image_encoder",
+    ];
+
     for name in &tensor_names {
         let lower = name.to_lowercase();
 
@@ -581,12 +738,29 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
                 embedding_indicators += 1;
             }
         }
+
+        for pattern in audio_patterns {
+            if lower.contains(pattern) {
+                audio_indicators += 1;
+            }
+        }
+
+        for pattern in vision_patterns {
+            if lower.contains(pattern) {
+                vision_indicators += 1;
+            }
+        }
     }
 
-    // Determine type based on indicators
-    // Embedding models often have transformer architecture but NO lm_head,
-    // and may have pooler or projection layers
-    let model_type = if diffusion_indicators > llm_indicators && diffusion_indicators > 5 {
+    // Determine type based on indicators.
+    // Priority: audio > vision > diffusion > embedding > llm > unknown.
+    // Audio and vision take higher priority because these models often
+    // reuse transformer layers that would otherwise trigger LLM detection.
+    let model_type = if audio_indicators > 3 {
+        ModelType::Audio
+    } else if vision_indicators > 3 {
+        ModelType::Vision
+    } else if diffusion_indicators > llm_indicators && diffusion_indicators > 5 {
         ModelType::Diffusion
     } else if llm_indicators > 5 {
         // Transformer-based model - is it LLM or embedding?
@@ -647,6 +821,36 @@ fn detect_family_from_tensors(tensor_names: &[&str], model_type: ModelType) -> O
                 Some(ModelFamily::new(ModelFamily::PIXART))
             } else if names_str.contains("stable_diffusion") || names_str.contains("unet") {
                 Some(ModelFamily::new(ModelFamily::STABLE_DIFFUSION))
+            } else {
+                None
+            }
+        }
+        ModelType::Audio => {
+            if names_str.contains("whisper") {
+                Some(ModelFamily::new(ModelFamily::WHISPER))
+            } else if names_str.contains("encodec") || names_str.contains("codec") {
+                Some(ModelFamily::new(ModelFamily::ENCODEC))
+            } else if names_str.contains("musicgen") {
+                Some(ModelFamily::new(ModelFamily::MUSICGEN))
+            } else if names_str.contains("bark") {
+                Some(ModelFamily::new(ModelFamily::BARK))
+            } else if names_str.contains("wav2vec") {
+                Some(ModelFamily::new(ModelFamily::WAV2VEC))
+            } else {
+                None
+            }
+        }
+        ModelType::Vision => {
+            if names_str.contains("clip") {
+                Some(ModelFamily::new(ModelFamily::CLIP))
+            } else if names_str.contains("siglip") {
+                Some(ModelFamily::new(ModelFamily::SIGLIP))
+            } else if names_str.contains("vit") || names_str.contains("patch_embed") {
+                Some(ModelFamily::new(ModelFamily::VIT))
+            } else if names_str.contains("dinov2") {
+                Some(ModelFamily::new(ModelFamily::DINOV2))
+            } else if names_str.contains("swin") {
+                Some(ModelFamily::new(ModelFamily::SWIN))
             } else {
                 None
             }

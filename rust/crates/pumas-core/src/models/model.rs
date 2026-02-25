@@ -79,6 +79,68 @@ where
     deserializer.deserialize_any(StringOrVec)
 }
 
+/// Custom deserializer for inference_settings that accepts null, an array, or
+/// an object (legacy format). Objects are discarded as `None` since the field
+/// was changed from a HashMap to Vec<InferenceParamSchema>.
+fn deserialize_inference_settings<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<InferenceParamSchema>>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de;
+
+    struct ArrayOrObject;
+
+    impl<'de> de::Visitor<'de> for ArrayOrObject {
+        type Value = Option<Vec<InferenceParamSchema>>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("null, an array of InferenceParamSchema, or an object (ignored)")
+        }
+
+        fn visit_none<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_unit<E>(self) -> Result<Self::Value, E>
+        where
+            E: de::Error,
+        {
+            Ok(None)
+        }
+
+        fn visit_seq<A>(self, seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: de::SeqAccess<'de>,
+        {
+            let vec: Vec<InferenceParamSchema> =
+                de::Deserialize::deserialize(de::value::SeqAccessDeserializer::new(seq))?;
+            if vec.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(vec))
+            }
+        }
+
+        fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+        where
+            M: de::MapAccess<'de>,
+        {
+            // Drain the map to keep the deserializer happy, then discard.
+            while let Some((_, _)) =
+                map.next_entry::<de::IgnoredAny, de::IgnoredAny>()?
+            {}
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(ArrayOrObject)
+}
+
 /// Metadata about an individual file in a model directory.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -166,7 +228,7 @@ pub struct ModelMetadata {
     pub download_url: Option<String>,
     #[serde(default)]
     pub model_card: Option<HashMap<String, serde_json::Value>>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_inference_settings")]
     pub inference_settings: Option<Vec<InferenceParamSchema>>,
     #[serde(default)]
     pub compatible_apps: Option<Vec<String>>,
@@ -508,5 +570,49 @@ mod tests {
         let metadata = ModelMetadata::default();
         assert!(metadata.model_id.is_none());
         assert!(metadata.tags.is_none());
+    }
+
+    #[test]
+    fn test_inference_settings_null() {
+        let json = r#"{"inference_settings": null}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert!(metadata.inference_settings.is_none());
+    }
+
+    #[test]
+    fn test_inference_settings_empty_object() {
+        let json = r#"{"inference_settings": {}}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert!(metadata.inference_settings.is_none());
+    }
+
+    #[test]
+    fn test_inference_settings_nonempty_object() {
+        let json = r#"{"inference_settings": {"temperature": 0.7}}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert!(metadata.inference_settings.is_none());
+    }
+
+    #[test]
+    fn test_inference_settings_array() {
+        let json = r#"{"inference_settings": [{"key":"temperature","label":"Temperature","param_type":"Number","default":0.7}]}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        let settings = metadata.inference_settings.unwrap();
+        assert_eq!(settings.len(), 1);
+        assert_eq!(settings[0].key, "temperature");
+    }
+
+    #[test]
+    fn test_inference_settings_empty_array() {
+        let json = r#"{"inference_settings": []}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert!(metadata.inference_settings.is_none());
+    }
+
+    #[test]
+    fn test_inference_settings_missing() {
+        let json = r#"{}"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert!(metadata.inference_settings.is_none());
     }
 }

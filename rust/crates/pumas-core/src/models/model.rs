@@ -94,6 +94,50 @@ pub struct ModelFileInfo {
     pub blake3: Option<String>,
 }
 
+/// Data type for an inference parameter.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum ParamType {
+    Number,
+    Integer,
+    String,
+    Boolean,
+}
+
+/// Constraints on an inference parameter value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParamConstraints {
+    #[serde(default)]
+    pub min: Option<f64>,
+    #[serde(default)]
+    pub max: Option<f64>,
+    /// If set, value must be one of these (enum-style dropdown).
+    #[serde(default)]
+    pub allowed_values: Option<Vec<serde_json::Value>>,
+}
+
+/// Describes a single configurable inference parameter with its type,
+/// default value, and optional constraints.
+///
+/// Downstream consumers (e.g. Pantograph node graph) use this schema
+/// to dynamically render UI controls for model-specific settings.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceParamSchema {
+    /// Machine-readable key (e.g. "context_length", "denoising_steps").
+    pub key: String,
+    /// Human-readable label (e.g. "Context Length").
+    pub label: String,
+    /// Data type of this parameter.
+    pub param_type: ParamType,
+    /// Default value for this parameter.
+    pub default: serde_json::Value,
+    /// Optional description / tooltip.
+    #[serde(default)]
+    pub description: Option<String>,
+    /// Optional numeric/enum constraints.
+    #[serde(default)]
+    pub constraints: Option<ParamConstraints>,
+}
+
 /// Canonical metadata stored with each model directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -123,7 +167,7 @@ pub struct ModelMetadata {
     #[serde(default)]
     pub model_card: Option<HashMap<String, serde_json::Value>>,
     #[serde(default)]
-    pub inference_settings: Option<HashMap<String, serde_json::Value>>,
+    pub inference_settings: Option<Vec<InferenceParamSchema>>,
     #[serde(default)]
     pub compatible_apps: Option<Vec<String>>,
     #[serde(default)]

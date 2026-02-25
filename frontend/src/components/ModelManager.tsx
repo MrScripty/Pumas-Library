@@ -17,12 +17,18 @@ import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
 import { ModelImportDialog } from './ModelImportDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
+import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
 import { getReleaseTimestamp } from '../utils/modelFormatters';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
 
 const logger = getLogger('ModelManager');
+
+/** Detect HTTP 401 Unauthorized errors that indicate missing HF authentication. */
+function isAuthRequiredError(errorMessage: string): boolean {
+  return /\b401\b/.test(errorMessage);
+}
 
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
@@ -66,6 +72,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
 
+  // HuggingFace Auth State
+  const [showHfAuth, setShowHfAuth] = useState(false);
+
   // Custom Hooks
   const { results: remoteResults, kinds: remoteKinds, error: remoteError, isLoading: isRemoteLoading } =
     useRemoteModelSearch({
@@ -86,6 +95,19 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Network status for offline/rate limit indicators
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
+
+  // Auto-open HF auth dialog when a download fails with 401
+  const prevDownloadErrorsRef = useRef<Record<string, string>>({});
+  useEffect(() => {
+    const prev = prevDownloadErrorsRef.current;
+    for (const [repoId, errorMsg] of Object.entries(downloadErrors)) {
+      if (!prev[repoId] && isAuthRequiredError(errorMsg)) {
+        setShowHfAuth(true);
+        break;
+      }
+    }
+    prevDownloadErrorsRef.current = downloadErrors;
+  }, [downloadErrors]);
 
   // Auto-refresh model list when downloads complete
   const prevDownloadStatusRef = useRef<Record<string, string>>({});
@@ -290,6 +312,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         logger.error('Unknown error starting remote download', { error, repoId });
       }
       setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
+      if (isAuthRequiredError(message)) {
+        setShowHfAuth(true);
+      }
     }
   };
 
@@ -483,6 +508,12 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         />
       )}
 
+      {/* HuggingFace Auth Dialog */}
+      <HuggingFaceAuthDialog
+        isOpen={showHfAuth}
+        onClose={() => setShowHfAuth(false)}
+      />
+
     <div className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col">
       {/* Network status banner */}
       <NetworkStatusBanner
@@ -507,6 +538,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         onSelectFilter={handleFilterSelect}
         onOpenModelsRoot={onOpenModelsRoot}
         onImportModels={handleImportClick}
+        onHfAuthClick={() => setShowHfAuth(true)}
         showModeToggle={Boolean(onAddModels)}
       />
 
@@ -529,6 +561,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               onSearchDeveloper={handleSearchDeveloper}
               onClearFilters={handleClearRemoteFilters}
               selectedKind={selectedKind}
+              onHfAuthClick={() => setShowHfAuth(true)}
             />
           ) : (
             <>

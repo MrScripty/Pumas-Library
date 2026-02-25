@@ -206,6 +206,11 @@ const electronAPI = {
   refetch_model_metadata_from_hf: (modelId: string) =>
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
 
+  // HuggingFace Authentication
+  set_hf_token: (token: string) => apiCall('set_hf_token', { token }),
+  clear_hf_token: () => apiCall('clear_hf_token'),
+  get_hf_auth_status: () => apiCall('get_hf_auth_status'),
+
   // ========================================
   // Model Library Import (Phase 1A)
   // ========================================

@@ -374,6 +374,12 @@ export interface HuggingFaceModel {
   compatibleEngines?: string[];
 }
 
+export interface HfAuthStatusResponse extends BaseResponse {
+  authenticated: boolean;
+  username?: string;
+  token_source?: string;
+}
+
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }
@@ -1381,6 +1387,11 @@ export interface PyWebViewAPI {
   pause_model_download(downloadId: string): Promise<BaseResponse>;
   resume_model_download(downloadId: string): Promise<BaseResponse>;
   list_model_downloads(): Promise<ListModelDownloadsResponse>;
+
+  // HuggingFace Authentication
+  set_hf_token(token: string): Promise<BaseResponse>;
+  clear_hf_token(): Promise<BaseResponse>;
+  get_hf_auth_status(): Promise<HfAuthStatusResponse>;
 
   /**
    * Get metadata for a library model (both stored and embedded)

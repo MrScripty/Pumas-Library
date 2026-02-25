@@ -17,6 +17,7 @@ import {
   Blocks,
   ChartPie,
   Cpu,
+  Key,
 } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/useModelDownloads';
@@ -44,6 +45,7 @@ interface RemoteModelsListProps {
   onSearchDeveloper?: (developer: string) => void;
   onClearFilters?: () => void;
   selectedKind: string;
+  onHfAuthClick?: () => void;
 }
 
 export function RemoteModelsList({
@@ -61,6 +63,7 @@ export function RemoteModelsList({
   onSearchDeveloper,
   onClearFilters,
   selectedKind,
+  onHfAuthClick,
 }: RemoteModelsListProps) {
   const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
 
@@ -242,6 +245,16 @@ export function RemoteModelsList({
                 {modelError && (
                   <div className="mt-1.5 text-xs text-[hsl(var(--accent-error))]">
                     {modelError}
+                    {/\b401\b/.test(modelError) && onHfAuthClick && (
+                      <button
+                        type="button"
+                        onClick={onHfAuthClick}
+                        className="ml-2 inline-flex items-center gap-1 text-[hsl(var(--accent-primary))] hover:underline"
+                      >
+                        <Key className="w-3 h-3" />
+                        Sign in to HuggingFace
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

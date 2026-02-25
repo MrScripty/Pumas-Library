@@ -5,7 +5,7 @@
  * Extracted from ModelManager.tsx
  */
 
-import { Search, Filter, Globe, Folder, Import } from 'lucide-react';
+import { Search, Filter, Globe, Folder, Import, Key } from 'lucide-react';
 
 interface ModelSearchBarProps {
   searchQuery: string;
@@ -22,6 +22,7 @@ interface ModelSearchBarProps {
   onSelectFilter: (filter: string) => void;
   onOpenModelsRoot?: () => void;
   onImportModels?: () => void;
+  onHfAuthClick?: () => void;
   showModeToggle?: boolean;
 }
 
@@ -40,6 +41,7 @@ export function ModelSearchBar({
   onSelectFilter,
   onOpenModelsRoot,
   onImportModels,
+  onHfAuthClick,
   showModeToggle = true,
 }: ModelSearchBarProps) {
   return (
@@ -91,6 +93,17 @@ export function ModelSearchBar({
                   aria-label="Open models folder"
                 >
                   <Folder className="w-4 h-4" />
+                </button>
+              )}
+              {onHfAuthClick && isDownloadMode && (
+                <button
+                  type="button"
+                  onClick={onHfAuthClick}
+                  className="p-1 rounded text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))] transition-colors"
+                  title="HuggingFace authentication"
+                  aria-label="HuggingFace authentication"
+                >
+                  <Key className="w-4 h-4" />
                 </button>
               )}
               {showModeToggle && (

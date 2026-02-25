@@ -6,6 +6,7 @@
 
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
+import type { InferenceSettingsResponse, UpdateInferenceSettingsResponse, InferenceParamSchema } from '../types/api';
 
 class ModelsAPI {
   private getAPI() {
@@ -100,6 +101,25 @@ class ModelsAPI {
   }> {
     const api = this.getAPI();
     return await api.refetch_model_metadata_from_hf(modelId);
+  }
+
+  /**
+   * Get inference settings schema for a model.
+   */
+  async getInferenceSettings(modelId: string): Promise<InferenceSettingsResponse> {
+    const api = this.getAPI();
+    return await api.get_inference_settings(modelId);
+  }
+
+  /**
+   * Update (replace) inference settings schema for a model.
+   */
+  async updateInferenceSettings(
+    modelId: string,
+    inferenceSettings: InferenceParamSchema[]
+  ): Promise<UpdateInferenceSettingsResponse> {
+    const api = this.getAPI();
+    return await api.update_inference_settings(modelId, inferenceSettings);
   }
 }
 

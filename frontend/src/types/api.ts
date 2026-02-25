@@ -380,6 +380,47 @@ export interface HfAuthStatusResponse extends BaseResponse {
   token_source?: string;
 }
 
+// ============================================================================
+// Inference Settings Types
+// ============================================================================
+
+/**
+ * Constraints on an inference parameter value.
+ */
+export interface ParamConstraints {
+  min?: number;
+  max?: number;
+  allowed_values?: unknown[];
+}
+
+/**
+ * Describes a single configurable inference parameter with its type,
+ * default value, and optional constraints.
+ */
+export interface InferenceParamSchema {
+  key: string;
+  label: string;
+  param_type: 'Number' | 'Integer' | 'String' | 'Boolean';
+  default: unknown;
+  description?: string;
+  constraints?: ParamConstraints;
+}
+
+/**
+ * Response containing the inference settings schema for a model.
+ */
+export interface InferenceSettingsResponse extends BaseResponse {
+  model_id: string;
+  inference_settings: InferenceParamSchema[];
+}
+
+/**
+ * Response after updating inference settings.
+ */
+export interface UpdateInferenceSettingsResponse extends BaseResponse {
+  model_id: string;
+}
+
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }
@@ -1392,6 +1433,22 @@ export interface PyWebViewAPI {
   set_hf_token(token: string): Promise<BaseResponse>;
   clear_hf_token(): Promise<BaseResponse>;
   get_hf_auth_status(): Promise<HfAuthStatusResponse>;
+
+  // Inference Settings
+  /**
+   * Get inference settings schema for a model.
+   * Returns persisted settings, or lazy defaults based on model type/format.
+   */
+  get_inference_settings(modelId: string): Promise<InferenceSettingsResponse>;
+
+  /**
+   * Update (replace) inference settings schema for a model.
+   * Pass an empty array to clear and revert to lazy defaults.
+   */
+  update_inference_settings(
+    modelId: string,
+    inferenceSettings: InferenceParamSchema[]
+  ): Promise<UpdateInferenceSettingsResponse>;
 
   /**
    * Get metadata for a library model (both stored and embedded)

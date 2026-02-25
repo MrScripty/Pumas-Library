@@ -1,12 +1,14 @@
 /**
  * Modal for displaying model metadata (stored and embedded)
+ * and editing inference settings.
  *
  * Displays metadata for a library model when ctrl+clicked.
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2, RefreshCw } from 'lucide-react';
+import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2, RefreshCw, Settings, Plus, Trash2 } from 'lucide-react';
 import { modelsAPI } from '../api/models';
+import type { InferenceParamSchema } from '../types/api';
 
 interface ModelMetadataModalProps {
   modelId: string;
@@ -88,7 +90,14 @@ function isHiddenGgufField(key: string, value: unknown): boolean {
   return false;
 }
 
-type MetadataSource = 'stored' | 'embedded';
+type MetadataSource = 'stored' | 'embedded' | 'inference';
+
+const PARAM_TYPE_OPTIONS: { value: InferenceParamSchema['param_type']; label: string }[] = [
+  { value: 'Integer', label: 'Integer' },
+  { value: 'Number', label: 'Number' },
+  { value: 'String', label: 'String' },
+  { value: 'Boolean', label: 'Boolean' },
+];
 
 export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   modelId,
@@ -105,6 +114,14 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [showAllFields, setShowAllFields] = useState(false);
   const [refetching, setRefetching] = useState(false);
   const [refetchError, setRefetchError] = useState<string | null>(null);
+
+  // Inference settings state
+  const [inferenceSettings, setInferenceSettings] = useState<InferenceParamSchema[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [addingParam, setAddingParam] = useState(false);
+  const [newParam, setNewParam] = useState({ key: '', label: '', param_type: 'Integer' as InferenceParamSchema['param_type'] });
 
   const handleRefetchFromHF = async () => {
     setRefetching(true);
@@ -129,16 +146,24 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
       setLoading(true);
       setError(null);
       try {
-        const result = await modelsAPI.getLibraryModelMetadata(modelId);
-        if (result.success) {
-          setStoredMetadata(result.stored_metadata);
-          if (result.embedded_metadata) {
-            setEmbeddedMetadata(result.embedded_metadata.metadata);
-            setEmbeddedFileType(result.embedded_metadata.file_type);
+        const [metaResult, settingsResult] = await Promise.all([
+          modelsAPI.getLibraryModelMetadata(modelId),
+          modelsAPI.getInferenceSettings(modelId).catch(() => null),
+        ]);
+
+        if (metaResult.success) {
+          setStoredMetadata(metaResult.stored_metadata);
+          if (metaResult.embedded_metadata) {
+            setEmbeddedMetadata(metaResult.embedded_metadata.metadata);
+            setEmbeddedFileType(metaResult.embedded_metadata.file_type);
           }
-          setPrimaryFile(result.primary_file);
+          setPrimaryFile(metaResult.primary_file);
         } else {
           setError('Failed to load metadata');
+        }
+
+        if (settingsResult?.success) {
+          setInferenceSettings(settingsResult.inference_settings || []);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Unknown error');
@@ -159,6 +184,75 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
+
+  // ========================================
+  // Inference settings handlers
+  // ========================================
+
+  const handleParamDefaultChange = (index: number, value: string) => {
+    setInferenceSettings((prev) => {
+      const next = [...prev];
+      const param = next[index];
+      if (param.param_type === 'Integer') {
+        const parsed = parseInt(value, 10);
+        param.default = isNaN(parsed) ? value : parsed;
+      } else if (param.param_type === 'Number') {
+        const parsed = parseFloat(value);
+        param.default = isNaN(parsed) ? value : parsed;
+      } else if (param.param_type === 'Boolean') {
+        param.default = value === 'true';
+      } else {
+        param.default = value;
+      }
+      return next;
+    });
+  };
+
+  const handleRemoveParam = (index: number) => {
+    setInferenceSettings((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddParam = () => {
+    if (!newParam.key.trim() || !newParam.label.trim()) return;
+
+    const defaultVal = newParam.param_type === 'Integer' || newParam.param_type === 'Number' ? 0
+      : newParam.param_type === 'Boolean' ? false : '';
+
+    setInferenceSettings((prev) => [
+      ...prev,
+      {
+        key: newParam.key.trim(),
+        label: newParam.label.trim(),
+        param_type: newParam.param_type,
+        default: defaultVal,
+      },
+    ]);
+    setNewParam({ key: '', label: '', param_type: 'Integer' });
+    setAddingParam(false);
+  };
+
+  const handleSaveInferenceSettings = async () => {
+    setSaving(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+    try {
+      const result = await modelsAPI.updateInferenceSettings(modelId, inferenceSettings);
+      if (result.success) {
+        setSaveSuccess(true);
+        setTimeout(() => setSaveSuccess(false), 2000);
+      } else {
+        setSaveError('Failed to save settings');
+      }
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Unknown error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ========================================
+  // Metadata grid renderer
+  // ========================================
 
   const renderMetadataGrid = (metadata: Record<string, unknown>, isGguf: boolean) => {
     const entries = Object.entries(metadata);
@@ -247,6 +341,148 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     );
   };
 
+  // ========================================
+  // Inference settings panel renderer
+  // ========================================
+
+  const renderInferenceSettings = () => (
+    <div className="space-y-4 max-h-80 overflow-y-auto">
+      {inferenceSettings.length === 0 ? (
+        <div className="text-center py-4 text-[hsl(var(--text-muted))] text-sm">
+          No inference settings configured for this model.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {inferenceSettings.map((param, index) => (
+            <div key={param.key} className="flex items-center gap-2">
+              <div className="flex-1 min-w-0">
+                <label
+                  className="block text-xs text-[hsl(var(--text-muted))] truncate"
+                  title={param.description || param.key}
+                >
+                  {param.label}
+                  <span className="ml-1 opacity-50">({param.param_type})</span>
+                </label>
+                {param.param_type === 'Boolean' ? (
+                  <select
+                    value={String(param.default)}
+                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                  >
+                    <option value="true">true</option>
+                    <option value="false">false</option>
+                  </select>
+                ) : param.param_type === 'String' && param.constraints?.allowed_values ? (
+                  <select
+                    value={String(param.default ?? '')}
+                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                  >
+                    {param.constraints.allowed_values.map((v) => (
+                      <option key={String(v)} value={String(v)}>
+                        {String(v)}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={param.param_type === 'String' ? 'text' : 'number'}
+                    value={param.default == null ? '' : String(param.default)}
+                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                    placeholder={param.description || param.key}
+                    min={param.constraints?.min ?? undefined}
+                    max={param.constraints?.max ?? undefined}
+                    step={param.param_type === 'Integer' ? 1 : 'any'}
+                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                  />
+                )}
+              </div>
+              <button
+                onClick={() => handleRemoveParam(index)}
+                className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
+                title="Remove parameter"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Add parameter form */}
+      {addingParam ? (
+        <div className="space-y-2 p-3 bg-[hsl(var(--surface-high)/0.5)] rounded border border-[hsl(var(--border-default))]">
+          <div className="grid grid-cols-3 gap-2">
+            <input
+              type="text"
+              value={newParam.key}
+              onChange={(e) => setNewParam((p) => ({ ...p, key: e.target.value }))}
+              placeholder="key"
+              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+            />
+            <input
+              type="text"
+              value={newParam.label}
+              onChange={(e) => setNewParam((p) => ({ ...p, label: e.target.value }))}
+              placeholder="Label"
+              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+            />
+            <select
+              value={newParam.param_type}
+              onChange={(e) => setNewParam((p) => ({ ...p, param_type: e.target.value as InferenceParamSchema['param_type'] }))}
+              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+            >
+              {PARAM_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={handleAddParam}
+              disabled={!newParam.key.trim() || !newParam.label.trim()}
+              className="px-3 py-1 text-xs bg-[hsl(var(--launcher-accent-primary))] text-white rounded hover:opacity-90 disabled:opacity-40"
+            >
+              Add
+            </button>
+            <button
+              onClick={() => setAddingParam(false)}
+              className="px-3 py-1 text-xs bg-[hsl(var(--surface-high))] text-[hsl(var(--text-secondary))] rounded hover:bg-[hsl(var(--surface-mid))]"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          onClick={() => setAddingParam(true)}
+          className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
+        >
+          <Plus className="w-3 h-3" /> Add Parameter
+        </button>
+      )}
+
+      {/* Save button and status */}
+      <div className="flex items-center gap-3 pt-2 border-t border-[hsl(var(--border-default))]">
+        <button
+          onClick={handleSaveInferenceSettings}
+          disabled={saving}
+          className="px-4 py-1.5 text-sm bg-[hsl(var(--launcher-accent-primary))] text-white rounded hover:opacity-90 disabled:opacity-50"
+        >
+          {saving ? 'Saving...' : 'Save Settings'}
+        </button>
+        {saveSuccess && (
+          <span className="text-xs text-[hsl(var(--accent-success))]">Saved</span>
+        )}
+        {saveError && (
+          <span className="text-xs text-[hsl(var(--accent-error))]">{saveError}</span>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- modal backdrop dismiss
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
@@ -322,13 +558,26 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
                   <Database className="w-4 h-4" />
                   Stored
                 </button>
+                <button
+                  onClick={() => setActiveSource('inference')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
+                    activeSource === 'inference'
+                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
+                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
+                  }`}
+                >
+                  <Settings className="w-4 h-4" />
+                  Inference
+                </button>
               </div>
 
-              {/* Metadata display */}
+              {/* Content for active tab */}
               {activeSource === 'embedded' && embeddedMetadata ? (
                 renderMetadataGrid(embeddedMetadata, embeddedFileType === 'gguf')
               ) : activeSource === 'stored' && storedMetadata ? (
                 renderMetadataGrid(storedMetadata, false)
+              ) : activeSource === 'inference' ? (
+                renderInferenceSettings()
               ) : (
                 <div className="text-center py-4 text-[hsl(var(--text-muted))]">
                   No {activeSource} metadata available

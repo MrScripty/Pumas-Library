@@ -206,6 +206,12 @@ const electronAPI = {
   refetch_model_metadata_from_hf: (modelId: string) =>
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
 
+  // Inference Settings
+  get_inference_settings: (modelId: string) =>
+    apiCall('get_inference_settings', { model_id: modelId }),
+  update_inference_settings: (modelId: string, inferenceSettings: Record<string, unknown>[]) =>
+    apiCall('update_inference_settings', { model_id: modelId, inference_settings: inferenceSettings }),
+
   // HuggingFace Authentication
   set_hf_token: (token: string) => apiCall('set_hf_token', { token }),
   clear_hf_token: () => apiCall('clear_hf_token'),

@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 // Re-export model types from models module
 pub use crate::models::{
-    DetectedFileType, DownloadOption, DownloadStatus, FtsSearchModel, HuggingFaceModel,
+    DetectedFileType, DownloadOption, DownloadStatus, FileGroup, FtsSearchModel, HuggingFaceModel,
     ImportStage, MatchMethod, ModelData, ModelDownloadProgress, ModelFileInfo, ModelHashes,
     ModelImportResult, ModelImportSpec, ModelMetadata, ModelOverrides, SecurityTier,
 };
@@ -498,6 +498,10 @@ pub struct DownloadRequest {
     /// Specific file to download (if not whole repo)
     #[serde(default)]
     pub filename: Option<String>,
+    /// Explicit list of files to download (from grouped file selection).
+    /// Takes priority over `filename` and `quant` when present.
+    #[serde(default)]
+    pub filenames: Option<Vec<String>>,
     /// Raw HuggingFace pipeline_tag (e.g. "automatic-speech-recognition").
     /// Preserved for authoritative model type classification.
     #[serde(default)]
@@ -624,6 +628,11 @@ pub struct LfsFileInfo {
     pub sha256: String,
 }
 
+/// Current cache format version for [`RepoFileTree`].
+/// Bump when the tree fetch logic changes (e.g. switching to recursive listing)
+/// so that stale entries are treated as cache misses.
+pub const REPO_FILE_TREE_VERSION: u32 = 2;
+
 /// Repository file tree from HuggingFace.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -639,6 +648,9 @@ pub struct RepoFileTree {
     /// Last modified timestamp from HuggingFace (for cache invalidation)
     #[serde(default)]
     pub last_modified: Option<String>,
+    /// Cache format version — old/missing entries are treated as stale.
+    #[serde(default)]
+    pub cache_version: u32,
 }
 
 #[cfg(test)]

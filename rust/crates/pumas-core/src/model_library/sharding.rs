@@ -9,6 +9,7 @@
 //! 2. **Part suffix**: `model.safetensors.part1`
 //! 3. **Numeric suffix**: `model_00001.safetensors`
 
+use crate::model_library::types::LfsFileInfo;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -317,6 +318,116 @@ pub fn extract_shard_info(filename: &str) -> Option<(String, usize, Option<usize
     None
 }
 
+/// File extensions considered to be model weight files.
+const WEIGHT_EXTENSIONS: &[&str] = &[
+    ".safetensors",
+    ".gguf",
+    ".bin",
+    ".pt",
+    ".pth",
+    ".onnx",
+    ".ckpt",
+    ".msgpack",
+];
+
+/// Returns true if the filename has a weight-file extension.
+fn is_weight_file(filename: &str) -> bool {
+    let lower = filename.to_lowercase();
+    WEIGHT_EXTENSIONS.iter().any(|ext| lower.ends_with(ext))
+}
+
+/// A group of weight files that form a logical download unit.
+///
+/// Sharded files (e.g. `model-00001-of-00003.safetensors`) are merged into
+/// a single group. Standalone weight files appear as single-file groups.
+#[derive(Debug, Clone)]
+pub struct WeightFileGroup {
+    /// Human-readable label, e.g. `"transformer/diffusion_pytorch_model.safetensors"`.
+    pub label: String,
+    /// All repo-relative filenames in this group, sorted.
+    pub filenames: Vec<String>,
+    /// Total size in bytes across all files in the group.
+    pub total_size: u64,
+    /// Number of shard files (1 for standalone).
+    pub shard_count: u32,
+}
+
+/// Group LFS files into weight-file groups and non-weight auxiliary files.
+///
+/// Weight files are grouped by `(directory, base_name)` so that shards in the
+/// same directory are merged into a single [`WeightFileGroup`].  Non-weight LFS
+/// files (images, READMEs, etc.) are returned separately for unconditional
+/// inclusion.
+///
+/// # Arguments
+///
+/// * `lfs_files` – LFS file listing from a HuggingFace repo tree.
+///
+/// # Returns
+///
+/// `(weight_groups, non_weight_files)` where weight groups are sorted by label.
+pub fn group_weight_files(lfs_files: &[LfsFileInfo]) -> (Vec<WeightFileGroup>, Vec<LfsFileInfo>) {
+    let mut non_weight: Vec<LfsFileInfo> = Vec::new();
+
+    // group_key → (label, Vec<(filename, size)>)
+    let mut groups: HashMap<String, (String, Vec<(String, u64)>)> = HashMap::new();
+
+    for lf in lfs_files {
+        if !is_weight_file(&lf.filename) {
+            non_weight.push(lf.clone());
+            continue;
+        }
+
+        // Split into (directory, basename).  Root files have dir = "".
+        let (dir, basename) = match lf.filename.rsplit_once('/') {
+            Some((d, b)) => (d, b),
+            None => ("", lf.filename.as_str()),
+        };
+
+        // Try to detect shard pattern from the basename
+        let (base_name, group_key) = if let Some((shard_base, _, _)) = extract_shard_info(basename) {
+            // Sharded: group by dir + shard base name
+            let label = if dir.is_empty() {
+                shard_base.clone()
+            } else {
+                format!("{}/{}", dir, shard_base)
+            };
+            let key = label.clone();
+            (label, key)
+        } else {
+            // Standalone file
+            let label = lf.filename.clone();
+            let key = label.clone();
+            (label, key)
+        };
+
+        groups
+            .entry(group_key)
+            .or_insert_with(|| (base_name, Vec::new()))
+            .1
+            .push((lf.filename.clone(), lf.size));
+    }
+
+    let mut weight_groups: Vec<WeightFileGroup> = groups
+        .into_values()
+        .map(|(label, mut files)| {
+            files.sort_by(|a, b| a.0.cmp(&b.0));
+            let total_size = files.iter().map(|(_, s)| *s).sum();
+            let shard_count = files.len() as u32;
+            WeightFileGroup {
+                label,
+                filenames: files.into_iter().map(|(f, _)| f).collect(),
+                total_size,
+                shard_count,
+            }
+        })
+        .collect();
+
+    weight_groups.sort_by(|a, b| a.label.cmp(&b.label));
+
+    (weight_groups, non_weight)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -585,5 +696,109 @@ mod tests {
         assert_eq!(deserialized.total_shards, validation.total_shards);
         assert_eq!(deserialized.found_shards, validation.found_shards);
         assert_eq!(deserialized.missing_shards, validation.missing_shards);
+    }
+
+    // ── group_weight_files tests ──
+
+    fn lfs(filename: &str, size: u64) -> LfsFileInfo {
+        LfsFileInfo {
+            filename: filename.to_string(),
+            size,
+            sha256: "abc".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_group_weight_files_sharded_in_subdir() {
+        let files = vec![
+            lfs("transformer/diffusion_pytorch_model-00001-of-00003.safetensors", 10_000),
+            lfs("transformer/diffusion_pytorch_model-00002-of-00003.safetensors", 10_000),
+            lfs("transformer/diffusion_pytorch_model-00003-of-00003.safetensors", 4_000),
+        ];
+
+        let (groups, non_weight) = group_weight_files(&files);
+
+        assert!(non_weight.is_empty());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].label, "transformer/diffusion_pytorch_model.safetensors");
+        assert_eq!(groups[0].shard_count, 3);
+        assert_eq!(groups[0].total_size, 24_000);
+        assert_eq!(groups[0].filenames.len(), 3);
+    }
+
+    #[test]
+    fn test_group_weight_files_multiple_components() {
+        // Simulates a FLUX-like repo with multiple weight sets
+        let files = vec![
+            lfs("flux1-krea-dev.safetensors", 23_800),
+            lfs("ae.safetensors", 335),
+            lfs("transformer/diffusion_pytorch_model-00001-of-00003.safetensors", 9_980),
+            lfs("transformer/diffusion_pytorch_model-00002-of-00003.safetensors", 9_950),
+            lfs("transformer/diffusion_pytorch_model-00003-of-00003.safetensors", 3_870),
+            lfs("text_encoder/model.safetensors", 246),
+            lfs("text_encoder_2/model-00001-of-00002.safetensors", 4_990),
+            lfs("text_encoder_2/model-00002-of-00002.safetensors", 4_530),
+            lfs("vae/diffusion_pytorch_model.safetensors", 335),
+            lfs("teaser.png", 12_600),
+        ];
+
+        let (groups, non_weight) = group_weight_files(&files);
+
+        // teaser.png is non-weight
+        assert_eq!(non_weight.len(), 1);
+        assert_eq!(non_weight[0].filename, "teaser.png");
+
+        // Should have 5 weight groups (sorted by label):
+        // ae.safetensors, flux1-krea-dev.safetensors,
+        // text_encoder/model.safetensors, text_encoder_2/model.safetensors,
+        // transformer/diffusion_pytorch_model.safetensors,
+        // vae/diffusion_pytorch_model.safetensors
+        assert_eq!(groups.len(), 6);
+
+        let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
+        assert_eq!(labels, vec![
+            "ae.safetensors",
+            "flux1-krea-dev.safetensors",
+            "text_encoder/model.safetensors",
+            "text_encoder_2/model.safetensors",
+            "transformer/diffusion_pytorch_model.safetensors",
+            "vae/diffusion_pytorch_model.safetensors",
+        ]);
+
+        // Check the sharded groups
+        let transformer = groups.iter().find(|g| g.label.contains("transformer/")).unwrap();
+        assert_eq!(transformer.shard_count, 3);
+        assert_eq!(transformer.total_size, 9_980 + 9_950 + 3_870);
+
+        let te2 = groups.iter().find(|g| g.label.contains("text_encoder_2/")).unwrap();
+        assert_eq!(te2.shard_count, 2);
+        assert_eq!(te2.total_size, 4_990 + 4_530);
+
+        // Standalone groups
+        let flux = groups.iter().find(|g| g.label == "flux1-krea-dev.safetensors").unwrap();
+        assert_eq!(flux.shard_count, 1);
+        assert_eq!(flux.total_size, 23_800);
+    }
+
+    #[test]
+    fn test_group_weight_files_non_weight_excluded() {
+        let files = vec![
+            lfs("model.safetensors", 1000),
+            lfs("teaser.png", 500),
+            lfs("preview.jpg", 300),
+        ];
+
+        let (groups, non_weight) = group_weight_files(&files);
+
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].label, "model.safetensors");
+        assert_eq!(non_weight.len(), 2);
+    }
+
+    #[test]
+    fn test_group_weight_files_empty() {
+        let (groups, non_weight) = group_weight_files(&[]);
+        assert!(groups.is_empty());
+        assert!(non_weight.is_empty());
     }
 }

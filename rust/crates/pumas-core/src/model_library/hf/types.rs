@@ -219,6 +219,8 @@ pub(crate) struct HfSibling {
 #[derive(Debug, Deserialize)]
 pub(crate) struct HfFileEntry {
     pub path: String,
+    #[serde(default, rename = "type")]
+    pub entry_type: Option<String>,
     #[serde(default)]
     pub lfs: Option<HfLfsInfo>,
 }

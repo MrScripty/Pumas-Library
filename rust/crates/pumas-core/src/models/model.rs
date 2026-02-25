@@ -395,7 +395,23 @@ pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
     sorted
 }
 
-/// Download option for a quantization variant.
+/// A group of files that form a single logical download unit.
+///
+/// Used for sharded safetensors/bin repos where multiple shard files
+/// (e.g. `model-00001-of-00003.safetensors`) should be treated as one entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct FileGroup {
+    /// Full repo-relative paths of all files in this group.
+    pub filenames: Vec<String>,
+    /// Number of shards (1 for standalone files).
+    pub shard_count: u32,
+    /// Human-readable label (e.g. "transformer/diffusion_pytorch_model.safetensors").
+    pub label: String,
+}
+
+/// Download option for a quantization variant or file group.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
@@ -403,6 +419,10 @@ pub struct DownloadOption {
     pub quant: String,
     #[serde(default)]
     pub size_bytes: Option<u64>,
+    /// When present, this option represents a grouped set of files
+    /// rather than a quant-based selection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub file_group: Option<FileGroup>,
 }
 
 /// Model download status.

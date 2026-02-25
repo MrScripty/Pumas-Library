@@ -398,6 +398,9 @@ pub struct MappingAction {
     pub action: MappingActionType,
     /// Model ID
     pub model_id: String,
+    /// Human-readable model name
+    #[serde(default)]
+    pub model_name: String,
     /// Source path in library
     pub source: PathBuf,
     /// Target path in app directory
@@ -715,6 +718,7 @@ mod tests {
         preview.conflicts.push(MappingAction {
             action: MappingActionType::SkipConflict,
             model_id: "test".to_string(),
+            model_name: "Test Model".to_string(),
             source: PathBuf::from("/src"),
             target: PathBuf::from("/dst"),
             reason: None,

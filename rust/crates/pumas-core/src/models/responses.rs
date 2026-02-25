@@ -346,32 +346,47 @@ pub struct DeleteModelResponse {
     pub error: Option<String>,
 }
 
-/// Mapping preview data.
+/// Serialisable mapping action for preview responses.
 ///
-/// Note: Not FFI-compatible due to `usize` fields.
+/// Note: Not FFI-compatible due to `PathBuf` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub struct MappingPreviewData {
-    pub creates: usize,
-    pub skips: usize,
-    pub conflicts: usize,
-    pub broken: usize,
+pub struct MappingActionInfo {
+    pub model_id: String,
+    pub model_name: String,
+    pub source_path: String,
+    pub target_path: String,
+    pub reason: String,
 }
 
-/// Mapping preview response.
+/// Broken-link entry for preview responses.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct BrokenLinkEntry {
+    pub target_path: String,
+    pub existing_target: String,
+    pub reason: String,
+}
+
+/// Mapping preview response matching the frontend `MappingPreviewResponse`.
 ///
-/// Note: Not FFI-compatible due to MappingPreviewData containing `usize` fields.
+/// Note: Not FFI-compatible.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct MappingPreviewResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub preview: Option<MappingPreviewData>,
+    pub to_create: Vec<MappingActionInfo>,
+    pub to_skip_exists: Vec<MappingActionInfo>,
+    pub conflicts: Vec<MappingActionInfo>,
+    pub broken_to_remove: Vec<BrokenLinkEntry>,
+    pub total_actions: usize,
+    pub warnings: Vec<String>,
+    pub errors: Vec<String>,
 }
 
-/// Mapping apply response.
+/// Mapping apply response matching the frontend `ApplyModelMappingResponse`.
 ///
 /// Note: Not FFI-compatible due to `usize` fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -380,9 +395,9 @@ pub struct MappingApplyResponse {
     pub success: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
-    pub created: usize,
-    pub updated: usize,
-    pub errors: Vec<String>,
+    pub links_created: usize,
+    pub links_removed: usize,
+    pub total_links: usize,
 }
 
 /// Sync models response.
@@ -396,6 +411,16 @@ pub struct SyncModelsResponse {
     pub error: Option<String>,
     pub synced: usize,
     pub errors: Vec<String>,
+}
+
+/// Response for getting excluded model IDs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LinkExclusionsResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub excluded_model_ids: Vec<String>,
 }
 
 /// Shortcut state.

@@ -198,57 +198,9 @@ impl ModelMapper {
             variant: Some("default".to_string()),
             mappings: vec![
                 MappingRule {
-                    target_dir: "checkpoints".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["checkpoints".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "loras".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["loras".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "vae".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["vae".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "controlnet".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["controlnet".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "clip".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["clip".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "embeddings".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["embeddings".to_string()]),
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-                MappingRule {
-                    target_dir: "upscale_models".to_string(),
-                    model_types: Some(vec!["diffusion".to_string()]),
-                    subtypes: Some(vec!["upscale".to_string()]),
+                    target_dir: ".".to_string(),
+                    model_types: None,
+                    subtypes: None,
                     families: None,
                     tags: None,
                     exclude_tags: None,
@@ -285,10 +237,28 @@ impl ModelMapper {
 
         let mut preview = MappingPreview::new();
 
+        // Get excluded model IDs for this app
+        let excluded_ids: std::collections::HashSet<String> = self
+            .library
+            .index()
+            .get_excluded_model_ids(app_id)?
+            .into_iter()
+            .collect();
+
         // Get all models from library
         let models = self.library.list_models().await?;
 
         for model in models {
+            // Skip models excluded from linking for this app
+            if excluded_ids.contains(&model.id) {
+                continue;
+            }
+            let model_name = if model.official_name.is_empty() {
+                model.cleaned_name.clone()
+            } else {
+                model.official_name.clone()
+            };
+
             // Find matching rules for this model
             for rule in &config.mappings {
                 if !self.matches_rule(&model, rule) {
@@ -315,6 +285,7 @@ impl ModelMapper {
                                     MappingAction {
                                         action: MappingActionType::SkipExists,
                                         model_id: model.id.clone(),
+                                        model_name: model_name.clone(),
                                         source: file_path.clone(),
                                         target: target_path,
                                         reason: Some("Link already exists".to_string()),
@@ -323,6 +294,7 @@ impl ModelMapper {
                                     MappingAction {
                                         action: MappingActionType::SkipConflict,
                                         model_id: model.id.clone(),
+                                        model_name: model_name.clone(),
                                         source: file_path.clone(),
                                         target: target_path,
                                         reason: Some("Different file exists".to_string()),
@@ -332,6 +304,7 @@ impl ModelMapper {
                                 MappingAction {
                                     action: MappingActionType::RemoveBroken,
                                     model_id: model.id.clone(),
+                                    model_name: model_name.clone(),
                                     source: file_path.clone(),
                                     target: target_path,
                                     reason: Some("Broken symlink".to_string()),
@@ -341,6 +314,7 @@ impl ModelMapper {
                             MappingAction {
                                 action: MappingActionType::SkipConflict,
                                 model_id: model.id.clone(),
+                                model_name: model_name.clone(),
                                 source: file_path.clone(),
                                 target: target_path,
                                 reason: Some("Regular file exists".to_string()),
@@ -350,6 +324,7 @@ impl ModelMapper {
                         MappingAction {
                             action: MappingActionType::Create,
                             model_id: model.id.clone(),
+                            model_name: model_name.clone(),
                             source: file_path.clone(),
                             target: target_path,
                             reason: None,

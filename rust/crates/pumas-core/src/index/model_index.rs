@@ -120,6 +120,17 @@ impl ModelIndex {
             [],
         )?;
 
+        // Per-model link exclusion: models excluded from app linking
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS model_link_exclusions (
+                model_id TEXT NOT NULL,
+                app_id TEXT NOT NULL,
+                excluded_at TEXT NOT NULL,
+                PRIMARY KEY (model_id, app_id)
+            )",
+            [],
+        )?;
+
         Ok(())
     }
 
@@ -568,6 +579,76 @@ impl ModelIndex {
         let _: i32 = conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| row.get(0))?;
         debug!("Checkpointed WAL");
         Ok(())
+    }
+
+    // ========================================
+    // Link Exclusion Methods
+    // ========================================
+
+    /// Set whether a model is excluded from linking for a given app.
+    pub fn set_link_exclusion(&self, model_id: &str, app_id: &str, excluded: bool) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| {
+            PumasError::Database {
+                message: "Failed to acquire connection lock".to_string(),
+                source: None,
+            }
+        })?;
+
+        if excluded {
+            let now = chrono::Utc::now().to_rfc3339();
+            conn.execute(
+                "INSERT OR IGNORE INTO model_link_exclusions (model_id, app_id, excluded_at)
+                 VALUES (?1, ?2, ?3)",
+                params![model_id, app_id, now],
+            )?;
+        } else {
+            conn.execute(
+                "DELETE FROM model_link_exclusions WHERE model_id = ?1 AND app_id = ?2",
+                params![model_id, app_id],
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Check if a model is excluded from linking for a given app.
+    pub fn is_link_excluded(&self, model_id: &str, app_id: &str) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| {
+            PumasError::Database {
+                message: "Failed to acquire connection lock".to_string(),
+                source: None,
+            }
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM model_link_exclusions WHERE model_id = ?1 AND app_id = ?2",
+            params![model_id, app_id],
+            |row| row.get(0),
+        )?;
+
+        Ok(count > 0)
+    }
+
+    /// Get all excluded model IDs for a given app.
+    pub fn get_excluded_model_ids(&self, app_id: &str) -> Result<Vec<String>> {
+        let conn = self.conn.lock().map_err(|_| {
+            PumasError::Database {
+                message: "Failed to acquire connection lock".to_string(),
+                source: None,
+            }
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT model_id FROM model_link_exclusions WHERE app_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![app_id], |row| row.get(0))?;
+
+        let mut ids = Vec::new();
+        for row in rows {
+            ids.push(row?);
+        }
+
+        Ok(ids)
     }
 
     /// Clear all models from the index.

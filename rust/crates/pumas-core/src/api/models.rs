@@ -260,21 +260,50 @@ impl PumasApi {
             return Ok(models::MappingPreviewResponse {
                 success: false,
                 error: Some(format!("Version models directory not found: {}", models_path.display())),
-                preview: None,
+                to_create: vec![],
+                to_skip_exists: vec![],
+                conflicts: vec![],
+                broken_to_remove: vec![],
+                total_actions: 0,
+                warnings: vec![],
+                errors: vec![],
             });
         }
 
-        let preview = self.primary().model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
+        // Ensure default mapping config is up to date (idempotent write)
+        let primary = self.primary();
+        primary.model_mapper.create_default_comfyui_config("*", models_path)?;
+
+        let preview = primary.model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
+
+        let to_action_info = |a: &crate::model_library::MappingAction| models::MappingActionInfo {
+            model_id: a.model_id.clone(),
+            model_name: a.model_name.clone(),
+            source_path: a.source.display().to_string(),
+            target_path: a.target.display().to_string(),
+            reason: a.reason.clone().unwrap_or_default(),
+        };
+
+        let to_create: Vec<_> = preview.creates.iter().map(to_action_info).collect();
+        let to_skip_exists: Vec<_> = preview.skips.iter().map(to_action_info).collect();
+        let conflicts: Vec<_> = preview.conflicts.iter().map(to_action_info).collect();
+        let broken_to_remove: Vec<_> = preview.broken.iter().map(|a| models::BrokenLinkEntry {
+            target_path: a.target.display().to_string(),
+            existing_target: a.source.display().to_string(),
+            reason: a.reason.clone().unwrap_or_default(),
+        }).collect();
+        let total_actions = to_create.len() + broken_to_remove.len();
 
         Ok(models::MappingPreviewResponse {
             success: true,
             error: None,
-            preview: Some(models::MappingPreviewData {
-                creates: preview.creates.len(),
-                skips: preview.skips.len(),
-                conflicts: preview.conflicts.len(),
-                broken: preview.broken.len(),
-            }),
+            to_create,
+            to_skip_exists,
+            conflicts,
+            broken_to_remove,
+            total_actions,
+            warnings: vec![],
+            errors: vec![],
         })
     }
 
@@ -291,14 +320,18 @@ impl PumasApi {
             std::fs::create_dir_all(models_path)?;
         }
 
-        let result = self.primary().model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
+        // Ensure default mapping config is up to date (idempotent write)
+        let primary = self.primary();
+        primary.model_mapper.create_default_comfyui_config("*", models_path)?;
+
+        let result = primary.model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
 
         Ok(models::MappingApplyResponse {
             success: true,
             error: None,
-            created: result.created,
-            updated: 0,
-            errors: result.errors.iter().map(|(p, e)| format!("{}: {}", p.display(), e)).collect(),
+            links_created: result.created,
+            links_removed: result.broken_removed,
+            total_links: result.created + result.skipped,
         })
     }
 
@@ -317,8 +350,8 @@ impl PumasApi {
         Ok(models::SyncModelsResponse {
             success: result.success,
             error: result.error,
-            synced: result.created,
-            errors: result.errors,
+            synced: result.links_created,
+            errors: vec![],
         })
     }
 
@@ -330,5 +363,37 @@ impl PumasApi {
     /// Reclassify all models in the library (re-detect types and relocate directories).
     pub async fn reclassify_all_models(&self) -> Result<model_library::ReclassifyResult> {
         self.primary().model_library.reclassify_all_models().await
+    }
+
+    // ========================================
+    // Link Exclusion
+    // ========================================
+
+    /// Toggle whether a model is excluded from app linking.
+    pub fn set_model_link_exclusion(
+        &self,
+        model_id: &str,
+        app_id: &str,
+        excluded: bool,
+    ) -> Result<models::BaseResponse> {
+        self.primary()
+            .model_library
+            .index()
+            .set_link_exclusion(model_id, app_id, excluded)?;
+        Ok(models::BaseResponse::success())
+    }
+
+    /// Get all model IDs excluded from linking for a given app.
+    pub fn get_link_exclusions(&self, app_id: &str) -> Result<models::LinkExclusionsResponse> {
+        let excluded = self
+            .primary()
+            .model_library
+            .index()
+            .get_excluded_model_ids(app_id)?;
+        Ok(models::LinkExclusionsResponse {
+            success: true,
+            error: None,
+            excluded_model_ids: excluded,
+        })
     }
 }

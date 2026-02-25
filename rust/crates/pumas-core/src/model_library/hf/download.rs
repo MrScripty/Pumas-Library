@@ -145,6 +145,29 @@ impl HuggingFaceClient {
         request: &DownloadRequest,
         dest_dir: &Path,
     ) -> Result<String> {
+        // Check for existing download to the same dest_dir (prevents duplicates
+        // from auto-recovery starting a download that's already tracked)
+        {
+            let downloads = self.downloads.read().await;
+            for (id, state) in downloads.iter() {
+                if state.dest_dir == dest_dir
+                    && !state.cancel_flag.load(Ordering::Relaxed)
+                    && matches!(
+                        state.status,
+                        DownloadStatus::Queued
+                            | DownloadStatus::Downloading
+                            | DownloadStatus::Paused
+                    )
+                {
+                    info!(
+                        "Skipping duplicate download for {}: already tracked as {}",
+                        request.repo_id, id
+                    );
+                    return Ok(id.clone());
+                }
+            }
+        }
+
         let download_id = uuid::Uuid::new_v4().to_string();
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
@@ -271,6 +294,22 @@ impl HuggingFaceClient {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: known_sha256.clone(),
             });
+        }
+
+        // Write marker file with repo_id so interrupted downloads can be recovered
+        // even if downloads.json is lost (e.g. crash before persistence flush).
+        let marker_path = dest_dir.join(".pumas_download");
+        if let Err(e) = std::fs::write(
+            &marker_path,
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": request.repo_id,
+                "family": request.family,
+                "official_name": request.official_name,
+                "model_type": request.model_type,
+            }))
+            .unwrap_or_default(),
+        ) {
+            info!("Failed to write download marker (non-fatal): {}", e);
         }
 
         info!(

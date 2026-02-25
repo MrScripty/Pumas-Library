@@ -9,7 +9,6 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
-import type { InterruptedDownloadInfo } from '../types/api';
 
 const logger = getLogger('useModelDownloads');
 
@@ -274,66 +273,16 @@ export function useModelDownloads() {
     }
   }, []);
 
-  // Interrupted downloads: .part files with no persistence entry
-  const [interruptedDownloads, setInterruptedDownloads] = useState<InterruptedDownloadInfo[]>([]);
-
-  useEffect(() => {
-    const checkInterrupted = async () => {
-      if (!isAPIAvailable()) return;
-      try {
-        const result = await api.list_interrupted_downloads();
-        if (result.success && result.interrupted?.length > 0) {
-          logger.info('Found interrupted downloads', { count: result.interrupted.length });
-          setInterruptedDownloads(result.interrupted);
-        }
-      } catch (error) {
-        logger.warn('Failed to check for interrupted downloads', { error });
-      }
-    };
-    void checkInterrupted();
-  }, []);
-
-  const recoverDownload = useCallback(async (repoId: string, destDir: string) => {
-    if (!isAPIAvailable()) return;
-    try {
-      const result = await api.recover_download(repoId, destDir);
-      if (!result.success || !result.download_id) {
-        const errorMsg = result.error || 'Recovery failed.';
-        logger.error('Failed to recover download', { error: errorMsg, repoId });
-        setDownloadErrors((prev) => ({ ...prev, [repoId]: errorMsg }));
-        return;
-      }
-      logger.info('Recovered interrupted download', { repoId, downloadId: result.download_id });
-      // Track it in the normal download flow
-      startDownload(repoId, result.download_id, {
-        modelName: repoId.split('/').pop() || repoId,
-      });
-      // Remove from interrupted list
-      setInterruptedDownloads((prev) => prev.filter((d) => d.model_dir !== destDir));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Recovery failed.';
-      logger.error('Error recovering download', { error: message, repoId });
-      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
-    }
-  }, [startDownload]);
-
-  const dismissInterrupted = useCallback((destDir: string) => {
-    setInterruptedDownloads((prev) => prev.filter((d) => d.model_dir !== destDir));
-  }, []);
-
   const hasActiveDownloads = Object.values(downloadStatusByRepo).some((s) => isActiveStatus(s.status));
 
   return {
     downloadStatusByRepo,
     downloadErrors,
     hasActiveDownloads,
-    interruptedDownloads,
     startDownload,
     cancelDownload,
     pauseDownload,
     resumeDownload,
-    recoverDownload,
-    dismissInterrupted,
     setDownloadErrors,
   };
 }

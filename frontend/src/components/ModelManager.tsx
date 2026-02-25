@@ -86,13 +86,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     downloadStatusByRepo,
     downloadErrors,
     hasActiveDownloads,
-    interruptedDownloads,
     startDownload,
     cancelDownload,
     pauseDownload,
     resumeDownload,
-    recoverDownload,
-    dismissInterrupted,
     setDownloadErrors,
   } = useModelDownloads();
 
@@ -158,12 +155,47 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       return modelGroups;
     }
 
+    // Build lookup of active downloads by lowercase repoId for case-insensitive merging
+    const downloadByRepoId = new Map<string, ModelInfo>();
+    for (const dl of downloadingModels) {
+      if (dl.downloadRepoId) {
+        const key = dl.downloadRepoId.toLowerCase();
+        // Keep the first entry when duplicates exist (same repo, different casing)
+        if (!downloadByRepoId.has(key)) {
+          downloadByRepoId.set(key, dl);
+        }
+      }
+    }
+
+    const mergedRepoKeys = new Set<string>();
     const groupMap = new Map<string, ModelInfo[]>();
+
+    // Merge download state onto library models that match by repoId (case-insensitive)
     modelGroups.forEach((group) => {
-      groupMap.set(group.category, [...group.models]);
+      const models = group.models.map((model) => {
+        const key = model.repoId?.toLowerCase();
+        if (key && downloadByRepoId.has(key)) {
+          const dl = downloadByRepoId.get(key)!;
+          mergedRepoKeys.add(key);
+          return {
+            ...model,
+            isDownloading: true,
+            downloadProgress: dl.downloadProgress,
+            downloadStatus: dl.downloadStatus,
+            downloadRepoId: dl.downloadRepoId,
+            downloadTotalBytes: dl.downloadTotalBytes,
+          };
+        }
+        return model;
+      });
+      groupMap.set(group.category, models);
     });
 
-    downloadingModels.forEach((model) => {
+    // Add download-only entries (no matching library model, deduplicated)
+    const orphanDownloads = downloadingModels.filter(
+      (dl) => !dl.downloadRepoId || !mergedRepoKeys.has(dl.downloadRepoId.toLowerCase())
+    );
+    orphanDownloads.forEach((model) => {
       const existing = groupMap.get(model.category);
       if (existing) {
         groupMap.set(model.category, [model, ...existing]);
@@ -175,7 +207,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     const orderedCategories = Array.from(
       new Set([
         ...modelGroups.map((group) => group.category),
-        ...downloadingModels.map((model) => model.category),
+        ...orphanDownloads.map((model) => model.category),
       ])
     );
 
@@ -490,6 +522,18 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   // Handler for file picker import button
   const handleDeleteModel = useCallback(async (modelId: string) => {
     try {
+      // Cancel any active download for this model first
+      for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
+        if (['queued', 'downloading', 'pausing', 'paused', 'error'].includes(status.status)) {
+          // Match by repoId: model IDs are like "llm/family/name", repoIds are "family/name"
+          const modelSuffix = modelId.split('/').slice(1).join('/');
+          if (repoId === modelSuffix || repoId.toLowerCase() === modelSuffix.toLowerCase()) {
+            logger.info('Cancelling active download before delete', { modelId, repoId });
+            await cancelDownload(repoId);
+          }
+        }
+      }
+
       const result = await modelsAPI.deleteModel(modelId);
       if (result.success) {
         logger.info('Model deleted', { modelId });
@@ -502,7 +546,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         logger.error('Error deleting model', { modelId, error: error.message });
       }
     }
-  }, [onModelsImported]);
+  }, [onModelsImported, downloadStatusByRepo, cancelDownload]);
 
   const handleConvertModel = useCallback((modelId: string) => {
     logger.info('Convert model requested', { modelId });
@@ -614,9 +658,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onCancelDownload={cancelDownload}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
-                interruptedDownloads={interruptedDownloads}
-                onRecoverDownload={recoverDownload}
-                onDismissInterrupted={dismissInterrupted}
               />
               {/* Link Health Status */}
               <div className="mt-4">

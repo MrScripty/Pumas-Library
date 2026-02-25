@@ -1185,7 +1185,10 @@ impl ModelImporter {
                 let name = e.file_name().to_string_lossy().to_string();
                 if name.ends_with(".part") {
                     part_files.push(name);
-                } else if name != "metadata.json" && name != "overrides.json" {
+                } else if name != "metadata.json"
+                    && name != "overrides.json"
+                    && name != ".pumas_download"
+                {
                     if e.file_type().ok().map_or(false, |ft| ft.is_file()) {
                         completed_files.push(name);
                     }
@@ -1197,12 +1200,37 @@ impl ModelImporter {
                 continue;
             }
 
+            // Try to read repo_id from .pumas_download marker file
+            let marker: Option<serde_json::Value> = std::fs::read_to_string(dir.join(".pumas_download"))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok());
+
             if let Some(inferred) = self.infer_spec_from_path(dir) {
+                let (repo_id, family, name, model_type) = if let Some(ref m) = marker {
+                    (
+                        m.get("repo_id").and_then(|v| v.as_str()).map(String::from),
+                        m.get("family")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                            .unwrap_or(inferred.family),
+                        m.get("official_name")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                            .unwrap_or(inferred.official_name),
+                        m.get("model_type")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                            .or(inferred.model_type),
+                    )
+                } else {
+                    (None, inferred.family, inferred.official_name, inferred.model_type)
+                };
                 results.push(InterruptedDownload {
                     model_dir: dir.to_path_buf(),
-                    model_type: inferred.model_type,
-                    family: inferred.family,
-                    inferred_name: inferred.official_name,
+                    repo_id,
+                    model_type,
+                    family,
+                    inferred_name: name,
                     part_files,
                     completed_files,
                 });
@@ -1259,17 +1287,18 @@ pub struct IncompleteShardRecovery {
 /// Descriptor for an interrupted download found in the library tree.
 ///
 /// These directories have `.part` files (indicating an active download was
-/// interrupted) but no download persistence entry. The user must supply the
-/// correct repo_id to recover them.
+/// interrupted) but no download persistence entry.
 #[derive(Debug, Clone, Serialize)]
 pub struct InterruptedDownload {
     /// Directory containing the partial download.
     pub model_dir: PathBuf,
-    /// Inferred model type from directory path (e.g., "llm").
+    /// Repo ID from `.pumas_download` marker file, if present.
+    pub repo_id: Option<String>,
+    /// Model type — from marker or inferred from directory path.
     pub model_type: Option<String>,
-    /// Inferred family from directory path (e.g., "stabilityai").
+    /// Family — from marker or inferred from directory path.
     pub family: String,
-    /// Inferred name from directory path (underscore-separated).
+    /// Official name — from marker or inferred from directory path.
     pub inferred_name: String,
     /// The `.part` files found.
     pub part_files: Vec<String>,

@@ -341,43 +341,22 @@ impl PumasApiBuilder {
             });
         }
 
-        // Spawn non-blocking scan for interrupted downloads missing persistence
-        {
-            let lib_clone = model_library.clone();
-            let known_dirs: std::collections::HashSet<std::path::PathBuf> =
-                if let Some(ref client) = hf_client {
-                    if let Some(persistence) = client.persistence() {
-                        persistence
-                            .load_all()
-                            .into_iter()
-                            .map(|e| e.dest_dir)
-                            .collect()
-                    } else {
-                        std::collections::HashSet::new()
-                    }
+        // Collect known dest_dirs for interrupted download detection
+        // (must happen before hf_client is moved into PrimaryState)
+        let known_download_dirs: std::collections::HashSet<std::path::PathBuf> =
+            if let Some(ref client) = hf_client {
+                if let Some(persistence) = client.persistence() {
+                    persistence
+                        .load_all()
+                        .into_iter()
+                        .map(|e| e.dest_dir)
+                        .collect()
                 } else {
                     std::collections::HashSet::new()
-                };
-            tokio::spawn(async move {
-                let importer = model_library::ModelImporter::new(lib_clone);
-                let interrupted = importer.find_interrupted_downloads(&known_dirs);
-                if !interrupted.is_empty() {
-                    tracing::warn!(
-                        "Found {} interrupted download(s) with no persistence entry. \
-                         Use list_interrupted_downloads() / recover_download() to resume.",
-                        interrupted.len(),
-                    );
-                    for item in &interrupted {
-                        tracing::info!(
-                            "  Interrupted: {} (family={}, .part files: {:?})",
-                            item.model_dir.display(),
-                            item.family,
-                            item.part_files,
-                        );
-                    }
                 }
-            });
-        }
+            } else {
+                std::collections::HashSet::new()
+            };
 
         let primary_state = Arc::new(PrimaryState {
             _state: state,
@@ -432,6 +411,61 @@ impl PumasApiBuilder {
                             tracing::warn!(
                                 "Failed to start shard recovery for {}: {}",
                                 recovery.repo_id,
+                                e,
+                            );
+                        }
+                    }
+                }
+            });
+        }
+
+        // Spawn one-time recovery for interrupted downloads (.part files, no persistence)
+        {
+            let ps = primary_state.clone();
+            let known_dirs = known_download_dirs;
+            tokio::spawn(async move {
+                let interrupted = ps.model_importer.find_interrupted_downloads(&known_dirs);
+                if interrupted.is_empty() {
+                    return;
+                }
+                tracing::info!(
+                    "Found {} interrupted download(s) to recover",
+                    interrupted.len()
+                );
+                let Some(ref client) = ps.hf_client else {
+                    tracing::warn!("Cannot recover interrupted downloads: HF client not available");
+                    return;
+                };
+                for item in interrupted {
+                    // Use repo_id from marker file, or fall back to inferred path
+                    let repo_id = item.repo_id.unwrap_or_else(|| {
+                        // Best-guess: {family}/{dir_name} using raw directory name
+                        let dir_name = item.model_dir
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(&item.inferred_name);
+                        format!("{}/{}", item.family, dir_name)
+                    });
+                    let request = model_library::DownloadRequest {
+                        repo_id: repo_id.clone(),
+                        family: item.family,
+                        official_name: item.inferred_name,
+                        model_type: item.model_type,
+                        quant: None,
+                        filename: None,
+                    };
+                    match client.start_download(&request, &item.model_dir).await {
+                        Ok(id) => {
+                            tracing::info!(
+                                "Started interrupted download recovery {} for repo {}",
+                                id,
+                                repo_id,
+                            );
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                "Failed to recover interrupted download for {}: {}",
+                                repo_id,
                                 e,
                             );
                         }

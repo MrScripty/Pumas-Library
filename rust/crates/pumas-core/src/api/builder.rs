@@ -223,14 +223,59 @@ impl PumasApiBuilder {
         let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
+        // Wire aux-complete callback -> early metadata stub (model appears in index during download)
+        if let Some(ref mut client) = hf_client {
+            let lib = model_library.clone();
+            client.set_aux_complete_callback(std::sync::Arc::new(move |info: model_library::AuxFilesCompleteInfo| {
+                let lib = lib.clone();
+                tokio::spawn(async move {
+                    let req = &info.download_request;
+                    let cleaned_name = model_library::normalize_name(&req.official_name);
+                    let model_type = req.model_type.clone().unwrap_or_else(|| "unknown".to_string());
+                    let model_id = format!("{}/{}/{}", model_type, req.family, cleaned_name);
+                    let now = chrono::Utc::now().to_rfc3339();
+
+                    let metadata = model_library::ModelMetadata {
+                        model_id: Some(model_id),
+                        family: Some(req.family.clone()),
+                        model_type: Some(model_type),
+                        official_name: Some(req.official_name.clone()),
+                        cleaned_name: Some(cleaned_name),
+                        repo_id: Some(req.repo_id.clone()),
+                        expected_files: Some(info.filenames.clone()),
+                        added_date: Some(now.clone()),
+                        updated_date: Some(now),
+                        size_bytes: info.total_bytes,
+                        match_source: Some("download".to_string()),
+                        pending_online_lookup: Some(true),
+                        lookup_attempts: Some(0),
+                        ..Default::default()
+                    };
+
+                    if let Err(e) = lib.save_metadata(&info.dest_dir, &metadata).await {
+                        tracing::warn!("Failed to write early metadata stub: {}", e);
+                        return;
+                    }
+                    if let Err(e) = lib.index_model_dir(&info.dest_dir).await {
+                        tracing::warn!("Failed to index early metadata stub: {}", e);
+                    }
+
+                    tracing::info!(
+                        "Early metadata stub created for {} (download in progress)",
+                        req.official_name,
+                    );
+                });
+            }));
+        }
+
         // Wire download completion -> in-place import (metadata + indexing)
         if let Some(ref mut client) = hf_client {
             let lib = model_library.clone();
             client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
                 let lib = lib.clone();
                 tokio::spawn(async move {
-                    // Remove stale metadata from any previous partial download
-                    // so import_in_place re-scans all files now present
+                    // Remove stale metadata (including early stub) so import_in_place
+                    // re-scans all files now present and creates the full metadata
                     let metadata_path = info.dest_dir.join("metadata.json");
                     if metadata_path.exists() {
                         tracing::info!("Removing stale metadata before re-import: {}", metadata_path.display());

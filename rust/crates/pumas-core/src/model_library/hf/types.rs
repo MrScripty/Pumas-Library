@@ -40,6 +40,27 @@ pub struct DownloadCompletionInfo {
 pub type DownloadCompletionCallback =
     Arc<dyn Fn(DownloadCompletionInfo) + Send + Sync + 'static>;
 
+/// Information passed when all auxiliary (config/tokenizer) files have been
+/// downloaded but before weight files begin. Used to create a preliminary
+/// `metadata.json` so the model appears in the library index during download.
+#[derive(Debug, Clone)]
+pub struct AuxFilesCompleteInfo {
+    /// Download ID.
+    pub download_id: String,
+    /// Directory where the model files are being placed.
+    pub dest_dir: PathBuf,
+    /// All filenames in this download (auxiliary + weight).
+    pub filenames: Vec<String>,
+    /// Original download request with model metadata.
+    pub download_request: DownloadRequest,
+    /// Total download size (sum of LFS file sizes).
+    pub total_bytes: Option<u64>,
+}
+
+/// Callback invoked when auxiliary files finish downloading (before weight files begin).
+pub type AuxFilesCompleteCallback =
+    Arc<dyn Fn(AuxFilesCompleteInfo) + Send + Sync + 'static>;
+
 /// A single file to download as part of a (possibly multi-file) model download.
 #[derive(Debug, Clone)]
 pub(crate) struct FileToDownload {

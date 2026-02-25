@@ -40,7 +40,7 @@ pub use types::*;
 pub use library::ModelLibrary;
 pub use importer::{IncompleteShardRecovery, ModelImporter, InPlaceImportSpec, OrphanScanResult};
 pub use mapper::ModelMapper;
-pub use hf::{HuggingFaceClient, HfAuthStatus, DownloadCompletionInfo, DownloadCompletionCallback};
+pub use hf::{HuggingFaceClient, HfAuthStatus, DownloadCompletionInfo, DownloadCompletionCallback, AuxFilesCompleteInfo, AuxFilesCompleteCallback};
 pub use hf_cache::{HfSearchCache, HfCacheConfig, CacheStats, CachedRepoDetails};
 pub use identifier::{extract_gguf_metadata, identify_model_type, ModelTypeInfo};
 pub use naming::normalize_name;

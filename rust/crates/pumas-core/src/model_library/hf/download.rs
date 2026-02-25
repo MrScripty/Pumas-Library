@@ -3,7 +3,7 @@
 //! Handles multi-file downloads with progress tracking, pause/resume,
 //! cancellation, retry with resume, and crash recovery via persistence.
 
-use super::types::{DownloadCompletionCallback, DownloadCompletionInfo, DownloadState, FileToDownload, HF_HUB_BASE};
+use super::types::{AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback, DownloadCompletionInfo, DownloadState, FileToDownload, HF_HUB_BASE};
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
@@ -200,7 +200,8 @@ impl HuggingFaceClient {
         let primary_file = files.iter().max_by_key(|f| f.size.unwrap_or(0));
         let known_sha256 = primary_file.and_then(|f| f.sha256.clone());
 
-        // Append auxiliary config/tokenizer files from the repo's regular file list
+        // Prepend auxiliary config/tokenizer files so they download first
+        // (gives inference engines the metadata they need sooner)
         let auxiliary = select_auxiliary_files(&tree.regular_files);
         if !auxiliary.is_empty() {
             info!(
@@ -209,14 +210,16 @@ impl HuggingFaceClient {
                 request.repo_id
             );
         }
-        let mut files = files;
-        for aux_filename in &auxiliary {
-            files.push(FileToDownload {
+        let mut aux_files: Vec<FileToDownload> = auxiliary
+            .iter()
+            .map(|aux_filename| FileToDownload {
                 filename: aux_filename.clone(),
                 size: None,
                 sha256: None,
-            });
-        }
+            })
+            .collect();
+        aux_files.extend(files);
+        let files = aux_files;
 
         // Total bytes across all files (sum known sizes; auxiliary files
         // lack LFS size metadata but are small enough to not materially
@@ -284,6 +287,7 @@ impl HuggingFaceClient {
         let dest_dir = dest_dir.to_path_buf();
         let persistence = self.persistence.clone();
         let completion_callback = self.completion_callback.clone();
+        let aux_complete_callback = self.aux_complete_callback.clone();
         let auth_header = self.auth_header_value().await;
 
         tokio::spawn(async move {
@@ -298,6 +302,7 @@ impl HuggingFaceClient {
                 pause_flag,
                 persistence.clone(),
                 completion_callback,
+                aux_complete_callback,
                 auth_header,
             )
             .await;
@@ -345,6 +350,7 @@ impl HuggingFaceClient {
         pause_flag: Arc<AtomicBool>,
         persistence: Option<Arc<DownloadPersistence>>,
         completion_callback: Option<DownloadCompletionCallback>,
+        aux_complete_callback: Option<AuxFilesCompleteCallback>,
         auth_header: Option<String>,
     ) -> Result<()> {
         use crate::config::NetworkConfig;
@@ -366,6 +372,7 @@ impl HuggingFaceClient {
 
         // Download each file sequentially
         let mut bytes_offset: u64 = 0;
+        let mut aux_callback_fired = false;
 
         for (file_idx, file_info) in files.iter().enumerate() {
             let filename = &file_info.filename;
@@ -400,6 +407,29 @@ impl HuggingFaceClient {
                     }
                 }
                 continue;
+            }
+
+            // Fire aux-complete callback at the boundary between auxiliary and weight files.
+            // Auxiliary files have size: None (non-LFS), weight files have size: Some (LFS).
+            if !aux_callback_fired && file_info.size.is_some() {
+                aux_callback_fired = true;
+                if let Some(ref callback) = aux_complete_callback {
+                    let info = {
+                        let downloads = downloads.read().await;
+                        downloads.get(download_id).and_then(|state| {
+                            state.download_request.as_ref().map(|req| AuxFilesCompleteInfo {
+                                download_id: download_id.to_string(),
+                                dest_dir: state.dest_dir.clone(),
+                                filenames: files.iter().map(|f| f.filename.clone()).collect(),
+                                download_request: req.clone(),
+                                total_bytes: state.total_bytes,
+                            })
+                        })
+                    };
+                    if let Some(info) = info {
+                        callback(info);
+                    }
+                }
             }
 
             // Update current filename in state
@@ -894,6 +924,7 @@ impl HuggingFaceClient {
         let download_id_clone = download_id.to_string();
         let persistence = self.persistence.clone();
         let completion_callback = self.completion_callback.clone();
+        let aux_complete_callback = self.aux_complete_callback.clone();
         let auth_header = self.auth_header_value().await;
 
         tokio::spawn(async move {
@@ -908,6 +939,7 @@ impl HuggingFaceClient {
                 pause_flag,
                 persistence.clone(),
                 completion_callback,
+                aux_complete_callback,
                 auth_header,
             )
             .await;

@@ -21,7 +21,10 @@ mod metadata;
 mod download;
 
 pub use auth::HfAuthStatus;
-pub use types::{DownloadCompletionCallback, DownloadCompletionInfo};
+pub use types::{
+    AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
+    DownloadCompletionInfo,
+};
 use types::{DownloadState, REPO_CACHE_TTL_SECS};
 
 use crate::error::{PumasError, Result};
@@ -55,6 +58,8 @@ pub struct HuggingFaceClient {
     pub(super) persistence: Option<Arc<DownloadPersistence>>,
     /// Optional callback invoked when a download completes successfully.
     pub(super) completion_callback: Option<DownloadCompletionCallback>,
+    /// Optional callback invoked after auxiliary files download but before weight files.
+    pub(super) aux_complete_callback: Option<AuxFilesCompleteCallback>,
     /// Authentication token for accessing gated/private models.
     pub(super) auth_token: Arc<RwLock<Option<String>>>,
 }
@@ -114,6 +119,7 @@ impl HuggingFaceClient {
             search_cache: None,
             persistence: None,
             completion_callback: None,
+            aux_complete_callback: None,
             auth_token: Arc::new(RwLock::new(initial_token)),
         })
     }
@@ -150,6 +156,14 @@ impl HuggingFaceClient {
     /// Used to trigger in-place import (metadata creation + indexing) after download.
     pub fn set_completion_callback(&mut self, callback: DownloadCompletionCallback) {
         self.completion_callback = Some(callback);
+    }
+
+    /// Set a callback that fires after auxiliary files download but before weight files begin.
+    ///
+    /// Used to create a preliminary metadata stub so the model appears in the library
+    /// index while weights are still downloading.
+    pub fn set_aux_complete_callback(&mut self, callback: AuxFilesCompleteCallback) {
+        self.aux_complete_callback = Some(callback);
     }
 
     // ========================================

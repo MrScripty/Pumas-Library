@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, Download, Package, ArrowUp } from 'lucide-react';
+import { X, Minus, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, Download, Package, ArrowUp } from 'lucide-react';
 import type { SystemResources } from '../types/apps';
 import { formatSpeed, formatBytes } from '../utils/formatters';
 import { Tooltip, IconButton } from './ui';
@@ -36,6 +36,7 @@ interface HeaderProps {
     ram_memory?: number;
   };
   launcherUpdateAvailable: boolean;
+  onMinimize: () => void;
   onClose: () => void;
   cacheStatus: {
     has_cache: boolean;
@@ -60,6 +61,7 @@ export const Header: React.FC<HeaderProps> = ({
   systemResources,
   appResources,
   launcherUpdateAvailable,
+  onMinimize,
   onClose,
   cacheStatus,
   installationProgress,
@@ -193,14 +195,21 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
         </div>
 
-        {/* Right: Close button */}
-        <IconButton
-          icon={<X className="group-hover:text-[hsl(var(--accent-error))] transition-colors" />}
-          tooltip="Close"
-          onClick={onClose}
-          size="sm"
-          className="app-region-no-drag"
-        />
+        {/* Right: Window controls */}
+        <div className="flex items-center gap-0.5 app-region-no-drag">
+          <IconButton
+            icon={<Minus />}
+            tooltip="Minimize"
+            onClick={onMinimize}
+            size="sm"
+          />
+          <IconButton
+            icon={<X className="group-hover:text-[hsl(var(--accent-error))] transition-colors" />}
+            tooltip="Close"
+            onClick={onClose}
+            size="sm"
+          />
+        </div>
       </div>
 
       {/* Bottom strip: Very thin resource bar */}

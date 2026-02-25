@@ -14,7 +14,7 @@ import { useOllamaProcess } from './hooks/useOllamaProcess';
 import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
 import { useAppPanelState } from './hooks/useAppPanelState';
-import { api, isAPIAvailable } from './api/adapter';
+import { api, isAPIAvailable, windowAPI } from './api/adapter';
 import { DEFAULT_APPS } from './config/apps';
 import type { AppConfig } from './types/apps';
 import { getLogger } from './utils/logger';
@@ -557,6 +557,10 @@ export default function App() {
     }
   };
 
+  const minimizeWindow = () => {
+    void windowAPI.minimize();
+  };
+
   const closeWindow = () => {
     if (isAPIAvailable()) {
       void api.close_window();
@@ -601,6 +605,7 @@ export default function App() {
         systemResources={systemResources}
         appResources={status?.app_resources?.comfyui}
         launcherUpdateAvailable={launcherUpdateAvailable}
+        onMinimize={minimizeWindow}
         onClose={closeWindow}
         cacheStatus={cacheStatus}
         installationProgress={installationProgress}

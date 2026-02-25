@@ -120,9 +120,11 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
           exit={{ opacity: 0 }}
         >
           {/* Backdrop */}
-          <div
+          <button
+            type="button"
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={onClose}
+            aria-label="Close dialog"
           />
 
           {/* Dialog */}
@@ -213,10 +215,9 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
                     />
                   </div>
 
-                  <a
-                    href="#"
-                    onClick={(e) => {
-                      e.preventDefault();
+                  <button
+                    type="button"
+                    onClick={() => {
                       if (isAPIAvailable()) {
                         void api.open_url('https://huggingface.co/settings/tokens');
                       } else {
@@ -227,7 +228,7 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
                   >
                     <ExternalLink className="w-3 h-3" />
                     Get a token from HuggingFace
-                  </a>
+                  </button>
 
                   <button
                     onClick={() => void handleSaveToken()}

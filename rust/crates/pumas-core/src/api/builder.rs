@@ -341,6 +341,44 @@ impl PumasApiBuilder {
             });
         }
 
+        // Spawn non-blocking scan for interrupted downloads missing persistence
+        {
+            let lib_clone = model_library.clone();
+            let known_dirs: std::collections::HashSet<std::path::PathBuf> =
+                if let Some(ref client) = hf_client {
+                    if let Some(persistence) = client.persistence() {
+                        persistence
+                            .load_all()
+                            .into_iter()
+                            .map(|e| e.dest_dir)
+                            .collect()
+                    } else {
+                        std::collections::HashSet::new()
+                    }
+                } else {
+                    std::collections::HashSet::new()
+                };
+            tokio::spawn(async move {
+                let importer = model_library::ModelImporter::new(lib_clone);
+                let interrupted = importer.find_interrupted_downloads(&known_dirs);
+                if !interrupted.is_empty() {
+                    tracing::warn!(
+                        "Found {} interrupted download(s) with no persistence entry. \
+                         Use list_interrupted_downloads() / recover_download() to resume.",
+                        interrupted.len(),
+                    );
+                    for item in &interrupted {
+                        tracing::info!(
+                            "  Interrupted: {} (family={}, .part files: {:?})",
+                            item.model_dir.display(),
+                            item.family,
+                            item.part_files,
+                        );
+                    }
+                }
+            });
+        }
+
         let primary_state = Arc::new(PrimaryState {
             _state: state,
             network_manager,

@@ -15,6 +15,7 @@ use crate::model_library::types::{
 };
 use crate::models::default_inference_settings;
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -1127,6 +1128,89 @@ impl ModelImporter {
             _ => None,
         }
     }
+
+    /// Find directories with interrupted downloads (`.part` files) that have
+    /// no download persistence entry and no metadata.
+    ///
+    /// These are downloads that were interrupted and lost their tracking state
+    /// (e.g. due to a crash). The user must supply the correct repo_id to
+    /// recover them via `recover_download()`.
+    pub fn find_interrupted_downloads(
+        &self,
+        known_dest_dirs: &HashSet<PathBuf>,
+    ) -> Vec<InterruptedDownload> {
+        let library_root = self.library.library_root();
+        let mut results = Vec::new();
+
+        for entry in WalkDir::new(library_root)
+            .min_depth(1)
+            .max_depth(3)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
+            if !entry.file_type().is_dir() {
+                continue;
+            }
+
+            let dir = entry.path();
+            let dir_name = dir
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+
+            // Skip temp import dirs and hidden dirs
+            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
+                continue;
+            }
+
+            // Skip if metadata.json already exists (model is complete)
+            if dir.join("metadata.json").exists() {
+                continue;
+            }
+
+            // Skip if this directory is already tracked by download persistence
+            if known_dest_dirs.contains(dir) {
+                continue;
+            }
+
+            let entries: Vec<_> = match std::fs::read_dir(dir) {
+                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
+                Err(_) => continue,
+            };
+
+            // Collect .part files and completed non-metadata files
+            let mut part_files = Vec::new();
+            let mut completed_files = Vec::new();
+            for e in &entries {
+                let name = e.file_name().to_string_lossy().to_string();
+                if name.ends_with(".part") {
+                    part_files.push(name);
+                } else if name != "metadata.json" && name != "overrides.json" {
+                    if e.file_type().ok().map_or(false, |ft| ft.is_file()) {
+                        completed_files.push(name);
+                    }
+                }
+            }
+
+            // Only interested in directories with .part files
+            if part_files.is_empty() {
+                continue;
+            }
+
+            if let Some(inferred) = self.infer_spec_from_path(dir) {
+                results.push(InterruptedDownload {
+                    model_dir: dir.to_path_buf(),
+                    model_type: inferred.model_type,
+                    family: inferred.family,
+                    inferred_name: inferred.official_name,
+                    part_files,
+                    completed_files,
+                });
+            }
+        }
+
+        results
+    }
 }
 
 /// Specification for in-place import (model files already in final location).
@@ -1170,6 +1254,27 @@ pub struct IncompleteShardRecovery {
     pub model_type: Option<String>,
     /// Files currently present in the directory.
     pub existing_files: Vec<String>,
+}
+
+/// Descriptor for an interrupted download found in the library tree.
+///
+/// These directories have `.part` files (indicating an active download was
+/// interrupted) but no download persistence entry. The user must supply the
+/// correct repo_id to recover them.
+#[derive(Debug, Clone, Serialize)]
+pub struct InterruptedDownload {
+    /// Directory containing the partial download.
+    pub model_dir: PathBuf,
+    /// Inferred model type from directory path (e.g., "llm").
+    pub model_type: Option<String>,
+    /// Inferred family from directory path (e.g., "stabilityai").
+    pub family: String,
+    /// Inferred name from directory path (underscore-separated).
+    pub inferred_name: String,
+    /// The `.part` files found.
+    pub part_files: Vec<String>,
+    /// Completed (non-`.part`, non-metadata) files found.
+    pub completed_files: Vec<String>,
 }
 
 /// Result of an orphan recovery scan.

@@ -204,6 +204,36 @@ pub async fn list_model_downloads(
     }))
 }
 
+pub async fn list_interrupted_downloads(
+    state: &AppState,
+    _params: &Value,
+) -> pumas_library::Result<Value> {
+    let interrupted = state.api.list_interrupted_downloads();
+    Ok(json!({
+        "success": true,
+        "interrupted": interrupted
+    }))
+}
+
+pub async fn recover_download(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let repo_id = require_str_param(params, "repo_id", "repoId")?;
+    let dest_dir = require_str_param(params, "dest_dir", "destDir")?;
+
+    match state.api.recover_download(&repo_id, &dest_dir).await {
+        Ok(download_id) => Ok(json!({
+            "success": true,
+            "download_id": download_id
+        })),
+        Err(e) => Ok(json!({
+            "success": false,
+            "error": e.to_string()
+        })),
+    }
+}
+
 pub async fn search_hf_models(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let query = require_str_param(params, "query", "query")?;
     let kind = get_str_param(params, "kind", "kind");

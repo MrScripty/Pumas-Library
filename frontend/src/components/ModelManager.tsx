@@ -86,10 +86,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     downloadStatusByRepo,
     downloadErrors,
     hasActiveDownloads,
+    interruptedDownloads,
     startDownload,
     cancelDownload,
     pauseDownload,
     resumeDownload,
+    recoverDownload,
+    dismissInterrupted,
     setDownloadErrors,
   } = useModelDownloads();
 
@@ -611,6 +614,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onCancelDownload={cancelDownload}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
+                interruptedDownloads={interruptedDownloads}
+                onRecoverDownload={recoverDownload}
+                onDismissInterrupted={dismissInterrupted}
               />
               {/* Link Health Status */}
               <div className="mt-4">

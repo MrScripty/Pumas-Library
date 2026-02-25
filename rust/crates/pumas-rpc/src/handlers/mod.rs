@@ -364,6 +364,8 @@ async fn dispatch_method(
         "pause_model_download" => models::pause_model_download(state, params).await,
         "resume_model_download" => models::resume_model_download(state, params).await,
         "list_model_downloads" => models::list_model_downloads(state, params).await,
+        "list_interrupted_downloads" => models::list_interrupted_downloads(state, params).await,
+        "recover_download" => models::recover_download(state, params).await,
         "search_hf_models" => models::search_hf_models(state, params).await,
         "get_related_models" => models::get_related_models(state, params).await,
         "search_models_fts" => models::search_models_fts(state, params).await,

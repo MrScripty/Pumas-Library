@@ -450,6 +450,23 @@ export interface ListModelDownloadsResponse extends BaseResponse {
   downloads: ModelDownloadStatusResponse[];
 }
 
+export interface InterruptedDownloadInfo {
+  model_dir: string;
+  model_type?: string;
+  family: string;
+  inferred_name: string;
+  part_files: string[];
+  completed_files: string[];
+}
+
+export interface ListInterruptedDownloadsResponse extends BaseResponse {
+  interrupted: InterruptedDownloadInfo[];
+}
+
+export interface RecoverDownloadResponse extends BaseResponse {
+  download_id?: string;
+}
+
 export interface ScanSharedStorageResponse extends BaseResponse {
   result: {
     modelsFound?: number;
@@ -1428,6 +1445,8 @@ export interface PyWebViewAPI {
   pause_model_download(downloadId: string): Promise<BaseResponse>;
   resume_model_download(downloadId: string): Promise<BaseResponse>;
   list_model_downloads(): Promise<ListModelDownloadsResponse>;
+  list_interrupted_downloads(): Promise<ListInterruptedDownloadsResponse>;
+  recover_download(repoId: string, destDir: string): Promise<RecoverDownloadResponse>;
 
   // HuggingFace Authentication
   set_hf_token(token: string): Promise<BaseResponse>;

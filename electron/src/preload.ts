@@ -198,6 +198,10 @@ const electronAPI = {
     apiCall('resume_model_download', { download_id: downloadId }),
   list_model_downloads: () =>
     apiCall('list_model_downloads'),
+  list_interrupted_downloads: () =>
+    apiCall('list_interrupted_downloads'),
+  recover_download: (repoId: string, destDir: string) =>
+    apiCall('recover_download', { repo_id: repoId, dest_dir: destDir }),
   get_model_overrides: (relPath: string) => apiCall('get_model_overrides', { rel_path: relPath }),
   update_model_overrides: (relPath: string, overrides: Record<string, unknown>) =>
     apiCall('update_model_overrides', { rel_path: relPath, overrides }),

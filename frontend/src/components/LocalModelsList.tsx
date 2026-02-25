@@ -19,8 +19,11 @@ import {
   Download,
   Pause,
   ArrowRightLeft,
+  AlertTriangle,
+  X,
 } from 'lucide-react';
 import type { ModelCategory, RelatedModelsState } from '../types/apps';
+import type { InterruptedDownloadInfo } from '../types/api';
 import { formatSize, formatDate } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
 import { EmptyState, IconButton, HoldToDeleteButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
@@ -45,6 +48,9 @@ interface LocalModelsListProps {
   onCancelDownload?: (repoId: string) => void;
   onDeleteModel?: (modelId: string) => void;
   onConvertModel?: (modelId: string) => void;
+  interruptedDownloads?: InterruptedDownloadInfo[];
+  onRecoverDownload?: (repoId: string, destDir: string) => void;
+  onDismissInterrupted?: (destDir: string) => void;
 }
 
 export function LocalModelsList({
@@ -66,12 +72,18 @@ export function LocalModelsList({
   onCancelDownload,
   onDeleteModel,
   onConvertModel,
+  interruptedDownloads,
+  onRecoverDownload,
+  onDismissInterrupted,
 }: LocalModelsListProps) {
   // State for metadata modal
   const [metadataModal, setMetadataModal] = useState<{
     modelId: string;
     modelName: string;
   } | null>(null);
+
+  // State for interrupted download recovery (repo_id inputs per dest_dir)
+  const [recoveryInputs, setRecoveryInputs] = useState<Record<string, string>>({});
 
   // Handle ctrl+click on model name to open metadata
   const handleModelNameClick = (
@@ -103,6 +115,77 @@ export function LocalModelsList({
 
   return (
     <>
+      {/* Interrupted downloads recovery */}
+      {interruptedDownloads && interruptedDownloads.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <div className="flex items-center gap-2 px-1">
+            <AlertTriangle className="w-3.5 h-3.5 text-[hsl(var(--launcher-accent-warning))]" />
+            <p className="text-xs font-semibold text-[hsl(var(--launcher-accent-warning))] uppercase tracking-wider">
+              Interrupted Downloads
+            </p>
+          </div>
+          <div className="space-y-2">
+            {interruptedDownloads.map((item) => {
+              const suggestion = `${item.family}/${item.inferred_name.replace(/ /g, '-')}`;
+              const inputValue = recoveryInputs[item.model_dir] ?? suggestion;
+              return (
+                <div
+                  key={item.model_dir}
+                  className="rounded-lg border border-[hsl(var(--launcher-accent-warning)/0.3)] bg-[hsl(var(--launcher-accent-warning)/0.05)] p-3"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-[hsl(var(--text-primary))] truncate">
+                        {item.family}/{item.inferred_name}
+                      </p>
+                      <p className="text-xs text-[hsl(var(--text-muted))] mt-0.5">
+                        {item.part_files.map((f) => f.replace('.part', '')).join(', ')}
+                        {item.completed_files.length > 0 && ` + ${item.completed_files.length} completed`}
+                      </p>
+                    </div>
+                    {onDismissInterrupted && (
+                      <button
+                        className="p-1 rounded hover:bg-[hsl(var(--launcher-bg-tertiary))] text-[hsl(var(--text-muted))]"
+                        onClick={() => onDismissInterrupted(item.model_dir)}
+                        title="Dismiss"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  {onRecoverDownload && (
+                    <div className="flex items-center gap-2 mt-2">
+                      <input
+                        type="text"
+                        value={inputValue}
+                        onChange={(e) =>
+                          setRecoveryInputs((prev) => ({ ...prev, [item.model_dir]: e.target.value }))
+                        }
+                        placeholder="owner/repo-name"
+                        className="flex-1 text-xs px-2 py-1.5 rounded border border-[hsl(var(--launcher-border))]
+                          bg-[hsl(var(--launcher-bg-secondary))] text-[hsl(var(--text-primary))]
+                          placeholder:text-[hsl(var(--text-muted))] focus:outline-none
+                          focus:border-[hsl(var(--launcher-accent-primary))]"
+                      />
+                      <button
+                        className="text-xs px-3 py-1.5 rounded font-medium
+                          bg-[hsl(var(--launcher-accent-primary))] text-white
+                          hover:bg-[hsl(var(--launcher-accent-primary)/0.8)]
+                          disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={!inputValue.includes('/')}
+                        onClick={() => onRecoverDownload(inputValue, item.model_dir)}
+                      >
+                        Resume
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {modelGroups.map((group: ModelCategory) => (
         <div key={group.category} className="space-y-2">
           <div className="flex items-center gap-2 px-1">

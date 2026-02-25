@@ -151,6 +151,11 @@ impl HuggingFaceClient {
         self.persistence = Some(persistence);
     }
 
+    /// Get a reference to the download persistence store if available.
+    pub fn persistence(&self) -> Option<&Arc<DownloadPersistence>> {
+        self.persistence.as_ref()
+    }
+
     /// Set a callback that fires when a download completes successfully.
     ///
     /// Used to trigger in-place import (metadata creation + indexing) after download.

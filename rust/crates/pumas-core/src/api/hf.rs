@@ -109,6 +109,89 @@ impl PumasApi {
         }
     }
 
+    /// List directories with interrupted downloads (`.part` files) that have
+    /// no download persistence entry and no metadata.
+    ///
+    /// These are downloads that lost their tracking state (e.g. due to crash).
+    /// Use `recover_download()` with the correct repo_id to resume them.
+    pub fn list_interrupted_downloads(&self) -> Vec<model_library::InterruptedDownload> {
+        let primary = self.primary();
+
+        // Collect dest_dirs of all known persisted downloads
+        let known_dirs: std::collections::HashSet<std::path::PathBuf> =
+            if let Some(ref client) = primary.hf_client {
+                if let Some(persistence) = client.persistence() {
+                    persistence
+                        .load_all()
+                        .into_iter()
+                        .map(|e| e.dest_dir)
+                        .collect()
+                } else {
+                    std::collections::HashSet::new()
+                }
+            } else {
+                std::collections::HashSet::new()
+            };
+
+        primary
+            .model_importer
+            .find_interrupted_downloads(&known_dirs)
+    }
+
+    /// Recover an interrupted download that lost its persistence state.
+    ///
+    /// Given the correct `repo_id` and the `dest_dir` path where the partial
+    /// download exists, starts a new download targeting that directory. The
+    /// download system handles `.part` file resume via HTTP Range headers and
+    /// skips files that are already complete.
+    pub async fn recover_download(
+        &self,
+        repo_id: &str,
+        dest_dir: &str,
+    ) -> Result<String> {
+        let dest = std::path::Path::new(dest_dir);
+        if !dest.is_dir() {
+            return Err(PumasError::NotFound {
+                resource: format!("directory: {}", dest_dir),
+            });
+        }
+
+        let primary = self.primary();
+        let client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
+            message: "HuggingFace client not initialized".to_string(),
+        })?;
+
+        // Parse repo_id into family/name
+        let parts: Vec<&str> = repo_id.splitn(2, '/').collect();
+        if parts.len() != 2 {
+            return Err(PumasError::Config {
+                message: format!("Invalid repo_id format (expected 'owner/name'): {}", repo_id),
+            });
+        }
+        let family = parts[0];
+        let official_name = parts[1];
+
+        // Determine model_type from directory path relative to library root
+        let library_root = primary.model_library.library_root();
+        let model_type = dest
+            .strip_prefix(library_root)
+            .ok()
+            .and_then(|rel| rel.components().next())
+            .and_then(|c| c.as_os_str().to_str())
+            .map(String::from);
+
+        let request = model_library::DownloadRequest {
+            repo_id: repo_id.to_string(),
+            family: family.to_string(),
+            official_name: official_name.to_string(),
+            model_type,
+            quant: None,
+            filename: None,
+        };
+
+        client.start_download(&request, dest).await
+    }
+
     /// Refetch metadata for a library model from HuggingFace.
     ///
     /// Uses the stored `repo_id` if available, otherwise falls back to

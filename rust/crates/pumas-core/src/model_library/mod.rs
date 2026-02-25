@@ -37,8 +37,8 @@ pub mod merge;
 pub mod sharding;
 
 pub use types::*;
-pub use library::ModelLibrary;
-pub use importer::{IncompleteShardRecovery, ModelImporter, InPlaceImportSpec, OrphanScanResult};
+pub use library::{ModelLibrary, ReclassifyResult};
+pub use importer::{IncompleteShardRecovery, InterruptedDownload, ModelImporter, InPlaceImportSpec, OrphanScanResult};
 pub use mapper::ModelMapper;
 pub use hf::{HuggingFaceClient, HfAuthStatus, DownloadCompletionInfo, DownloadCompletionCallback, AuxFilesCompleteInfo, AuxFilesCompleteCallback};
 pub use hf_cache::{HfSearchCache, HfCacheConfig, CacheStats, CachedRepoDetails};

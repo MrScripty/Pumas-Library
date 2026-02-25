@@ -365,6 +365,30 @@ impl From<pumas_library::models::ModelDownloadProgress> for FfiModelDownloadProg
     }
 }
 
+/// An interrupted download found in the library (`.part` files, no persistence entry).
+#[derive(uniffi::Record)]
+pub struct FfiInterruptedDownload {
+    pub model_dir: String,
+    pub model_type: Option<String>,
+    pub family: String,
+    pub inferred_name: String,
+    pub part_files: Vec<String>,
+    pub completed_files: Vec<String>,
+}
+
+impl From<pumas_library::model_library::InterruptedDownload> for FfiInterruptedDownload {
+    fn from(d: pumas_library::model_library::InterruptedDownload) -> Self {
+        Self {
+            model_dir: d.model_dir.to_string_lossy().to_string(),
+            model_type: d.model_type,
+            family: d.family,
+            inferred_name: d.inferred_name,
+            part_files: d.part_files,
+            completed_files: d.completed_files,
+        }
+    }
+}
+
 // ---- Response types ----
 
 /// Response from deleting a model.
@@ -1168,6 +1192,27 @@ impl FfiPumasApi {
     pub async fn cancel_hf_download(&self, download_id: String) -> Result<bool, FfiError> {
         self.inner
             .cancel_hf_download(&download_id)
+            .await
+            .map_err(FfiError::from)
+    }
+
+    /// List interrupted downloads that lost their persistence state.
+    pub fn list_interrupted_downloads(&self) -> Vec<FfiInterruptedDownload> {
+        self.inner
+            .list_interrupted_downloads()
+            .into_iter()
+            .map(FfiInterruptedDownload::from)
+            .collect()
+    }
+
+    /// Recover an interrupted download by providing the correct repo_id.
+    pub async fn recover_download(
+        &self,
+        repo_id: String,
+        dest_dir: String,
+    ) -> Result<String, FfiError> {
+        self.inner
+            .recover_download(&repo_id, &dest_dir)
             .await
             .map_err(FfiError::from)
     }

@@ -34,6 +34,7 @@ describe('Header Component', () => {
     launcherUpdateAvailable: false,
     isUpdatingLauncher: false,
     onUpdate: vi.fn(),
+    onMinimize: vi.fn(),
     onClose: vi.fn(),
     cacheStatus: mockCacheStatus,
     installationProgress: null,

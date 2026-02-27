@@ -5,7 +5,7 @@
  * Supports setting, clearing, and validating tokens against the HF API.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type KeyboardEvent } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Key, CheckCircle, XCircle, ExternalLink, Loader2, X } from 'lucide-react';
 import { api, isAPIAvailable } from '../api/adapter';
@@ -24,7 +24,7 @@ interface AuthState {
   tokenSource?: string;
 }
 
-export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialogProps): JSX.Element | null {
+export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialogProps) {
   const [authState, setAuthState] = useState<AuthState | null>(null);
   const [tokenInput, setTokenInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -102,7 +102,7 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent): void => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>): void => {
     if (e.key === 'Enter' && tokenInput.trim() && !isSaving) {
       void handleSaveToken();
     }

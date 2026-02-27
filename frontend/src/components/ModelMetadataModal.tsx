@@ -193,6 +193,9 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     setInferenceSettings((prev) => {
       const next = [...prev];
       const param = next[index];
+      if (!param) {
+        return prev;
+      }
       if (param.param_type === 'Integer') {
         const parsed = parseInt(value, 10);
         param.default = isNaN(parsed) ? value : parsed;

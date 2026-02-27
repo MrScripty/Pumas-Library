@@ -818,6 +818,15 @@ mod tests {
     use crate::model_library::types::ModelMetadata;
     use tempfile::TempDir;
 
+    fn pinned_profile_spec(package: &str, version: &str) -> String {
+        serde_json::json!({
+            "python_packages": [
+                {"name": package, "version": version}
+            ]
+        })
+        .to_string()
+    }
+
     async fn setup_library() -> (TempDir, ModelLibrary) {
         let temp_dir = TempDir::new().unwrap();
         let library = ModelLibrary::new(temp_dir.path()).await.unwrap();
@@ -866,7 +875,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.4.0"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -877,7 +886,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h2".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.0"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -944,7 +953,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -995,6 +1004,9 @@ mod tests {
                 profile_hash: Some("h-ready".to_string()),
                 environment_kind: "python-venv".to_string(),
                 spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1"}
+                    ],
                     "probes": [
                         { "kind": "command", "program": "true" }
                     ]
@@ -1052,6 +1064,9 @@ mod tests {
                 profile_hash: Some("h-install".to_string()),
                 environment_kind: "python-venv".to_string(),
                 spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1"}
+                    ],
                     "probes": [
                         { "kind": "path_exists", "path": "deps/ok.flag" }
                     ],
@@ -1099,7 +1114,10 @@ mod tests {
         assert_eq!(install.state, DependencyState::ManualInterventionRequired);
         assert!(install.attempted_binding_ids.is_empty());
         assert!(install.installed_binding_ids.is_empty());
-        assert_eq!(install.bindings[0].state, DependencyState::ManualInterventionRequired);
+        assert_eq!(
+            install.bindings[0].state,
+            DependencyState::ManualInterventionRequired
+        );
         assert_eq!(
             install.bindings[0].error_code.as_deref(),
             Some("installation_delegated_to_consumer")

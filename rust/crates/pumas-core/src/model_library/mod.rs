@@ -22,6 +22,7 @@
 //! ```
 
 mod dependencies;
+pub(crate) mod dependency_pins;
 pub mod download_store;
 mod hashing;
 mod hf;

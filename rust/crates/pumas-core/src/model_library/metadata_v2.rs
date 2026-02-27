@@ -507,7 +507,12 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("hash-1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1+cu121"}
+                    ]
+                })
+                .to_string(),
                 created_at: chrono::Utc::now().to_rfc3339(),
             })
             .unwrap();

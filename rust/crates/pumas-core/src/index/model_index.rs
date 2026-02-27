@@ -1,5 +1,6 @@
 //! SQLite model index for storing and querying model metadata.
 
+use crate::model_library::dependency_pins::parse_and_canonicalize_profile_spec;
 use crate::{PumasError, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -1230,20 +1231,71 @@ impl ModelIndex {
             source: None,
         })?;
 
+        let field_context = format!(
+            "dependency_profiles.{}:{}",
+            record.profile_id, record.profile_version
+        );
+        let normalized = parse_and_canonicalize_profile_spec(
+            &record.spec_json,
+            &record.environment_kind,
+            &field_context,
+        )?;
+
+        let existing: Option<(String, String)> = conn
+            .query_row(
+                "SELECT environment_kind, spec_json
+                 FROM dependency_profiles
+                 WHERE profile_id = ?1 AND profile_version = ?2",
+                params![record.profile_id, record.profile_version],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+
+        if let Some((existing_environment_kind, existing_spec_json)) = existing {
+            let existing_normalized = parse_and_canonicalize_profile_spec(
+                &existing_spec_json,
+                &existing_environment_kind,
+                &field_context,
+            )?;
+
+            if existing_environment_kind != record.environment_kind
+                || existing_normalized.profile_hash != normalized.profile_hash
+            {
+                return Err(PumasError::Validation {
+                    field: field_context,
+                    message:
+                        "dependency_profile_version_immutable: profile content for this (profile_id, profile_version) cannot change"
+                            .to_string(),
+                });
+            }
+
+            conn.execute(
+                "UPDATE dependency_profiles
+                 SET profile_hash = ?3,
+                     environment_kind = ?4,
+                     spec_json = ?5
+                 WHERE profile_id = ?1 AND profile_version = ?2",
+                params![
+                    record.profile_id,
+                    record.profile_version,
+                    normalized.profile_hash,
+                    record.environment_kind,
+                    normalized.canonical_json,
+                ],
+            )?;
+            return Ok(());
+        }
+
         conn.execute(
             "INSERT INTO dependency_profiles (
                profile_id, profile_version, profile_hash, environment_kind, spec_json, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
-             ON CONFLICT(profile_id, profile_version) DO UPDATE SET
-               profile_hash = excluded.profile_hash,
-               environment_kind = excluded.environment_kind,
-               spec_json = excluded.spec_json",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 record.profile_id,
                 record.profile_version,
-                record.profile_hash,
+                normalized.profile_hash,
                 record.environment_kind,
-                record.spec_json,
+                normalized.canonical_json,
                 record.created_at,
             ],
         )?;
@@ -2028,6 +2080,15 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    fn pinned_profile_spec(package: &str, version: &str) -> String {
+        serde_json::json!({
+            "python_packages": [
+                {"name": package, "version": version}
+            ]
+        })
+        .to_string()
+    }
+
     fn create_test_index() -> (ModelIndex, TempDir) {
         let temp_dir = TempDir::new().unwrap();
         let db_path = temp_dir.path().join("models.db");
@@ -2471,7 +2532,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.4.0"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -2481,7 +2542,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h2".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.0"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -2545,7 +2606,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("hash-1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1+cu121"),
                 created_at: now,
             })
             .unwrap();
@@ -2567,7 +2628,7 @@ mod tests {
                 profile_version: 1,
                 profile_hash: Some("h1".to_string()),
                 environment_kind: "python-venv".to_string(),
-                spec_json: "{}".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.0"),
                 created_at: now.clone(),
             })
             .unwrap();
@@ -2611,5 +2672,68 @@ mod tests {
         assert_eq!(new_json.get("priority").unwrap(), 200);
         assert_eq!(old_json.get("status").unwrap(), "active");
         assert_eq!(new_json.get("status").unwrap(), "deprecated");
+    }
+
+    #[test]
+    fn test_dependency_profile_rejects_non_exact_pin_syntax() {
+        let (index, _temp) = create_test_index();
+        let err = index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "torch-open".to_string(),
+                profile_version: 1,
+                profile_hash: None,
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": ">=2.5.0"}
+                    ]
+                })
+                .to_string(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            })
+            .unwrap_err();
+
+        match err {
+            PumasError::Validation { field, message } => {
+                assert!(field.contains("python_packages"));
+                assert!(message.contains("invalid_dependency_pin"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_dependency_profile_version_is_immutable_for_changed_content() {
+        let (index, _temp) = create_test_index();
+        let now = chrono::Utc::now().to_rfc3339();
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "torch-cu121".to_string(),
+                profile_version: 7,
+                profile_hash: None,
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1+cu121"),
+                created_at: now.clone(),
+            })
+            .unwrap();
+
+        let err = index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "torch-cu121".to_string(),
+                profile_version: 7,
+                profile_hash: None,
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.6.0+cu121"),
+                created_at: now,
+            })
+            .unwrap_err();
+
+        match err {
+            PumasError::Validation { field, message } => {
+                assert_eq!(field, "dependency_profiles.torch-cu121:7");
+                assert!(message.contains("dependency_profile_version_immutable"));
+            }
+            other => panic!("expected validation error, got {other:?}"),
+        }
     }
 }

@@ -110,6 +110,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "lookup_hf_metadata_for_file"
         | "detect_sharded_sets"
         | "validate_file_type"
+        | "refresh_model_mappings"
         | "get_file_link_count"
         | "check_files_writable"
         | "open_path"
@@ -195,13 +196,6 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
             json!({
                 "success": true,
                 "models": if result.is_null() { json!({}) } else { result }
-            })
-        }
-
-        "refresh_model_mappings" => {
-            json!({
-                "success": true,
-                "results": if result.is_null() { json!({}) } else { result }
             })
         }
 

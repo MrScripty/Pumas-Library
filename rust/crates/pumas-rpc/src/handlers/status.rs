@@ -122,36 +122,19 @@ pub async fn check_setproctitle(state: &AppState, _params: &Value) -> pumas_libr
 }
 
 pub async fn get_network_status(
-    _state: &AppState,
+    state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    // TODO: Implement network status from network layer
-    Ok(json!({
-        "success": true,
-        "total_requests": 0,
-        "successful_requests": 0,
-        "failed_requests": 0,
-        "circuit_breaker_rejections": 0,
-        "retries": 0,
-        "success_rate": 1.0,
-        "circuit_states": {},
-        "is_offline": false
-    }))
+    let status = state.api.get_network_status_response().await;
+    Ok(serde_json::to_value(status)?)
 }
 
 pub async fn get_library_status(
-    _state: &AppState,
+    state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    // TODO: Implement library status
-    Ok(json!({
-        "success": true,
-        "indexing": false,
-        "deep_scan_in_progress": false,
-        "model_count": 0,
-        "pending_lookups": null,
-        "deep_scan_progress": null
-    }))
+    let status = state.api.get_library_status().await?;
+    Ok(serde_json::to_value(status)?)
 }
 
 pub async fn get_app_status(state: &AppState, params: &Value) -> pumas_library::Result<Value> {

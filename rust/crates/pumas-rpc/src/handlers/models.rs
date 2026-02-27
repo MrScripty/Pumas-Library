@@ -28,12 +28,51 @@ pub async fn refresh_model_index(
 }
 
 pub async fn refresh_model_mappings(
-    _state: &AppState,
+    state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let _app_id = get_str_param(params, "app_id", "appId");
-    // TODO: Implement model mapping refresh
-    Ok(json!({}))
+    let app_id = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
+    if app_id != "comfyui" {
+        return Ok(json!({
+            "success": false,
+            "error": format!("Model mapping refresh currently supports only comfyui, got: {}", app_id),
+        }));
+    }
+
+    let managers = state.version_managers.read().await;
+    if let Some(vm) = managers.get("comfyui") {
+        let active = vm.get_active_version().await?;
+        if let Some(version_tag) = active {
+            let version_path = vm.version_path(&version_tag);
+            let models_path = version_path.join("models");
+            drop(managers);
+
+            let response = state
+                .api
+                .apply_model_mapping(&version_tag, &models_path)
+                .await?;
+
+            Ok(json!({
+                "success": response.success,
+                "error": response.error,
+                "app_id": "comfyui",
+                "version_tag": version_tag,
+                "links_created": response.links_created,
+                "links_removed": response.links_removed,
+                "total_links": response.total_links,
+            }))
+        } else {
+            Ok(json!({
+                "success": false,
+                "error": "No active version set for comfyui",
+            }))
+        }
+    } else {
+        Ok(json!({
+            "success": false,
+            "error": "Version manager not initialized for comfyui",
+        }))
+    }
 }
 
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
@@ -379,14 +418,10 @@ pub async fn detect_sharded_sets(
     }))
 }
 
-pub async fn validate_file_type(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let _file_path = require_str_param(params, "file_path", "filePath")?;
-    // TODO: Implement file type validation
-    Ok(json!({
-        "success": true,
-        "valid": true,
-        "detected_type": null
-    }))
+pub async fn validate_file_type(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+    let file_path = require_str_param(params, "file_path", "filePath")?;
+    let response = state.api.validate_file_type(&file_path);
+    Ok(serde_json::to_value(response)?)
 }
 
 pub async fn get_embedded_metadata(

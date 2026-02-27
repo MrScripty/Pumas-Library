@@ -244,6 +244,50 @@ pub struct LibraryStatusResponse {
     pub deep_scan_progress: Option<DeepScanProgress>,
 }
 
+/// File type validation response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct FileTypeValidationResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub valid: bool,
+    pub detected_type: String,
+}
+
+/// Sync-with-resolutions response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct SyncWithResolutionsResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub links_created: usize,
+    pub links_skipped: usize,
+    pub links_renamed: usize,
+    pub overwrites: usize,
+    pub errors: Vec<String>,
+}
+
+/// Cross-filesystem warning response.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct CrossFilesystemWarningResponse {
+    pub success: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    pub cross_filesystem: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub library_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recommendation: Option<String>,
+}
+
 /// Deep scan progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]

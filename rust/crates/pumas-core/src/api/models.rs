@@ -6,6 +6,8 @@ use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 impl PumasApi {
     // ========================================
@@ -33,6 +35,54 @@ impl PumasApi {
     /// Rebuild the model index from metadata files.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
         self.primary().model_library.rebuild_index().await
+    }
+
+    /// Get model-library status information for GUI polling.
+    pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
+        let model_count = self.primary().model_library.list_models().await?.len() as u32;
+        let pending_lookups = self.primary().model_library.get_pending_lookups().await?.len() as u32;
+
+        Ok(models::LibraryStatusResponse {
+            success: true,
+            error: None,
+            indexing: false,
+            deep_scan_in_progress: false,
+            model_count,
+            pending_lookups: Some(pending_lookups),
+            deep_scan_progress: None,
+        })
+    }
+
+    /// Validate model file type using content detection (magic bytes/header parsing).
+    pub fn validate_file_type(&self, file_path: &str) -> models::FileTypeValidationResponse {
+        let path = Path::new(file_path);
+        if !path.exists() || !path.is_file() {
+            return models::FileTypeValidationResponse {
+                success: false,
+                error: Some(format!("File not found: {}", file_path)),
+                valid: false,
+                detected_type: "error".to_string(),
+            };
+        }
+
+        match model_library::identify_model_type(path) {
+            Ok(info) => {
+                let detected_type = info.format.as_str().to_string();
+                let valid = info.format != model_library::FileFormat::Unknown;
+                models::FileTypeValidationResponse {
+                    success: true,
+                    error: None,
+                    valid,
+                    detected_type,
+                }
+            }
+            Err(err) => models::FileTypeValidationResponse {
+                success: false,
+                error: Some(err.to_string()),
+                valid: false,
+                detected_type: "error".to_string(),
+            },
+        }
     }
 
     /// Get a single model by ID.
@@ -500,6 +550,112 @@ impl PumasApi {
             synced: result.links_created,
             errors: vec![],
         })
+    }
+
+    /// Apply model mapping with per-path conflict resolutions.
+    pub async fn sync_with_resolutions(
+        &self,
+        version_tag: &str,
+        models_path: &Path,
+        resolutions: HashMap<String, model_library::ConflictResolution>,
+    ) -> Result<models::SyncWithResolutionsResponse> {
+        if !models_path.exists() {
+            std::fs::create_dir_all(models_path)?;
+        }
+
+        let primary = self.primary();
+        primary
+            .model_mapper
+            .create_default_comfyui_config("*", models_path)?;
+
+        let resolution_count = |kind: model_library::ConflictResolution| {
+            resolutions.values().filter(|value| **value == kind).count()
+        };
+        let overwrite_count = resolution_count(model_library::ConflictResolution::Overwrite);
+        let rename_count = resolution_count(model_library::ConflictResolution::Rename);
+
+        let typed_resolutions: HashMap<PathBuf, model_library::ConflictResolution> = resolutions
+            .into_iter()
+            .map(|(target, resolution)| (PathBuf::from(target), resolution))
+            .collect();
+
+        let result = primary
+            .model_mapper
+            .apply_mapping_with_resolutions(
+                "comfyui",
+                Some(version_tag),
+                models_path,
+                &typed_resolutions,
+            )
+            .await?;
+
+        let errors: Vec<String> = result
+            .errors
+            .iter()
+            .map(|(path, err)| format!("{}: {}", path.display(), err))
+            .collect();
+        let success = errors.is_empty();
+        let error = if success {
+            None
+        } else {
+            Some(format!("{} mapping operation(s) failed", errors.len()))
+        };
+
+        Ok(models::SyncWithResolutionsResponse {
+            success,
+            error,
+            links_created: result.created,
+            links_skipped: result.skipped + result.conflicts,
+            links_renamed: rename_count,
+            overwrites: overwrite_count,
+            errors,
+        })
+    }
+
+    /// Return whether library and app version paths are on different filesystems.
+    pub fn get_cross_filesystem_warning(
+        &self,
+        app_models_path: &Path,
+    ) -> models::CrossFilesystemWarningResponse {
+        let primary = self.primary();
+        let library_root = primary.model_library.library_root().display().to_string();
+        let app_path = app_models_path.display().to_string();
+
+        match primary.model_mapper.check_cross_filesystem(app_models_path) {
+            Ok(cross_filesystem) if cross_filesystem => models::CrossFilesystemWarningResponse {
+                success: true,
+                error: None,
+                cross_filesystem: true,
+                library_path: Some(library_root),
+                app_path: Some(app_path),
+                warning: Some(
+                    "Model library and app version directory are on different filesystems."
+                        .to_string(),
+                ),
+                recommendation: Some(
+                    "Prefer keeping both directories on the same filesystem for best link behavior."
+                        .to_string(),
+                ),
+            },
+            Ok(_) => models::CrossFilesystemWarningResponse {
+                success: true,
+                error: None,
+                cross_filesystem: false,
+                library_path: Some(library_root),
+                app_path: Some(app_path),
+                warning: None,
+                recommendation: None,
+            },
+            Err(err) => models::CrossFilesystemWarningResponse {
+                success: false,
+                error: Some(err.to_string()),
+                cross_filesystem: false,
+                library_path: Some(library_root),
+                app_path: Some(app_path),
+                warning: None,
+                recommendation: None,
+            },
+        }
     }
 
     /// Reclassify a single model (re-detect type and relocate directory if needed).

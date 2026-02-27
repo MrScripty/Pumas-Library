@@ -15,7 +15,7 @@ use crate::model_library::types::{
 };
 use crate::model_library::{
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2, TaskNormalizationStatus,
+    validate_metadata_v2_with_index, TaskNormalizationStatus,
 };
 use crate::models::default_inference_settings;
 use serde::Serialize;
@@ -929,7 +929,7 @@ impl ModelImporter {
             metadata.review_status = Some("pending".to_string());
         }
 
-        validate_metadata_v2(&metadata)?;
+        validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
         // Save metadata.json
         self.library.save_metadata(model_dir, &metadata).await?;

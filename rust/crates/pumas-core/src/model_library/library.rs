@@ -16,8 +16,8 @@ use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{ModelMetadata, ModelOverrides, ModelType};
 use crate::model_library::{
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2, LinkRegistry,
-    ModelTypeResolution,
+    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
+    LinkRegistry, ModelTypeResolution,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -734,7 +734,7 @@ impl ModelLibrary {
             return Ok(None);
         }
 
-        validate_metadata_v2(&metadata)?;
+        validate_metadata_v2_with_index(&metadata, self.index())?;
 
         // Save and re-index
         self.save_metadata(&model_dir, &metadata).await?;
@@ -889,7 +889,7 @@ impl ModelLibrary {
             return Ok(None);
         }
 
-        validate_metadata_v2(&metadata)?;
+        validate_metadata_v2_with_index(&metadata, self.index())?;
 
         if !identity_changed {
             // Classification metadata changed, but canonical path did not.

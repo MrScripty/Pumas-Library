@@ -1172,6 +1172,28 @@ impl ModelIndex {
         Ok(())
     }
 
+    /// Check whether a dependency profile exists by (profile_id, profile_version).
+    pub fn dependency_profile_exists(
+        &self,
+        profile_id: &str,
+        profile_version: i64,
+    ) -> Result<bool> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM dependency_profiles
+             WHERE profile_id = ?1 AND profile_version = ?2",
+            params![profile_id, profile_version],
+            |row| row.get(0),
+        )?;
+
+        Ok(count > 0)
+    }
+
     /// Insert or update a model dependency binding row.
     pub fn upsert_model_dependency_binding(
         &self,
@@ -1736,5 +1758,26 @@ mod tests {
         assert_eq!(bindings.len(), 2);
         assert_eq!(bindings[0].binding_id, "b1");
         assert_eq!(bindings[1].binding_id, "b2");
+    }
+
+    #[test]
+    fn test_dependency_profile_exists_lookup() {
+        let (index, _temp) = create_test_index();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        assert!(!index.dependency_profile_exists("torch-cu121", 1).unwrap());
+
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "torch-cu121".to_string(),
+                profile_version: 1,
+                profile_hash: Some("hash-1".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: "{}".to_string(),
+                created_at: now,
+            })
+            .unwrap();
+
+        assert!(index.dependency_profile_exists("torch-cu121", 1).unwrap());
     }
 }

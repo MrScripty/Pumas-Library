@@ -39,7 +39,7 @@ impl NormalizedTaskSignature {
     }
 }
 
-const MODALITY_ORDER: [&str; 15] = [
+pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 15] = [
     "text",
     "image",
     "audio",
@@ -191,10 +191,10 @@ fn collapse_whitespace(input: &str) -> String {
 }
 
 fn modality_rank(token: &str) -> usize {
-    MODALITY_ORDER
+    CANONICAL_MODALITY_TOKENS
         .iter()
         .position(|m| *m == token)
-        .unwrap_or(MODALITY_ORDER.len())
+        .unwrap_or(CANONICAL_MODALITY_TOKENS.len())
 }
 
 fn normalize_modality_token(token: &str) -> Option<&'static str> {

@@ -85,6 +85,21 @@ pub struct ModelDependencyBindingRecord {
     pub spec_json: Option<String>,
 }
 
+/// Dependency binding history event row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DependencyBindingHistoryRecord {
+    pub event_id: i64,
+    pub binding_id: String,
+    pub model_id: String,
+    pub actor: String,
+    pub action: String,
+    pub old_value_json: Option<String>,
+    pub new_value_json: Option<String>,
+    pub reason: Option<String>,
+    pub created_at: String,
+}
+
 /// Active architecture-based model-type resolver rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1229,12 +1244,51 @@ impl ModelIndex {
         &self,
         record: &ModelDependencyBindingRecord,
     ) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
         })?;
+        let tx = conn.transaction()?;
 
-        conn.execute(
+        let existing: Option<ModelDependencyBindingRecord> = tx
+            .query_row(
+                "SELECT
+                   binding_id,
+                   model_id,
+                   profile_id,
+                   profile_version,
+                   binding_kind,
+                   backend_key,
+                   platform_selector,
+                   status,
+                   priority,
+                   attached_by,
+                   attached_at
+                 FROM model_dependency_bindings
+                 WHERE binding_id = ?1",
+                params![record.binding_id],
+                |row| {
+                    Ok(ModelDependencyBindingRecord {
+                        binding_id: row.get(0)?,
+                        model_id: row.get(1)?,
+                        profile_id: row.get(2)?,
+                        profile_version: row.get(3)?,
+                        binding_kind: row.get(4)?,
+                        backend_key: row.get(5)?,
+                        platform_selector: row.get(6)?,
+                        status: row.get(7)?,
+                        priority: row.get(8)?,
+                        attached_by: row.get(9)?,
+                        attached_at: row.get(10)?,
+                        profile_hash: None,
+                        environment_kind: None,
+                        spec_json: None,
+                    })
+                },
+            )
+            .optional()?;
+
+        tx.execute(
             "INSERT INTO model_dependency_bindings (
                binding_id, model_id, profile_id, profile_version, binding_kind, backend_key,
                platform_selector, status, priority, attached_by, attached_at
@@ -1265,7 +1319,96 @@ impl ModelIndex {
             ],
         )?;
 
+        let old_snapshot = existing.as_ref().map(dependency_binding_snapshot_json);
+        let new_snapshot = dependency_binding_snapshot_json(record);
+        let actor = record
+            .attached_by
+            .clone()
+            .or_else(|| existing.as_ref().and_then(|row| row.attached_by.clone()))
+            .unwrap_or_else(|| "system".to_string());
+
+        let action = if existing.is_none() {
+            Some("binding_created")
+        } else if old_snapshot.as_ref() != Some(&new_snapshot) {
+            Some("binding_updated")
+        } else {
+            None
+        };
+
+        if let Some(action) = action {
+            let reason = existing.as_ref().and_then(|old| {
+                if old.status != record.status {
+                    Some("status-changed".to_string())
+                } else {
+                    None
+                }
+            });
+            tx.execute(
+                "INSERT INTO dependency_binding_history (
+                   binding_id, model_id, actor, action, old_value_json, new_value_json, reason, created_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+                params![
+                    record.binding_id,
+                    record.model_id,
+                    actor,
+                    action,
+                    old_snapshot,
+                    new_snapshot,
+                    reason,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+
         Ok(())
+    }
+
+    /// List dependency binding history rows in deterministic event order.
+    pub fn list_dependency_binding_history(
+        &self,
+        model_id: &str,
+    ) -> Result<Vec<DependencyBindingHistoryRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+               event_id,
+               binding_id,
+               model_id,
+               actor,
+               action,
+               old_value_json,
+               new_value_json,
+               reason,
+               created_at
+             FROM dependency_binding_history
+             WHERE model_id = ?1
+             ORDER BY event_id ASC",
+        )?;
+
+        let rows = stmt.query_map(params![model_id], |row| {
+            Ok(DependencyBindingHistoryRecord {
+                event_id: row.get(0)?,
+                binding_id: row.get(1)?,
+                model_id: row.get(2)?,
+                actor: row.get(3)?,
+                action: row.get(4)?,
+                old_value_json: row.get(5)?,
+                new_value_json: row.get(6)?,
+                reason: row.get(7)?,
+                created_at: row.get(8)?,
+            })
+        })?;
+
+        let mut history = Vec::new();
+        for row in rows {
+            history.push(row?);
+        }
+        Ok(history)
     }
 
     /// List active dependency bindings for a model with optional backend filtering.
@@ -1829,6 +1972,23 @@ fn apply_merge_patch(target: &mut Value, patch: &Value) {
     }
 }
 
+fn dependency_binding_snapshot_json(record: &ModelDependencyBindingRecord) -> String {
+    serde_json::json!({
+        "binding_id": record.binding_id,
+        "model_id": record.model_id,
+        "profile_id": record.profile_id,
+        "profile_version": record.profile_version,
+        "binding_kind": record.binding_kind,
+        "backend_key": record.backend_key,
+        "platform_selector": record.platform_selector,
+        "status": record.status,
+        "priority": record.priority,
+        "attached_by": record.attached_by,
+        "attached_at": record.attached_at,
+    })
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2315,5 +2475,65 @@ mod tests {
             .unwrap();
 
         assert!(index.dependency_profile_exists("torch-cu121", 1).unwrap());
+    }
+
+    #[test]
+    fn test_dependency_binding_history_records_create_and_update() {
+        let (index, _temp) = create_test_index();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        index
+            .upsert(&create_test_record("m1", "Model 1", "llm"))
+            .unwrap();
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h1".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: "{}".to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+
+        let mut binding = ModelDependencyBindingRecord {
+            binding_id: "b1".to_string(),
+            model_id: "m1".to_string(),
+            profile_id: "p1".to_string(),
+            profile_version: 1,
+            binding_kind: "required_core".to_string(),
+            backend_key: Some("transformers".to_string()),
+            platform_selector: Some("linux-x86_64".to_string()),
+            status: "active".to_string(),
+            priority: 100,
+            attached_by: Some("tester".to_string()),
+            attached_at: now.clone(),
+            profile_hash: None,
+            environment_kind: None,
+            spec_json: None,
+        };
+
+        index.upsert_model_dependency_binding(&binding).unwrap();
+        // Idempotent upsert should not append history.
+        index.upsert_model_dependency_binding(&binding).unwrap();
+
+        binding.priority = 200;
+        binding.status = "deprecated".to_string();
+        index.upsert_model_dependency_binding(&binding).unwrap();
+
+        let history = index.list_dependency_binding_history("m1").unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].action, "binding_created");
+        assert_eq!(history[1].action, "binding_updated");
+        assert_eq!(history[1].reason.as_deref(), Some("status-changed"));
+
+        let old_json: Value =
+            serde_json::from_str(history[1].old_value_json.as_ref().unwrap()).unwrap();
+        let new_json: Value =
+            serde_json::from_str(history[1].new_value_json.as_ref().unwrap()).unwrap();
+        assert_eq!(old_json.get("priority").unwrap(), 100);
+        assert_eq!(new_json.get("priority").unwrap(), 200);
+        assert_eq!(old_json.get("status").unwrap(), "active");
+        assert_eq!(new_json.get("status").unwrap(), "deprecated");
     }
 }

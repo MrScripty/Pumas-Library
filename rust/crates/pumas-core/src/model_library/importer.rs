@@ -13,6 +13,9 @@ use crate::model_library::types::{
     BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
     ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
+use crate::model_library::{
+    normalize_task_signature, push_review_reason, validate_metadata_v2, TaskNormalizationStatus,
+};
 use crate::models::default_inference_settings;
 use serde::Serialize;
 use std::collections::HashSet;
@@ -227,7 +230,9 @@ impl ModelImporter {
             .model_type
             .as_ref()
             .and_then(|s| {
-                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                let parsed: crate::model_library::types::ModelType = s
+                    .parse()
+                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
                 if parsed != crate::model_library::types::ModelType::Unknown {
                     Some(parsed.as_str().to_string())
                 } else {
@@ -357,7 +362,9 @@ impl ModelImporter {
             .model_type
             .as_ref()
             .and_then(|s| {
-                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                let parsed: crate::model_library::types::ModelType = s
+                    .parse()
+                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
                 if parsed != crate::model_library::types::ModelType::Unknown {
                     Some(parsed.as_str().to_string())
                 } else {
@@ -487,24 +494,23 @@ impl ModelImporter {
 
         for (idx, spec) in specs.into_iter().enumerate() {
             // Update progress
-            progress.update(
-                idx,
-                Some(spec.path.clone()),
-                ImportStage::Copying,
-            );
+            progress.update(idx, Some(spec.path.clone()), ImportStage::Copying);
 
             if let Some(ref tx) = progress_tx {
                 let _ = tx.send(progress.clone()).await;
             }
 
             // Import
-            let result = self.import(&spec).await.unwrap_or_else(|e| ModelImportResult {
-                path: spec.path.clone(),
-                success: false,
-                model_path: None,
-                error: Some(e.to_string()),
-                security_tier: None,
-            });
+            let result = self
+                .import(&spec)
+                .await
+                .unwrap_or_else(|e| ModelImportResult {
+                    path: spec.path.clone(),
+                    success: false,
+                    model_path: None,
+                    error: Some(e.to_string()),
+                    security_tier: None,
+                });
 
             progress.results.push(result.clone());
             results.push(result);
@@ -730,10 +736,13 @@ impl ModelImporter {
             .model_type
             .as_ref()
             .map(|s| {
-                let parsed: crate::model_library::types::ModelType = s.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+                let parsed: crate::model_library::types::ModelType = s
+                    .parse()
+                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
                 parsed.as_str().to_string()
             })
             .unwrap_or_else(|| type_info.model_type.as_str().to_string());
+        let model_type_resolution_confidence = if model_type == "unknown" { 0.0 } else { 0.7 };
 
         let family = type_info
             .family
@@ -760,6 +769,7 @@ impl ModelImporter {
         );
 
         Ok(ModelMetadata {
+            schema_version: Some(2),
             model_id: Some(model_id),
             family: Some(family),
             model_type: Some(model_type),
@@ -787,9 +797,29 @@ impl ModelImporter {
             lookup_attempts: Some(0),
             last_lookup_attempt: None,
             conversion_source: None,
-            repo_id: None,          // Set by caller (import_in_place) after creation
-            expected_files: None,   // Set by caller (import_in_place) after creation
-            pipeline_tag: None,     // Set by caller (import_in_place) after creation
+            repo_id: None,        // Set by caller (import_in_place) after creation
+            expected_files: None, // Set by caller (import_in_place) after creation
+            pipeline_tag: None,   // Set by caller (import_in_place) after creation
+            task_type_primary: Some("unknown".to_string()),
+            task_type_secondary: None,
+            input_modalities: Some(vec!["unknown".to_string()]),
+            output_modalities: Some(vec!["unknown".to_string()]),
+            task_classification_source: Some("local-import-no-task-signature".to_string()),
+            task_classification_confidence: Some(0.0),
+            model_type_resolution_source: Some("import-resolver".to_string()),
+            model_type_resolution_confidence: Some(model_type_resolution_confidence),
+            runtime_engine_hints: None,
+            dependency_bindings: None,
+            requires_custom_code: Some(false),
+            custom_code_sources: None,
+            metadata_needs_review: Some(true),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            review_status: Some("pending".to_string()),
+            reviewed_by: None,
+            reviewed_at: None,
+            model_card_artifact: None,
+            license_artifact: None,
+            license_status: Some("license_unknown".to_string()),
         })
     }
 
@@ -853,13 +883,12 @@ impl ModelImporter {
         );
 
         // Detect dLLM subtype from config.json
-        let resolved_subtype = if resolved_model_type.0 == ModelType::Llm
-            && detect_dllm_from_config_json(model_dir)
-        {
-            Some("dllm".to_string())
-        } else {
-            None
-        };
+        let resolved_subtype =
+            if resolved_model_type.0 == ModelType::Llm && detect_dllm_from_config_json(model_dir) {
+                Some("dllm".to_string())
+            } else {
+                None
+            };
 
         // Enumerate existing files (no copy needed)
         let files = self.enumerate_model_files(model_dir)?;
@@ -940,8 +969,74 @@ impl ModelImporter {
         // Persist download provenance and HF metadata
         metadata.repo_id = spec.repo_id.clone();
         metadata.expected_files = spec.expected_files.clone();
-        metadata.pipeline_tag = spec.pipeline_tag.clone()
-            .or(resolved_model_type.1);
+        metadata.pipeline_tag = spec.pipeline_tag.clone().or(resolved_model_type.1);
+        metadata.metadata_needs_review = Some(false);
+        metadata.review_reasons = Some(Vec::new());
+        metadata.review_status = Some("not_required".to_string());
+
+        // Resolve task semantics from source task label/signature.
+        // This path is source-first: use pipeline_tag when provided, then normalize.
+        let raw_task_signature = metadata
+            .pipeline_tag
+            .as_deref()
+            .unwrap_or("unknown->unknown");
+        let normalized = normalize_task_signature(raw_task_signature);
+
+        metadata.input_modalities = Some(normalized.input_modalities.clone());
+        metadata.output_modalities = Some(normalized.output_modalities.clone());
+
+        match self
+            .library
+            .index()
+            .get_active_task_signature_mapping(&normalized.signature_key)?
+        {
+            Some(mapping) => {
+                metadata.task_type_primary = Some(mapping.task_type_primary);
+                metadata.task_classification_source = Some("task-signature-mapping".to_string());
+                metadata.task_classification_confidence =
+                    Some(match normalized.normalization_status {
+                        TaskNormalizationStatus::Ok => 1.0,
+                        TaskNormalizationStatus::Warning => 0.8,
+                        TaskNormalizationStatus::Error => 0.0,
+                    });
+            }
+            None => {
+                self.library.index().upsert_pending_task_signature_mapping(
+                    &normalized.signature_key,
+                    &normalized.input_modalities,
+                    &normalized.output_modalities,
+                )?;
+                metadata.task_type_primary = Some("unknown".to_string());
+                metadata.task_classification_source =
+                    Some("runtime-discovered-signature".to_string());
+                metadata.task_classification_confidence = Some(0.0);
+                metadata.metadata_needs_review = Some(true);
+                metadata.review_status = Some("pending".to_string());
+                push_review_reason(&mut metadata, "unknown-task-signature");
+            }
+        }
+
+        if normalized.normalization_status == TaskNormalizationStatus::Error {
+            metadata.task_type_primary = Some("unknown".to_string());
+            metadata.task_classification_source = Some("invalid-task-signature".to_string());
+            metadata.task_classification_confidence = Some(0.0);
+            metadata.metadata_needs_review = Some(true);
+            metadata.review_status = Some("pending".to_string());
+            push_review_reason(&mut metadata, "invalid-task-signature");
+        } else if normalized.normalization_status == TaskNormalizationStatus::Warning {
+            metadata.metadata_needs_review = Some(true);
+            metadata.review_status = Some("pending".to_string());
+        }
+
+        if resolved_model_type.0 == ModelType::Unknown {
+            metadata.model_type_resolution_source = Some("unresolved".to_string());
+            metadata.model_type_resolution_confidence = Some(0.0);
+            metadata.metadata_needs_review = Some(true);
+            metadata.review_status = Some("pending".to_string());
+            push_review_reason(&mut metadata, "model-type-unresolved");
+        }
+
+        validate_metadata_v2(&metadata)?;
 
         // Save metadata.json
         self.library.save_metadata(model_dir, &metadata).await?;
@@ -1095,10 +1190,7 @@ impl ModelImporter {
             }
 
             let dir = entry.path();
-            let dir_name = dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // Skip temp import dirs and hidden dirs
             if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
@@ -1117,9 +1209,9 @@ impl ModelImporter {
             };
 
             // Skip if any .part files present (download in progress)
-            let has_part_files = entries.iter().any(|e| {
-                e.file_name().to_string_lossy().ends_with(".part")
-            });
+            let has_part_files = entries
+                .iter()
+                .any(|e| e.file_name().to_string_lossy().ends_with(".part"));
             if has_part_files {
                 continue;
             }
@@ -1170,10 +1262,7 @@ impl ModelImporter {
             }
 
             let dir = entry.path();
-            let dir_name = dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
                 continue;
@@ -1196,7 +1285,9 @@ impl ModelImporter {
                 .filter_map(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     // Skip .part files and metadata
-                    if name.ends_with(".part") || name == "metadata.json" || name == "overrides.json"
+                    if name.ends_with(".part")
+                        || name == "metadata.json"
+                        || name == "overrides.json"
                     {
                         return None;
                     }
@@ -1220,8 +1311,7 @@ impl ModelImporter {
 
             // Check if any file is part of an incomplete shard set
             for filename in &model_files {
-                if let Some((base_name, _idx, Some(total))) =
-                    sharding::extract_shard_info(filename)
+                if let Some((base_name, _idx, Some(total))) = sharding::extract_shard_info(filename)
                 {
                     if total > 1 {
                         let found_count = model_files
@@ -1321,10 +1411,7 @@ impl ModelImporter {
             }
 
             let dir = entry.path();
-            let dir_name = dir
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // Skip temp import dirs and hidden dirs
             if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
@@ -1369,9 +1456,10 @@ impl ModelImporter {
             }
 
             // Try to read repo_id from .pumas_download marker file
-            let marker: Option<serde_json::Value> = std::fs::read_to_string(dir.join(".pumas_download"))
-                .ok()
-                .and_then(|s| serde_json::from_str(&s).ok());
+            let marker: Option<serde_json::Value> =
+                std::fs::read_to_string(dir.join(".pumas_download"))
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok());
 
             if let Some(inferred) = self.infer_spec_from_path(dir) {
                 let (repo_id, family, name, model_type) = if let Some(ref m) = marker {
@@ -1391,7 +1479,12 @@ impl ModelImporter {
                             .or(inferred.model_type),
                     )
                 } else {
-                    (None, inferred.family, inferred.official_name, inferred.model_type)
+                    (
+                        None,
+                        inferred.family,
+                        inferred.official_name,
+                        inferred.model_type,
+                    )
                 };
                 results.push(InterruptedDownload {
                     model_dir: dir.to_path_buf(),

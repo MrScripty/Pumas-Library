@@ -37,6 +37,21 @@ pub struct SearchResult {
     pub query: String,
 }
 
+/// Active task-signature mapping row used by metadata v2 classification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct TaskSignatureMapping {
+    pub id: i64,
+    pub signature_key: String,
+    pub mapping_version: i64,
+    pub input_modalities: Vec<String>,
+    pub output_modalities: Vec<String>,
+    pub task_type_primary: String,
+    pub priority: i64,
+    pub status: String,
+    pub source: String,
+}
+
 /// SQLite model index with FTS5 support.
 pub struct ModelIndex {
     db_path: PathBuf,
@@ -131,16 +146,349 @@ impl ModelIndex {
             [],
         )?;
 
+        Self::ensure_metadata_v2_schema(conn)?;
+        Self::seed_metadata_v2_rows(conn)?;
+
+        Ok(())
+    }
+
+    /// Create metadata v2/additional governance tables.
+    fn ensure_metadata_v2_schema(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS task_signature_mappings (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              signature_key TEXT NOT NULL,
+              mapping_version INTEGER NOT NULL,
+              input_modalities_json TEXT NOT NULL,
+              output_modalities_json TEXT NOT NULL,
+              task_type_primary TEXT NOT NULL,
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              supersedes_id INTEGER,
+              change_reason TEXT,
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              FOREIGN KEY (supersedes_id) REFERENCES task_signature_mappings(id),
+              UNIQUE(signature_key, mapping_version)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_task_signature_mappings_lookup
+              ON task_signature_mappings(status, signature_key, priority, mapping_version DESC);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_task_signature_mappings_one_active
+              ON task_signature_mappings(signature_key)
+              WHERE status = 'active';
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_task_signature_mappings_one_pending
+              ON task_signature_mappings(signature_key)
+              WHERE status = 'pending';
+
+            CREATE TABLE IF NOT EXISTS model_type_arch_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              pattern TEXT NOT NULL,
+              match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_model_type_arch_rules_active_unique
+              ON model_type_arch_rules(pattern, match_style)
+              WHERE status = 'active';
+
+            CREATE INDEX IF NOT EXISTS idx_model_type_arch_rules_lookup
+              ON model_type_arch_rules(status, priority, pattern, match_style);
+
+            CREATE TABLE IF NOT EXISTS model_type_config_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              config_model_type TEXT NOT NULL,
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_model_type_config_rules_active_unique
+              ON model_type_config_rules(config_model_type)
+              WHERE status = 'active';
+
+            CREATE INDEX IF NOT EXISTS idx_model_type_config_rules_lookup
+              ON model_type_config_rules(status, priority, config_model_type);
+
+            CREATE TABLE IF NOT EXISTS model_metadata_baselines (
+              model_id TEXT PRIMARY KEY,
+              schema_version INTEGER NOT NULL,
+              baseline_json TEXT NOT NULL CHECK (json_valid(baseline_json)),
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              created_by TEXT NOT NULL DEFAULT 'pumas-library',
+              FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+            );
+
+            CREATE TRIGGER IF NOT EXISTS trg_model_metadata_baselines_no_update
+            BEFORE UPDATE ON model_metadata_baselines
+            FOR EACH ROW
+            BEGIN
+              SELECT RAISE(ABORT, 'model_metadata_baselines is immutable');
+            END;
+
+            CREATE TABLE IF NOT EXISTS model_metadata_overlays (
+              overlay_id TEXT PRIMARY KEY,
+              model_id TEXT NOT NULL,
+              overlay_json TEXT NOT NULL CHECK (json_valid(overlay_json)),
+              status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'superseded', 'reverted')),
+              reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              created_by TEXT NOT NULL,
+              FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_model_metadata_overlays_model
+              ON model_metadata_overlays(model_id, created_at);
+
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_model_metadata_overlays_one_active
+              ON model_metadata_overlays(model_id)
+              WHERE status = 'active';
+
+            CREATE TABLE IF NOT EXISTS model_metadata_history (
+              event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              model_id TEXT NOT NULL,
+              overlay_id TEXT,
+              actor TEXT NOT NULL,
+              action TEXT NOT NULL
+                CHECK (action IN (
+                  'baseline_created',
+                  'overlay_created',
+                  'overlay_superseded',
+                  'overlay_reverted',
+                  'reset_to_original',
+                  'field_updated'
+                )),
+              field_path TEXT,
+              old_value_json TEXT,
+              new_value_json TEXT,
+              reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE,
+              FOREIGN KEY (overlay_id) REFERENCES model_metadata_overlays(overlay_id) ON DELETE SET NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_model_metadata_history_model
+              ON model_metadata_history(model_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS dependency_profiles (
+              profile_id TEXT NOT NULL,
+              profile_version INTEGER NOT NULL,
+              profile_hash TEXT,
+              environment_kind TEXT NOT NULL,
+              spec_json TEXT NOT NULL CHECK (json_valid(spec_json)),
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              PRIMARY KEY (profile_id, profile_version)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_dependency_profiles_hash
+              ON dependency_profiles(profile_hash);
+
+            CREATE TABLE IF NOT EXISTS model_dependency_bindings (
+              binding_id TEXT PRIMARY KEY,
+              model_id TEXT NOT NULL,
+              profile_id TEXT NOT NULL,
+              profile_version INTEGER NOT NULL,
+              binding_kind TEXT NOT NULL,
+              backend_key TEXT,
+              platform_selector TEXT,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'deprecated')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              attached_by TEXT,
+              attached_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE,
+              FOREIGN KEY (profile_id, profile_version) REFERENCES dependency_profiles(profile_id, profile_version)
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_model_dependency_bindings_model
+              ON model_dependency_bindings(model_id, status, binding_kind, backend_key, priority, binding_id);
+
+            CREATE TABLE IF NOT EXISTS dependency_binding_history (
+              event_id INTEGER PRIMARY KEY AUTOINCREMENT,
+              binding_id TEXT NOT NULL,
+              model_id TEXT NOT NULL,
+              actor TEXT NOT NULL,
+              action TEXT NOT NULL,
+              old_value_json TEXT,
+              new_value_json TEXT,
+              reason TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              FOREIGN KEY (binding_id) REFERENCES model_dependency_bindings(binding_id) ON DELETE CASCADE,
+              FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+            );
+            ",
+        )?;
+
+        Ok(())
+    }
+
+    /// Seed idempotent baseline rows for mapping/rule tables.
+    fn seed_metadata_v2_rows(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO task_signature_mappings (
+              signature_key, mapping_version, input_modalities_json, output_modalities_json, task_type_primary, priority, status, source
+            ) VALUES
+              ('text->text', 1, '[\"text\"]', '[\"text\"]', 'text-generation', 100, 'active', 'system'),
+              ('text->image', 1, '[\"text\"]', '[\"image\"]', 'text-to-image', 100, 'active', 'system'),
+              ('image->image', 1, '[\"image\"]', '[\"image\"]', 'image-to-image', 100, 'active', 'system'),
+              ('text+image->image', 1, '[\"text\",\"image\"]', '[\"image\"]', 'text-image-to-image', 100, 'active', 'system'),
+              ('text->audio', 1, '[\"text\"]', '[\"audio\"]', 'text-to-audio', 100, 'active', 'system'),
+              ('audio->audio', 1, '[\"audio\"]', '[\"audio\"]', 'audio-to-audio', 100, 'active', 'system'),
+              ('audio->text', 1, '[\"audio\"]', '[\"text\"]', 'audio-to-text', 100, 'active', 'system'),
+              ('text->embedding', 1, '[\"text\"]', '[\"embedding\"]', 'text-embedding', 100, 'active', 'system'),
+              ('image->embedding', 1, '[\"image\"]', '[\"embedding\"]', 'image-embedding', 100, 'active', 'system'),
+              ('audio->embedding', 1, '[\"audio\"]', '[\"embedding\"]', 'audio-embedding', 100, 'active', 'system'),
+              ('image->text', 1, '[\"image\"]', '[\"text\"]', 'image-to-text', 100, 'active', 'system'),
+              ('video->text', 1, '[\"video\"]', '[\"text\"]', 'video-to-text', 100, 'active', 'system'),
+              ('text+image->text', 1, '[\"text\",\"image\"]', '[\"text\"]', 'visual-question-answering', 100, 'active', 'system'),
+              ('text+video->text', 1, '[\"text\",\"video\"]', '[\"text\"]', 'video-question-answering', 100, 'active', 'system'),
+              ('text->video', 1, '[\"text\"]', '[\"video\"]', 'text-to-video', 100, 'active', 'system'),
+              ('text->3d', 1, '[\"text\"]', '[\"3d\"]', 'text-to-3d', 100, 'active', 'system'),
+              ('image->3d', 1, '[\"image\"]', '[\"3d\"]', 'image-to-3d', 100, 'active', 'system');
+
+            INSERT OR IGNORE INTO model_type_arch_rules (pattern, match_style, model_type, priority, status, source) VALUES
+              ('ForCausalLM', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForMaskedLM', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForConditionalGeneration', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForSequenceClassification', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForTokenClassification', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForQuestionAnswering', 'suffix', 'llm', 100, 'active', 'system'),
+              ('ForSpeechSeq2Seq', 'suffix', 'audio', 100, 'active', 'system'),
+              ('ForAudioClassification', 'suffix', 'audio', 100, 'active', 'system'),
+              ('Whisper', 'prefix', 'audio', 100, 'active', 'system'),
+              ('Encodec', 'prefix', 'audio', 100, 'active', 'system'),
+              ('ForImageClassification', 'suffix', 'vision', 100, 'active', 'system'),
+              ('ForObjectDetection', 'suffix', 'vision', 100, 'active', 'system'),
+              ('ForSemanticSegmentation', 'suffix', 'vision', 100, 'active', 'system'),
+              ('ForImageSegmentation', 'suffix', 'vision', 100, 'active', 'system'),
+              ('CLIPVisionModel', 'prefix', 'vision', 100, 'active', 'system'),
+              ('UNet2DConditionModel', 'exact', 'diffusion', 100, 'active', 'system'),
+              ('UNet2DModel', 'exact', 'diffusion', 100, 'active', 'system'),
+              ('AutoencoderKL', 'exact', 'diffusion', 100, 'active', 'system'),
+              ('VQModel', 'exact', 'diffusion', 100, 'active', 'system'),
+              ('StableDiffusion*Pipeline', 'wildcard', 'diffusion', 100, 'active', 'system'),
+              ('DiffusionPipeline', 'exact', 'diffusion', 100, 'active', 'system');
+
+            INSERT OR IGNORE INTO model_type_config_rules (config_model_type, model_type, priority, status, source) VALUES
+              ('llama', 'llm', 100, 'active', 'system'),
+              ('mistral', 'llm', 100, 'active', 'system'),
+              ('mixtral', 'llm', 100, 'active', 'system'),
+              ('gpt2', 'llm', 100, 'active', 'system'),
+              ('gpt_neo', 'llm', 100, 'active', 'system'),
+              ('gpt_neox', 'llm', 100, 'active', 'system'),
+              ('gptj', 'llm', 100, 'active', 'system'),
+              ('phi', 'llm', 100, 'active', 'system'),
+              ('phi3', 'llm', 100, 'active', 'system'),
+              ('qwen2', 'llm', 100, 'active', 'system'),
+              ('qwen3', 'llm', 100, 'active', 'system'),
+              ('gemma', 'llm', 100, 'active', 'system'),
+              ('gemma2', 'llm', 100, 'active', 'system'),
+              ('gemma3', 'llm', 100, 'active', 'system'),
+              ('deepseek_v2', 'llm', 100, 'active', 'system'),
+              ('deepseek_v3', 'llm', 100, 'active', 'system'),
+              ('falcon', 'llm', 100, 'active', 'system'),
+              ('mpt', 'llm', 100, 'active', 'system'),
+              ('bloom', 'llm', 100, 'active', 'system'),
+              ('opt', 'llm', 100, 'active', 'system'),
+              ('codegen', 'llm', 100, 'active', 'system'),
+              ('starcoder2', 'llm', 100, 'active', 'system'),
+              ('rwkv', 'llm', 100, 'active', 'system'),
+              ('rwkv5', 'llm', 100, 'active', 'system'),
+              ('rwkv6', 'llm', 100, 'active', 'system'),
+              ('mamba', 'llm', 100, 'active', 'system'),
+              ('mamba2', 'llm', 100, 'active', 'system'),
+              ('jamba', 'llm', 100, 'active', 'system'),
+              ('dbrx', 'llm', 100, 'active', 'system'),
+              ('stablelm', 'llm', 100, 'active', 'system'),
+              ('stable_diffusion', 'diffusion', 100, 'active', 'system'),
+              ('sdxl', 'diffusion', 100, 'active', 'system'),
+              ('kandinsky', 'diffusion', 100, 'active', 'system'),
+              ('pixart', 'diffusion', 100, 'active', 'system'),
+              ('whisper', 'audio', 100, 'active', 'system'),
+              ('wav2vec2', 'audio', 100, 'active', 'system'),
+              ('hubert', 'audio', 100, 'active', 'system'),
+              ('wavlm', 'audio', 100, 'active', 'system'),
+              ('seamless_m4t', 'audio', 100, 'active', 'system'),
+              ('bark', 'audio', 100, 'active', 'system'),
+              ('musicgen', 'audio', 100, 'active', 'system'),
+              ('encodec', 'audio', 100, 'active', 'system'),
+              ('speecht5', 'audio', 100, 'active', 'system'),
+              ('mms', 'audio', 100, 'active', 'system'),
+              ('vit', 'vision', 100, 'active', 'system'),
+              ('swin', 'vision', 100, 'active', 'system'),
+              ('convnext', 'vision', 100, 'active', 'system'),
+              ('deit', 'vision', 100, 'active', 'system'),
+              ('beit', 'vision', 100, 'active', 'system'),
+              ('dinov2', 'vision', 100, 'active', 'system'),
+              ('clip', 'vision', 100, 'active', 'system'),
+              ('siglip', 'vision', 100, 'active', 'system'),
+              ('blip', 'vision', 100, 'active', 'system'),
+              ('blip2', 'vision', 100, 'active', 'system'),
+              ('sentence-transformers', 'embedding', 100, 'active', 'system'),
+              ('bge', 'embedding', 100, 'active', 'system'),
+              ('e5', 'embedding', 100, 'active', 'system'),
+              ('gte', 'embedding', 100, 'active', 'system'),
+              ('jina-embeddings', 'embedding', 100, 'active', 'system');
+            ",
+        )?;
+
+        conn.execute_batch(
+            "
+            INSERT OR IGNORE INTO model_metadata_baselines (model_id, schema_version, baseline_json, created_at, created_by)
+            SELECT
+              m.id,
+              COALESCE(CAST(json_extract(m.metadata_json, '$.schema_version') AS INTEGER), 1),
+              m.metadata_json,
+              m.updated_at,
+              'pumas-library'
+            FROM models m;
+
+            INSERT INTO model_metadata_history (
+              model_id, overlay_id, actor, action, field_path, old_value_json, new_value_json, reason, created_at
+            )
+            SELECT
+              b.model_id,
+              NULL,
+              'pumas-library',
+              'baseline_created',
+              NULL,
+              NULL,
+              b.baseline_json,
+              'migration-backfill',
+              b.created_at
+            FROM model_metadata_baselines b
+            WHERE NOT EXISTS (
+              SELECT 1
+              FROM model_metadata_history h
+              WHERE h.model_id = b.model_id AND h.action = 'baseline_created'
+            );
+            ",
+        )?;
+
         Ok(())
     }
 
     /// Ensure FTS5 virtual table and triggers exist.
     fn ensure_fts5(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let fts5_manager = FTS5Manager::new(&self.fts5_config);
@@ -156,11 +504,9 @@ impl ModelIndex {
 
     /// Insert or update a model record.
     pub fn upsert(&self, record: &ModelRecord) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let tags_json = serde_json::to_string(&record.tags)?;
@@ -199,11 +545,9 @@ impl ModelIndex {
 
     /// Get a model by ID.
     pub fn get(&self, id: &str) -> Result<Option<ModelRecord>> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let result = conn
@@ -221,11 +565,9 @@ impl ModelIndex {
 
     /// Delete a model by ID.
     pub fn delete(&self, id: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let rows_affected = conn.execute("DELETE FROM models WHERE id = ?1", params![id])?;
@@ -248,11 +590,9 @@ impl ModelIndex {
     ) -> Result<SearchResult> {
         let start = Instant::now();
 
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let fts5_query = if query.trim().is_empty() {
@@ -473,11 +813,9 @@ impl ModelIndex {
 
     /// Get all model IDs.
     pub fn get_all_ids(&self) -> Result<Vec<String>> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let mut stmt = conn.prepare("SELECT id FROM models ORDER BY id")?;
@@ -497,11 +835,9 @@ impl ModelIndex {
     /// matching hash values. Used by the library merge system for content-based
     /// duplicate detection.
     pub fn find_by_hash(&self, hash: &str) -> Result<Option<ModelRecord>> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let result = conn
@@ -522,11 +858,9 @@ impl ModelIndex {
 
     /// Get the count of models.
     pub fn count(&self) -> Result<usize> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let count: usize = conn.query_row("SELECT COUNT(*) FROM models", [], |row| row.get(0))?;
@@ -536,11 +870,9 @@ impl ModelIndex {
 
     /// Rebuild the FTS5 index.
     pub fn rebuild_fts5(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let fts5_manager = FTS5Manager::new(&self.fts5_config);
@@ -552,11 +884,9 @@ impl ModelIndex {
 
     /// Optimize the FTS5 index.
     pub fn optimize_fts5(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let fts5_manager = FTS5Manager::new(&self.fts5_config);
@@ -568,11 +898,9 @@ impl ModelIndex {
 
     /// Checkpoint the WAL file.
     pub fn checkpoint_wal(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         // Use query_row since PRAGMA wal_checkpoint returns results
@@ -587,11 +915,9 @@ impl ModelIndex {
 
     /// Set whether a model is excluded from linking for a given app.
     pub fn set_link_exclusion(&self, model_id: &str, app_id: &str, excluded: bool) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         if excluded {
@@ -613,11 +939,9 @@ impl ModelIndex {
 
     /// Check if a model is excluded from linking for a given app.
     pub fn is_link_excluded(&self, model_id: &str, app_id: &str) -> Result<bool> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         let count: i64 = conn.query_row(
@@ -631,16 +955,13 @@ impl ModelIndex {
 
     /// Get all excluded model IDs for a given app.
     pub fn get_excluded_model_ids(&self, app_id: &str) -> Result<Vec<String>> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
-        let mut stmt = conn.prepare(
-            "SELECT model_id FROM model_link_exclusions WHERE app_id = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT model_id FROM model_link_exclusions WHERE app_id = ?1")?;
         let rows = stmt.query_map(params![app_id], |row| row.get(0))?;
 
         let mut ids = Vec::new();
@@ -651,13 +972,132 @@ impl ModelIndex {
         Ok(ids)
     }
 
+    /// Resolve an active task-signature mapping row.
+    pub fn get_active_task_signature_mapping(
+        &self,
+        signature_key: &str,
+    ) -> Result<Option<TaskSignatureMapping>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let row = conn
+            .query_row(
+                "SELECT
+                    id,
+                    signature_key,
+                    mapping_version,
+                    input_modalities_json,
+                    output_modalities_json,
+                    task_type_primary,
+                    priority,
+                    status,
+                    source
+                 FROM task_signature_mappings
+                 WHERE status = 'active' AND signature_key = ?1
+                 ORDER BY priority ASC, mapping_version DESC
+                 LIMIT 1",
+                params![signature_key],
+                |row| {
+                    let input_json: String = row.get(3)?;
+                    let output_json: String = row.get(4)?;
+                    Ok(TaskSignatureMapping {
+                        id: row.get(0)?,
+                        signature_key: row.get(1)?,
+                        mapping_version: row.get(2)?,
+                        input_modalities: serde_json::from_str(&input_json).unwrap_or_default(),
+                        output_modalities: serde_json::from_str(&output_json).unwrap_or_default(),
+                        task_type_primary: row.get(5)?,
+                        priority: row.get(6)?,
+                        status: row.get(7)?,
+                        source: row.get(8)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(row)
+    }
+
+    /// Upsert the per-signature pending mapping row used for runtime discovery.
+    pub fn upsert_pending_task_signature_mapping(
+        &self,
+        signature_key: &str,
+        input_modalities: &[String],
+        output_modalities: &[String],
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let tx = conn.transaction()?;
+
+        let existing_pending_id: Option<i64> = tx
+            .query_row(
+                "SELECT id
+                 FROM task_signature_mappings
+                 WHERE signature_key = ?1 AND status = 'pending'
+                 LIMIT 1",
+                params![signature_key],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        if let Some(pending_id) = existing_pending_id {
+            tx.execute(
+                "UPDATE task_signature_mappings
+                 SET
+                   input_modalities_json = ?1,
+                   output_modalities_json = ?2,
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+                 WHERE id = ?3",
+                params![
+                    serde_json::to_string(input_modalities)?,
+                    serde_json::to_string(output_modalities)?,
+                    pending_id
+                ],
+            )?;
+        } else {
+            let next_version: i64 = tx.query_row(
+                "SELECT COALESCE(MAX(mapping_version), 0) + 1
+                 FROM task_signature_mappings
+                 WHERE signature_key = ?1",
+                params![signature_key],
+                |row| row.get(0),
+            )?;
+
+            tx.execute(
+                "INSERT INTO task_signature_mappings (
+                   signature_key,
+                   mapping_version,
+                   input_modalities_json,
+                   output_modalities_json,
+                   task_type_primary,
+                   priority,
+                   status,
+                   source,
+                   notes
+                 ) VALUES (?1, ?2, ?3, ?4, 'unknown', 100, 'pending', 'runtime-discovered', 'auto-staged unknown signature')",
+                params![
+                    signature_key,
+                    next_version,
+                    serde_json::to_string(input_modalities)?,
+                    serde_json::to_string(output_modalities)?,
+                ],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Clear all models from the index.
     pub fn clear(&self) -> Result<()> {
-        let conn = self.conn.lock().map_err(|_| {
-            PumasError::Database {
-                message: "Failed to acquire connection lock".to_string(),
-                source: None,
-            }
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
         })?;
 
         // Delete from FTS5 table first, then models table.
@@ -861,5 +1301,79 @@ mod tests {
 
         let found = index.find_by_hash("nonexistent_hash_value").unwrap();
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn test_metadata_v2_schema_tables_exist() {
+        let (index, _temp) = create_test_index();
+        let conn = index.conn.lock().unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT name
+                 FROM sqlite_master
+                 WHERE type='table' AND name IN (
+                    'task_signature_mappings',
+                    'model_type_arch_rules',
+                    'model_type_config_rules',
+                    'model_metadata_baselines',
+                    'model_metadata_overlays',
+                    'model_metadata_history',
+                    'dependency_profiles',
+                    'model_dependency_bindings',
+                    'dependency_binding_history'
+                 )",
+            )
+            .unwrap();
+        let rows = stmt
+            .query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert_eq!(rows.len(), 9);
+    }
+
+    #[test]
+    fn test_seeded_active_task_signature_mapping_exists() {
+        let (index, _temp) = create_test_index();
+
+        let mapping = index
+            .get_active_task_signature_mapping("text->image")
+            .unwrap();
+        assert!(mapping.is_some());
+
+        let mapping = mapping.unwrap();
+        assert_eq!(mapping.signature_key, "text->image");
+        assert_eq!(mapping.task_type_primary, "text-to-image");
+        assert_eq!(mapping.status, "active");
+        assert_eq!(mapping.input_modalities, vec!["text".to_string()]);
+        assert_eq!(mapping.output_modalities, vec!["image".to_string()]);
+    }
+
+    #[test]
+    fn test_upsert_pending_task_signature_mapping_is_single_row() {
+        let (index, _temp) = create_test_index();
+        let signature = "text+image->audio";
+        let inputs = vec!["text".to_string(), "image".to_string()];
+        let outputs = vec!["audio".to_string()];
+
+        index
+            .upsert_pending_task_signature_mapping(signature, &inputs, &outputs)
+            .unwrap();
+        index
+            .upsert_pending_task_signature_mapping(signature, &inputs, &outputs)
+            .unwrap();
+
+        let conn = index.conn.lock().unwrap();
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM task_signature_mappings
+                 WHERE signature_key = ?1 AND status = 'pending'",
+                params![signature],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 }

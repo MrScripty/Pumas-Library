@@ -131,9 +131,7 @@ where
             M: de::MapAccess<'de>,
         {
             // Drain the map to keep the deserializer happy, then discard.
-            while let Some((_, _)) =
-                map.next_entry::<de::IgnoredAny, de::IgnoredAny>()?
-            {}
+            while let Some((_, _)) = map.next_entry::<de::IgnoredAny, de::IgnoredAny>()? {}
             Ok(None)
         }
     }
@@ -200,10 +198,44 @@ pub struct InferenceParamSchema {
     pub constraints: Option<ParamConstraints>,
 }
 
+/// Reference to a dependency binding row for this model.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct DependencyBindingRef {
+    #[serde(default)]
+    pub binding_id: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+    #[serde(default)]
+    pub profile_version: Option<i64>,
+    #[serde(default)]
+    pub binding_kind: Option<String>,
+    #[serde(default)]
+    pub backend_key: Option<String>,
+    #[serde(default)]
+    pub platform_selector: Option<String>,
+}
+
+/// Stored artifact metadata for license/model-card governance.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub struct MetadataArtifactRef {
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub source_url: Option<String>,
+    #[serde(default)]
+    pub sha256: Option<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
 /// Canonical metadata stored with each model directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct ModelMetadata {
+    #[serde(default)]
+    pub schema_version: Option<u32>,
     #[serde(default)]
     pub model_id: Option<String>,
     #[serde(default)]
@@ -273,6 +305,47 @@ pub struct ModelMetadata {
     /// Cached for auditing and reclassification without re-querying HF.
     #[serde(default)]
     pub pipeline_tag: Option<String>,
+    // Metadata v2 classification contract fields
+    #[serde(default)]
+    pub task_type_primary: Option<String>,
+    #[serde(default)]
+    pub task_type_secondary: Option<String>,
+    #[serde(default)]
+    pub input_modalities: Option<Vec<String>>,
+    #[serde(default)]
+    pub output_modalities: Option<Vec<String>>,
+    #[serde(default)]
+    pub task_classification_source: Option<String>,
+    #[serde(default)]
+    pub task_classification_confidence: Option<f64>,
+    #[serde(default)]
+    pub model_type_resolution_source: Option<String>,
+    #[serde(default)]
+    pub model_type_resolution_confidence: Option<f64>,
+    #[serde(default)]
+    pub runtime_engine_hints: Option<Vec<String>>,
+    #[serde(default)]
+    pub dependency_bindings: Option<Vec<DependencyBindingRef>>,
+    #[serde(default)]
+    pub requires_custom_code: Option<bool>,
+    #[serde(default)]
+    pub custom_code_sources: Option<Vec<String>>,
+    #[serde(default)]
+    pub metadata_needs_review: Option<bool>,
+    #[serde(default)]
+    pub review_reasons: Option<Vec<String>>,
+    #[serde(default)]
+    pub review_status: Option<String>,
+    #[serde(default)]
+    pub reviewed_by: Option<String>,
+    #[serde(default)]
+    pub reviewed_at: Option<String>,
+    #[serde(default)]
+    pub model_card_artifact: Option<MetadataArtifactRef>,
+    #[serde(default)]
+    pub license_artifact: Option<MetadataArtifactRef>,
+    #[serde(default)]
+    pub license_status: Option<String>,
 }
 
 /// User overrides for model mapping.

@@ -123,6 +123,70 @@ impl PumasApi {
         Ok(())
     }
 
+    /// List dependency profile bindings for a model in a specific runtime context.
+    pub async fn get_model_dependency_profiles(
+        &self,
+        model_id: &str,
+        platform_context: &str,
+        backend_key: Option<&str>,
+    ) -> Result<Vec<model_library::ModelDependencyBindingPlan>> {
+        self.primary()
+            .model_library
+            .get_model_dependency_profiles(model_id, platform_context, backend_key)
+            .await
+    }
+
+    /// Resolve deterministic dependency plan for a model in a specific runtime context.
+    pub async fn resolve_model_dependency_plan(
+        &self,
+        model_id: &str,
+        platform_context: &str,
+        backend_key: Option<&str>,
+    ) -> Result<model_library::ModelDependencyPlan> {
+        self.primary()
+            .model_library
+            .resolve_model_dependency_plan(model_id, platform_context, backend_key)
+            .await
+    }
+
+    /// Check dependencies for a model in a specific runtime context.
+    pub async fn check_model_dependencies(
+        &self,
+        model_id: &str,
+        platform_context: &str,
+        backend_key: Option<&str>,
+        selected_binding_ids: Option<Vec<String>>,
+    ) -> Result<model_library::ModelDependencyCheckResult> {
+        self.primary()
+            .model_library
+            .check_model_dependencies(
+                model_id,
+                platform_context,
+                backend_key,
+                selected_binding_ids,
+            )
+            .await
+    }
+
+    /// Install dependencies for a model in a specific runtime context.
+    pub async fn install_model_dependencies(
+        &self,
+        model_id: &str,
+        platform_context: &str,
+        backend_key: Option<&str>,
+        selected_binding_ids: Option<Vec<String>>,
+    ) -> Result<model_library::ModelDependencyInstallResult> {
+        self.primary()
+            .model_library
+            .install_model_dependencies(
+                model_id,
+                platform_context,
+                backend_key,
+                selected_binding_ids,
+            )
+            .await
+    }
+
     /// Import a model from a local path.
     pub async fn import_model(
         &self,

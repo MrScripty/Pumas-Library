@@ -381,6 +381,14 @@ async fn dispatch_method(
         // Inference Settings
         "get_inference_settings" => models::get_inference_settings(state, params).await,
         "update_inference_settings" => models::update_inference_settings(state, params).await,
+        "get_model_dependency_profiles" => {
+            models::get_model_dependency_profiles(state, params).await
+        }
+        "resolve_model_dependency_plan" => {
+            models::resolve_model_dependency_plan(state, params).await
+        }
+        "check_model_dependencies" => models::check_model_dependencies(state, params).await,
+        "install_model_dependencies" => models::install_model_dependencies(state, params).await,
 
         // HuggingFace Authentication
         "set_hf_token" => models::set_hf_token(state, params).await,

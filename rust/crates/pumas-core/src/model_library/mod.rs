@@ -21,6 +21,7 @@
 //!     └── ModelIndex (FTS5) - Full-text search
 //! ```
 
+mod dependencies;
 pub mod download_store;
 mod hashing;
 mod hf;
@@ -39,6 +40,10 @@ mod task_signature;
 mod types;
 mod watcher;
 
+pub use dependencies::{
+    DependencyState, ModelDependencyBindingPlan, ModelDependencyCheckResult,
+    ModelDependencyInstallResult, ModelDependencyPlan,
+};
 pub use download_store::DownloadPersistence;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub use hf::{

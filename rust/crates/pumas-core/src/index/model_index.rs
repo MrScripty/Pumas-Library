@@ -52,6 +52,38 @@ pub struct TaskSignatureMapping {
     pub source: String,
 }
 
+/// Dependency profile row.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct DependencyProfileRecord {
+    pub profile_id: String,
+    pub profile_version: i64,
+    pub profile_hash: Option<String>,
+    pub environment_kind: String,
+    pub spec_json: String,
+    pub created_at: String,
+}
+
+/// Model dependency binding row joined with profile fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelDependencyBindingRecord {
+    pub binding_id: String,
+    pub model_id: String,
+    pub profile_id: String,
+    pub profile_version: i64,
+    pub binding_kind: String,
+    pub backend_key: Option<String>,
+    pub platform_selector: Option<String>,
+    pub status: String,
+    pub priority: i64,
+    pub attached_by: Option<String>,
+    pub attached_at: String,
+    pub profile_hash: Option<String>,
+    pub environment_kind: Option<String>,
+    pub spec_json: Option<String>,
+}
+
 /// Active architecture-based model-type resolver rule.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -1112,6 +1144,168 @@ impl ModelIndex {
         Ok(())
     }
 
+    /// Insert or update a dependency profile row.
+    pub fn upsert_dependency_profile(&self, record: &DependencyProfileRecord) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        conn.execute(
+            "INSERT INTO dependency_profiles (
+               profile_id, profile_version, profile_hash, environment_kind, spec_json, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(profile_id, profile_version) DO UPDATE SET
+               profile_hash = excluded.profile_hash,
+               environment_kind = excluded.environment_kind,
+               spec_json = excluded.spec_json",
+            params![
+                record.profile_id,
+                record.profile_version,
+                record.profile_hash,
+                record.environment_kind,
+                record.spec_json,
+                record.created_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// Insert or update a model dependency binding row.
+    pub fn upsert_model_dependency_binding(
+        &self,
+        record: &ModelDependencyBindingRecord,
+    ) -> Result<()> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        conn.execute(
+            "INSERT INTO model_dependency_bindings (
+               binding_id, model_id, profile_id, profile_version, binding_kind, backend_key,
+               platform_selector, status, priority, attached_by, attached_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(binding_id) DO UPDATE SET
+               model_id = excluded.model_id,
+               profile_id = excluded.profile_id,
+               profile_version = excluded.profile_version,
+               binding_kind = excluded.binding_kind,
+               backend_key = excluded.backend_key,
+               platform_selector = excluded.platform_selector,
+               status = excluded.status,
+               priority = excluded.priority,
+               attached_by = excluded.attached_by,
+               attached_at = excluded.attached_at",
+            params![
+                record.binding_id,
+                record.model_id,
+                record.profile_id,
+                record.profile_version,
+                record.binding_kind,
+                record.backend_key,
+                record.platform_selector,
+                record.status,
+                record.priority,
+                record.attached_by,
+                record.attached_at,
+            ],
+        )?;
+
+        Ok(())
+    }
+
+    /// List active dependency bindings for a model with optional backend filtering.
+    pub fn list_active_model_dependency_bindings(
+        &self,
+        model_id: &str,
+        backend_key: Option<&str>,
+    ) -> Result<Vec<ModelDependencyBindingRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT
+               b.binding_id,
+               b.model_id,
+               b.profile_id,
+               b.profile_version,
+               b.binding_kind,
+               b.backend_key,
+               b.platform_selector,
+               b.status,
+               b.priority,
+               b.attached_by,
+               b.attached_at,
+               p.profile_hash,
+               p.environment_kind,
+               p.spec_json
+             FROM model_dependency_bindings b
+             LEFT JOIN dependency_profiles p
+               ON p.profile_id = b.profile_id AND p.profile_version = b.profile_version
+             WHERE b.model_id = ?1
+               AND b.status = 'active'
+               AND (
+                 ?2 IS NULL
+                 OR b.backend_key IS NULL
+                 OR lower(b.backend_key) = lower(?2)
+               )",
+        )?;
+
+        let rows = stmt.query_map(params![model_id, backend_key], |row| {
+            Ok(ModelDependencyBindingRecord {
+                binding_id: row.get(0)?,
+                model_id: row.get(1)?,
+                profile_id: row.get(2)?,
+                profile_version: row.get(3)?,
+                binding_kind: row.get(4)?,
+                backend_key: row.get(5)?,
+                platform_selector: row.get(6)?,
+                status: row.get(7)?,
+                priority: row.get(8)?,
+                attached_by: row.get(9)?,
+                attached_at: row.get(10)?,
+                profile_hash: row.get(11)?,
+                environment_kind: row.get(12)?,
+                spec_json: row.get(13)?,
+            })
+        })?;
+
+        let mut bindings = Vec::new();
+        for row in rows {
+            bindings.push(row?);
+        }
+
+        bindings.sort_by(|a, b| {
+            a.binding_kind
+                .to_lowercase()
+                .cmp(&b.binding_kind.to_lowercase())
+                .then_with(|| {
+                    a.backend_key
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .cmp(&b.backend_key.as_deref().unwrap_or("").to_lowercase())
+                })
+                .then_with(|| {
+                    a.platform_selector
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_lowercase()
+                        .cmp(&b.platform_selector.as_deref().unwrap_or("").to_lowercase())
+                })
+                .then_with(|| a.profile_id.cmp(&b.profile_id))
+                .then_with(|| a.profile_version.cmp(&b.profile_version))
+                .then_with(|| a.priority.cmp(&b.priority))
+                .then_with(|| a.binding_id.cmp(&b.binding_id))
+        });
+
+        Ok(bindings)
+    }
+
     /// List active architecture/class model-type resolver rules.
     pub fn list_active_model_type_arch_rules(&self) -> Result<Vec<ModelTypeArchRule>> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
@@ -1466,5 +1660,81 @@ mod tests {
         assert!(!config_rules.is_empty());
         assert!(arch_rules.iter().any(|r| r.pattern == "ForCausalLM"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llama"));
+    }
+
+    #[test]
+    fn test_dependency_binding_order_is_deterministic() {
+        let (index, _temp) = create_test_index();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        index
+            .upsert(&create_test_record("m1", "Model 1", "llm"))
+            .unwrap();
+
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h1".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: "{}".to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p2".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h2".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: "{}".to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+
+        index
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b2".to_string(),
+                model_id: "m1".to_string(),
+                profile_id: "p2".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: Some("linux-x86_64-cuda".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now.clone(),
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+        index
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b1".to_string(),
+                model_id: "m1".to_string(),
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("candle".to_string()),
+                platform_selector: Some("linux-x86_64-cuda".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let bindings = index
+            .list_active_model_dependency_bindings("m1", None)
+            .unwrap();
+
+        assert_eq!(bindings.len(), 2);
+        assert_eq!(bindings[0].binding_id, "b1");
+        assert_eq!(bindings[1].binding_id, "b2");
     }
 }

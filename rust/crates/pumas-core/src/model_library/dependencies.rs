@@ -7,6 +7,8 @@ use crate::error::{PumasError, Result};
 use crate::model_library::library::ModelLibrary;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use tokio::process::Command;
 
 /// Dependency lifecycle/check/install states.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -262,17 +264,6 @@ impl ModelLibrary {
             .await?;
 
         let mut bindings = plan.bindings.clone();
-        if plan.state == DependencyState::Ready {
-            for binding in &mut bindings {
-                binding.state = DependencyState::Missing;
-                binding.error_code = None;
-                binding.message = Some(
-                    "Dependency presence probing is not implemented yet; treating as missing"
-                        .to_string(),
-                );
-            }
-        }
-
         if let Some(ref selected) = selected_binding_ids {
             let selected_set: HashSet<&str> = selected.iter().map(|s| s.as_str()).collect();
             let missing_required = missing_required_binding_ids(&bindings, &selected_set);
@@ -301,13 +292,35 @@ impl ModelLibrary {
             }
         }
 
+        if plan.state == DependencyState::Ready {
+            let runtime_specs = load_runtime_specs(self, model_id, platform_context, backend_key)?;
+            let model_dir = self.library_root().join(model_id);
+            for binding in &mut bindings {
+                let Some(runtime_spec) = runtime_specs.get(&binding.binding_id) else {
+                    binding.state = DependencyState::UnknownProfile;
+                    binding.error_code = Some("unknown_profile".to_string());
+                    binding.message =
+                        Some("Dependency binding runtime profile could not be loaded".to_string());
+                    continue;
+                };
+
+                let outcome = probe_binding_readiness(runtime_spec, &model_dir).await;
+                binding.state = outcome.state;
+                binding.error_code = outcome.error_code;
+                binding.message = outcome.message;
+            }
+        }
+
+        let check_state = aggregate_dependency_state(plan.state.clone(), &bindings);
+        let (check_error_code, check_message) = dependency_state_summary(&check_state, &bindings);
+
         Ok(ModelDependencyCheckResult {
             model_id: plan.model_id,
             platform_key: plan.platform_key,
             backend_key: plan.backend_key,
-            state: plan.state,
-            error_code: plan.error_code,
-            message: plan.message,
+            state: check_state,
+            error_code: check_error_code.or(plan.error_code),
+            message: check_message.or(plan.message),
             selected_binding_ids,
             bindings,
         })
@@ -333,40 +346,152 @@ impl ModelLibrary {
             )
             .await?;
 
+        let runtime_specs = load_runtime_specs(self, model_id, platform_context, backend_key)?;
+        let model_dir = self.library_root().join(model_id);
+        let mut bindings = check.bindings.clone();
+
         let selected_set = selected_binding_ids
             .as_ref()
             .map(|v| v.iter().cloned().collect::<HashSet<_>>());
         let mut attempted = Vec::new();
+        let mut installed = Vec::new();
         let mut skipped = Vec::new();
-        for binding in &check.bindings {
+        for binding in &mut bindings {
             let selected = match selected_set.as_ref() {
                 Some(set) => set.contains(&binding.binding_id),
                 None => true,
             };
             if selected {
+                if binding.state != DependencyState::Missing {
+                    continue;
+                }
+
+                let Some(runtime_spec) = runtime_specs.get(&binding.binding_id) else {
+                    binding.state = DependencyState::UnknownProfile;
+                    binding.error_code = Some("unknown_profile".to_string());
+                    binding.message =
+                        Some("Dependency binding runtime profile could not be loaded".to_string());
+                    continue;
+                };
+
+                let install_commands = runtime_spec.install_commands.clone().unwrap_or_default();
+                if install_commands.is_empty() {
+                    binding.state = DependencyState::ManualInterventionRequired;
+                    binding.error_code = Some("manual_intervention_required".to_string());
+                    binding.message = Some(
+                        "No install commands are defined for this dependency profile".to_string(),
+                    );
+                    continue;
+                }
+
+                let install_result =
+                    execute_install_commands(&install_commands, runtime_spec, &model_dir).await;
                 attempted.push(binding.binding_id.clone());
+                if let Err(message) = install_result {
+                    binding.state = DependencyState::Failed;
+                    binding.error_code = Some("install_command_failed".to_string());
+                    binding.message = Some(message);
+                    continue;
+                }
+
+                let outcome = probe_binding_readiness(runtime_spec, &model_dir).await;
+                binding.state = outcome.state;
+                binding.error_code = outcome.error_code;
+                binding.message = outcome.message;
+                if binding.state == DependencyState::Ready {
+                    installed.push(binding.binding_id.clone());
+                } else if binding.state == DependencyState::Missing {
+                    binding.state = DependencyState::Failed;
+                    binding.error_code = Some("install_verification_failed".to_string());
+                    binding.message = Some(
+                        "Install commands completed but dependency probes still fail".to_string(),
+                    );
+                }
             } else {
                 skipped.push(binding.binding_id.clone());
             }
         }
 
+        let aggregate_seed = if check.state == DependencyState::Missing {
+            DependencyState::Ready
+        } else {
+            check.state.clone()
+        };
+        let final_state = aggregate_dependency_state(aggregate_seed, &bindings);
+        let (final_error_code, final_message) = dependency_state_summary(&final_state, &bindings);
+
         Ok(ModelDependencyInstallResult {
             model_id: check.model_id,
             platform_key: check.platform_key,
             backend_key: check.backend_key,
-            state: check.state,
-            error_code: check.error_code,
-            message: Some(check.message.unwrap_or_else(|| {
-                "Installation executor not implemented; returning deterministic plan/check only"
-                    .to_string()
-            })),
+            state: final_state,
+            error_code: final_error_code.or(check.error_code),
+            message: final_message.or(check.message),
             selected_binding_ids: check.selected_binding_ids,
             attempted_binding_ids: attempted,
-            installed_binding_ids: Vec::new(),
+            installed_binding_ids: installed,
             skipped_binding_ids: skipped,
-            bindings: check.bindings,
+            bindings,
         })
     }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DependencyProfileSpec {
+    #[serde(default)]
+    probes: Vec<DependencyProbeSpec>,
+    #[serde(default)]
+    install: Option<DependencyInstallSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DependencyInstallSpec {
+    #[serde(default)]
+    commands: Vec<DependencyCommandSpec>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum DependencyProbeSpec {
+    Command {
+        program: String,
+        #[serde(default)]
+        args: Vec<String>,
+        #[serde(default)]
+        success_exit_codes: Option<Vec<i32>>,
+    },
+    PathExists {
+        path: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "snake_case")]
+struct DependencyCommandSpec {
+    program: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    source_url: Option<String>,
+    #[serde(default)]
+    source_ref: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BindingRuntimeSpec {
+    binding_id: String,
+    profile_id: String,
+    profile_version: i64,
+    probes: Vec<DependencyProbeSpec>,
+    install_commands: Option<Vec<DependencyCommandSpec>>,
+}
+
+struct BindingProbeOutcome {
+    state: DependencyState,
+    error_code: Option<String>,
+    message: Option<String>,
 }
 
 fn ensure_model_exists(library: &ModelLibrary, model_id: &str) -> Result<()> {
@@ -396,6 +521,262 @@ fn normalize_platform_key(platform_context: &str) -> String {
         "unknown".to_string()
     } else {
         normalized
+    }
+}
+
+fn load_runtime_specs(
+    library: &ModelLibrary,
+    model_id: &str,
+    platform_context: &str,
+    backend_key: Option<&str>,
+) -> Result<HashMap<String, BindingRuntimeSpec>> {
+    let platform_key = normalize_platform_key(platform_context);
+    let records = library
+        .index()
+        .list_active_model_dependency_bindings(model_id, backend_key)?;
+
+    let mut specs = HashMap::new();
+    for record in records.into_iter().filter(|record| {
+        platform_selector_matches(record.platform_selector.as_deref(), &platform_key)
+    }) {
+        let Some(spec_json) = record.spec_json.as_ref() else {
+            continue;
+        };
+
+        let parsed: DependencyProfileSpec =
+            serde_json::from_str(spec_json).map_err(|err| PumasError::Validation {
+                field: format!(
+                    "dependency_profiles.{}:{}",
+                    record.profile_id, record.profile_version
+                ),
+                message: format!("invalid spec_json: {}", err),
+            })?;
+
+        specs.insert(
+            record.binding_id.clone(),
+            BindingRuntimeSpec {
+                binding_id: record.binding_id,
+                profile_id: record.profile_id,
+                profile_version: record.profile_version,
+                probes: parsed.probes,
+                install_commands: parsed.install.map(|install| install.commands),
+            },
+        );
+    }
+
+    Ok(specs)
+}
+
+async fn probe_binding_readiness(
+    runtime_spec: &BindingRuntimeSpec,
+    model_dir: &Path,
+) -> BindingProbeOutcome {
+    if runtime_spec.probes.is_empty() {
+        return BindingProbeOutcome {
+            state: DependencyState::Missing,
+            error_code: Some("probe_not_defined".to_string()),
+            message: Some("No dependency probes are defined for this profile".to_string()),
+        };
+    }
+
+    for probe in &runtime_spec.probes {
+        match run_probe(probe, model_dir).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return BindingProbeOutcome {
+                    state: DependencyState::Missing,
+                    error_code: Some("probe_failed".to_string()),
+                    message: Some(format!(
+                        "Dependency probe failed for {}:{} (binding {})",
+                        runtime_spec.profile_id,
+                        runtime_spec.profile_version,
+                        runtime_spec.binding_id
+                    )),
+                };
+            }
+            Err(message) => {
+                return BindingProbeOutcome {
+                    state: DependencyState::ManualInterventionRequired,
+                    error_code: Some("manual_intervention_required".to_string()),
+                    message: Some(message),
+                };
+            }
+        }
+    }
+
+    BindingProbeOutcome {
+        state: DependencyState::Ready,
+        error_code: None,
+        message: Some("Dependency probes passed".to_string()),
+    }
+}
+
+async fn run_probe(
+    probe: &DependencyProbeSpec,
+    model_dir: &Path,
+) -> std::result::Result<bool, String> {
+    match probe {
+        DependencyProbeSpec::PathExists { path } => {
+            let resolved = resolve_probe_path(model_dir, path);
+            Ok(resolved.exists())
+        }
+        DependencyProbeSpec::Command {
+            program,
+            args,
+            success_exit_codes,
+        } => run_command_probe(program, args, success_exit_codes.as_ref()).await,
+    }
+}
+
+async fn run_command_probe(
+    program: &str,
+    args: &[String],
+    success_exit_codes: Option<&Vec<i32>>,
+) -> std::result::Result<bool, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .await
+        .map_err(|err| format!("failed to execute probe command {}: {}", program, err))?;
+
+    let code = output.status.code().unwrap_or(-1);
+    let allowed_codes = success_exit_codes.cloned().unwrap_or_else(|| vec![0]);
+    Ok(allowed_codes.contains(&code))
+}
+
+async fn execute_install_commands(
+    commands: &[DependencyCommandSpec],
+    runtime_spec: &BindingRuntimeSpec,
+    model_dir: &Path,
+) -> std::result::Result<(), String> {
+    for command in commands {
+        let source = command.source_url.as_deref().unwrap_or("unknown-source");
+        let source_ref = command.source_ref.as_deref().unwrap_or("unknown-ref");
+        tracing::info!(
+            "Installing dependency binding {} ({}:{}) via {} {:?} (source={} ref={})",
+            runtime_spec.binding_id,
+            runtime_spec.profile_id,
+            runtime_spec.profile_version,
+            command.program,
+            command.args,
+            source,
+            source_ref
+        );
+
+        let output = Command::new(&command.program)
+            .args(&command.args)
+            .current_dir(model_dir)
+            .output()
+            .await
+            .map_err(|err| {
+                format!(
+                    "failed to execute install command {} for {}:{}: {}",
+                    command.program, runtime_spec.profile_id, runtime_spec.profile_version, err
+                )
+            })?;
+
+        if !output.status.success() {
+            let code = output.status.code().unwrap_or(-1);
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(format!(
+                "install command {} {:?} failed with exit code {}{}",
+                command.program,
+                command.args,
+                code,
+                if stderr.is_empty() {
+                    "".to_string()
+                } else {
+                    format!(": {}", stderr)
+                }
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn resolve_probe_path(model_dir: &Path, path: &str) -> PathBuf {
+    let raw = PathBuf::from(path);
+    if raw.is_absolute() {
+        raw
+    } else {
+        model_dir.join(raw)
+    }
+}
+
+fn aggregate_dependency_state(
+    initial_state: DependencyState,
+    bindings: &[ModelDependencyBindingPlan],
+) -> DependencyState {
+    if initial_state != DependencyState::Ready {
+        return initial_state;
+    }
+
+    if bindings
+        .iter()
+        .any(|binding| binding.state == DependencyState::Failed)
+    {
+        return DependencyState::Failed;
+    }
+    if bindings
+        .iter()
+        .any(|binding| binding.state == DependencyState::ManualInterventionRequired)
+    {
+        return DependencyState::ManualInterventionRequired;
+    }
+    if bindings
+        .iter()
+        .any(|binding| binding.state == DependencyState::UnknownProfile)
+    {
+        return DependencyState::UnknownProfile;
+    }
+    if bindings
+        .iter()
+        .any(|binding| binding.state == DependencyState::ProfileConflict)
+    {
+        return DependencyState::ProfileConflict;
+    }
+    if bindings
+        .iter()
+        .any(|binding| binding.state == DependencyState::Missing)
+    {
+        return DependencyState::Missing;
+    }
+
+    DependencyState::Ready
+}
+
+fn dependency_state_summary(
+    state: &DependencyState,
+    bindings: &[ModelDependencyBindingPlan],
+) -> (Option<String>, Option<String>) {
+    match state {
+        DependencyState::Ready => (None, Some("All dependency bindings are ready".to_string())),
+        DependencyState::Missing => (
+            Some("missing_dependencies".to_string()),
+            Some(format!(
+                "{} dependency bindings are missing",
+                bindings
+                    .iter()
+                    .filter(|binding| binding.state == DependencyState::Missing)
+                    .count()
+            )),
+        ),
+        DependencyState::Failed => (
+            Some("dependency_install_failed".to_string()),
+            Some("One or more dependency bindings failed".to_string()),
+        ),
+        DependencyState::UnknownProfile => (
+            Some("unknown_profile".to_string()),
+            Some("One or more dependency profiles are unknown".to_string()),
+        ),
+        DependencyState::ManualInterventionRequired => (
+            Some("manual_intervention_required".to_string()),
+            Some("Dependency configuration requires manual intervention".to_string()),
+        ),
+        DependencyState::ProfileConflict => (
+            Some("profile_conflict".to_string()),
+            Some("Dependency profile conflict detected".to_string()),
+        ),
     }
 }
 
@@ -657,5 +1038,127 @@ mod tests {
             result.error_code.as_deref(),
             Some("required_binding_omitted")
         );
+    }
+
+    #[tokio::test]
+    async fn check_marks_binding_ready_when_probe_passes() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/probe-ready";
+        create_model(&library, model_id).await;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p-ready".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h-ready".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "probes": [
+                        { "kind": "command", "program": "true" }
+                    ]
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b-ready".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "p-ready".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let check = library
+            .check_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
+            .await
+            .unwrap();
+
+        assert_eq!(check.state, DependencyState::Ready);
+        assert_eq!(check.bindings.len(), 1);
+        assert_eq!(check.bindings[0].state, DependencyState::Ready);
+    }
+
+    #[tokio::test]
+    async fn install_executes_commands_and_rechecks_probes() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/install-flow";
+        create_model(&library, model_id).await;
+
+        let model_dir = library.library_root().join(model_id);
+        let marker = model_dir.join("deps").join("ok.flag");
+        assert!(!marker.exists());
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p-install".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h-install".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "probes": [
+                        { "kind": "path_exists", "path": "deps/ok.flag" }
+                    ],
+                    "install": {
+                        "commands": [
+                            { "program": "sh", "args": ["-c", "mkdir -p deps && touch deps/ok.flag"], "source_url": "https://example.com/install", "source_ref": "README.md" }
+                        ]
+                    }
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b-install".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "p-install".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let pre_check = library
+            .check_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
+            .await
+            .unwrap();
+        assert_eq!(pre_check.state, DependencyState::Missing);
+        assert_eq!(pre_check.bindings[0].state, DependencyState::Missing);
+
+        let install = library
+            .install_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
+            .await
+            .unwrap();
+        assert_eq!(install.state, DependencyState::Ready);
+        assert_eq!(install.attempted_binding_ids, vec!["b-install".to_string()]);
+        assert_eq!(install.installed_binding_ids, vec!["b-install".to_string()]);
+        assert!(marker.exists());
     }
 }

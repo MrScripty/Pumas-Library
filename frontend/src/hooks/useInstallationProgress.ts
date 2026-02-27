@@ -37,10 +37,11 @@ export function useInstallationProgress({
   const resolvedAppId = appId ?? 'comfyui';
   const [progress, setProgress] = useState<InstallationProgress | null>(externalProgress || null);
   const [cancellationNotice, setCancellationNotice] = useState<string | null>(null);
-  const [noticeTimeout, setNoticeTimeout] = useState<NodeJS.Timeout | null>(null);
-  const [pollInterval, setPollInterval] = useState<NodeJS.Timeout | null>(null);
   const [failedInstall, setFailedInstall] = useState<{ tag: string; log: string | null } | null>(null);
   const cancellationRef = useRef(false);
+  const noticeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const completionStopTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Sync external progress
   useEffect(() => {
@@ -61,13 +62,12 @@ export function useInstallationProgress({
 
   // Show cancellation notice
   const showCancellationNotice = () => {
-    if (noticeTimeout) {
-      clearTimeout(noticeTimeout);
+    if (noticeTimeoutRef.current) {
+      clearTimeout(noticeTimeoutRef.current);
     }
 
     setCancellationNotice('Installation canceled');
-    const timeoutId = setTimeout(() => setCancellationNotice(null), 3000);
-    setNoticeTimeout(timeoutId);
+    noticeTimeoutRef.current = setTimeout(() => setCancellationNotice(null), 3000);
   };
 
   // Poll for progress updates when installing (local polling)
@@ -78,9 +78,13 @@ export function useInstallationProgress({
     }
 
     if (!installingVersion) {
-      if (pollInterval) {
-        clearInterval(pollInterval);
-        setPollInterval(null);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (completionStopTimeoutRef.current) {
+        clearTimeout(completionStopTimeoutRef.current);
+        completionStopTimeoutRef.current = null;
       }
       setProgress(null);
       return;
@@ -93,11 +97,15 @@ export function useInstallationProgress({
 
         // Stop polling if installation is complete
         if (result?.completed_at) {
-          setTimeout(() => {
-            if (pollInterval) {
-              clearInterval(pollInterval);
-              setPollInterval(null);
+          if (completionStopTimeoutRef.current) {
+            clearTimeout(completionStopTimeoutRef.current);
+          }
+          completionStopTimeoutRef.current = setTimeout(() => {
+            if (pollIntervalRef.current) {
+              clearInterval(pollIntervalRef.current);
+              pollIntervalRef.current = null;
             }
+            completionStopTimeoutRef.current = null;
           }, 1000);
         }
 
@@ -120,22 +128,40 @@ export function useInstallationProgress({
     void fetchProgress();
 
     // Poll every second
-    const interval = setInterval(() => void fetchProgress(), 1000);
-    setPollInterval(interval);
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+    }
+    pollIntervalRef.current = setInterval(() => void fetchProgress(), 1000);
 
     return () => {
-      clearInterval(interval);
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (completionStopTimeoutRef.current) {
+        clearTimeout(completionStopTimeoutRef.current);
+        completionStopTimeoutRef.current = null;
+      }
     };
   }, [installingVersion, onRefreshProgress, resolvedAppId]);
 
-  // Cleanup notice timeout
+  // Cleanup timers
   useEffect(() => {
     return () => {
-      if (noticeTimeout) {
-        clearTimeout(noticeTimeout);
+      if (noticeTimeoutRef.current) {
+        clearTimeout(noticeTimeoutRef.current);
+        noticeTimeoutRef.current = null;
+      }
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+      if (completionStopTimeoutRef.current) {
+        clearTimeout(completionStopTimeoutRef.current);
+        completionStopTimeoutRef.current = null;
       }
     };
-  }, [noticeTimeout]);
+  }, []);
 
   return {
     progress,

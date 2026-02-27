@@ -255,8 +255,12 @@ impl ProcessLauncher {
                 path: Some(log_file.clone()),
                 source: Some(e),
             })?;
-
-            cmd.stdout(Stdio::from(file.try_clone().unwrap()));
+            let stdout_file = file.try_clone().map_err(|e| PumasError::Io {
+                message: "clone log file handle".to_string(),
+                path: Some(log_file.clone()),
+                source: Some(e),
+            })?;
+            cmd.stdout(Stdio::from(stdout_file));
             cmd.stderr(Stdio::from(file));
         } else {
             cmd.stdout(Stdio::null());
@@ -461,8 +465,12 @@ impl ProcessLauncher {
                 path: Some(log_file.clone()),
                 source: Some(e),
             })?;
-
-            cmd.stdout(Stdio::from(file.try_clone().unwrap()));
+            let stdout_file = file.try_clone().map_err(|e| PumasError::Io {
+                message: "clone log file handle".to_string(),
+                path: Some(log_file.clone()),
+                source: Some(e),
+            })?;
+            cmd.stdout(Stdio::from(stdout_file));
             cmd.stderr(Stdio::from(file));
         } else {
             cmd.stdout(Stdio::null());

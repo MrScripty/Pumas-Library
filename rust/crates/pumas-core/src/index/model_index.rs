@@ -52,6 +52,25 @@ pub struct TaskSignatureMapping {
     pub source: String,
 }
 
+/// Active architecture-based model-type resolver rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelTypeArchRule {
+    pub pattern: String,
+    pub match_style: String,
+    pub model_type: String,
+    pub priority: i64,
+}
+
+/// Active config.model_type-based resolver rule.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelTypeConfigRule {
+    pub config_model_type: String,
+    pub model_type: String,
+    pub priority: i64,
+}
+
 /// SQLite model index with FTS5 support.
 pub struct ModelIndex {
     db_path: PathBuf,
@@ -1093,6 +1112,65 @@ impl ModelIndex {
         Ok(())
     }
 
+    /// List active architecture/class model-type resolver rules.
+    pub fn list_active_model_type_arch_rules(&self) -> Result<Vec<ModelTypeArchRule>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT pattern, match_style, model_type, priority
+             FROM model_type_arch_rules
+             WHERE status = 'active'
+             ORDER BY priority ASC, pattern ASC, match_style ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ModelTypeArchRule {
+                pattern: row.get(0)?,
+                match_style: row.get(1)?,
+                model_type: row.get(2)?,
+                priority: row.get(3)?,
+            })
+        })?;
+
+        let mut rules = Vec::new();
+        for row in rows {
+            rules.push(row?);
+        }
+        Ok(rules)
+    }
+
+    /// List active config.model_type resolver rules.
+    pub fn list_active_model_type_config_rules(&self) -> Result<Vec<ModelTypeConfigRule>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT config_model_type, model_type, priority
+             FROM model_type_config_rules
+             WHERE status = 'active'
+             ORDER BY priority ASC, config_model_type ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            Ok(ModelTypeConfigRule {
+                config_model_type: row.get(0)?,
+                model_type: row.get(1)?,
+                priority: row.get(2)?,
+            })
+        })?;
+
+        let mut rules = Vec::new();
+        for row in rows {
+            rules.push(row?);
+        }
+        Ok(rules)
+    }
+
     /// Clear all models from the index.
     pub fn clear(&self) -> Result<()> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
@@ -1375,5 +1453,18 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_active_model_type_rules_are_seeded() {
+        let (index, _temp) = create_test_index();
+
+        let arch_rules = index.list_active_model_type_arch_rules().unwrap();
+        let config_rules = index.list_active_model_type_config_rules().unwrap();
+
+        assert!(!arch_rules.is_empty());
+        assert!(!config_rules.is_empty());
+        assert!(arch_rules.iter().any(|r| r.pattern == "ForCausalLM"));
+        assert!(config_rules.iter().any(|r| r.config_model_type == "llama"));
     }
 }

@@ -32,6 +32,7 @@ mod link_registry;
 mod mapper;
 pub mod merge;
 mod metadata_v2;
+mod model_type_resolver;
 mod naming;
 pub mod sharding;
 mod task_signature;
@@ -55,6 +56,7 @@ pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;
 pub use merge::{LibraryMerger, MergeResult};
 pub use metadata_v2::{normalize_review_reasons, push_review_reason, validate_metadata_v2};
+pub use model_type_resolver::{resolve_model_type_with_rules, ModelTypeResolution};
 pub use naming::normalize_name;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

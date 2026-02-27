@@ -14,7 +14,8 @@ use crate::model_library::types::{
     ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
 use crate::model_library::{
-    normalize_task_signature, push_review_reason, validate_metadata_v2, TaskNormalizationStatus,
+    normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
+    validate_metadata_v2, TaskNormalizationStatus,
 };
 use crate::models::default_inference_settings;
 use serde::Serialize;
@@ -24,46 +25,6 @@ use std::sync::Arc;
 
 /// Known dLLM (diffusion LLM) model types from config.json.
 pub(crate) const DLLM_MODEL_TYPES: &[&str] = &["llada", "mdlm", "dream", "mercury", "sedd"];
-
-/// Resolve model type using the priority chain.
-///
-/// Priority (highest to lowest):
-/// 1. `pipeline_tag` — raw HF tag from search/download (most authoritative)
-/// 2. `spec_model_type` — normalized type from download request / user
-/// 3. `config.json` — model_type + architectures fields on disk
-/// 4. `type_info` — file-based tensor/header detection (last resort)
-///
-/// Returns `(ModelType, Option<pipeline_tag_string>)`.
-pub(crate) fn resolve_model_type(
-    pipeline_tag: Option<&str>,
-    spec_model_type: Option<&str>,
-    model_dir: &Path,
-    type_info: &ModelTypeInfo,
-) -> (ModelType, Option<String>) {
-    // 1. Pipeline tag (most authoritative)
-    if let Some(tag) = pipeline_tag {
-        let mt = ModelType::from_pipeline_tag(tag);
-        if mt != ModelType::Unknown {
-            return (mt, Some(tag.to_string()));
-        }
-    }
-
-    // 2. Spec model_type (from download request / frontend)
-    if let Some(mt_str) = spec_model_type {
-        let mt: ModelType = mt_str.parse().unwrap_or(ModelType::Unknown);
-        if mt != ModelType::Unknown {
-            return (mt, pipeline_tag.map(String::from));
-        }
-    }
-
-    // 3. config.json inference
-    if let Some((mt, tag)) = infer_type_from_config_json(model_dir) {
-        return (mt, Some(tag));
-    }
-
-    // 4. File-based detection (last resort)
-    (type_info.model_type, pipeline_tag.map(String::from))
-}
 
 /// Infer model type from a directory's config.json.
 ///
@@ -867,28 +828,26 @@ impl ModelImporter {
         }
         let primary_file = primary_file.unwrap();
 
-        // Detect file type from primary file (lowest-priority fallback)
+        // Detect file type from primary file.
         let type_info = identify_model_type(&primary_file)?;
 
-        // Resolve model type using priority chain:
-        // 1. pipeline_tag (raw HF tag, most authoritative)
-        // 2. spec.model_type (normalized from frontend/download request)
-        // 3. config.json inference (model_type + architectures fields)
-        // 4. file-based detection (tensor analysis — last resort)
-        let resolved_model_type = resolve_model_type(
+        // Resolve model type from hard source signals via SQLite rule tables.
+        // Medium hints (pipeline_tag/spec.model_type) only adjust confidence.
+        let resolved_model_type = resolve_model_type_with_rules(
+            self.library.index(),
+            model_dir,
             spec.pipeline_tag.as_deref(),
             spec.model_type.as_deref(),
-            model_dir,
-            &type_info,
-        );
+        )?;
 
         // Detect dLLM subtype from config.json
-        let resolved_subtype =
-            if resolved_model_type.0 == ModelType::Llm && detect_dllm_from_config_json(model_dir) {
-                Some("dllm".to_string())
-            } else {
-                None
-            };
+        let resolved_subtype = if resolved_model_type.model_type == ModelType::Llm
+            && detect_dllm_from_config_json(model_dir)
+        {
+            Some("dllm".to_string())
+        } else {
+            None
+        };
 
         // Enumerate existing files (no copy needed)
         let files = self.enumerate_model_files(model_dir)?;
@@ -951,7 +910,7 @@ impl ModelImporter {
             family: spec.family.clone(),
             official_name: spec.official_name.clone(),
             repo_id: spec.repo_id.clone(),
-            model_type: Some(resolved_model_type.0.as_str().to_string()),
+            model_type: Some(resolved_model_type.model_type.as_str().to_string()),
             subtype: resolved_subtype,
             tags: None,
             security_acknowledged: Some(true),
@@ -969,7 +928,9 @@ impl ModelImporter {
         // Persist download provenance and HF metadata
         metadata.repo_id = spec.repo_id.clone();
         metadata.expected_files = spec.expected_files.clone();
-        metadata.pipeline_tag = spec.pipeline_tag.clone().or(resolved_model_type.1);
+        metadata.pipeline_tag = spec.pipeline_tag.clone();
+        metadata.model_type_resolution_source = Some(resolved_model_type.source.clone());
+        metadata.model_type_resolution_confidence = Some(resolved_model_type.confidence);
         metadata.metadata_needs_review = Some(false);
         metadata.review_reasons = Some(Vec::new());
         metadata.review_status = Some("not_required".to_string());
@@ -1028,12 +989,12 @@ impl ModelImporter {
             metadata.review_status = Some("pending".to_string());
         }
 
-        if resolved_model_type.0 == ModelType::Unknown {
-            metadata.model_type_resolution_source = Some("unresolved".to_string());
-            metadata.model_type_resolution_confidence = Some(0.0);
+        for reason in &resolved_model_type.review_reasons {
+            push_review_reason(&mut metadata, reason);
+        }
+        if !resolved_model_type.review_reasons.is_empty() {
             metadata.metadata_needs_review = Some(true);
             metadata.review_status = Some("pending".to_string());
-            push_review_reason(&mut metadata, "model-type-unresolved");
         }
 
         validate_metadata_v2(&metadata)?;
@@ -1526,7 +1487,7 @@ pub struct InPlaceImportSpec {
     /// Expected files for this model (from download manifest).
     /// Stored in metadata to enable incomplete model detection.
     pub expected_files: Option<Vec<String>>,
-    /// Raw HuggingFace pipeline_tag for authoritative type classification.
+    /// Raw HuggingFace pipeline_tag hint used as medium signal for confidence scoring.
     pub pipeline_tag: Option<String>,
 }
 

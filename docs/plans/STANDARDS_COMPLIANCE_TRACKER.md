@@ -59,7 +59,7 @@ Plan:
 ### WS-03: File Size Refactors (Priority P2)
 Goal: Move toward 500-line target from `CODING-STANDARDS.md`.
 
-Current baseline: 53 files exceed 500 lines.
+Current baseline: 52 files exceed 500 lines (down from 53 after splitting `pumas-rpc/src/handlers/models.rs`).
 
 Top offenders:
 1. `rust/crates/pumas-core/src/model_library/library.rs` (3437)
@@ -74,7 +74,7 @@ Top offenders:
 10. `rust/crates/pumas-core/src/model_library/hf_cache.rs` (983)
 
 Plan:
-- [ ] Prioritize decomposition of `pumas-rpc/src/handlers/models.rs` and high-churn `pumas-core` files.
+- [x] Prioritize decomposition of `pumas-rpc/src/handlers/models.rs` and high-churn `pumas-core` files.
 - [ ] Create per-file extraction plans before refactors to avoid behavior regressions.
 
 ### WS-04: TODO Hygiene (Priority P3)
@@ -95,3 +95,4 @@ Plan:
 5. Added `README.md` coverage for all currently missing frontend/electron `src` directories (WS-02 complete).
 6. Resolved TODO formatting non-compliance by adding owner context to remaining TODO.
 7. Added RPC unit tests for conflict-resolution parsing and `refresh_model_mappings` passthrough behavior.
+8. Split `pumas-rpc/src/handlers/models.rs` into focused submodules under `handlers/models/` (all under 500 lines).

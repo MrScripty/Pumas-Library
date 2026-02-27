@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
   FileText,
   Loader2,
   PlayCircle,
@@ -63,6 +64,7 @@ export const MigrationReportsPanel: React.FC = () => {
   const [isExecutingMigration, setIsExecutingMigration] = useState(false);
   const [isPruning, setIsPruning] = useState(false);
   const [deletingReportPath, setDeletingReportPath] = useState<string | null>(null);
+  const [openingPath, setOpeningPath] = useState<string | null>(null);
 
   const fetchReports = useCallback(async () => {
     if (!isAPIAvailable()) return;
@@ -211,6 +213,26 @@ export const MigrationReportsPanel: React.FC = () => {
       setIsPruning(false);
     }
   }, [fetchReports, keepLatest]);
+
+  const handleOpenPath = useCallback(async (path: string, label: string) => {
+    if (!isAPIAvailable()) return;
+
+    setOpeningPath(path);
+    try {
+      const result = await api.open_path(path);
+      if (!result.success) {
+        setMessage({
+          type: 'error',
+          text: result.error ?? `Failed to open ${label} report.`,
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to open migration report path', { error, path });
+      setMessage({ type: 'error', text: `Failed to open ${label} report.` });
+    } finally {
+      setOpeningPath(null);
+    }
+  }, []);
 
   const statusIcon = useMemo(() => {
     if (lastExecutionReport === null) return null;
@@ -383,14 +405,32 @@ export const MigrationReportsPanel: React.FC = () => {
                         {formatTimestamp(report.generated_at)}
                       </span>
                     </div>
-                    <button
-                      className="px-2 py-1 text-xs rounded border border-[hsl(var(--accent-error)/0.35)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--accent-error)/0.12)] hover:bg-[hsl(var(--accent-error)/0.2)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-                      onClick={() => void handleDeleteReport(report.json_report_path)}
-                      disabled={deletingReportPath === report.json_report_path}
-                    >
-                      <Trash2 className="w-3 h-3" />
-                      {deletingReportPath === report.json_report_path ? 'Deleting...' : 'Delete'}
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--launcher-border)/0.8)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--launcher-bg-secondary)/0.8)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
+                        onClick={() => void handleOpenPath(report.json_report_path, 'JSON')}
+                        disabled={openingPath === report.json_report_path}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        {openingPath === report.json_report_path ? 'Opening...' : 'Open JSON'}
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--launcher-border)/0.8)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--launcher-bg-secondary)/0.8)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
+                        onClick={() => void handleOpenPath(report.markdown_report_path, 'Markdown')}
+                        disabled={openingPath === report.markdown_report_path}
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        {openingPath === report.markdown_report_path ? 'Opening...' : 'Open MD'}
+                      </button>
+                      <button
+                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--accent-error)/0.35)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--accent-error)/0.12)] hover:bg-[hsl(var(--accent-error)/0.2)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
+                        onClick={() => void handleDeleteReport(report.json_report_path)}
+                        disabled={deletingReportPath === report.json_report_path}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        {deletingReportPath === report.json_report_path ? 'Deleting...' : 'Delete'}
+                      </button>
+                    </div>
                   </div>
                   <div className="mt-2 space-y-1 text-[11px] text-[hsl(var(--launcher-text-tertiary))]">
                     <div title={report.json_report_path}>JSON: {shortenPath(report.json_report_path)}</div>

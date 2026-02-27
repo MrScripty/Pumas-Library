@@ -46,6 +46,15 @@ pub struct ShortcutManager {
 }
 
 impl ShortcutManager {
+    /// Quote a single argument for .desktop Exec syntax.
+    ///
+    /// Desktop entries are not shell-evaluated, but quoted args still need
+    /// backslash/quote escaping so paths with spaces or quotes are preserved.
+    fn quote_desktop_exec_arg(arg: &str) -> String {
+        let escaped = arg.replace('\\', "\\\\").replace('"', "\\\"");
+        format!("\"{}\"", escaped)
+    }
+
     /// Create a new shortcut manager.
     ///
     /// # Arguments
@@ -215,11 +224,13 @@ impl ShortcutManager {
         })?;
 
         let desktop_path = self.apps_dir.join(format!("ComfyUI-{}.desktop", slug));
+        let launcher_script_arg =
+            Self::quote_desktop_exec_arg(launcher_script.to_string_lossy().as_ref());
 
         let entry = DesktopEntry::builder()
             .name(format!("ComfyUI {}", tag))
             .comment(format!("Launch ComfyUI {}", tag))
-            .exec(format!("bash \"{}\"", launcher_script.display()))
+            .exec(format!("bash {}", launcher_script_arg))
             .icon(icon_name)
             .terminal(false)
             .build();
@@ -244,12 +255,14 @@ impl ShortcutManager {
         })?;
 
         let desktop_path = self.desktop_dir.join(format!("ComfyUI-{}.desktop", slug));
+        let launcher_script_arg =
+            Self::quote_desktop_exec_arg(launcher_script.to_string_lossy().as_ref());
 
         // Desktop shortcut just shows "ComfyUI" (icon already has version)
         let entry = DesktopEntry::builder()
             .name("ComfyUI")
             .comment(format!("Launch ComfyUI {}", tag))
-            .exec(format!("bash \"{}\"", launcher_script.display()))
+            .exec(format!("bash {}", launcher_script_arg))
             .icon(icon_name)
             .terminal(false)
             .build();
@@ -389,6 +402,13 @@ mod tests {
         assert_eq!(state.tag, "v1.0.0");
         assert!(!state.menu);
         assert!(!state.desktop);
+    }
+
+    #[test]
+    fn test_quote_desktop_exec_arg() {
+        let quoted =
+            ShortcutManager::quote_desktop_exec_arg(r#"/tmp/some "quoted" path\with\slashes"#);
+        assert_eq!(quoted, r#""/tmp/some \"quoted\" path\\with\\slashes""#);
     }
 
     #[test]

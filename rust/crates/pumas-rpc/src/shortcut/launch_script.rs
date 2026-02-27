@@ -22,6 +22,15 @@ pub struct LaunchScriptGenerator {
 }
 
 impl LaunchScriptGenerator {
+    /// Escape a value for safe interpolation inside bash double quotes.
+    fn escape_bash_double_quoted(value: &str) -> String {
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+    }
+
     /// Create a new launch script generator.
     ///
     /// # Arguments
@@ -95,8 +104,13 @@ impl LaunchScriptGenerator {
         slug: &str,
         profile_dir: &Path,
     ) -> String {
-        let version_dir_str = version_dir.display();
-        let profile_dir_str = profile_dir.display();
+        let version_dir_string = version_dir.display().to_string();
+        let profile_dir_string = profile_dir.display().to_string();
+        let version_dir_str = Self::escape_bash_double_quoted(&version_dir_string);
+        let profile_dir_str = Self::escape_bash_double_quoted(&profile_dir_string);
+        let comfyui_url = Self::escape_bash_double_quoted(AppId::ComfyUI.default_base_url());
+        let window_class = Self::escape_bash_double_quoted(&format!("ComfyUI-{}", slug));
+        let escaped_tag = Self::escape_bash_double_quoted(tag);
 
         format!(
             r#"#!/bin/bash
@@ -107,7 +121,7 @@ VENV_PATH="$VERSION_DIR/venv"
 MAIN_PY="$VERSION_DIR/main.py"
 PID_FILE="$VERSION_DIR/comfyui.pid"
 URL="{comfyui_url}"
-WINDOW_CLASS="ComfyUI-{slug}"
+WINDOW_CLASS="{window_class}"
 PROFILE_DIR="{profile_dir_str}"
 SERVER_START_DELAY={delay}
 SERVER_PID=""
@@ -187,11 +201,11 @@ open_app
 wait $SERVER_PID
 "#,
             version_dir_str = version_dir_str,
-            slug = slug,
             profile_dir_str = profile_dir_str,
             delay = self.server_start_delay,
-            tag = tag,
-            comfyui_url = AppId::ComfyUI.default_base_url(),
+            tag = escaped_tag,
+            window_class = window_class,
+            comfyui_url = comfyui_url,
         )
     }
 
@@ -267,5 +281,11 @@ mod tests {
         generator.remove("v1-0-0").unwrap();
 
         assert!(!script_path.exists());
+    }
+
+    #[test]
+    fn test_escape_bash_double_quoted() {
+        let escaped = LaunchScriptGenerator::escape_bash_double_quoted(r#"a"b$c`d\e"#);
+        assert_eq!(escaped, r#"a\"b\$c\`d\\e"#);
     }
 }

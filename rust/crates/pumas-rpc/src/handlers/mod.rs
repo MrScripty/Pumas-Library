@@ -5,9 +5,9 @@ mod custom_nodes;
 mod links;
 mod models;
 mod ollama;
-mod shared;
 mod plugins;
 mod process;
+mod shared;
 mod shortcuts;
 mod status;
 mod torch;
@@ -242,6 +242,9 @@ async fn dispatch_method(
         }
         "check_model_dependencies" => models::check_model_dependencies(state, params).await,
         "install_model_dependencies" => models::install_model_dependencies(state, params).await,
+        "audit_dependency_pin_compliance" => {
+            models::audit_dependency_pin_compliance(state, params).await
+        }
         "list_models_needing_review" => models::list_models_needing_review(state, params).await,
         "submit_model_review" => models::submit_model_review(state, params).await,
         "reset_model_review" => models::reset_model_review(state, params).await,

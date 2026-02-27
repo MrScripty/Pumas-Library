@@ -105,6 +105,17 @@ pub async fn install_model_dependencies(
     }))
 }
 
+pub async fn audit_dependency_pin_compliance(
+    state: &AppState,
+    _params: &Value,
+) -> pumas_library::Result<Value> {
+    let report = state.api.audit_dependency_pin_compliance().await?;
+    Ok(json!({
+        "success": true,
+        "report": report
+    }))
+}
+
 pub async fn list_models_needing_review(
     state: &AppState,
     params: &Value,

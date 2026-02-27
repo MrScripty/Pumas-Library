@@ -122,6 +122,48 @@ pub struct ModelDependencyInstallResult {
     pub bindings: Vec<ModelDependencyBindingPlan>,
 }
 
+/// Per-binding audit finding for dependency pin compliance.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct DependencyPinAuditBindingIssue {
+    pub model_id: String,
+    pub binding_id: String,
+    pub profile_id: String,
+    pub profile_version: i64,
+    pub binding_kind: String,
+    pub backend_key: Option<String>,
+    pub error_code: String,
+    pub message: Option<String>,
+    pub missing_pins: Vec<String>,
+    pub required_pins: Vec<ModelDependencyRequiredPin>,
+}
+
+/// Per-profile audit rollup for missing required pins.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct DependencyPinAuditProfileIssue {
+    pub profile_id: String,
+    pub profile_version: i64,
+    pub missing_pins: Vec<String>,
+    pub suggested_backfill_pins: Vec<String>,
+    pub affected_binding_ids: Vec<String>,
+}
+
+/// Report of dependency pin compliance across active bindings.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct DependencyPinAuditReport {
+    pub generated_at: String,
+    pub total_models_scanned: u32,
+    pub total_bindings_scanned: u32,
+    pub issue_count: u32,
+    pub binding_issues: Vec<DependencyPinAuditBindingIssue>,
+    pub profile_issues: Vec<DependencyPinAuditProfileIssue>,
+}
+
 impl ModelLibrary {
     /// Return model dependency profiles/bindings for model + context.
     pub async fn get_model_dependency_profiles(
@@ -505,6 +547,116 @@ impl ModelLibrary {
             skipped_binding_ids: skipped,
             missing_pins: aggregate_missing_required_pins(&bindings),
             bindings,
+        })
+    }
+
+    /// Audit dependency pin compliance for all active bindings.
+    ///
+    /// Returns deterministic findings for unpinned dependency profiles and
+    /// modality-resolution ambiguity before/after enforcement rollout.
+    pub async fn audit_dependency_pin_compliance(&self) -> Result<DependencyPinAuditReport> {
+        let models = self.list_models().await?;
+        let mut binding_issues = Vec::new();
+        let mut profile_issues: BTreeMap<(String, i64), DependencyPinAuditProfileIssue> =
+            BTreeMap::new();
+        let mut total_bindings_scanned = 0_u32;
+
+        for model in &models {
+            let model_metadata = self.get_effective_metadata(&model.id)?;
+            let bindings = self
+                .index()
+                .list_active_model_dependency_bindings(&model.id, None)?;
+            for binding in bindings {
+                total_bindings_scanned += 1;
+                let Some(spec_json) = binding.spec_json.as_deref() else {
+                    continue;
+                };
+                let environment_kind = binding
+                    .environment_kind
+                    .as_deref()
+                    .unwrap_or("unknown")
+                    .to_string();
+
+                let pin_eval = evaluate_binding_pin_requirements(
+                    &binding.binding_id,
+                    &binding.binding_kind,
+                    binding.backend_key.as_deref(),
+                    &binding.profile_id,
+                    binding.profile_version,
+                    &environment_kind,
+                    spec_json,
+                    model_metadata.as_ref(),
+                );
+                let Some(error_code) = pin_eval.error_code.clone() else {
+                    continue;
+                };
+
+                binding_issues.push(DependencyPinAuditBindingIssue {
+                    model_id: model.id.clone(),
+                    binding_id: binding.binding_id.clone(),
+                    profile_id: binding.profile_id.clone(),
+                    profile_version: binding.profile_version,
+                    binding_kind: binding.binding_kind.clone(),
+                    backend_key: binding.backend_key.clone(),
+                    error_code: error_code.clone(),
+                    message: pin_eval.message.clone(),
+                    missing_pins: pin_eval.missing_pins.clone(),
+                    required_pins: pin_eval.required_pins.clone(),
+                });
+
+                if error_code == PIN_ERROR_UNPINNED_DEPENDENCY && !pin_eval.missing_pins.is_empty()
+                {
+                    let key = (binding.profile_id.clone(), binding.profile_version);
+                    let issue = profile_issues.entry(key).or_insert_with(|| {
+                        DependencyPinAuditProfileIssue {
+                            profile_id: binding.profile_id.clone(),
+                            profile_version: binding.profile_version,
+                            missing_pins: Vec::new(),
+                            suggested_backfill_pins: Vec::new(),
+                            affected_binding_ids: Vec::new(),
+                        }
+                    });
+                    for pin in &pin_eval.missing_pins {
+                        if !issue.missing_pins.contains(pin) {
+                            issue.missing_pins.push(pin.clone());
+                        }
+                        let suggested = format!("{}==<pin-me>", pin);
+                        if !issue.suggested_backfill_pins.contains(&suggested) {
+                            issue.suggested_backfill_pins.push(suggested);
+                        }
+                    }
+                    if !issue.affected_binding_ids.contains(&binding.binding_id) {
+                        issue.affected_binding_ids.push(binding.binding_id.clone());
+                    }
+                }
+            }
+        }
+
+        binding_issues.sort_by(|a, b| {
+            a.model_id
+                .cmp(&b.model_id)
+                .then_with(|| a.binding_id.cmp(&b.binding_id))
+        });
+
+        let mut profile_issue_rows = profile_issues.into_values().collect::<Vec<_>>();
+        for issue in &mut profile_issue_rows {
+            issue.missing_pins.sort();
+            issue.suggested_backfill_pins.sort();
+            issue.affected_binding_ids.sort();
+        }
+        profile_issue_rows.sort_by(|a, b| {
+            a.profile_id
+                .cmp(&b.profile_id)
+                .then_with(|| a.profile_version.cmp(&b.profile_version))
+        });
+
+        Ok(DependencyPinAuditReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            total_models_scanned: models.len() as u32,
+            total_bindings_scanned,
+            issue_count: binding_issues.len() as u32,
+            binding_issues,
+            profile_issues: profile_issue_rows,
         })
     }
 }
@@ -1869,6 +2021,63 @@ mod tests {
                 "backend_required".to_string(),
                 "profile_policy_required".to_string()
             ]
+        );
+    }
+
+    #[tokio::test]
+    async fn audit_reports_unpinned_bindings_and_profile_backfill_suggestions() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/audit-unpinned";
+        create_model_with_modalities(
+            &library,
+            model_id,
+            vec!["text"],
+            vec!["text"],
+            Some("text-generation"),
+        )
+        .await;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "audit-pt".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h-audit-1".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("xformers", "==0.0.30"),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b-audit-1".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "audit-pt".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("pytorch".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let report = library.audit_dependency_pin_compliance().await.unwrap();
+        assert_eq!(report.total_models_scanned, 1);
+        assert_eq!(report.total_bindings_scanned, 1);
+        assert_eq!(report.issue_count, 1);
+        assert_eq!(report.binding_issues.len(), 1);
+        assert_eq!(report.binding_issues[0].error_code, "unpinned_dependency");
+        assert_eq!(
+            report.profile_issues[0].suggested_backfill_pins,
+            vec!["torch==<pin-me>".to_string()]
         );
     }
 }

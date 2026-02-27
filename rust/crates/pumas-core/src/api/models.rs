@@ -40,7 +40,12 @@ impl PumasApi {
     /// Get model-library status information for GUI polling.
     pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
         let model_count = self.primary().model_library.list_models().await?.len() as u32;
-        let pending_lookups = self.primary().model_library.get_pending_lookups().await?.len() as u32;
+        let pending_lookups = self
+            .primary()
+            .model_library
+            .get_pending_lookups()
+            .await?
+            .len() as u32;
 
         Ok(models::LibraryStatusResponse {
             success: true,
@@ -227,6 +232,16 @@ impl PumasApi {
                 backend_key,
                 selected_binding_ids,
             )
+            .await
+    }
+
+    /// Audit dependency pin compliance across active model bindings.
+    pub async fn audit_dependency_pin_compliance(
+        &self,
+    ) -> Result<model_library::DependencyPinAuditReport> {
+        self.primary()
+            .model_library
+            .audit_dependency_pin_compliance()
             .await
     }
 

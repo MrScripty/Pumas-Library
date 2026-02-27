@@ -42,6 +42,7 @@ mod types;
 mod watcher;
 
 pub use dependencies::{
+    DependencyPinAuditBindingIssue, DependencyPinAuditProfileIssue, DependencyPinAuditReport,
     DependencyState, ModelDependencyBindingPlan, ModelDependencyCheckResult,
     ModelDependencyInstallResult, ModelDependencyPinSummary, ModelDependencyPlan,
     ModelDependencyRequiredPin,

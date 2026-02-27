@@ -148,6 +148,16 @@ pub struct ModelMetadataHistoryRecord {
     pub created_at: String,
 }
 
+/// SQLite foreign-key violation row from `PRAGMA foreign_key_check`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ForeignKeyViolation {
+    pub table: String,
+    pub rowid: Option<i64>,
+    pub parent: String,
+    pub fk_index: i64,
+}
+
 /// SQLite model index with FTS5 support.
 pub struct ModelIndex {
     db_path: PathBuf,
@@ -962,6 +972,30 @@ impl ModelIndex {
         let count: usize = conn.query_row("SELECT COUNT(*) FROM models", [], |row| row.get(0))?;
 
         Ok(count)
+    }
+
+    /// List SQLite foreign-key violations for integrity checks.
+    pub fn list_foreign_key_violations(&self) -> Result<Vec<ForeignKeyViolation>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare("PRAGMA foreign_key_check")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ForeignKeyViolation {
+                table: row.get(0)?,
+                rowid: row.get(1)?,
+                parent: row.get(2)?,
+                fk_index: row.get(3)?,
+            })
+        })?;
+
+        let mut violations = Vec::new();
+        for row in rows {
+            violations.push(row?);
+        }
+        Ok(violations)
     }
 
     /// Rebuild the FTS5 index.
@@ -2211,6 +2245,48 @@ mod tests {
             .unwrap();
 
         assert_eq!(rows.len(), 9);
+    }
+
+    #[test]
+    fn test_list_foreign_key_violations_returns_empty_when_clean() {
+        let (index, _temp) = create_test_index();
+        let violations = index.list_foreign_key_violations().unwrap();
+        assert!(violations.is_empty());
+    }
+
+    #[test]
+    fn test_list_foreign_key_violations_detects_rows() {
+        let (index, _temp) = create_test_index();
+        let conn = index.conn.lock().unwrap();
+        conn.execute("PRAGMA foreign_keys = OFF", []).unwrap();
+        conn.execute(
+            "INSERT INTO model_dependency_bindings (
+                binding_id, model_id, profile_id, profile_version, binding_kind,
+                backend_key, platform_selector, status, priority, attached_by, attached_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, NULL, ?6, ?7, NULL, strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+            params![
+                "b1",
+                "missing-model",
+                "missing-profile",
+                1_i64,
+                "required_core",
+                "active",
+                10_i64
+            ],
+        )
+        .unwrap();
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+        drop(conn);
+
+        let violations = index.list_foreign_key_violations().unwrap();
+        assert_eq!(violations.len(), 2);
+        assert!(violations
+            .iter()
+            .any(|violation| violation.table == "model_dependency_bindings"));
+        assert!(violations
+            .iter()
+            .all(|violation| violation.parent == "models"
+                || violation.parent == "dependency_profiles"));
     }
 
     #[test]

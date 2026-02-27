@@ -392,6 +392,17 @@ async fn dispatch_method(
         "list_models_needing_review" => models::list_models_needing_review(state, params).await,
         "submit_model_review" => models::submit_model_review(state, params).await,
         "reset_model_review" => models::reset_model_review(state, params).await,
+        "generate_model_migration_dry_run_report" => {
+            models::generate_model_migration_dry_run_report(state, params).await
+        }
+        "execute_model_migration" => models::execute_model_migration(state, params).await,
+        "list_model_migration_reports" => models::list_model_migration_reports(state, params).await,
+        "delete_model_migration_report" => {
+            models::delete_model_migration_report(state, params).await
+        }
+        "prune_model_migration_reports" => {
+            models::prune_model_migration_reports(state, params).await
+        }
 
         // HuggingFace Authentication
         "set_hf_token" => models::set_hf_token(state, params).await,

@@ -24,7 +24,7 @@ use crate::model_library::{
 };
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
@@ -38,6 +38,12 @@ const METADATA_FILENAME: &str = "metadata.json";
 const OVERRIDES_FILENAME: &str = "overrides.json";
 /// SQLite database filename.
 const DB_FILENAME: &str = "models.db";
+/// Checkpoint file used by metadata v2 migration runner.
+const MIGRATION_CHECKPOINT_FILENAME: &str = ".metadata_v2_migration_checkpoint.json";
+/// Directory for migration report artifacts.
+const MIGRATION_REPORTS_DIR: &str = "migration-reports";
+/// Index file for generated migration report artifacts.
+const MIGRATION_REPORT_INDEX_FILENAME: &str = "index.json";
 
 /// The core model library registry.
 ///
@@ -1241,6 +1247,537 @@ impl ModelLibrary {
 
         Ok(result)
     }
+
+    /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
+    ///
+    /// The report evaluates each model's resolved classification, target canonical path,
+    /// move feasibility, and dependency/license findings without changing files on disk.
+    pub fn generate_migration_dry_run_report(&self) -> Result<MigrationDryRunReport> {
+        tracing::info!("Generating model library migration dry-run report");
+
+        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let mut report = MigrationDryRunReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            total_models: model_dirs.len(),
+            ..Default::default()
+        };
+
+        for model_dir in model_dirs {
+            let row = match self.build_migration_dry_run_item(&model_dir) {
+                Ok(item) => item,
+                Err(err) => {
+                    report.error_count += 1;
+                    MigrationDryRunItem {
+                        model_id: self
+                            .get_model_id(&model_dir)
+                            .unwrap_or_else(|| model_dir.display().to_string()),
+                        target_model_id: None,
+                        current_path: model_dir.display().to_string(),
+                        target_path: None,
+                        action: "error".to_string(),
+                        current_model_type: None,
+                        resolved_model_type: None,
+                        resolver_source: None,
+                        resolver_confidence: None,
+                        resolver_review_reasons: vec![],
+                        metadata_needs_review: false,
+                        review_reasons: vec![],
+                        license_status: None,
+                        declared_dependency_binding_count: 0,
+                        active_dependency_binding_count: 0,
+                        findings: vec![],
+                        error: Some(err.to_string()),
+                    }
+                }
+            };
+
+            match row.action.as_str() {
+                "move" => report.move_candidates += 1,
+                "blocked_collision" => report.collision_count += 1,
+                "keep" => report.keep_candidates += 1,
+                "error" => { /* counted above */ }
+                _ => {}
+            }
+            if !row.findings.is_empty() {
+                report.models_with_findings += 1;
+            }
+            report.items.push(row);
+        }
+
+        Ok(report)
+    }
+
+    /// Generate a migration dry-run report and persist JSON/Markdown artifacts.
+    pub fn generate_migration_dry_run_report_with_artifacts(
+        &self,
+    ) -> Result<MigrationDryRunReport> {
+        let mut report = self.generate_migration_dry_run_report()?;
+        let (json_report_path, markdown_report_path) =
+            migration_report_paths(&self.library_root, "dry-run");
+        report.machine_readable_report_path = Some(json_report_path.display().to_string());
+        report.human_readable_report_path = Some(markdown_report_path.display().to_string());
+        write_migration_dry_run_reports(&self.library_root, &report)?;
+        append_migration_report_index_entry(
+            &self.library_root,
+            MigrationReportIndexEntry {
+                generated_at: report.generated_at.clone(),
+                report_kind: "dry_run".to_string(),
+                json_report_path: json_report_path.display().to_string(),
+                markdown_report_path: markdown_report_path.display().to_string(),
+            },
+        )?;
+        Ok(report)
+    }
+
+    /// List generated migration report artifacts from index.json (newest-first).
+    pub fn list_migration_reports(&self) -> Result<Vec<MigrationReportArtifact>> {
+        let index_path = migration_report_index_path(&self.library_root);
+        let index: MigrationReportIndex = atomic_read_json(&index_path)?.unwrap_or_default();
+        let mut reports = index
+            .entries
+            .into_iter()
+            .map(|entry| MigrationReportArtifact {
+                generated_at: entry.generated_at,
+                report_kind: entry.report_kind,
+                json_report_path: entry.json_report_path,
+                markdown_report_path: entry.markdown_report_path,
+            })
+            .collect::<Vec<_>>();
+
+        // RFC3339 timestamps sort lexicographically in chronological order.
+        reports.sort_by(|a, b| b.generated_at.cmp(&a.generated_at));
+        Ok(reports)
+    }
+
+    /// Delete one migration report (JSON + Markdown artifacts) and remove its index entry.
+    ///
+    /// `report_path` may match either the JSON path or Markdown path from the index entry.
+    pub fn delete_migration_report(&self, report_path: &str) -> Result<bool> {
+        let mut index = load_migration_report_index(&self.library_root)?;
+        let Some(position) = index.entries.iter().position(|entry| {
+            entry.json_report_path == report_path || entry.markdown_report_path == report_path
+        }) else {
+            return Ok(false);
+        };
+
+        let removed = index.entries.remove(position);
+        remove_migration_report_artifact_files(&self.library_root, &removed)?;
+        save_migration_report_index(&self.library_root, &index)?;
+        Ok(true)
+    }
+
+    /// Prune migration report history to `keep_latest` entries (newest-first retention).
+    ///
+    /// Removes stale artifact files and rewrites `migration-reports/index.json`.
+    pub fn prune_migration_reports(&self, keep_latest: usize) -> Result<usize> {
+        let mut index = load_migration_report_index(&self.library_root)?;
+        if index.entries.len() <= keep_latest {
+            return Ok(0);
+        }
+
+        index
+            .entries
+            .sort_by(|a, b| b.generated_at.cmp(&a.generated_at));
+        let removed_entries = index.entries.split_off(keep_latest);
+        let removed_count = removed_entries.len();
+
+        for entry in &removed_entries {
+            remove_migration_report_artifact_files(&self.library_root, entry)?;
+        }
+        save_migration_report_index(&self.library_root, &index)?;
+
+        Ok(removed_count)
+    }
+
+    fn build_migration_dry_run_item(&self, model_dir: &Path) -> Result<MigrationDryRunItem> {
+        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
+            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
+        })?;
+
+        let metadata = self
+            .load_metadata(model_dir)?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.clone(),
+            })?;
+
+        let current_type = metadata.model_type.clone();
+        let current_family = metadata
+            .family
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let cleaned_name = metadata.cleaned_name.clone().unwrap_or_else(|| {
+            model_id
+                .rsplit('/')
+                .next()
+                .unwrap_or(model_id.as_str())
+                .to_string()
+        });
+
+        let resolved = resolve_model_type_with_rules(
+            self.index(),
+            model_dir,
+            metadata.pipeline_tag.as_deref(),
+            None,
+        )?;
+        let resolved_type = resolved.model_type.as_str().to_string();
+
+        let primary_file = find_primary_model_file(model_dir);
+        let file_type_info = primary_file
+            .as_ref()
+            .and_then(|f| identify_model_type(f).ok());
+        let resolved_family = file_type_info
+            .as_ref()
+            .and_then(|ti| ti.family.as_ref())
+            .map(|f| f.as_str().to_string())
+            .unwrap_or(current_family);
+
+        let target_dir = self.build_model_path(&resolved_type, &resolved_family, &cleaned_name);
+        let target_model_id = format!(
+            "{}/{}/{}",
+            normalize_name(&resolved_type),
+            normalize_name(&resolved_family),
+            normalize_name(&cleaned_name)
+        );
+        let action = if target_dir == model_dir {
+            "keep"
+        } else if target_dir.exists() {
+            "blocked_collision"
+        } else {
+            "move"
+        };
+
+        let metadata_needs_review = metadata.metadata_needs_review.unwrap_or(false);
+        let review_reasons = metadata.review_reasons.clone().unwrap_or_default();
+        let declared_dependency_binding_count = metadata
+            .dependency_bindings
+            .as_ref()
+            .map(|bindings| bindings.len())
+            .unwrap_or(0);
+        let active_dependency_binding_count = self
+            .index()
+            .list_active_model_dependency_bindings(&model_id, None)?
+            .len();
+
+        let mut findings = Vec::new();
+        if metadata_needs_review {
+            findings.push("metadata_needs_review".to_string());
+        }
+        if !review_reasons.is_empty() {
+            findings.push("review_reasons_present".to_string());
+        }
+        if license_status_unresolved(metadata.license_status.as_deref()) {
+            findings.push("license_unresolved".to_string());
+        }
+        if declared_dependency_binding_count > 0 && active_dependency_binding_count == 0 {
+            findings.push("declared_dependency_bindings_missing_active_rows".to_string());
+        }
+        if declared_dependency_binding_count == 0 && active_dependency_binding_count > 0 {
+            findings.push("active_dependency_bindings_without_declared_refs".to_string());
+        }
+
+        Ok(MigrationDryRunItem {
+            model_id,
+            target_model_id: Some(target_model_id),
+            current_path: model_dir.display().to_string(),
+            target_path: Some(target_dir.display().to_string()),
+            action: action.to_string(),
+            current_model_type: current_type,
+            resolved_model_type: Some(resolved_type),
+            resolver_source: Some(resolved.source),
+            resolver_confidence: Some(resolved.confidence),
+            resolver_review_reasons: resolved.review_reasons,
+            metadata_needs_review,
+            review_reasons,
+            license_status: metadata.license_status.clone(),
+            declared_dependency_binding_count,
+            active_dependency_binding_count,
+            findings,
+            error: None,
+        })
+    }
+
+    /// Execute metadata v2 migration moves with checkpoint/resume support.
+    ///
+    /// If a checkpoint file exists, execution resumes from that state.
+    /// Otherwise, a new dry-run plan is materialized into a checkpoint and then executed.
+    pub async fn execute_migration_with_checkpoint(&self) -> Result<MigrationExecutionReport> {
+        let checkpoint_path = self.library_root.join(MIGRATION_CHECKPOINT_FILENAME);
+        let mut resumed_from_checkpoint = false;
+        let mut checkpoint_state = if checkpoint_path.exists() {
+            resumed_from_checkpoint = true;
+            load_migration_checkpoint(&checkpoint_path)?.ok_or_else(|| {
+                PumasError::Other(format!(
+                    "Migration checkpoint file exists but could not be loaded: {}",
+                    checkpoint_path.display()
+                ))
+            })?
+        } else {
+            let dry_run = self.generate_migration_dry_run_report()?;
+            let pending_moves = dry_run
+                .items
+                .into_iter()
+                .filter(|item| item.action == "move")
+                .filter_map(|item| {
+                    Some(MigrationPlannedMove {
+                        model_id: item.model_id,
+                        target_model_id: item.target_model_id?,
+                        current_path: item.current_path,
+                        target_path: item.target_path?,
+                    })
+                })
+                .collect::<Vec<_>>();
+
+            let initialized = MigrationCheckpointState {
+                created_at: chrono::Utc::now().to_rfc3339(),
+                updated_at: chrono::Utc::now().to_rfc3339(),
+                pending_moves,
+                completed_results: vec![],
+            };
+            save_migration_checkpoint(&checkpoint_path, &initialized)?;
+            initialized
+        };
+
+        let planned_move_count =
+            checkpoint_state.pending_moves.len() + checkpoint_state.completed_results.len();
+        while !checkpoint_state.pending_moves.is_empty() {
+            let planned = checkpoint_state.pending_moves.remove(0);
+            let result = self.execute_planned_migration_move(&planned).await;
+            checkpoint_state.completed_results.push(result);
+            checkpoint_state.updated_at = chrono::Utc::now().to_rfc3339();
+            save_migration_checkpoint(&checkpoint_path, &checkpoint_state)?;
+        }
+
+        let mut report = MigrationExecutionReport {
+            generated_at: checkpoint_state.created_at.clone(),
+            completed_at: Some(chrono::Utc::now().to_rfc3339()),
+            resumed_from_checkpoint,
+            checkpoint_path: checkpoint_path.display().to_string(),
+            planned_move_count,
+            ..Default::default()
+        };
+        report.results = checkpoint_state.completed_results.clone();
+        for item in &report.results {
+            match item.action.as_str() {
+                "moved" | "already_migrated" => report.completed_move_count += 1,
+                "blocked_collision" | "missing_source" => report.skipped_move_count += 1,
+                _ => report.error_count += 1,
+            }
+        }
+
+        report.reindexed_model_count = self.rebuild_index().await?;
+        report.index_model_count = self.index.count()?;
+        report.referential_integrity_errors = self.validate_post_migration_integrity()?;
+        report.referential_integrity_ok = report.referential_integrity_errors.is_empty();
+        if !report.referential_integrity_ok {
+            report.error_count += report.referential_integrity_errors.len();
+        }
+
+        if checkpoint_state.pending_moves.is_empty() {
+            let _ = std::fs::remove_file(&checkpoint_path);
+        } else {
+            save_migration_checkpoint(&checkpoint_path, &checkpoint_state)?;
+        }
+
+        let (json_report_path, markdown_report_path) =
+            migration_report_paths(&self.library_root, "execution");
+        report.machine_readable_report_path = Some(json_report_path.display().to_string());
+        report.human_readable_report_path = Some(markdown_report_path.display().to_string());
+        write_migration_execution_reports(&self.library_root, &report)?;
+        append_migration_report_index_entry(
+            &self.library_root,
+            MigrationReportIndexEntry {
+                generated_at: report.generated_at.clone(),
+                report_kind: "execution".to_string(),
+                json_report_path: json_report_path.display().to_string(),
+                markdown_report_path: markdown_report_path.display().to_string(),
+            },
+        )?;
+
+        Ok(report)
+    }
+
+    async fn execute_planned_migration_move(
+        &self,
+        planned: &MigrationPlannedMove,
+    ) -> MigrationExecutionItem {
+        let source_dir = self.library_root.join(&planned.model_id);
+        let target_dir = self.library_root.join(&planned.target_model_id);
+
+        if !source_dir.exists() {
+            if target_dir.exists() {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "already_migrated".to_string(),
+                    error: None,
+                };
+            }
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "missing_source".to_string(),
+                error: Some(format!(
+                    "Source directory not found: {}",
+                    source_dir.display()
+                )),
+            };
+        }
+
+        if target_dir.exists() {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "blocked_collision".to_string(),
+                error: Some(format!("Target already exists: {}", target_dir.display())),
+            };
+        }
+
+        let mut metadata = match self.load_metadata(&source_dir) {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some("metadata.json missing from source model directory".to_string()),
+                };
+            }
+            Err(err) => {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+
+        metadata.model_id = Some(planned.target_model_id.clone());
+        apply_target_identity_to_metadata(&mut metadata, &planned.target_model_id);
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        if let Err(err) = validate_metadata_v2_with_index(&metadata, self.index()) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(err.to_string()),
+            };
+        }
+
+        if let Some(parent) = target_dir.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(format!(
+                        "Failed to create target parent directory {}: {}",
+                        parent.display(),
+                        err
+                    )),
+                };
+            }
+        }
+
+        if let Err(err) = std::fs::rename(&source_dir, &target_dir) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Failed to move {} -> {}: {}",
+                    source_dir.display(),
+                    target_dir.display(),
+                    err
+                )),
+            };
+        }
+
+        if let Err(err) = self.save_metadata(&target_dir, &metadata).await {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Moved directory but failed to save metadata: {}",
+                    err
+                )),
+            };
+        }
+
+        let _ = self.index.delete(&planned.model_id);
+        if let Err(err) = self.index_model_dir(&target_dir).await {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Moved directory but failed to re-index model: {}",
+                    err
+                )),
+            };
+        }
+
+        cleanup_empty_parent_dirs_after_move(&source_dir, &self.library_root);
+
+        MigrationExecutionItem {
+            model_id: planned.model_id.clone(),
+            target_model_id: planned.target_model_id.clone(),
+            action: "moved".to_string(),
+            error: None,
+        }
+    }
+
+    fn validate_post_migration_integrity(&self) -> Result<Vec<String>> {
+        let mut errors = Vec::new();
+
+        for violation in self.index.list_foreign_key_violations()? {
+            errors.push(format!(
+                "foreign key violation: table={} parent={} fk_index={} rowid={}",
+                violation.table,
+                violation.parent,
+                violation.fk_index,
+                violation
+                    .rowid
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "null".to_string())
+            ));
+        }
+
+        let metadata_dir_count = self.model_dirs().count();
+        let index_count = self.index.count()?;
+        if index_count != metadata_dir_count {
+            errors.push(format!(
+                "index/model directory count mismatch: index_count={} metadata_dirs={}",
+                index_count, metadata_dir_count
+            ));
+        }
+
+        for model_dir in self.model_dirs() {
+            let model_id = self
+                .get_model_id(&model_dir)
+                .unwrap_or_else(|| model_dir.display().to_string());
+            match self.load_metadata(&model_dir) {
+                Ok(Some(metadata)) => {
+                    if let Err(err) = validate_metadata_v2_with_index(&metadata, self.index()) {
+                        errors.push(format!(
+                            "metadata validation failed for {}: {}",
+                            model_id, err
+                        ));
+                    }
+                }
+                Ok(None) => {
+                    errors.push(format!("metadata missing for {}", model_id));
+                }
+                Err(err) => {
+                    errors.push(format!("failed to load metadata for {}: {}", model_id, err));
+                }
+            }
+        }
+
+        Ok(errors)
+    }
 }
 
 /// Result of a library-wide reclassification operation.
@@ -1254,6 +1791,165 @@ pub struct ReclassifyResult {
     pub changes: Vec<(String, String)>,
     /// List of (model_id, error_message) for models that failed.
     pub errors: Vec<(String, String)>,
+}
+
+/// Migration dry-run report for metadata v2 reorganization planning.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationDryRunReport {
+    /// UTC timestamp when the report was generated.
+    pub generated_at: String,
+    /// Total number of models inspected.
+    pub total_models: usize,
+    /// Number of models that would require a move.
+    pub move_candidates: usize,
+    /// Number of models already at the canonical location.
+    pub keep_candidates: usize,
+    /// Number of models blocked by destination collisions.
+    pub collision_count: usize,
+    /// Number of models that failed dry-run evaluation.
+    pub error_count: usize,
+    /// Number of models with non-empty findings.
+    pub models_with_findings: usize,
+    /// Path to JSON dry-run report artifact.
+    pub machine_readable_report_path: Option<String>,
+    /// Path to Markdown dry-run report artifact.
+    pub human_readable_report_path: Option<String>,
+    /// Per-model dry-run output rows.
+    pub items: Vec<MigrationDryRunItem>,
+}
+
+/// Per-model migration dry-run row.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationDryRunItem {
+    /// Current model ID.
+    pub model_id: String,
+    /// Proposed target model ID.
+    pub target_model_id: Option<String>,
+    /// Current model directory path.
+    pub current_path: String,
+    /// Proposed target directory path.
+    pub target_path: Option<String>,
+    /// Planned action: `keep`, `move`, `blocked_collision`, or `error`.
+    pub action: String,
+    /// Current metadata model type.
+    pub current_model_type: Option<String>,
+    /// Resolved model type from rule-table resolver.
+    pub resolved_model_type: Option<String>,
+    /// Resolver source label.
+    pub resolver_source: Option<String>,
+    /// Resolver confidence value.
+    pub resolver_confidence: Option<f64>,
+    /// Resolver-generated review reasons.
+    pub resolver_review_reasons: Vec<String>,
+    /// Whether metadata currently requires review.
+    pub metadata_needs_review: bool,
+    /// Current metadata review reasons.
+    pub review_reasons: Vec<String>,
+    /// Current metadata license status.
+    pub license_status: Option<String>,
+    /// Number of dependency refs declared in metadata.
+    pub declared_dependency_binding_count: usize,
+    /// Number of active dependency binding rows in SQLite.
+    pub active_dependency_binding_count: usize,
+    /// Deterministic findings for migration audit/reporting.
+    pub findings: Vec<String>,
+    /// Error message when action is `error`.
+    pub error: Option<String>,
+}
+
+/// Planned move row persisted in migration checkpoint state.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationPlannedMove {
+    /// Source model ID.
+    pub model_id: String,
+    /// Destination model ID.
+    pub target_model_id: String,
+    /// Source model path at plan time.
+    pub current_path: String,
+    /// Destination model path at plan time.
+    pub target_path: String,
+}
+
+/// Per-model migration execution result.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationExecutionItem {
+    /// Source model ID.
+    pub model_id: String,
+    /// Destination model ID.
+    pub target_model_id: String,
+    /// Action outcome: `moved`, `already_migrated`, `blocked_collision`, `missing_source`, `error`.
+    pub action: String,
+    /// Optional error or detail string for non-success outcomes.
+    pub error: Option<String>,
+}
+
+/// Execution report for checkpointed migration run.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationExecutionReport {
+    /// UTC timestamp when the run started (or checkpoint was initialized).
+    pub generated_at: String,
+    /// UTC timestamp when execution finished.
+    pub completed_at: Option<String>,
+    /// Whether execution resumed from an existing checkpoint.
+    pub resumed_from_checkpoint: bool,
+    /// Checkpoint file used by this run.
+    pub checkpoint_path: String,
+    /// Total number of planned moves.
+    pub planned_move_count: usize,
+    /// Count of successful moves (`moved` + `already_migrated`).
+    pub completed_move_count: usize,
+    /// Count of deterministic skips (`blocked_collision` + `missing_source`).
+    pub skipped_move_count: usize,
+    /// Count of execution errors.
+    pub error_count: usize,
+    /// Number of models indexed after post-migration rebuild.
+    pub reindexed_model_count: usize,
+    /// Model count currently stored in SQLite index after rebuild.
+    pub index_model_count: usize,
+    /// Whether post-migration referential integrity checks passed.
+    pub referential_integrity_ok: bool,
+    /// Post-migration integrity and metadata validation errors.
+    pub referential_integrity_errors: Vec<String>,
+    /// Path to JSON execution report artifact.
+    pub machine_readable_report_path: Option<String>,
+    /// Path to Markdown execution report artifact.
+    pub human_readable_report_path: Option<String>,
+    /// Per-model execution rows.
+    pub results: Vec<MigrationExecutionItem>,
+}
+
+/// Report artifact row from `migration-reports/index.json`.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct MigrationReportArtifact {
+    /// UTC timestamp for the report generation.
+    pub generated_at: String,
+    /// Report kind: `dry_run` or `execution`.
+    pub report_kind: String,
+    /// Absolute path to JSON report artifact.
+    pub json_report_path: String,
+    /// Absolute path to Markdown report artifact.
+    pub markdown_report_path: String,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct MigrationCheckpointState {
+    created_at: String,
+    updated_at: String,
+    pending_moves: Vec<MigrationPlannedMove>,
+    completed_results: Vec<MigrationExecutionItem>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+struct MigrationReportIndex {
+    entries: Vec<MigrationReportIndexEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct MigrationReportIndexEntry {
+    generated_at: String,
+    report_kind: String,
+    json_report_path: String,
+    markdown_report_path: String,
 }
 
 fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
@@ -1373,6 +2069,322 @@ fn apply_model_type_resolution(
         || metadata.review_reasons != prev_reasons
         || metadata.metadata_needs_review != prev_needs_review
         || metadata.review_status != prev_review_status
+}
+
+fn license_status_unresolved(status: Option<&str>) -> bool {
+    let Some(value) = status.map(|s| s.trim().to_lowercase()) else {
+        return true;
+    };
+    if value.is_empty() {
+        return true;
+    }
+
+    matches!(
+        value.as_str(),
+        "license_unknown" | "unknown" | "missing" | "unresolved" | "pending"
+    ) || value.contains("unknown")
+        || value.contains("unresolved")
+        || value.contains("missing")
+        || value.contains("pending")
+}
+
+fn load_migration_checkpoint(path: &Path) -> Result<Option<MigrationCheckpointState>> {
+    atomic_read_json(path)
+}
+
+fn save_migration_checkpoint(path: &Path, checkpoint: &MigrationCheckpointState) -> Result<()> {
+    atomic_write_json(path, checkpoint, true)
+}
+
+fn apply_target_identity_to_metadata(metadata: &mut ModelMetadata, target_model_id: &str) {
+    let parts = target_model_id.split('/').collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return;
+    }
+
+    metadata.model_type = Some(parts[0].to_string());
+    metadata.family = Some(parts[1].to_string());
+    if let Some(cleaned_name) = parts.last() {
+        metadata.cleaned_name = Some((*cleaned_name).to_string());
+    }
+}
+
+fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
+    if let Some(parent) = source_dir.parent() {
+        let _ = std::fs::remove_dir(parent);
+        if let Some(grandparent) = parent.parent() {
+            if grandparent != library_root {
+                let _ = std::fs::remove_dir(grandparent);
+            }
+        }
+    }
+}
+
+fn migration_report_paths(library_root: &Path, kind: &str) -> (PathBuf, PathBuf) {
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let json = reports_dir.join(format!("metadata-v2-{}-{}.json", kind, nonce));
+    let markdown = reports_dir.join(format!("metadata-v2-{}-{}.md", kind, nonce));
+    (json, markdown)
+}
+
+fn migration_report_index_path(library_root: &Path) -> PathBuf {
+    library_root
+        .join(MIGRATION_REPORTS_DIR)
+        .join(MIGRATION_REPORT_INDEX_FILENAME)
+}
+
+fn load_migration_report_index(library_root: &Path) -> Result<MigrationReportIndex> {
+    let index_path = migration_report_index_path(library_root);
+    Ok(atomic_read_json(&index_path)?.unwrap_or_default())
+}
+
+fn save_migration_report_index(library_root: &Path, index: &MigrationReportIndex) -> Result<()> {
+    let index_path = migration_report_index_path(library_root);
+    if let Some(parent) = index_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    atomic_write_json(&index_path, index, true)
+}
+
+fn append_migration_report_index_entry(
+    library_root: &Path,
+    entry: MigrationReportIndexEntry,
+) -> Result<()> {
+    let mut index = load_migration_report_index(library_root)?;
+    index.entries.push(entry);
+    save_migration_report_index(library_root, &index)
+}
+
+fn remove_migration_report_artifact_files(
+    library_root: &Path,
+    entry: &MigrationReportIndexEntry,
+) -> Result<()> {
+    let json_path = resolve_migration_report_artifact_path(library_root, &entry.json_report_path)?;
+    let markdown_path =
+        resolve_migration_report_artifact_path(library_root, &entry.markdown_report_path)?;
+
+    remove_report_file_if_exists(&json_path)?;
+    remove_report_file_if_exists(&markdown_path)?;
+    Ok(())
+}
+
+fn resolve_migration_report_artifact_path(library_root: &Path, raw_path: &str) -> Result<PathBuf> {
+    let raw = PathBuf::from(raw_path);
+    let resolved = if raw.is_absolute() {
+        raw
+    } else {
+        library_root.join(raw)
+    };
+
+    if resolved
+        .components()
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return Err(PumasError::Validation {
+            field: "report_path".to_string(),
+            message: format!("report path must not contain '..': {}", resolved.display()),
+        });
+    }
+
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    if !resolved.starts_with(&reports_dir) {
+        return Err(PumasError::Validation {
+            field: "report_path".to_string(),
+            message: format!(
+                "report path must be within migration reports directory: {}",
+                resolved.display()
+            ),
+        });
+    }
+
+    Ok(resolved)
+}
+
+fn remove_report_file_if_exists(path: &Path) -> Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(err) => Err(PumasError::Io {
+            message: format!("failed to remove report file: {}", err),
+            path: Some(path.to_path_buf()),
+            source: Some(err),
+        }),
+    }
+}
+
+fn write_migration_dry_run_reports(
+    library_root: &Path,
+    report: &MigrationDryRunReport,
+) -> Result<()> {
+    let json_path = report
+        .machine_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "machine_readable_report_path".to_string(),
+            message: "missing JSON report path for migration dry-run report".to_string(),
+        })?;
+    let markdown_path = report
+        .human_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "human_readable_report_path".to_string(),
+            message: "missing Markdown report path for migration dry-run report".to_string(),
+        })?;
+
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    std::fs::create_dir_all(&reports_dir)?;
+    atomic_write_json(&json_path, report, true)?;
+    std::fs::write(&markdown_path, render_migration_dry_run_markdown(report))?;
+    Ok(())
+}
+
+fn write_migration_execution_reports(
+    library_root: &Path,
+    report: &MigrationExecutionReport,
+) -> Result<()> {
+    let json_path = report
+        .machine_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "machine_readable_report_path".to_string(),
+            message: "missing JSON report path for migration execution report".to_string(),
+        })?;
+    let markdown_path = report
+        .human_readable_report_path
+        .as_ref()
+        .map(PathBuf::from)
+        .ok_or_else(|| PumasError::Validation {
+            field: "human_readable_report_path".to_string(),
+            message: "missing Markdown report path for migration execution report".to_string(),
+        })?;
+
+    let reports_dir = library_root.join(MIGRATION_REPORTS_DIR);
+    std::fs::create_dir_all(&reports_dir)?;
+    atomic_write_json(&json_path, report, true)?;
+    std::fs::write(&markdown_path, render_migration_execution_markdown(report))?;
+    Ok(())
+}
+
+fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Metadata v2 Migration Dry-Run Report\n\n");
+    output.push_str(&format!("- Generated At: `{}`\n", report.generated_at));
+    output.push_str(&format!("- Total Models: `{}`\n", report.total_models));
+    output.push_str(&format!(
+        "- Move Candidates: `{}`\n",
+        report.move_candidates
+    ));
+    output.push_str(&format!(
+        "- Keep Candidates: `{}`\n",
+        report.keep_candidates
+    ));
+    output.push_str(&format!("- Collisions: `{}`\n", report.collision_count));
+    output.push_str(&format!("- Errors: `{}`\n", report.error_count));
+    output.push_str(&format!(
+        "- Models With Findings: `{}`\n",
+        report.models_with_findings
+    ));
+    if let Some(path) = &report.machine_readable_report_path {
+        output.push_str(&format!("- JSON Report Path: `{}`\n", path));
+    }
+    if let Some(path) = &report.human_readable_report_path {
+        output.push_str(&format!("- Markdown Report Path: `{}`\n", path));
+    }
+    output.push('\n');
+    output.push_str("## Items\n\n");
+    output.push_str("| Model ID | Target Model ID | Action | Findings | Error |\n");
+    output.push_str("| --- | --- | --- | --- | --- |\n");
+    for item in &report.items {
+        let findings = if item.findings.is_empty() {
+            String::new()
+        } else {
+            item.findings.join(",")
+        };
+        let error = item.error.as_deref().unwrap_or("");
+        let target = item.target_model_id.as_deref().unwrap_or("");
+        output.push_str(&format!(
+            "| `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            item.model_id, target, item.action, findings, error
+        ));
+    }
+
+    output
+}
+
+fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> String {
+    let mut output = String::new();
+    output.push_str("# Metadata v2 Migration Execution Report\n\n");
+    output.push_str(&format!("- Generated At: `{}`\n", report.generated_at));
+    output.push_str(&format!(
+        "- Completed At: `{}`\n",
+        report.completed_at.as_deref().unwrap_or("not_completed")
+    ));
+    output.push_str(&format!(
+        "- Resumed From Checkpoint: `{}`\n",
+        report.resumed_from_checkpoint
+    ));
+    output.push_str(&format!(
+        "- Planned Moves: `{}`\n",
+        report.planned_move_count
+    ));
+    output.push_str(&format!(
+        "- Completed Moves: `{}`\n",
+        report.completed_move_count
+    ));
+    output.push_str(&format!(
+        "- Skipped Moves: `{}`\n",
+        report.skipped_move_count
+    ));
+    output.push_str(&format!("- Errors: `{}`\n", report.error_count));
+    output.push_str(&format!(
+        "- Reindexed Models: `{}`\n",
+        report.reindexed_model_count
+    ));
+    output.push_str(&format!(
+        "- Index Model Count: `{}`\n",
+        report.index_model_count
+    ));
+    output.push_str(&format!(
+        "- Referential Integrity OK: `{}`\n",
+        report.referential_integrity_ok
+    ));
+    output.push_str(&format!(
+        "- Checkpoint Path: `{}`\n",
+        report.checkpoint_path
+    ));
+    if let Some(path) = &report.machine_readable_report_path {
+        output.push_str(&format!("- JSON Report Path: `{}`\n", path));
+    }
+    if let Some(path) = &report.human_readable_report_path {
+        output.push_str(&format!("- Markdown Report Path: `{}`\n", path));
+    }
+    output.push('\n');
+    output.push_str("## Results\n\n");
+    output.push_str("| Model ID | Target Model ID | Action | Error |\n");
+    output.push_str("| --- | --- | --- | --- |\n");
+    for row in &report.results {
+        let error = row.error.as_deref().unwrap_or("");
+        output.push_str(&format!(
+            "| `{}` | `{}` | `{}` | `{}` |\n",
+            row.model_id, row.target_model_id, row.action, error
+        ));
+    }
+
+    if !report.referential_integrity_errors.is_empty() {
+        output.push_str("\n## Integrity Validation Errors\n\n");
+        for error in &report.referential_integrity_errors {
+            output.push_str(&format!("- `{}`\n", error));
+        }
+    }
+
+    output
 }
 
 /// Find the primary model file in a directory (the largest model file).
@@ -1920,5 +2932,463 @@ mod tests {
         assert!(queue_after[0]
             .review_reasons
             .contains(&"unknown-task-signature".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_report_detects_move_and_findings() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "dry-run-move");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("llm/llama/dry-run-move".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("dry-run-move".to_string()),
+            metadata_needs_review: Some(true),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            license_status: Some("license_unknown".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        assert_eq!(report.total_models, 1);
+        assert_eq!(report.move_candidates, 1);
+        assert_eq!(report.collision_count, 0);
+        assert_eq!(report.error_count, 0);
+        assert_eq!(report.items.len(), 1);
+
+        let item = &report.items[0];
+        assert_eq!(item.model_id, "llm/llama/dry-run-move");
+        assert_eq!(item.action, "move");
+        assert_eq!(
+            item.target_model_id.as_deref(),
+            Some("diffusion/llama/dry-run-move")
+        );
+        assert!(item.findings.contains(&"metadata_needs_review".to_string()));
+        assert!(item.findings.contains(&"license_unresolved".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_report_detects_collision() {
+        let (_, library) = setup_library().await;
+
+        let source_dir = library.build_model_path("llm", "llama", "dry-run-collision");
+        let target_dir = library.build_model_path("diffusion", "llama", "dry-run-collision");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+        write_min_safetensors(&source_dir.join("model.safetensors"));
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let source_metadata = ModelMetadata {
+            model_id: Some("llm/llama/dry-run-collision".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("dry-run-collision".to_string()),
+            ..Default::default()
+        };
+        let target_metadata = ModelMetadata {
+            model_id: Some("diffusion/llama/dry-run-collision".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("diffusion".to_string()),
+            cleaned_name: Some("dry-run-collision".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&source_dir, &source_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&target_dir, &target_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+        library.index_model_dir(&target_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        assert_eq!(report.total_models, 2);
+        assert_eq!(report.collision_count, 1);
+        assert!(report
+            .items
+            .iter()
+            .any(|item| item.action == "blocked_collision"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_report_with_artifacts_writes_reports_and_index() {
+        let (temp_dir, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "dry-run-artifacts");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/dry-run-artifacts".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("dry-run-artifacts".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        assert!(report.machine_readable_report_path.is_some());
+        assert!(report.human_readable_report_path.is_some());
+
+        let json_report_path = PathBuf::from(report.machine_readable_report_path.unwrap());
+        let markdown_report_path = PathBuf::from(report.human_readable_report_path.unwrap());
+        assert!(json_report_path.exists());
+        assert!(markdown_report_path.exists());
+        let markdown = std::fs::read_to_string(markdown_report_path).unwrap();
+        assert!(markdown.contains("Metadata v2 Migration Dry-Run Report"));
+
+        let index_path = temp_dir
+            .path()
+            .join(MIGRATION_REPORTS_DIR)
+            .join(MIGRATION_REPORT_INDEX_FILENAME);
+        assert!(index_path.exists());
+        let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
+        assert!(!index.entries.is_empty());
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "dry_run"));
+    }
+
+    #[tokio::test]
+    async fn test_list_migration_reports_returns_empty_without_index() {
+        let (_, library) = setup_library().await;
+        let reports = library.list_migration_reports().unwrap();
+        assert!(reports.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_list_migration_reports_returns_newest_first() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "report-history");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/report-history".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("report-history".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let first = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let second = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+
+        let reports = library.list_migration_reports().unwrap();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].report_kind, "dry_run");
+        assert_eq!(
+            reports[0].json_report_path,
+            second.machine_readable_report_path.unwrap()
+        );
+        assert_eq!(
+            reports[1].json_report_path,
+            first.machine_readable_report_path.unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_migration_report_removes_artifacts_and_index_entry() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "report-delete");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/report-delete".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("report-delete".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        let json_path = PathBuf::from(report.machine_readable_report_path.unwrap());
+        let markdown_path = PathBuf::from(report.human_readable_report_path.unwrap());
+        assert!(json_path.exists());
+        assert!(markdown_path.exists());
+
+        let removed = library
+            .delete_migration_report(markdown_path.to_string_lossy().as_ref())
+            .unwrap();
+        assert!(removed);
+        assert!(!json_path.exists());
+        assert!(!markdown_path.exists());
+        assert!(library.list_migration_reports().unwrap().is_empty());
+
+        let removed_again = library
+            .delete_migration_report(markdown_path.to_string_lossy().as_ref())
+            .unwrap();
+        assert!(!removed_again);
+    }
+
+    #[tokio::test]
+    async fn test_prune_migration_reports_keeps_newest_entries() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "report-prune");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/report-prune".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("report-prune".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let first = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let second = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        let third = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+
+        let first_json = PathBuf::from(first.machine_readable_report_path.unwrap());
+        let second_json = PathBuf::from(second.machine_readable_report_path.unwrap());
+        let third_json = PathBuf::from(third.machine_readable_report_path.unwrap());
+
+        let removed = library.prune_migration_reports(1).unwrap();
+        assert_eq!(removed, 2);
+        assert!(!first_json.exists());
+        assert!(!second_json.exists());
+        assert!(third_json.exists());
+
+        let reports = library.list_migration_reports().unwrap();
+        assert_eq!(reports.len(), 1);
+        assert_eq!(
+            reports[0].json_report_path,
+            third_json.display().to_string()
+        );
+        assert_eq!(library.prune_migration_reports(10).unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_moves_and_clears_checkpoint() {
+        let (temp_dir, library) = setup_library().await;
+        let source_dir = library.build_model_path("llm", "llama", "exec-move");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("model.safetensors"));
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/exec-move".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("exec-move".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.error_count, 0);
+        assert_eq!(report.reindexed_model_count, 1);
+        assert_eq!(report.index_model_count, 1);
+        assert!(report.referential_integrity_ok);
+        assert!(report.referential_integrity_errors.is_empty());
+        assert!(report.results.iter().any(|row| row.action == "moved"));
+        assert!(report.machine_readable_report_path.is_some());
+        assert!(report.human_readable_report_path.is_some());
+
+        let moved_dir = library.build_model_path("diffusion", "llama", "exec-move");
+        assert!(moved_dir.exists());
+        assert!(!source_dir.exists());
+        assert!(!temp_dir.path().join(MIGRATION_CHECKPOINT_FILENAME).exists());
+
+        let json_report_path = PathBuf::from(report.machine_readable_report_path.unwrap());
+        let markdown_report_path = PathBuf::from(report.human_readable_report_path.unwrap());
+        assert!(json_report_path.exists());
+        assert!(markdown_report_path.exists());
+        let markdown = std::fs::read_to_string(markdown_report_path).unwrap();
+        assert!(markdown.contains("Metadata v2 Migration Execution Report"));
+        assert!(markdown.contains("Referential Integrity OK"));
+        let index_path = temp_dir
+            .path()
+            .join(MIGRATION_REPORTS_DIR)
+            .join(MIGRATION_REPORT_INDEX_FILENAME);
+        assert!(index_path.exists());
+        let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "execution"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_resumes_existing_checkpoint() {
+        let (temp_dir, library) = setup_library().await;
+        let source_dir = library.build_model_path("llm", "llama", "resume-move");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("model.safetensors"));
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/resume-move".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("resume-move".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let checkpoint_path = temp_dir.path().join(MIGRATION_CHECKPOINT_FILENAME);
+        let checkpoint = MigrationCheckpointState {
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            pending_moves: vec![MigrationPlannedMove {
+                model_id: "llm/llama/resume-move".to_string(),
+                target_model_id: "diffusion/llama/resume-move".to_string(),
+                current_path: source_dir.display().to_string(),
+                target_path: library
+                    .build_model_path("diffusion", "llama", "resume-move")
+                    .display()
+                    .to_string(),
+            }],
+            completed_results: vec![],
+        };
+        save_migration_checkpoint(&checkpoint_path, &checkpoint).unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert!(report.resumed_from_checkpoint);
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.error_count, 0);
+        assert_eq!(report.reindexed_model_count, 1);
+        assert_eq!(report.index_model_count, 1);
+        assert!(report.referential_integrity_ok);
+        assert!(report.referential_integrity_errors.is_empty());
+        assert!(report.machine_readable_report_path.is_some());
+        assert!(report.human_readable_report_path.is_some());
+        assert!(!checkpoint_path.exists());
+
+        let index_path = temp_dir
+            .path()
+            .join(MIGRATION_REPORTS_DIR)
+            .join(MIGRATION_REPORT_INDEX_FILENAME);
+        assert!(index_path.exists());
+        let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "execution"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_reports_post_validation_errors() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "validation-error");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["LlamaForCausalLM"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("llm/llama/validation-error".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("validation-error".to_string()),
+            task_type_primary: Some("text-generation".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("task-signature-mapping".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("model-type-resolver-arch-rules".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            dependency_bindings: Some(vec![crate::models::DependencyBindingRef {
+                binding_id: Some("binding-missing-profile".to_string()),
+                profile_id: Some("missing-profile".to_string()),
+                profile_version: Some(1),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: None,
+            }]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert!(!report.referential_integrity_ok);
+        assert!(report
+            .referential_integrity_errors
+            .iter()
+            .any(|error| error.contains("metadata validation failed")));
+        assert!(report.error_count >= 1);
     }
 }

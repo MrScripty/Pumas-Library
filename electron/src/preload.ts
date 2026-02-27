@@ -300,6 +300,14 @@ const electronAPI = {
     apiCall('set_model_link_exclusion', { model_id: modelId, app_id: appId, excluded }),
   get_link_exclusions: (appId: string) =>
     apiCall('get_link_exclusions', { app_id: appId }),
+  generate_model_migration_dry_run_report: () =>
+    apiCall('generate_model_migration_dry_run_report'),
+  execute_model_migration: () => apiCall('execute_model_migration'),
+  list_model_migration_reports: () => apiCall('list_model_migration_reports'),
+  delete_model_migration_report: (reportPath: string) =>
+    apiCall('delete_model_migration_report', { report_path: reportPath }),
+  prune_model_migration_reports: (keepLatest: number) =>
+    apiCall('prune_model_migration_reports', { keep_latest: keepLatest }),
 
   // ========================================
   // Custom Nodes

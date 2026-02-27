@@ -523,6 +523,44 @@ impl PumasApi {
         self.primary().model_library.reclassify_all_models().await
     }
 
+    /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
+    pub async fn generate_model_migration_dry_run_report(
+        &self,
+    ) -> Result<model_library::MigrationDryRunReport> {
+        self.primary()
+            .model_library
+            .generate_migration_dry_run_report_with_artifacts()
+    }
+
+    /// Execute checkpointed metadata v2 migration moves.
+    pub async fn execute_model_migration(&self) -> Result<model_library::MigrationExecutionReport> {
+        self.primary()
+            .model_library
+            .execute_migration_with_checkpoint()
+            .await
+    }
+
+    /// List migration report artifacts from the report index (newest-first).
+    pub async fn list_model_migration_reports(
+        &self,
+    ) -> Result<Vec<model_library::MigrationReportArtifact>> {
+        self.primary().model_library.list_migration_reports()
+    }
+
+    /// Delete a migration report artifact pair (JSON + Markdown) and index entry.
+    pub async fn delete_model_migration_report(&self, report_path: &str) -> Result<bool> {
+        self.primary()
+            .model_library
+            .delete_migration_report(report_path)
+    }
+
+    /// Prune migration report history to `keep_latest` entries.
+    pub async fn prune_model_migration_reports(&self, keep_latest: usize) -> Result<usize> {
+        self.primary()
+            .model_library
+            .prune_migration_reports(keep_latest)
+    }
+
     // ========================================
     // Link Exclusion
     // ========================================

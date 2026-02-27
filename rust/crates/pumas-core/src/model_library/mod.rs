@@ -56,7 +56,10 @@ pub use importer::{
     InPlaceImportSpec, IncompleteShardRecovery, InterruptedDownload, ModelImporter,
     OrphanScanResult,
 };
-pub use library::{ModelLibrary, ReclassifyResult};
+pub use library::{
+    MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
+    MigrationPlannedMove, MigrationReportArtifact, ModelLibrary, ReclassifyResult,
+};
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;
 pub use merge::{LibraryMerger, MergeResult};

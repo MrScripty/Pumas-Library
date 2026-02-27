@@ -146,7 +146,12 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "update_inference_settings"
         | "list_models_needing_review"
         | "submit_model_review"
-        | "reset_model_review" => result,
+        | "reset_model_review"
+        | "generate_model_migration_dry_run_report"
+        | "execute_model_migration"
+        | "list_model_migration_reports"
+        | "delete_model_migration_report"
+        | "prune_model_migration_reports" => result,
 
         // Structured response methods (handler returns {success, ...} directly)
         "install_version" => result,

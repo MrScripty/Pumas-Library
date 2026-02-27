@@ -835,7 +835,7 @@ Phase 2: Path/ID Refactor
 
 Phase 3: Dependency Flow Update
 1. Pre-execution call: `check_model_dependencies`.
-2. If missing and policy allows: call `install_model_dependencies`.
+2. Optional: call `install_model_dependencies` only to retrieve install guidance for the consumer runtime.
 3. Surface structured errors and logs on failure.
 
 Phase 4: Validation + Cutover

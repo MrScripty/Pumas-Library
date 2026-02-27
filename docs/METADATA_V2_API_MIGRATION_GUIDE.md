@@ -42,7 +42,7 @@ New:
 New required order:
 1. `resolve_model_dependency_plan`
 2. `check_model_dependencies`
-3. if missing and policy allows: `install_model_dependencies`
+3. optionally call `install_model_dependencies` for install guidance only
 4. treat `unknown_profile`, `manual_intervention_required`, and `profile_conflict` as non-ready
 
 ### 3) Review queue operations

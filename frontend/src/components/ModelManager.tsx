@@ -17,6 +17,7 @@ import { LocalModelsList } from './LocalModelsList';
 import { RemoteModelsList } from './RemoteModelsList';
 import { ModelImportDialog } from './ModelImportDialog';
 import { LinkHealthStatus } from './LinkHealthStatus';
+import { MigrationReportsPanel } from './MigrationReportsPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
 import { getReleaseTimestamp } from '../utils/modelFormatters';
@@ -663,6 +664,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               {/* Link Health Status */}
               <div className="mt-4">
                 <LinkHealthStatus activeVersion={activeVersion} />
+              </div>
+              {/* Migration Reports */}
+              <div className="mt-4">
+                <MigrationReportsPanel />
               </div>
             </>
           )}

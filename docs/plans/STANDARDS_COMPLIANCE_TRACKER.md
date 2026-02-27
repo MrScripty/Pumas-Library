@@ -42,8 +42,8 @@ Completed:
 - [x] Updated RPC response wrapper so `refresh_model_mappings` is passthrough (preserves real success/error payload).
 
 Follow-up:
-- [ ] Add integration tests for `sync_with_resolutions` invalid action handling.
-- [ ] Add integration tests for cross-filesystem warning bridge path.
+- [x] Add integration tests for `sync_with_resolutions` invalid action handling.
+- [x] Add integration tests for cross-filesystem warning bridge path.
 
 ### WS-02: Source Directory README Compliance (Priority P1)
 Goal: Satisfy `DOCUMENTATION-STANDARDS.md` requirement that every directory under source roots has a `README.md`.
@@ -109,3 +109,4 @@ Plan:
 9. Split `pumas-rpc/src/handlers/versions.rs` into focused submodules under `handlers/versions/` (all under 500 lines).
 10. Extracted shared helper logic from `pumas-rpc/src/handlers/mod.rs` into `handlers/shared.rs`, reducing dispatcher file size below 500 lines.
 11. Extracted Ollama naming helper/tests into `pumas-app-manager/src/ollama_client/naming.rs`, reducing `ollama_client.rs` below 500 lines.
+12. Added integration coverage for `sync_with_resolutions` invalid action handling and cross-filesystem warning response shape.

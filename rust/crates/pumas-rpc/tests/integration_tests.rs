@@ -523,6 +523,69 @@ mod tests {
         server.stop().await;
     }
 
+    #[tokio::test]
+    async fn test_sync_with_resolutions_rejects_invalid_action() {
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let response = rpc_call(
+            port,
+            "sync_with_resolutions",
+            json!({
+                "versionTag": "v-test",
+                "resolutions": {
+                    "checkpoints/model.safetensors": "invalid_action"
+                }
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(response.get("success").and_then(|v| v.as_bool()), Some(false));
+        let error = response
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
+        assert!(error.contains("Invalid conflict resolution action"));
+        assert!(error.contains("skip, overwrite, rename"));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_get_cross_filesystem_warning_returns_structured_response() {
+        let env = create_test_env();
+        // Ensure the version path exists so cross-filesystem check can resolve metadata cleanly.
+        std::fs::create_dir_all(env.path().join("comfyui-versions/v-test/models")).unwrap();
+
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let response = rpc_call(
+            port,
+            "get_cross_filesystem_warning",
+            json!({
+                "versionTag": "v-test"
+            }),
+        )
+        .await
+        .unwrap();
+
+        assert!(response.get("success").and_then(|v| v.as_bool()).is_some());
+        assert!(response
+            .get("cross_filesystem")
+            .and_then(|v| v.as_bool())
+            .is_some());
+        assert!(response
+            .get("library_path")
+            .and_then(|v| v.as_str())
+            .is_some());
+        assert!(response.get("app_path").and_then(|v| v.as_str()).is_some());
+
+        server.stop().await;
+    }
+
     // Note: These tests require the RPC server to be running.
     // In CI, you would start the server as part of the test setup.
     // For local development, run: cargo run --release -- --port <port> --launcher_root <path>

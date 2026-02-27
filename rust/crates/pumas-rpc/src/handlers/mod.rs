@@ -391,6 +391,7 @@ async fn dispatch_method(
         "install_model_dependencies" => models::install_model_dependencies(state, params).await,
         "list_models_needing_review" => models::list_models_needing_review(state, params).await,
         "submit_model_review" => models::submit_model_review(state, params).await,
+        "reset_model_review" => models::reset_model_review(state, params).await,
 
         // HuggingFace Authentication
         "set_hf_token" => models::set_hf_token(state, params).await,

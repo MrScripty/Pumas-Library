@@ -145,7 +145,8 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_inference_settings"
         | "update_inference_settings"
         | "list_models_needing_review"
-        | "submit_model_review" => result,
+        | "submit_model_review"
+        | "reset_model_review" => result,
 
         // Structured response methods (handler returns {success, ...} directly)
         "install_version" => result,

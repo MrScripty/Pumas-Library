@@ -479,6 +479,7 @@ pub async fn get_library_model_metadata(
     // Get stored metadata from metadata.json
     let model_dir = library.library_root().join(&model_id);
     let stored_metadata = library.load_metadata(&model_dir)?;
+    let effective_metadata = state.api.get_effective_model_metadata(&model_id).await?;
 
     // Find primary model file and get embedded metadata
     let primary_file = library.get_primary_model_file(&model_id);
@@ -523,6 +524,7 @@ pub async fn get_library_model_metadata(
         "success": true,
         "model_id": model_id,
         "stored_metadata": stored_metadata,
+        "effective_metadata": effective_metadata,
         "embedded_metadata": embedded_metadata,
         "primary_file": primary_file_str
     }))
@@ -828,5 +830,21 @@ pub async fn submit_model_review(state: &AppState, params: &Value) -> pumas_libr
     Ok(json!({
         "success": true,
         "result": result
+    }))
+}
+
+pub async fn reset_model_review(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
+    let model_id = require_str_param(params, "model_id", "modelId")?;
+    let reviewer = require_str_param(params, "reviewer", "reviewer")?;
+    let reason = get_str_param(params, "reason", "reason");
+
+    let reset = state
+        .api
+        .reset_model_review(&model_id, &reviewer, reason)
+        .await?;
+    Ok(json!({
+        "success": true,
+        "model_id": model_id,
+        "reset": reset
     }))
 }

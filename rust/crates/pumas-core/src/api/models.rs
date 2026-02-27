@@ -213,6 +213,29 @@ impl PumasApi {
             .await
     }
 
+    /// Reset a model's review edits to baseline metadata.
+    pub async fn reset_model_review(
+        &self,
+        model_id: &str,
+        reviewer: &str,
+        reason: Option<&str>,
+    ) -> Result<bool> {
+        self.primary()
+            .model_library
+            .reset_model_review(model_id, reviewer, reason)
+            .await
+    }
+
+    /// Get effective metadata (`baseline + active overlay`) for a model.
+    pub async fn get_effective_model_metadata(
+        &self,
+        model_id: &str,
+    ) -> Result<Option<models::ModelMetadata>> {
+        self.primary()
+            .model_library
+            .get_effective_metadata(model_id)
+    }
+
     /// Import a model from a local path.
     pub async fn import_model(
         &self,

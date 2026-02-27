@@ -494,6 +494,11 @@ impl ModelLibrary {
         Ok(review_items)
     }
 
+    /// Load effective model metadata (`baseline + active overlay`) for a model ID.
+    pub fn get_effective_metadata(&self, model_id: &str) -> Result<Option<ModelMetadata>> {
+        self.load_effective_metadata_by_id(model_id)
+    }
+
     /// Submit a metadata review patch for a model.
     ///
     /// The patch is applied as JSON Merge Patch against the current effective metadata.
@@ -620,6 +625,32 @@ impl ModelLibrary {
             metadata_needs_review,
             review_reasons,
         })
+    }
+
+    /// Reset model metadata edits to baseline by reverting the active overlay.
+    pub async fn reset_model_review(
+        &self,
+        model_id: &str,
+        reviewer: &str,
+        reason: Option<&str>,
+    ) -> Result<bool> {
+        let reviewer = reviewer.trim();
+        if reviewer.is_empty() {
+            return Err(PumasError::Validation {
+                field: "reviewer".to_string(),
+                message: "reviewer must be non-empty".to_string(),
+            });
+        }
+
+        let model_dir = self.library_root.join(model_id);
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
+
+        self.index
+            .reset_metadata_overlay(model_id, reviewer, reason)
     }
 
     /// Get models pending online lookup.
@@ -1828,5 +1859,66 @@ mod tests {
             PumasError::Validation { field, .. } => assert_eq!(field, "patch"),
             _ => panic!("expected validation error"),
         }
+    }
+
+    #[tokio::test]
+    async fn test_reset_model_review_restores_baseline_review_state() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "reset-review");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("llm/llama/reset-review".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Reset Review".to_string()),
+            task_type_primary: Some("unknown".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("runtime-discovered-signature".to_string()),
+            task_classification_confidence: Some(0.0),
+            model_type_resolution_source: Some("model-type-resolver-arch-rules".to_string()),
+            model_type_resolution_confidence: Some(0.7),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        library
+            .submit_model_review(
+                "llm/llama/reset-review",
+                serde_json::json!({
+                    "task_type_primary": "text-generation",
+                    "task_classification_source": "task-signature-mapping",
+                    "task_classification_confidence": 1.0
+                }),
+                "alice",
+                Some("approve"),
+            )
+            .await
+            .unwrap();
+        assert!(library
+            .list_models_needing_review(None)
+            .await
+            .unwrap()
+            .is_empty());
+
+        let reset = library
+            .reset_model_review("llm/llama/reset-review", "bob", Some("revert"))
+            .await
+            .unwrap();
+        assert!(reset);
+
+        let queue_after = library.list_models_needing_review(None).await.unwrap();
+        assert_eq!(queue_after.len(), 1);
+        assert_eq!(queue_after[0].model_id, "llm/llama/reset-review");
+        assert_eq!(queue_after[0].review_status.as_deref(), Some("pending"));
+        assert!(queue_after[0]
+            .review_reasons
+            .contains(&"unknown-task-signature".to_string()));
     }
 }

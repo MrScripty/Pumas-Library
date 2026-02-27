@@ -326,10 +326,10 @@ impl ModelLibrary {
         })
     }
 
-    /// Install dependencies for model/context.
+    /// Return dependency install guidance for model/context.
     ///
-    /// This currently returns deterministic planning/check results and does not
-    /// execute installation commands.
+    /// Pumas Core does not execute installers. It returns deterministic
+    /// readiness/installability data for consumer-managed environments.
     pub async fn install_model_dependencies(
         &self,
         model_id: &str,
@@ -347,14 +347,13 @@ impl ModelLibrary {
             .await?;
 
         let runtime_specs = load_runtime_specs(self, model_id, platform_context, backend_key)?;
-        let model_dir = self.library_root().join(model_id);
         let mut bindings = check.bindings.clone();
 
         let selected_set = selected_binding_ids
             .as_ref()
             .map(|v| v.iter().cloned().collect::<HashSet<_>>());
-        let mut attempted = Vec::new();
-        let mut installed = Vec::new();
+        let attempted = Vec::new();
+        let installed = Vec::new();
         let mut skipped = Vec::new();
         for binding in &mut bindings {
             let selected = match selected_set.as_ref() {
@@ -379,34 +378,25 @@ impl ModelLibrary {
                     binding.state = DependencyState::ManualInterventionRequired;
                     binding.error_code = Some("manual_intervention_required".to_string());
                     binding.message = Some(
-                        "No install commands are defined for this dependency profile".to_string(),
+                        "No install commands are defined; consumer must install manually"
+                            .to_string(),
                     );
                     continue;
                 }
 
-                let install_result =
-                    execute_install_commands(&install_commands, runtime_spec, &model_dir).await;
-                attempted.push(binding.binding_id.clone());
-                if let Err(message) = install_result {
-                    binding.state = DependencyState::Failed;
-                    binding.error_code = Some("install_command_failed".to_string());
-                    binding.message = Some(message);
-                    continue;
-                }
-
-                let outcome = probe_binding_readiness(runtime_spec, &model_dir).await;
-                binding.state = outcome.state;
-                binding.error_code = outcome.error_code;
-                binding.message = outcome.message;
-                if binding.state == DependencyState::Ready {
-                    installed.push(binding.binding_id.clone());
-                } else if binding.state == DependencyState::Missing {
-                    binding.state = DependencyState::Failed;
-                    binding.error_code = Some("install_verification_failed".to_string());
-                    binding.message = Some(
-                        "Install commands completed but dependency probes still fail".to_string(),
-                    );
-                }
+                binding.state = DependencyState::ManualInterventionRequired;
+                binding.error_code = Some("installation_delegated_to_consumer".to_string());
+                let first = &install_commands[0];
+                let source = first.source_url.as_deref().unwrap_or("unknown-source");
+                let source_ref = first.source_ref.as_deref().unwrap_or("unknown-ref");
+                binding.message = Some(format!(
+                    "Pumas does not execute install commands; consumer should run '{}' {:?} (and {} total command(s), source={} ref={})",
+                    first.program,
+                    first.args,
+                    install_commands.len(),
+                    source,
+                    source_ref
+                ));
             } else {
                 skipped.push(binding.binding_id.clone());
             }
@@ -642,56 +632,6 @@ async fn run_command_probe(
     let code = output.status.code().unwrap_or(-1);
     let allowed_codes = success_exit_codes.cloned().unwrap_or_else(|| vec![0]);
     Ok(allowed_codes.contains(&code))
-}
-
-async fn execute_install_commands(
-    commands: &[DependencyCommandSpec],
-    runtime_spec: &BindingRuntimeSpec,
-    model_dir: &Path,
-) -> std::result::Result<(), String> {
-    for command in commands {
-        let source = command.source_url.as_deref().unwrap_or("unknown-source");
-        let source_ref = command.source_ref.as_deref().unwrap_or("unknown-ref");
-        tracing::info!(
-            "Installing dependency binding {} ({}:{}) via {} {:?} (source={} ref={})",
-            runtime_spec.binding_id,
-            runtime_spec.profile_id,
-            runtime_spec.profile_version,
-            command.program,
-            command.args,
-            source,
-            source_ref
-        );
-
-        let output = Command::new(&command.program)
-            .args(&command.args)
-            .current_dir(model_dir)
-            .output()
-            .await
-            .map_err(|err| {
-                format!(
-                    "failed to execute install command {} for {}:{}: {}",
-                    command.program, runtime_spec.profile_id, runtime_spec.profile_version, err
-                )
-            })?;
-
-        if !output.status.success() {
-            let code = output.status.code().unwrap_or(-1);
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(format!(
-                "install command {} {:?} failed with exit code {}{}",
-                command.program,
-                command.args,
-                code,
-                if stderr.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(": {}", stderr)
-                }
-            ));
-        }
-    }
-    Ok(())
 }
 
 fn resolve_probe_path(model_dir: &Path, path: &str) -> PathBuf {
@@ -1094,7 +1034,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn install_executes_commands_and_rechecks_probes() {
+    async fn install_is_informational_only_and_does_not_execute_commands() {
         let (_tmp, library) = setup_library().await;
         let model_id = "llm/llama/install-flow";
         create_model(&library, model_id).await;
@@ -1156,9 +1096,14 @@ mod tests {
             .install_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
             .await
             .unwrap();
-        assert_eq!(install.state, DependencyState::Ready);
-        assert_eq!(install.attempted_binding_ids, vec!["b-install".to_string()]);
-        assert_eq!(install.installed_binding_ids, vec!["b-install".to_string()]);
-        assert!(marker.exists());
+        assert_eq!(install.state, DependencyState::ManualInterventionRequired);
+        assert!(install.attempted_binding_ids.is_empty());
+        assert!(install.installed_binding_ids.is_empty());
+        assert_eq!(install.bindings[0].state, DependencyState::ManualInterventionRequired);
+        assert_eq!(
+            install.bindings[0].error_code.as_deref(),
+            Some("installation_delegated_to_consumer")
+        );
+        assert!(!marker.exists());
     }
 }

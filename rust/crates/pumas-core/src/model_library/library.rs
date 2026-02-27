@@ -630,6 +630,8 @@ impl ModelLibrary {
             reviewer,
             reason,
         )?;
+        self.save_metadata(&model_dir, &target_metadata).await?;
+        self.index_model_dir(&model_dir).await?;
 
         let review_status = target_metadata
             .review_status
@@ -668,8 +670,15 @@ impl ModelLibrary {
             });
         }
 
-        self.index
-            .reset_metadata_overlay(model_id, reviewer, reason)
+        let reset = self.index.reset_metadata_overlay(model_id, reviewer, reason)?;
+        if reset {
+            if let Some(metadata) = self.load_effective_metadata_by_id(model_id)? {
+                self.save_metadata(&model_dir, &metadata).await?;
+                self.index_model_dir(&model_dir).await?;
+            }
+        }
+
+        Ok(reset)
     }
 
     /// Get models pending online lookup.
@@ -711,12 +720,47 @@ impl ModelLibrary {
 
     fn load_effective_metadata_by_id(&self, model_id: &str) -> Result<Option<ModelMetadata>> {
         if let Some(effective_json) = self.index.get_effective_metadata_json(model_id)? {
-            let metadata: ModelMetadata = serde_json::from_str(&effective_json)?;
+            let mut metadata: ModelMetadata = serde_json::from_str(&effective_json)?;
+            self.project_active_dependency_refs(model_id, &mut metadata)?;
             Ok(Some(metadata))
         } else {
             let model_dir = self.library_root.join(model_id);
-            self.load_metadata(&model_dir)
+            let mut metadata = match self.load_metadata(&model_dir)? {
+                Some(metadata) => metadata,
+                None => return Ok(None),
+            };
+            self.project_active_dependency_refs(model_id, &mut metadata)?;
+            Ok(Some(metadata))
         }
+    }
+
+    fn project_active_dependency_refs(
+        &self,
+        model_id: &str,
+        metadata: &mut ModelMetadata,
+    ) -> Result<()> {
+        let active_bindings = self
+            .index()
+            .list_active_model_dependency_bindings(model_id, None)?;
+        if active_bindings.is_empty() {
+            return Ok(());
+        }
+
+        metadata.dependency_bindings = Some(
+            active_bindings
+                .into_iter()
+                .map(|binding| crate::models::DependencyBindingRef {
+                    binding_id: Some(binding.binding_id),
+                    profile_id: Some(binding.profile_id),
+                    profile_version: Some(binding.profile_version),
+                    binding_kind: Some(binding.binding_kind),
+                    backend_key: binding.backend_key,
+                    platform_selector: binding.platform_selector,
+                })
+                .collect(),
+        );
+
+        Ok(())
     }
 
     fn load_baseline_metadata_value(&self, model_id: &str, model_dir: &Path) -> Result<Value> {

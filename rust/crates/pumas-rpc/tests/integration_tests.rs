@@ -4,19 +4,11 @@
 //! and returns responses that match the expected TypeScript types.
 
 use serde_json::{json, Value};
-use std::net::TcpListener;
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::time::Duration;
 use tempfile::TempDir;
-
-/// Find an available port for testing.
-fn find_available_port() -> u16 {
-    TcpListener::bind("127.0.0.1:0")
-        .expect("Failed to bind to port")
-        .local_addr()
-        .expect("Failed to get local address")
-        .port()
-}
+use tokio::io::AsyncBufReadExt;
 
 /// Create a temporary directory with launcher-data structure.
 fn create_test_env() -> TempDir {
@@ -34,6 +26,15 @@ fn create_test_env() -> TempDir {
 
 /// Make an RPC call to the server.
 async fn rpc_call(port: u16, method: &str, params: Value) -> Result<Value, String> {
+    let json = rpc_call_raw(port, method, params).await?;
+    if let Some(error) = json.get("error") {
+        return Err(error.to_string());
+    }
+    Ok(json.get("result").cloned().unwrap_or(Value::Null))
+}
+
+/// Make an RPC call and return the full JSON-RPC payload.
+async fn rpc_call_raw(port: u16, method: &str, params: Value) -> Result<Value, String> {
     let client = reqwest::Client::new();
     let response = client
         .post(format!("http://127.0.0.1:{}/rpc", port))
@@ -48,13 +49,7 @@ async fn rpc_call(port: u16, method: &str, params: Value) -> Result<Value, Strin
         .await
         .map_err(|e| e.to_string())?;
 
-    let json: Value = response.json().await.map_err(|e| e.to_string())?;
-
-    if let Some(error) = json.get("error") {
-        return Err(error.to_string());
-    }
-
-    Ok(json.get("result").cloned().unwrap_or(Value::Null))
+    response.json::<Value>().await.map_err(|e| e.to_string())
 }
 
 /// Check health endpoint.
@@ -83,6 +78,111 @@ async fn wait_for_server(port: u16, timeout_secs: u64) -> bool {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     false
+}
+
+struct RpcServerHandle {
+    child: tokio::process::Child,
+    port: u16,
+    stdout_drain: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl RpcServerHandle {
+    async fn stop(mut self) {
+        if let Some(drain) = self.stdout_drain.take() {
+            drain.abort();
+        }
+        let _ = self.child.kill().await;
+        let _ = self.child.wait().await;
+    }
+}
+
+impl Drop for RpcServerHandle {
+    fn drop(&mut self) {
+        if let Some(drain) = self.stdout_drain.take() {
+            drain.abort();
+        }
+        let _ = self.child.start_kill();
+    }
+}
+
+/// Start the RPC binary and wait until `/health` is ready.
+async fn start_rpc_server(launcher_root: &std::path::Path) -> Result<RpcServerHandle, String> {
+    let binary = if let Ok(path) = std::env::var("CARGO_BIN_EXE_pumas-rpc") {
+        PathBuf::from(path)
+    } else {
+        let current_exe = std::env::current_exe()
+            .map_err(|e| format!("failed to resolve current_exe for fallback: {e}"))?;
+        let target_debug_dir = current_exe
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "failed to resolve target/debug directory for fallback".to_string())?;
+
+        let mut fallback = target_debug_dir.join("pumas-rpc");
+        if cfg!(target_os = "windows") {
+            fallback.set_extension("exe");
+        }
+        if !fallback.exists() {
+            return Err(format!(
+                "CARGO_BIN_EXE_pumas-rpc not set and fallback binary not found at {}",
+                fallback.display()
+            ));
+        }
+        fallback
+    };
+
+    let mut child = tokio::process::Command::new(&binary)
+        .arg("--host")
+        .arg("127.0.0.1")
+        .arg("--port")
+        .arg("0")
+        .arg("--launcher-root")
+        .arg(launcher_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| format!("failed to spawn pumas-rpc: {e}"))?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "failed to capture stdout".to_string())?;
+    let mut lines = tokio::io::BufReader::new(stdout).lines();
+
+    let mut discovered_port: Option<u16> = None;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(20);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(250), lines.next_line()).await {
+            Ok(Ok(Some(line))) => {
+                if let Some(value) = line.strip_prefix("RPC_PORT=") {
+                    let parsed = value
+                        .trim()
+                        .parse::<u16>()
+                        .map_err(|e| format!("invalid RPC_PORT value '{value}': {e}"))?;
+                    discovered_port = Some(parsed);
+                    break;
+                }
+            }
+            Ok(Ok(None)) => break,
+            Ok(Err(err)) => return Err(format!("failed to read pumas-rpc stdout: {err}")),
+            Err(_) => continue,
+        }
+    }
+
+    let port =
+        discovered_port.ok_or_else(|| "RPC_PORT line not emitted by pumas-rpc".to_string())?;
+    if !wait_for_server(port, 15).await {
+        return Err(format!("pumas-rpc failed health check on port {port}"));
+    }
+
+    let stdout_drain = tokio::spawn(async move {
+        while let Ok(Some(_)) = lines.next_line().await {}
+    });
+
+    Ok(RpcServerHandle {
+        child,
+        port,
+        stdout_drain: Some(stdout_drain),
+    })
 }
 
 // =============================================================================
@@ -308,6 +408,120 @@ fn validate_link_health_response(response: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn test_migration_report_rpc_lifecycle() {
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let dry_run = rpc_call(port, "generate_model_migration_dry_run_report", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(dry_run.get("success").and_then(|v| v.as_bool()), Some(true));
+        let dry_run_report = dry_run.get("report").expect("missing report");
+        assert!(dry_run_report
+            .get("generated_at")
+            .and_then(|v| v.as_str())
+            .is_some());
+        assert!(dry_run_report
+            .get("machine_readable_report_path")
+            .and_then(|v| v.as_str())
+            .is_some());
+        assert!(dry_run_report
+            .get("human_readable_report_path")
+            .and_then(|v| v.as_str())
+            .is_some());
+
+        let execution = rpc_call(port, "execute_model_migration", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(
+            execution.get("success").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        let execution_report = execution.get("report").expect("missing execution report");
+        assert!(execution_report
+            .get("referential_integrity_ok")
+            .and_then(|v| v.as_bool())
+            .is_some());
+        assert!(execution_report
+            .get("referential_integrity_errors")
+            .and_then(|v| v.as_array())
+            .is_some());
+        assert!(execution_report
+            .get("reindexed_model_count")
+            .and_then(|v| v.as_u64())
+            .is_some());
+
+        let listed = rpc_call(port, "list_model_migration_reports", json!({}))
+            .await
+            .unwrap();
+        assert_eq!(listed.get("success").and_then(|v| v.as_bool()), Some(true));
+        let reports = listed
+            .get("reports")
+            .and_then(|v| v.as_array())
+            .expect("reports array missing");
+        assert!(
+            !reports.is_empty(),
+            "expected at least one report artifact after dry-run/execution"
+        );
+        let first_report = reports[0].clone();
+        let report_path = first_report
+            .get("json_report_path")
+            .and_then(|v| v.as_str())
+            .expect("json_report_path missing")
+            .to_string();
+
+        let deleted = rpc_call(
+            port,
+            "delete_model_migration_report",
+            json!({"reportPath": report_path}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(deleted.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert_eq!(deleted.get("removed").and_then(|v| v.as_bool()), Some(true));
+
+        let pruned = rpc_call(
+            port,
+            "prune_model_migration_reports",
+            json!({"keepLatest": 0}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pruned.get("success").and_then(|v| v.as_bool()), Some(true));
+        assert!(pruned.get("removed").and_then(|v| v.as_u64()).is_some());
+        assert_eq!(pruned.get("kept").and_then(|v| v.as_u64()), Some(0));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_migration_report_prune_rejects_negative_keep_latest() {
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let payload = rpc_call_raw(
+            port,
+            "prune_model_migration_reports",
+            json!({"keep_latest": -1}),
+        )
+        .await
+        .unwrap();
+        let error = payload
+            .get("error")
+            .expect("expected JSON-RPC error payload");
+        assert_eq!(error.get("code").and_then(|v| v.as_i64()), Some(-32602));
+        assert!(error
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .contains("keep_latest must be >= 0"));
+
+        server.stop().await;
+    }
 
     // Note: These tests require the RPC server to be running.
     // In CI, you would start the server as part of the test setup.

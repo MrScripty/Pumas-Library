@@ -40,14 +40,6 @@ impl PumasApi {
         self.primary().model_library.get_model(model_id).await
     }
 
-    /// Mark a model's metadata as manually set (protected from auto-updates).
-    pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        self.primary()
-            .model_library
-            .mark_metadata_as_manual(model_id)
-            .await
-    }
-
     /// Get inference settings schema for a model.
     ///
     /// If the model has persisted settings, returns those. Otherwise,

@@ -389,22 +389,6 @@ pub async fn validate_file_type(_state: &AppState, params: &Value) -> pumas_libr
     }))
 }
 
-pub async fn mark_metadata_as_manual(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-    match state.api.mark_model_metadata_as_manual(&model_id).await {
-        Ok(()) => Ok(json!({
-            "success": true
-        })),
-        Err(e) => Ok(json!({
-            "success": false,
-            "error": e.to_string()
-        })),
-    }
-}
-
 pub async fn get_embedded_metadata(
     _state: &AppState,
     params: &Value,
@@ -542,24 +526,6 @@ pub async fn refetch_model_metadata_from_hf(
         "model_id": model_id,
         "metadata": serde_json::to_value(&updated)?
     }))
-}
-
-pub async fn get_model_overrides(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let _rel_path = require_str_param(params, "rel_path", "relPath")?;
-    // TODO: Implement model overrides
-    Ok(json!({}))
-}
-
-pub async fn update_model_overrides(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let _rel_path = require_str_param(params, "rel_path", "relPath")?;
-    // TODO: Implement model overrides update
-    Ok(json!(false))
 }
 
 pub async fn adopt_orphan_models(

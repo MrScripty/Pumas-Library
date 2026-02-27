@@ -8,7 +8,6 @@
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
 import type {
-  BaseResponse,
   CheckFilesWritableResponse,
   DetectShardedSetsResponse,
   EmbeddedMetadataResponse,
@@ -91,15 +90,6 @@ class ImportAPI {
   async validateFileType(filePath: string): Promise<FileTypeValidationResponse> {
     const api = this.getAPI();
     return await api.validate_file_type(filePath);
-  }
-
-  /**
-   * Mark model metadata as manually corrected to protect from auto-updates.
-   * Prevents future Deep Scans from overwriting user edits.
-   */
-  async markMetadataAsManual(modelId: string): Promise<BaseResponse> {
-    const api = this.getAPI();
-    return await api.mark_metadata_as_manual(modelId);
   }
 
   /**

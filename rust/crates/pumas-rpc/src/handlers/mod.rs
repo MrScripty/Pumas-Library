@@ -366,14 +366,11 @@ async fn dispatch_method(
         "lookup_hf_metadata_for_file" => models::lookup_hf_metadata_for_file(state, params).await,
         "detect_sharded_sets" => models::detect_sharded_sets(state, params).await,
         "validate_file_type" => models::validate_file_type(state, params).await,
-        "mark_metadata_as_manual" => models::mark_metadata_as_manual(state, params).await,
         "get_embedded_metadata" => models::get_embedded_metadata(state, params).await,
         "get_library_model_metadata" => models::get_library_model_metadata(state, params).await,
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
         }
-        "get_model_overrides" => models::get_model_overrides(state, params).await,
-        "update_model_overrides" => models::update_model_overrides(state, params).await,
         "adopt_orphan_models" => models::adopt_orphan_models(state, params).await,
         "import_model_in_place" => models::import_model_in_place(state, params).await,
         "scan_shared_storage" => models::scan_shared_storage(state, params).await,

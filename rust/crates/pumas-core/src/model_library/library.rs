@@ -719,20 +719,6 @@ impl ModelLibrary {
         Ok(serde_json::to_value(metadata)?)
     }
 
-    /// Mark a model's metadata as manually set (protected from auto-updates).
-    pub async fn mark_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        let model_dir = self.library_root.join(model_id);
-        let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
-
-        metadata.match_source = Some("manual".to_string());
-        metadata.pending_online_lookup = Some(false);
-
-        self.save_metadata(&model_dir, &metadata).await?;
-        self.index_model_dir(&model_dir).await?;
-
-        Ok(())
-    }
-
     /// Update model metadata from HuggingFace.
     ///
     /// When `force` is true, updates even if the metadata was manually set.

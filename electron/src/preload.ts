@@ -206,9 +206,6 @@ const electronAPI = {
     apiCall('list_interrupted_downloads'),
   recover_download: (repoId: string, destDir: string) =>
     apiCall('recover_download', { repo_id: repoId, dest_dir: destDir }),
-  get_model_overrides: (relPath: string) => apiCall('get_model_overrides', { rel_path: relPath }),
-  update_model_overrides: (relPath: string, overrides: Record<string, unknown>) =>
-    apiCall('update_model_overrides', { rel_path: relPath, overrides }),
   get_library_model_metadata: (modelId: string) =>
     apiCall('get_library_model_metadata', { model_id: modelId }),
   refetch_model_metadata_from_hf: (modelId: string) =>
@@ -261,8 +258,6 @@ const electronAPI = {
   detect_sharded_sets: (filePaths: string[]) =>
     apiCall('detect_sharded_sets', { file_paths: filePaths }),
   validate_file_type: (filePath: string) => apiCall('validate_file_type', { file_path: filePath }),
-  mark_metadata_as_manual: (modelId: string) =>
-    apiCall('mark_metadata_as_manual', { model_id: modelId }),
   get_library_status: () => apiCall('get_library_status'),
   get_file_link_count: (filePath: string) => apiCall('get_file_link_count', { file_path: filePath }),
   check_files_writable: (filePaths: string[]) =>

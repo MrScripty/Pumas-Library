@@ -1664,11 +1664,6 @@ export interface PyWebViewAPI {
   validate_file_type(filePath: string): Promise<FileTypeValidationResponse>;
 
   /**
-   * Mark model metadata as manually corrected to protect from auto-updates
-   */
-  mark_metadata_as_manual(modelId: string): Promise<BaseResponse>;
-
-  /**
    * Get embedded metadata from a model file (GGUF or safetensors)
    */
   get_embedded_metadata(filePath: string): Promise<EmbeddedMetadataResponse>;

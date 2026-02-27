@@ -129,6 +129,7 @@ export function LocalModelsList({
               const progressValue = Math.min(1, Math.max(0, model.downloadProgress ?? 0));
               const isQueued = model.downloadStatus === 'queued';
               const isPaused = model.downloadStatus === 'paused';
+              const isActiveDownload = ['queued', 'downloading', 'pausing', 'cancelling'].includes(model.downloadStatus ?? '');
               const progressDegrees = Math.round(progressValue * 360);
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
               const canPause = isDownloading && (model.downloadStatus === 'downloading' || model.downloadStatus === 'queued') && Boolean(onPauseDownload) && Boolean(model.downloadRepoId);
@@ -214,15 +215,19 @@ export function LocalModelsList({
                               : undefined
                           }
                         >
-                          <span
-                            className={`download-progress-ring ${isQueued ? 'is-waiting' : ''} ${isPaused ? 'is-paused' : ''}`}
-                            style={
-                              {
-                                '--progress': `${ringDegrees}deg`,
-                              } as CSSProperties
-                            }
-                          />
-                          {!isQueued && !isPaused && <span className="download-scan-ring" />}
+                          {isActiveDownload && (
+                            <>
+                              <span
+                                className={`download-progress-ring ${isQueued ? 'is-waiting' : ''} ${isPaused ? 'is-paused' : ''}`}
+                                style={
+                                  {
+                                    '--progress': `${ringDegrees}deg`,
+                                  } as CSSProperties
+                                }
+                              />
+                              {!isQueued && !isPaused && <span className="download-scan-ring" />}
+                            </>
+                          )}
                           {canPause ? (
                             <>
                               <Download className="h-3.5 w-3.5 group-hover:hidden" />

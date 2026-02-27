@@ -156,6 +156,7 @@ export function RemoteModelsList({
         const isErrored = downloadStatus?.status === 'error';
         const isQueued = downloadStatus?.status === 'queued';
         const isPausing = downloadStatus?.status === 'pausing';
+        const showActiveDownloadRing = isDownloading;
         const modelError = downloadErrors[model.repoId];
         const progressValue = downloadStatus?.progress ?? 0;
         const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
@@ -343,7 +344,7 @@ export function RemoteModelsList({
                   aria-pressed={openQuantMenuRepoId === model.repoId}
                 >
                   <span className="relative flex h-4 w-4 items-center justify-center">
-                    {(isDownloading || isPaused) && (
+                    {showActiveDownloadRing && (
                       <>
                         <span
                           className={`download-progress-ring ${isQueued ? 'is-waiting' : ''} ${isPaused ? 'is-paused' : ''}`}
@@ -356,13 +357,9 @@ export function RemoteModelsList({
                         {!isQueued && !isPaused && <span className="download-scan-ring" />}
                       </>
                     )}
-                    {isDownloading || isPaused ? (
+                    {isDownloading ? (
                       <>
-                        <Download
-                          className={`h-4 w-4 transition-opacity ${
-                            isDownloading ? 'group-hover:opacity-30' : ''
-                          }`}
-                        />
+                        <Download className="h-4 w-4 transition-opacity group-hover:opacity-30" />
                         <X className="absolute h-4 w-4 opacity-0 transition-opacity group-hover:opacity-100" />
                       </>
                     ) : (

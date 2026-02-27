@@ -72,6 +72,65 @@ function formatMetadataValue(key: string, value: unknown): string {
   return String(value);
 }
 
+/** Check whether value is a plain object-like record */
+function isRecordValue(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Check whether value is a structured type requiring summary/expand controls */
+function isStructuredValue(value: unknown): boolean {
+  return Array.isArray(value) || isRecordValue(value);
+}
+
+/** Generate a short summary for array/object metadata values */
+function getStructuredValueSummary(key: string, value: unknown): string {
+  const lowerKey = key.toLowerCase();
+
+  if (lowerKey === 'dependency_bindings' && Array.isArray(value)) {
+    return `Dependency bindings (${value.length})`;
+  }
+  if (lowerKey === 'files' && Array.isArray(value)) {
+    return `Files (${value.length})`;
+  }
+  if (lowerKey === 'hashes' && isRecordValue(value)) {
+    const hashKinds = Object.keys(value).filter((k) => value[k] != null && String(value[k]).trim() !== '');
+    if (hashKinds.length === 0) return 'Hashes (empty)';
+    const preview = hashKinds.slice(0, 3).join(', ');
+    return `Hashes (${preview}${hashKinds.length > 3 ? ', ...' : ''})`;
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return 'Array (0)';
+    const typedValues = value.filter((item) => item != null);
+    if (typedValues.length > 0 && typedValues.every((item) => typeof item === 'string')) {
+      return `Array of strings (${value.length})`;
+    }
+    if (typedValues.length > 0 && typedValues.every((item) => isRecordValue(item))) {
+      return `Array of objects (${value.length})`;
+    }
+    return `Array (${value.length})`;
+  }
+
+  if (isRecordValue(value)) {
+    const keys = Object.keys(value);
+    if (keys.length === 0) return 'Object (0 keys)';
+    const preview = keys.slice(0, 3).join(', ');
+    return `Object (${keys.length} keys: ${preview}${keys.length > 3 ? ', ...' : ''})`;
+  }
+
+  return String(value ?? '');
+}
+
+/** Stringify metadata values for copy/expanded display */
+function serializeMetadataValue(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value, null, 2) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
 /** Check if a GGUF field is a priority field */
 function isPriorityGgufField(key: string): boolean {
   const lowerKey = key.toLowerCase();
@@ -114,6 +173,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [showAllFields, setShowAllFields] = useState(false);
   const [refetching, setRefetching] = useState(false);
   const [refetchError, setRefetchError] = useState<string | null>(null);
+  const [expandedFieldKeys, setExpandedFieldKeys] = useState<Set<string>>(new Set());
+  const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
 
   // Inference settings state
   const [inferenceSettings, setInferenceSettings] = useState<InferenceParamSchema[]>([]);
@@ -253,6 +314,31 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     }
   };
 
+  const toggleFieldExpanded = (fieldKey: string) => {
+    setExpandedFieldKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(fieldKey)) {
+        next.delete(fieldKey);
+      } else {
+        next.add(fieldKey);
+      }
+      return next;
+    });
+  };
+
+  const handleCopyFieldValue = async (fieldKey: string, value: unknown) => {
+    if (!navigator.clipboard?.writeText) return;
+    try {
+      await navigator.clipboard.writeText(serializeMetadataValue(value));
+      setCopiedFieldKey(fieldKey);
+      setTimeout(() => {
+        setCopiedFieldKey((current) => (current === fieldKey ? null : current));
+      }, 1500);
+    } catch {
+      // Clipboard write failures are non-fatal; leave UI unchanged.
+    }
+  };
+
   // ========================================
   // Metadata grid renderer
   // ========================================
@@ -330,16 +416,54 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     // Non-GGUF (stored metadata) - simpler display
     return (
       <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-h-80 overflow-y-auto">
-        {displayEntries.map(([key, value]) => (
-          <React.Fragment key={key}>
-            <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
-              {formatFieldName(key)}
-            </span>
-            <span className="text-[hsl(var(--text-secondary))] truncate" title={formatMetadataValue(key, value)}>
-              {formatMetadataValue(key, value)}
-            </span>
-          </React.Fragment>
-        ))}
+        {displayEntries.map(([key, value]) => {
+          const fieldKey = `${activeSource}:${key}`;
+          const isStructured = isStructuredValue(value);
+          const isExpanded = expandedFieldKeys.has(fieldKey);
+          const summaryLabel = isStructured ? getStructuredValueSummary(key, value) : formatMetadataValue(key, value);
+
+          return (
+            <React.Fragment key={key}>
+              <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
+                {formatFieldName(key)}
+              </span>
+              <div className="text-[hsl(var(--text-secondary))]">
+                {!isStructured ? (
+                  <span className="truncate block" title={summaryLabel}>
+                    {summaryLabel}
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="truncate" title={summaryLabel}>
+                      {summaryLabel}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleFieldExpanded(fieldKey)}
+                      className="text-xs px-1.5 py-0.5 rounded border border-[hsl(var(--border-default))] hover:bg-[hsl(var(--surface-high))] shrink-0"
+                      title={isExpanded ? 'Collapse value' : 'Expand value'}
+                    >
+                      {isExpanded ? 'Collapse' : 'Expand'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyFieldValue(fieldKey, value)}
+                      className="text-xs px-1.5 py-0.5 rounded border border-[hsl(var(--border-default))] hover:bg-[hsl(var(--surface-high))] shrink-0"
+                      title="Copy full JSON value"
+                    >
+                      {copiedFieldKey === fieldKey ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                )}
+              </div>
+              {isStructured && isExpanded && (
+                <pre className="col-span-2 mt-1 mb-2 p-2 rounded bg-[hsl(var(--surface-high)/0.5)] border border-[hsl(var(--border-default))] text-xs font-mono whitespace-pre-wrap break-all text-[hsl(var(--text-secondary))]">
+                  {serializeMetadataValue(value)}
+                </pre>
+              )}
+            </React.Fragment>
+          );
+        })}
       </div>
     );
   };

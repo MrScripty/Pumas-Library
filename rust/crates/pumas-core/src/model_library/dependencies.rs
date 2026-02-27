@@ -574,12 +574,12 @@ const PIN_REASON_PROFILE_POLICY_REQUIRED: &str = "profile_policy_required";
 const PIN_ERROR_UNPINNED_DEPENDENCY: &str = "unpinned_dependency";
 const PIN_ERROR_MODALITY_RESOLUTION_UNKNOWN: &str = "modality_resolution_unknown";
 
-struct BindingPinEvaluation {
-    pin_summary: ModelDependencyPinSummary,
-    required_pins: Vec<ModelDependencyRequiredPin>,
-    missing_pins: Vec<String>,
-    error_code: Option<String>,
-    message: Option<String>,
+pub(super) struct BindingPinEvaluation {
+    pub pin_summary: ModelDependencyPinSummary,
+    pub required_pins: Vec<ModelDependencyRequiredPin>,
+    pub missing_pins: Vec<String>,
+    pub error_code: Option<String>,
+    pub message: Option<String>,
 }
 
 enum ModalityResolution {
@@ -587,7 +587,7 @@ enum ModalityResolution {
     Unknown(String),
 }
 
-fn evaluate_binding_pin_requirements(
+pub(super) fn evaluate_binding_pin_requirements(
     binding_id: &str,
     binding_kind: &str,
     backend_key: Option<&str>,

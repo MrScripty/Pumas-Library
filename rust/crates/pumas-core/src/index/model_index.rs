@@ -1325,6 +1325,45 @@ impl ModelIndex {
         Ok(count > 0)
     }
 
+    /// Load a dependency profile by `(profile_id, profile_version)`.
+    pub fn get_dependency_profile(
+        &self,
+        profile_id: &str,
+        profile_version: i64,
+    ) -> Result<Option<DependencyProfileRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let record = conn
+            .query_row(
+                "SELECT
+                   profile_id,
+                   profile_version,
+                   profile_hash,
+                   environment_kind,
+                   spec_json,
+                   created_at
+                 FROM dependency_profiles
+                 WHERE profile_id = ?1 AND profile_version = ?2",
+                params![profile_id, profile_version],
+                |row| {
+                    Ok(DependencyProfileRecord {
+                        profile_id: row.get(0)?,
+                        profile_version: row.get(1)?,
+                        profile_hash: row.get(2)?,
+                        environment_kind: row.get(3)?,
+                        spec_json: row.get(4)?,
+                        created_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(record)
+    }
+
     /// Insert or update a model dependency binding row.
     pub fn upsert_model_dependency_binding(
         &self,

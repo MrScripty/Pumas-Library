@@ -2,6 +2,7 @@
 
 use crate::error::{PumasError, Result};
 use crate::index::ModelIndex;
+use crate::model_library::dependencies::evaluate_binding_pin_requirements;
 use crate::model_library::task_signature::CANONICAL_MODALITY_TOKENS;
 use crate::models::{DependencyBindingRef, ModelMetadata};
 
@@ -45,6 +46,7 @@ fn validate_metadata_v2_internal(
         "model_type_resolution_confidence",
         metadata.model_type_resolution_confidence,
     )?;
+    validate_dependency_binding_refs(metadata.dependency_bindings.as_ref(), index, metadata)?;
 
     let strict_v2 = metadata.schema_version.unwrap_or(1) >= 2;
     if !strict_v2 {
@@ -94,7 +96,6 @@ fn validate_metadata_v2_internal(
     validate_modalities("output_modalities", metadata.output_modalities.as_ref())?;
     validate_review_reasons(metadata.review_reasons.as_ref())?;
     validate_custom_code_requirements(metadata)?;
-    validate_dependency_binding_refs(metadata.dependency_bindings.as_ref(), index)?;
 
     if task_type_primary == "unknown" {
         validate_unknown_review_bundle(
@@ -250,6 +251,7 @@ fn validate_custom_code_requirements(metadata: &ModelMetadata) -> Result<()> {
 fn validate_dependency_binding_refs(
     bindings: Option<&Vec<DependencyBindingRef>>,
     index: Option<&ModelIndex>,
+    metadata: &ModelMetadata,
 ) -> Result<()> {
     let Some(bindings) = bindings else {
         return Ok(());
@@ -293,12 +295,47 @@ fn validate_dependency_binding_refs(
             });
         }
 
-        if !index.dependency_profile_exists(profile_id, profile_version)? {
+        let Some(profile) = index.get_dependency_profile(profile_id, profile_version)? else {
             return Err(PumasError::Validation {
                 field: format!("dependency_bindings[{idx}]"),
                 message: format!(
                     "references missing dependency profile: {}:{}",
                     profile_id, profile_version
+                ),
+            });
+        };
+
+        let binding_id = binding
+            .binding_id
+            .as_deref()
+            .map(str::trim)
+            .unwrap_or_default();
+        let binding_kind = binding
+            .binding_kind
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or("required_core");
+
+        let pin_eval = evaluate_binding_pin_requirements(
+            binding_id,
+            binding_kind,
+            binding.backend_key.as_deref(),
+            &profile.profile_id,
+            profile.profile_version,
+            &profile.environment_kind,
+            &profile.spec_json,
+            Some(metadata),
+        );
+        if let Some(error_code) = pin_eval.error_code {
+            return Err(PumasError::Validation {
+                field: format!("dependency_bindings[{idx}]"),
+                message: format!(
+                    "{}: {}",
+                    error_code,
+                    pin_eval.message.unwrap_or_else(|| {
+                        "dependency binding does not satisfy required pin policy".to_string()
+                    })
                 ),
             });
         }
@@ -518,5 +555,66 @@ mod tests {
             .unwrap();
 
         validate_metadata_v2_with_index(&metadata, &index).unwrap();
+    }
+
+    #[test]
+    fn dependency_binding_refs_are_validated_for_schema_v1() {
+        let temp = TempDir::new().unwrap();
+        let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
+
+        let mut metadata = ModelMetadata::default();
+        metadata.schema_version = Some(1);
+        metadata.dependency_bindings = Some(vec![DependencyBindingRef {
+            profile_id: Some("torch-core".to_string()),
+            profile_version: Some(1),
+            ..Default::default()
+        }]);
+
+        let err = validate_metadata_v2_with_index(&metadata, &index).unwrap_err();
+        match err {
+            PumasError::Validation { field, .. } => assert_eq!(field, "dependency_bindings[0]"),
+            _ => panic!("expected validation error"),
+        }
+    }
+
+    #[test]
+    fn dependency_binding_refs_enforce_pin_compliance() {
+        let temp = TempDir::new().unwrap();
+        let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
+
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "torch-core".to_string(),
+                profile_version: 1,
+                profile_hash: Some("hash-2".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "xformers", "version": "==0.0.30"}
+                    ]
+                })
+                .to_string(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            })
+            .unwrap();
+
+        let mut metadata = metadata_v2_base();
+        metadata.dependency_bindings = Some(vec![DependencyBindingRef {
+            binding_id: Some("binding.torch.core".to_string()),
+            profile_id: Some("torch-core".to_string()),
+            profile_version: Some(1),
+            backend_key: Some("pytorch".to_string()),
+            binding_kind: Some("required_core".to_string()),
+            ..Default::default()
+        }]);
+
+        let err = validate_metadata_v2_with_index(&metadata, &index).unwrap_err();
+        match err {
+            PumasError::Validation { field, message } => {
+                assert_eq!(field, "dependency_bindings[0]");
+                assert!(message.contains("unpinned_dependency"));
+            }
+            _ => panic!("expected validation error"),
+        }
     }
 }

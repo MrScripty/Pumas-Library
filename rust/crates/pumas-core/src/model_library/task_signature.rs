@@ -59,7 +59,7 @@ const MODALITY_ORDER: [&str; 15] = [
 
 /// Normalize a task signature or source task label into canonical shape.
 pub fn normalize_task_signature(raw: &str) -> NormalizedTaskSignature {
-    let normalized = raw.trim().to_lowercase();
+    let normalized = collapse_whitespace(&raw.trim().to_lowercase());
     if normalized.is_empty() {
         return NormalizedTaskSignature::error_invalid_signature();
     }
@@ -120,10 +120,14 @@ pub fn normalize_task_signature(raw: &str) -> NormalizedTaskSignature {
 }
 
 fn normalize_direction_separator(input: &str) -> String {
-    let mut out = input
-        .replace('→', "->")
-        .replace("=>", "->")
-        .replace(" to ", "->");
+    let mut out = input.replace('→', "->").replace("=>", "->");
+
+    if let Ok(word_to) = Regex::new(r"\s+to\s+") {
+        out = word_to.replace_all(&out, "->").to_string();
+    }
+    if let Ok(word_two) = Regex::new(r"\s+2\s+") {
+        out = word_two.replace_all(&out, "->").to_string();
+    }
 
     // Support compact forms like "speech2text"
     if let Ok(compact_two) = Regex::new(r"([a-z])2([a-z])") {
@@ -146,14 +150,17 @@ fn split_directional(input: &str) -> Option<(&str, &str)> {
 }
 
 fn normalize_modalities(side: &str) -> (Vec<String>, Vec<String>) {
-    let mut normalized = side.replace(" and ", "+");
+    let mut normalized = collapse_whitespace(side);
+    if let Ok(and_word) = Regex::new(r"\band\b") {
+        normalized = and_word.replace_all(&normalized, "+").to_string();
+    }
     normalized = normalized
         .replace(',', "+")
         .replace('&', "+")
         .replace('/', "+");
 
     let mut known = HashSet::new();
-    let mut unknown = Vec::new();
+    let mut unknown = HashSet::new();
     for token in normalized.split('+') {
         let token = token.trim();
         if token.is_empty() {
@@ -163,14 +170,24 @@ fn normalize_modalities(side: &str) -> (Vec<String>, Vec<String>) {
         if let Some(modality) = normalize_modality_token(token) {
             known.insert(modality.to_string());
         } else {
-            unknown.push(token.to_string());
+            unknown.insert(token.to_string());
         }
     }
 
     let mut known_vec: Vec<String> = known.into_iter().collect();
     known_vec.sort_by_key(|m| modality_rank(m.as_str()));
 
-    (known_vec, unknown)
+    let mut unknown_vec: Vec<String> = unknown.into_iter().collect();
+    unknown_vec.sort();
+
+    (known_vec, unknown_vec)
+}
+
+fn collapse_whitespace(input: &str) -> String {
+    if let Ok(spaces) = Regex::new(r"\s+") {
+        return spaces.replace_all(input, " ").trim().to_string();
+    }
+    input.trim().to_string()
 }
 
 fn modality_rank(token: &str) -> usize {
@@ -278,12 +295,24 @@ mod tests {
             normalize_task_signature("text/image -> image").signature_key,
             "text+image->image"
         );
+        assert_eq!(
+            normalize_task_signature("text & image to image").signature_key,
+            "text+image->image"
+        );
+        assert_eq!(
+            normalize_task_signature(" video   and   text -> text ").signature_key,
+            "text+video->text"
+        );
     }
 
     #[test]
     fn expands_aliases() {
         assert_eq!(
             normalize_task_signature("speech2text").signature_key,
+            "audio->text"
+        );
+        assert_eq!(
+            normalize_task_signature("audio 2 text").signature_key,
             "audio->text"
         );
         assert_eq!(
@@ -314,10 +343,36 @@ mod tests {
     }
 
     #[test]
+    fn unresolved_tokens_are_deduped_and_sorted() {
+        let result = normalize_task_signature("text+zeta+alpha+zeta->image");
+        assert_eq!(
+            result
+                .normalization_warnings
+                .iter()
+                .find(|w| w.starts_with("unresolved-input-tokens:")),
+            Some(&"unresolved-input-tokens:alpha,zeta".to_string())
+        );
+    }
+
+    #[test]
     fn invalid_signature_is_error() {
         let result = normalize_task_signature("unknownformat");
         assert_eq!(result.signature_key, "unknown->unknown");
         assert_eq!(result.normalization_status, TaskNormalizationStatus::Error);
+    }
+
+    #[test]
+    fn missing_side_falls_back_to_unknown_with_warning() {
+        let result = normalize_task_signature("text->");
+        assert_eq!(result.signature_key, "text->unknown");
+        assert_eq!(
+            result.normalization_status,
+            TaskNormalizationStatus::Warning
+        );
+        assert!(result
+            .normalization_warnings
+            .iter()
+            .any(|w| w == "missing-output-modalities"));
     }
 
     #[test]

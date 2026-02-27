@@ -8,6 +8,7 @@ Application-manager layer for installed app versions, dependency checks, process
 | ----------- | ----------- |
 | `version_manager/` | Version install/remove/switch/progress and dependency checks. |
 | `custom_nodes/` | Custom node lifecycle for supported app runtimes. |
+| `ollama_client/` | Focused Ollama client helper modules (for example naming logic). |
 | `process/` | Process factory/wrappers used by app managers. |
 | `ollama_client.rs` | Ollama RPC/HTTP client integrations. |
 | `torch_client.rs` | Torch-related environment and runtime checks. |

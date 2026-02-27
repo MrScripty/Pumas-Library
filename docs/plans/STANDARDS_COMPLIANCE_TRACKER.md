@@ -59,7 +59,7 @@ Plan:
 ### WS-03: File Size Refactors (Priority P2)
 Goal: Move toward 500-line target from `CODING-STANDARDS.md`.
 
-Current baseline: 51 files exceed 500 lines (down from 53 after splitting `pumas-rpc` handler modules).
+Current baseline: 49 files exceed 500 lines (down from 53 after splitting `pumas-rpc` handler modules and `ollama_client` helpers).
 
 Top offenders:
 1. `rust/crates/pumas-core/src/model_library/library.rs` (3437)
@@ -75,7 +75,17 @@ Top offenders:
 
 Plan:
 - [x] Prioritize decomposition of `pumas-rpc/src/handlers/models.rs` and high-churn `pumas-core` files.
-- [ ] Create per-file extraction plans before refactors to avoid behavior regressions.
+- [x] Create per-file extraction plans before refactors to avoid behavior regressions.
+
+Next extraction plans:
+1. `rust/crates/pumas-core/src/models/responses.rs`:
+Keep API response contracts stable while splitting structs by domain (`system`, `model`, `link`, `migration`) with `pub use` re-exports in `mod.rs`.
+2. `rust/crates/pumas-core/src/api/builder.rs`:
+Extract background task startup/recovery orchestration into dedicated internal modules to reduce constructor complexity and improve test seams.
+3. `rust/crates/pumas-app-manager/src/custom_nodes/mod.rs`:
+Split CRUD/install/update/remove flows into focused submodules (`install`, `update`, `remove`, `query`) while retaining the public manager API.
+4. `frontend/src/types/api.ts`:
+Split TS API contracts into feature files (`status`, `models`, `versions`, `mapping`, `migration`) and keep `types/api.ts` as a re-export barrel for compatibility.
 
 ### WS-04: TODO Hygiene (Priority P3)
 Goal: Ensure TODO comments include ticket/owner/date context per documentation standard.
@@ -97,3 +107,5 @@ Plan:
 7. Added RPC unit tests for conflict-resolution parsing and `refresh_model_mappings` passthrough behavior.
 8. Split `pumas-rpc/src/handlers/models.rs` into focused submodules under `handlers/models/` (all under 500 lines).
 9. Split `pumas-rpc/src/handlers/versions.rs` into focused submodules under `handlers/versions/` (all under 500 lines).
+10. Extracted shared helper logic from `pumas-rpc/src/handlers/mod.rs` into `handlers/shared.rs`, reducing dispatcher file size below 500 lines.
+11. Extracted Ollama naming helper/tests into `pumas-app-manager/src/ollama_client/naming.rs`, reducing `ollama_client.rs` below 500 lines.

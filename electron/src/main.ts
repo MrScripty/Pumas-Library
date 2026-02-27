@@ -175,7 +175,18 @@ function registerIPCHandlers(): void {
 
   // Shell handlers
   ipcMain.handle('shell:openExternal', async (_event, url: string) => {
-    await shell.openExternal(url);
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(url);
+    } catch {
+      throw new Error('Invalid URL');
+    }
+
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      throw new Error('Only http/https URLs are allowed');
+    }
+
+    await shell.openExternal(parsedUrl.toString());
   });
 
   ipcMain.handle('shell:openPath', async (_event, filePath: string) => {

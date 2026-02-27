@@ -6,9 +6,9 @@
 //! - Customizable retry predicates
 //! - Statistics tracking
 
+use rand::Rng;
 use std::future::Future;
 use std::time::Duration;
-use rand::Rng;
 use tracing::{debug, warn};
 
 /// Configuration for retry behavior.
@@ -240,12 +240,8 @@ mod tests {
     async fn test_retry_succeeds_first_try() {
         let config = RetryConfig::new().with_max_attempts(3);
 
-        let (result, stats) = retry_async(
-            &config,
-            || async { Ok::<_, String>(42) },
-            |_: &String| true,
-        )
-        .await;
+        let (result, stats) =
+            retry_async(&config, || async { Ok::<_, String>(42) }, |_: &String| true).await;
 
         assert_eq!(result.unwrap(), 42);
         assert_eq!(stats.attempts, 1);

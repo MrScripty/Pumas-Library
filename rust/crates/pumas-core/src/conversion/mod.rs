@@ -9,18 +9,18 @@
 //! specific implementations (e.g. `LlamaCppBackend` for GGUF quantization).
 
 pub mod llama_cpp;
-pub mod nvfp4;
-pub mod sherry;
 mod manager;
+pub mod nvfp4;
 pub(crate) mod pipeline;
 pub(crate) mod progress;
 mod scripts;
+pub mod sherry;
 mod types;
 
 pub use llama_cpp::LlamaCppBackend;
+pub use manager::ConversionManager;
 pub use nvfp4::Nvfp4Backend;
 pub use sherry::SherryBackend;
-pub use manager::ConversionManager;
 pub use types::{
     BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
     ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,

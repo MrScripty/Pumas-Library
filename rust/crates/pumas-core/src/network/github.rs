@@ -6,11 +6,11 @@
 //! - Offline-first strategy with stale data fallback
 //! - Rate limit handling
 
+use super::web_source::{CacheStrategy, WebSource, WebSourceId};
 use crate::config::{AppId, NetworkConfig};
 use crate::models::{CacheStatus, GitHubReleasesCache};
 use crate::network::client::HttpClient;
 use crate::network::retry::{retry_async, RetryConfig};
-use super::web_source::{CacheStrategy, WebSource, WebSourceId};
 use crate::{PumasError, Result};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -41,10 +41,7 @@ impl ReleasesCache {
     /// Create a new releases cache.
     pub fn new(cache_dir: PathBuf, ttl: Duration) -> Self {
         Self {
-            memory_cache: Cache::builder()
-                .time_to_live(ttl)
-                .max_capacity(10)
-                .build(),
+            memory_cache: Cache::builder().time_to_live(ttl).max_capacity(10).build(),
             cache_dir,
             default_ttl: ttl,
         }
@@ -132,7 +129,11 @@ impl ReleasesCache {
             let age = DateTime::parse_from_rfc3339(&cache.last_fetched)
                 .map(|t| Utc::now().signed_duration_since(t).num_seconds() as u64)
                 .ok();
-            (age, Some(cache.last_fetched), Some(cache.releases.len() as u32))
+            (
+                age,
+                Some(cache.last_fetched),
+                Some(cache.releases.len() as u32),
+            )
         } else {
             (None, None, None)
         };
@@ -159,7 +160,8 @@ impl ReleasesCache {
     fn disk_cache_path(&self, key: &str) -> PathBuf {
         // Sanitize key for filename
         let safe_key = key.replace('/', "-");
-        self.cache_dir.join(format!("github-releases-{}.json", safe_key))
+        self.cache_dir
+            .join(format!("github-releases-{}.json", safe_key))
     }
 }
 
@@ -233,14 +235,16 @@ impl GitHubClient {
             if !force_refresh && is_valid {
                 // Valid disk cache - use it and populate memory cache
                 debug!("GitHub releases cache hit (disk) for {}", repo);
-                self.cache.set_memory(&cache_key, disk_cache.releases.clone());
+                self.cache
+                    .set_memory(&cache_key, disk_cache.releases.clone());
                 return Ok(disk_cache.releases);
             }
 
             // 3. Stale cache available - try network, fall back to stale
             if !force_refresh {
                 debug!("GitHub releases cache stale for {}, trying network", repo);
-                let fetch_result: Result<Vec<GitHubRelease>> = self.fetch_releases_from_network(repo).await;
+                let fetch_result: Result<Vec<GitHubRelease>> =
+                    self.fetch_releases_from_network(repo).await;
                 match fetch_result {
                     Ok(releases) => {
                         self.cache.set_memory(&cache_key, releases.clone());
@@ -252,7 +256,8 @@ impl GitHubClient {
                             "Network fetch failed for {}, using stale cache: {}",
                             repo, e
                         );
-                        self.cache.set_memory(&cache_key, disk_cache.releases.clone());
+                        self.cache
+                            .set_memory(&cache_key, disk_cache.releases.clone());
                         return Ok(disk_cache.releases);
                     }
                 }
@@ -275,7 +280,9 @@ impl GitHubClient {
         app_id: AppId,
         force_refresh: bool,
     ) -> Result<Vec<GitHubRelease>> {
-        let mut releases = self.get_releases(app_id.github_repo(), force_refresh).await?;
+        let mut releases = self
+            .get_releases(app_id.github_repo(), force_refresh)
+            .await?;
 
         // Populate archive_size from platform-matched assets
         Self::populate_archive_sizes(&mut releases, app_id);
@@ -356,7 +363,8 @@ impl GitHubClient {
 
     /// Get cache status for a repository.
     pub fn get_cache_status(&self, repo: &str) -> CacheStatus {
-        self.cache.get_status(repo, self.is_fetching.load(Ordering::SeqCst))
+        self.cache
+            .get_status(repo, self.is_fetching.load(Ordering::SeqCst))
     }
 
     /// Invalidate cache for a repository.
@@ -381,7 +389,10 @@ impl GitHubClient {
                 let mut rx = receiver.clone();
                 drop(pending); // Release the lock while waiting
 
-                debug!("Coalescing request for {} - waiting for in-flight fetch", repo);
+                debug!(
+                    "Coalescing request for {} - waiting for in-flight fetch",
+                    repo
+                );
 
                 // Wait for the result
                 loop {
@@ -462,9 +473,10 @@ impl GitHubClient {
                     let http = http.clone();
                     let url = url_clone.clone();
                     async move {
-                        let headers = vec![
-                            ("Accept".to_string(), "application/vnd.github.v3+json".to_string()),
-                        ];
+                        let headers = vec![(
+                            "Accept".to_string(),
+                            "application/vnd.github.v3+json".to_string(),
+                        )];
                         http.get_with_headers(&url, &headers).await
                     }
                 },
@@ -497,10 +509,8 @@ impl GitHubClient {
                             .and_then(|v| v.to_str().ok())
                             .and_then(|s| s.parse::<u64>().ok())
                             .and_then(|reset| {
-                                let now = SystemTime::now()
-                                    .duration_since(UNIX_EPOCH)
-                                    .ok()?
-                                    .as_secs();
+                                let now =
+                                    SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
                                 Some(reset.saturating_sub(now))
                             })
                     });
@@ -523,12 +533,11 @@ impl GitHubClient {
                 });
             }
 
-            let releases: Vec<GitHubRelease> = response.json().await.map_err(|e| {
-                PumasError::Json {
+            let releases: Vec<GitHubRelease> =
+                response.json().await.map_err(|e| PumasError::Json {
                     message: format!("Failed to parse GitHub releases: {}", e),
                     source: None,
-                }
-            })?;
+                })?;
 
             let count = releases.len();
             all_releases.extend(releases);

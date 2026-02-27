@@ -37,8 +37,7 @@ pub struct DownloadCompletionInfo {
 }
 
 /// Callback invoked when a download completes successfully.
-pub type DownloadCompletionCallback =
-    Arc<dyn Fn(DownloadCompletionInfo) + Send + Sync + 'static>;
+pub type DownloadCompletionCallback = Arc<dyn Fn(DownloadCompletionInfo) + Send + Sync + 'static>;
 
 /// Information passed when all auxiliary (config/tokenizer) files have been
 /// downloaded but before weight files begin. Used to create a preliminary
@@ -58,8 +57,7 @@ pub struct AuxFilesCompleteInfo {
 }
 
 /// Callback invoked when auxiliary files finish downloading (before weight files begin).
-pub type AuxFilesCompleteCallback =
-    Arc<dyn Fn(AuxFilesCompleteInfo) + Send + Sync + 'static>;
+pub type AuxFilesCompleteCallback = Arc<dyn Fn(AuxFilesCompleteInfo) + Send + Sync + 'static>;
 
 /// A single file to download as part of a (possibly multi-file) model download.
 #[derive(Debug, Clone)]

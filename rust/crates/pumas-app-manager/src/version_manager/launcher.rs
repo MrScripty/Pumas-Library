@@ -2,10 +2,10 @@
 //!
 //! Handles launching ComfyUI instances and detecting when they're ready.
 
-use pumas_library::config::{AppId, InstallationConfig};
 use crate::version_manager::LaunchResult;
-use pumas_library::{PumasError, Result};
 use chrono::Utc;
+use pumas_library::config::{AppId, InstallationConfig};
+use pumas_library::{PumasError, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -41,7 +41,10 @@ impl VersionLauncher {
 
     /// Get the venv python path for a version.
     fn venv_python(&self, tag: &str) -> PathBuf {
-        self.version_path(tag).join("venv").join("bin").join("python")
+        self.version_path(tag)
+            .join("venv")
+            .join("bin")
+            .join("python")
     }
 
     /// Launch a version.
@@ -78,8 +81,14 @@ impl VersionLauncher {
         info!("Launching {} from {}", tag, version_path.display());
 
         match self.app_id {
-            AppId::ComfyUI => self.launch_comfyui(tag, &version_path, &log_file, extra_args).await,
-            AppId::Ollama => self.launch_ollama(tag, &version_path, &log_file, extra_args).await,
+            AppId::ComfyUI => {
+                self.launch_comfyui(tag, &version_path, &log_file, extra_args)
+                    .await
+            }
+            AppId::Ollama => {
+                self.launch_ollama(tag, &version_path, &log_file, extra_args)
+                    .await
+            }
             _ => Err(PumasError::Other(format!(
                 "Launch not implemented for {:?}",
                 self.app_id
@@ -125,16 +134,19 @@ impl VersionLauncher {
         cmd.args(&args)
             .current_dir(version_path)
             .env("SKIP_BROWSER", "1")
-            .stdout(Stdio::from(log_output.try_clone().map_err(|e| PumasError::Io {
-                message: format!("Failed to clone log handle: {}", e),
-                path: Some(log_file.clone()),
-                source: Some(e),
+            .stdout(Stdio::from(log_output.try_clone().map_err(|e| {
+                PumasError::Io {
+                    message: format!("Failed to clone log handle: {}", e),
+                    path: Some(log_file.clone()),
+                    source: Some(e),
+                }
             })?))
             .stderr(Stdio::from(log_output));
         // Unix: start in new process group for clean termination
         #[cfg(unix)]
         cmd.process_group(0);
-        let child = cmd.spawn()
+        let child = cmd
+            .spawn()
             .map_err(|e| PumasError::Other(format!("Failed to spawn ComfyUI: {}", e)))?;
 
         let pid = child.id();
@@ -194,16 +206,19 @@ impl VersionLauncher {
         let mut cmd = Command::new(&ollama_bin);
         cmd.args(&args)
             .current_dir(version_path)
-            .stdout(Stdio::from(log_output.try_clone().map_err(|e| PumasError::Io {
-                message: format!("Failed to clone log handle: {}", e),
-                path: Some(log_file.clone()),
-                source: Some(e),
+            .stdout(Stdio::from(log_output.try_clone().map_err(|e| {
+                PumasError::Io {
+                    message: format!("Failed to clone log handle: {}", e),
+                    path: Some(log_file.clone()),
+                    source: Some(e),
+                }
             })?))
             .stderr(Stdio::from(log_output));
         // Unix: start in new process group for clean termination
         #[cfg(unix)]
         cmd.process_group(0);
-        let child = cmd.spawn()
+        let child = cmd
+            .spawn()
             .map_err(|e| PumasError::Other(format!("Failed to spawn Ollama: {}", e)))?;
 
         let pid = child.id();
@@ -243,7 +258,10 @@ impl VersionLauncher {
             match child.try_wait() {
                 Ok(Some(status)) => {
                     error!("Process exited with status {}", status);
-                    return (false, Some(format!("Process exited with status {}", status)));
+                    return (
+                        false,
+                        Some(format!("Process exited with status {}", status)),
+                    );
                 }
                 Ok(None) => {
                     // Still running, continue
@@ -275,8 +293,17 @@ impl VersionLauncher {
             delay = (delay * 2).min(max_delay);
         }
 
-        warn!("Server did not become ready within {} seconds", timeout_secs);
-        (false, Some(format!("Server did not become ready within {} seconds", timeout_secs)))
+        warn!(
+            "Server did not become ready within {} seconds",
+            timeout_secs
+        );
+        (
+            false,
+            Some(format!(
+                "Server did not become ready within {} seconds",
+                timeout_secs
+            )),
+        )
     }
 
     /// Stop a running version.
@@ -294,9 +321,10 @@ impl VersionLauncher {
             source: Some(e),
         })?;
 
-        let pid: i32 = pid_str.trim().parse().map_err(|_| PumasError::Other(
-            format!("Invalid PID in file: {}", pid_str)
-        ))?;
+        let pid: i32 = pid_str
+            .trim()
+            .parse()
+            .map_err(|_| PumasError::Other(format!("Invalid PID in file: {}", pid_str)))?;
 
         info!("Stopping process with PID {}", pid);
 
@@ -377,7 +405,11 @@ impl VersionLauncher {
         let script_path = version_path.join(format!("run_{}.sh", slug));
 
         let venv_python = self.venv_python(tag);
-        let profiles_dir = self.launcher_root.join("launcher-data").join("profiles").join(&slug);
+        let profiles_dir = self
+            .launcher_root
+            .join("launcher-data")
+            .join("profiles")
+            .join(&slug);
         let server_base_url = AppId::ComfyUI.default_base_url();
 
         let script_content = format!(

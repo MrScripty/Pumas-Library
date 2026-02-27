@@ -29,20 +29,22 @@ impl PumasApi {
             let mgr_lock = self.primary().process_manager.read().await;
             if let Some(ref mgr) = *mgr_lock {
                 let comfyui_resources = if comfyui_running {
-                    mgr.aggregate_app_resources().map(|r| models::AppResourceUsage {
-                        // Convert from GB (f32) to bytes (u64) for frontend
-                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                    })
+                    mgr.aggregate_app_resources()
+                        .map(|r| models::AppResourceUsage {
+                            // Convert from GB (f32) to bytes (u64) for frontend
+                            gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                            ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        })
                 } else {
                     None
                 };
 
                 let ollama_resources = if ollama_running {
-                    mgr.aggregate_ollama_resources().map(|r| models::AppResourceUsage {
-                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                    })
+                    mgr.aggregate_ollama_resources()
+                        .map(|r| models::AppResourceUsage {
+                            gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                            ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        })
                 } else {
                     None
                 };
@@ -62,9 +64,11 @@ impl PumasApi {
 
         // Debug: log app_resources before returning
         if let Some(ref res) = app_resources {
-            tracing::debug!("get_status: app_resources = comfyui={:?}, ollama={:?}",
-                  res.comfyui.as_ref().map(|r| (r.ram_memory, r.gpu_memory)),
-                  res.ollama.as_ref().map(|r| (r.ram_memory, r.gpu_memory)));
+            tracing::debug!(
+                "get_status: app_resources = comfyui={:?}, ollama={:?}",
+                res.comfyui.as_ref().map(|r| (r.ram_memory, r.gpu_memory)),
+                res.ollama.as_ref().map(|r| (r.ram_memory, r.gpu_memory))
+            );
         } else {
             tracing::debug!("get_status: app_resources = None");
         }
@@ -154,7 +158,7 @@ impl PumasApi {
 
     /// Get system resources (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<models::SystemResourcesResponse> {
-        use sysinfo::{System, Disks};
+        use sysinfo::{Disks, System};
 
         let mut sys = System::new_all();
         sys.refresh_all();
@@ -256,7 +260,9 @@ impl PumasApi {
                 resource: format!("Directory: {}", dir.display()),
             });
         }
-        self.primary().system_utils.open_path(&dir.to_string_lossy())
+        self.primary()
+            .system_utils
+            .open_path(&dir.to_string_lossy())
     }
 
     // ========================================
@@ -265,12 +271,20 @@ impl PumasApi {
 
     /// Check if background fetch has completed.
     pub async fn has_background_fetch_completed(&self) -> bool {
-        self.primary()._state.read().await.background_fetch_completed
+        self.primary()
+            ._state
+            .read()
+            .await
+            .background_fetch_completed
     }
 
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
-        self.primary()._state.write().await.background_fetch_completed = false;
+        self.primary()
+            ._state
+            .write()
+            .await
+            .background_fetch_completed = false;
     }
 
     // ========================================

@@ -19,16 +19,14 @@ pub mod version_manager;
 
 // Re-export commonly used types
 pub use api_proxy::PluginApiProxy;
-pub use custom_nodes::{CustomNodesManager, InstalledCustomNode, InstallResult, UpdateResult};
-pub use ollama_client::{OllamaClient, OllamaModel, RunningModel, derive_ollama_name};
+pub use custom_nodes::{CustomNodesManager, InstallResult, InstalledCustomNode, UpdateResult};
+pub use ollama_client::{derive_ollama_name, OllamaClient, OllamaModel, RunningModel};
 pub use process::{AppProcessManager, ProcessHandle, ProcessManagerFactory, ProcessStatus};
 pub use torch_client::{
     ComputeDevice, DeviceInfo, ModelSlot, SlotState, TorchClient, TorchServerConfig,
     TorchServerStatus,
 };
-pub use version_manager::{
-    ReleaseSize, SizeBreakdown, SizeCalculator, VersionManager,
-};
+pub use version_manager::{ReleaseSize, SizeBreakdown, SizeCalculator, VersionManager};
 
 // Re-export pumas-core types that are commonly needed with app manager
 pub use pumas_library::config::AppId;

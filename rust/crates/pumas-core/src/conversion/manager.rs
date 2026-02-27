@@ -14,10 +14,10 @@ use tracing::{debug, error, info, warn};
 
 use super::llama_cpp::LlamaCppBackend;
 use super::nvfp4::Nvfp4Backend;
-use super::sherry::SherryBackend;
 use super::pipeline;
 use super::progress::ConversionProgressTracker;
 use super::scripts;
+use super::sherry::SherryBackend;
 use super::types::{
     BackendStatus, ConversionDirection, ConversionProgress, ConversionRequest, ConversionSource,
     ConversionStatus, QuantBackend, QuantOption, QuantizationBackend, QuantizeParams,
@@ -276,7 +276,10 @@ impl ConversionManager {
         // Create cancellation token
         let cancel_token = CancellationToken::new();
         {
-            let mut tokens = self.cancel_tokens.lock().expect("cancel_tokens lock poisoned");
+            let mut tokens = self
+                .cancel_tokens
+                .lock()
+                .expect("cancel_tokens lock poisoned");
             tokens.insert(conversion_id.clone(), cancel_token.clone());
         }
 
@@ -474,7 +477,10 @@ impl ConversionManager {
     /// Cancel a running conversion.
     pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
         let token = {
-            let tokens = self.cancel_tokens.lock().expect("cancel_tokens lock poisoned");
+            let tokens = self
+                .cancel_tokens
+                .lock()
+                .expect("cancel_tokens lock poisoned");
             tokens.get(conversion_id).cloned()
         };
 
@@ -497,11 +503,11 @@ impl ConversionManager {
     /// Graceful shutdown: cancel all active conversions.
     pub async fn shutdown(&self) {
         let tokens: Vec<(String, CancellationToken)> = {
-            let tokens = self.cancel_tokens.lock().expect("cancel_tokens lock poisoned");
-            tokens
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
+            let tokens = self
+                .cancel_tokens
+                .lock()
+                .expect("cancel_tokens lock poisoned");
+            tokens.iter().map(|(k, v)| (k.clone(), v.clone())).collect()
         };
 
         for (id, token) in tokens {
@@ -771,13 +777,10 @@ async fn run_conversion(
         model_id: source_metadata.model_id.clone(),
         family: source_metadata.family.clone(),
         model_type: source_metadata.model_type.clone(),
-        official_name: source_metadata.official_name.as_ref().map(|name| {
-            format!(
-                "{} ({})",
-                name,
-                target_extension(direction).to_uppercase()
-            )
-        }),
+        official_name: source_metadata
+            .official_name
+            .as_ref()
+            .map(|name| format!("{} ({})", name, target_extension(direction).to_uppercase())),
         tags: Some(
             source_metadata
                 .tags
@@ -791,7 +794,9 @@ async fn run_conversion(
         ..Default::default()
     };
 
-    library.save_metadata(&output_dir, &converted_metadata).await?;
+    library
+        .save_metadata(&output_dir, &converted_metadata)
+        .await?;
     library.index_model_dir(&output_dir).await?;
 
     let output_model_id = library

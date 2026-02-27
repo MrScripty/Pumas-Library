@@ -198,7 +198,8 @@ fn identify_gguf<R: Read + Seek>(file: &mut R, path: &Path) -> Result<ModelTypeI
         extra: HashMap::new(),
     };
 
-    info.extra.insert("gguf_version".to_string(), version.to_string());
+    info.extra
+        .insert("gguf_version".to_string(), version.to_string());
 
     // Parse metadata to find architecture, name, basename, etc.
     if let Ok(metadata) = extract_gguf_key_metadata(file, metadata_count as usize) {
@@ -235,8 +236,15 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         // Audio architectures
         if matches!(
             arch_lower.as_str(),
-            "whisper" | "encodec" | "wav2vec" | "wav2vec2" | "hubert"
-            | "wavlm" | "bark" | "musicgen" | "seamless_m4t"
+            "whisper"
+                | "encodec"
+                | "wav2vec"
+                | "wav2vec2"
+                | "hubert"
+                | "wavlm"
+                | "bark"
+                | "musicgen"
+                | "seamless_m4t"
         ) {
             return ModelType::Audio;
         }
@@ -244,8 +252,15 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         // Vision architectures
         if matches!(
             arch_lower.as_str(),
-            "clip" | "vit" | "siglip" | "dinov2" | "swin"
-            | "convnext" | "deit" | "beit" | "mobilevlm"
+            "clip"
+                | "vit"
+                | "siglip"
+                | "dinov2"
+                | "swin"
+                | "convnext"
+                | "deit"
+                | "beit"
+                | "mobilevlm"
         ) {
             return ModelType::Vision;
         }
@@ -253,8 +268,13 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         // Diffusion architectures
         if matches!(
             arch_lower.as_str(),
-            "stable-diffusion" | "stable_diffusion" | "sdxl" | "sd3"
-            | "flux" | "pixart" | "kandinsky"
+            "stable-diffusion"
+                | "stable_diffusion"
+                | "sdxl"
+                | "sd3"
+                | "flux"
+                | "pixart"
+                | "kandinsky"
         ) {
             return ModelType::Diffusion;
         }
@@ -268,22 +288,29 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
             return Some(ModelType::Embedding);
         }
         // Audio
-        if lower.contains("whisper") || lower.contains("tts")
-            || lower.contains("speech") || lower.contains("audio")
-            || lower.contains("bark") || lower.contains("musicgen")
+        if lower.contains("whisper")
+            || lower.contains("tts")
+            || lower.contains("speech")
+            || lower.contains("audio")
+            || lower.contains("bark")
+            || lower.contains("musicgen")
             || lower.contains("encodec")
         {
             return Some(ModelType::Audio);
         }
         // Vision
-        if lower.contains("vision") || lower.contains("-vit-")
-            || lower.contains("clip") || lower.contains("siglip")
+        if lower.contains("vision")
+            || lower.contains("-vit-")
+            || lower.contains("clip")
+            || lower.contains("siglip")
         {
             return Some(ModelType::Vision);
         }
         // Diffusion
-        if lower.contains("diffusion") || lower.contains("flux")
-            || lower.contains("sdxl") || lower.contains("stable-diffusion")
+        if lower.contains("diffusion")
+            || lower.contains("flux")
+            || lower.contains("sdxl")
+            || lower.contains("stable-diffusion")
             || lower.contains("unet")
         {
             return Some(ModelType::Diffusion);
@@ -396,14 +423,14 @@ fn skip_gguf_value_impl<R: Read>(file: &mut R, value_type: u32, depth: usize) ->
     }
 
     let skip_bytes = match value_type {
-        0 => 1,  // uint8
-        1 => 1,  // int8
-        2 => 2,  // uint16
-        3 => 2,  // int16
-        4 => 4,  // uint32
-        5 => 4,  // int32
-        6 => 4,  // float32
-        7 => 1,  // bool
+        0 => 1, // uint8
+        1 => 1, // int8
+        2 => 2, // uint16
+        3 => 2, // int16
+        4 => 4, // uint32
+        5 => 4, // int32
+        6 => 4, // float32
+        7 => 1, // bool
         8 => {
             // string
             let mut len_buf = [0u8; 8];
@@ -576,9 +603,7 @@ fn is_audio_from_context(path: &Path) -> bool {
                 .and_then(|v| v.as_str())
             {
                 let lower = fe_type.to_lowercase();
-                if lower.contains("whisper")
-                    || lower.contains("wav2vec")
-                    || lower.contains("audio")
+                if lower.contains("whisper") || lower.contains("wav2vec") || lower.contains("audio")
                 {
                     return true;
                 }
@@ -684,12 +709,7 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
     ];
 
     // Embedding-specific patterns (pooling, sentence transformers, etc.)
-    let embedding_patterns = [
-        "pooler",
-        "sentence_",
-        "dense_layer",
-        "projection",
-    ];
+    let embedding_patterns = ["pooler", "sentence_", "dense_layer", "projection"];
 
     // Audio patterns (speech, music, audio processing)
     let audio_patterns = [
@@ -922,7 +942,10 @@ mod tests {
             h.extend_from_slice(json);
             h
         };
-        assert_eq!(detect_format(&header, "safetensors"), FileFormat::Safetensors);
+        assert_eq!(
+            detect_format(&header, "safetensors"),
+            FileFormat::Safetensors
+        );
     }
 
     #[test]

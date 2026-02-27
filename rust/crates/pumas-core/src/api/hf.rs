@@ -45,8 +45,9 @@ impl PumasApi {
             // Determine destination directory.
             // Normalize through ModelType to handle raw pipeline_tags (e.g. "text-to-audio" → "audio").
             let model_type_raw = request.model_type.as_deref().unwrap_or("unknown");
-            let model_type_parsed: crate::model_library::ModelType =
-                model_type_raw.parse().unwrap_or(crate::model_library::ModelType::Unknown);
+            let model_type_parsed: crate::model_library::ModelType = model_type_raw
+                .parse()
+                .unwrap_or(crate::model_library::ModelType::Unknown);
             let model_type = model_type_parsed.as_str();
             let dest_dir = self.primary().model_library.build_model_path(
                 model_type,
@@ -144,11 +145,7 @@ impl PumasApi {
     /// download exists, starts a new download targeting that directory. The
     /// download system handles `.part` file resume via HTTP Range headers and
     /// skips files that are already complete.
-    pub async fn recover_download(
-        &self,
-        repo_id: &str,
-        dest_dir: &str,
-    ) -> Result<String> {
+    pub async fn recover_download(&self, repo_id: &str, dest_dir: &str) -> Result<String> {
         let dest = std::path::Path::new(dest_dir);
         if !dest.is_dir() {
             return Err(PumasError::NotFound {
@@ -157,15 +154,21 @@ impl PumasApi {
         }
 
         let primary = self.primary();
-        let client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
-            message: "HuggingFace client not initialized".to_string(),
-        })?;
+        let client = primary
+            .hf_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })?;
 
         // Parse repo_id into family/name
         let parts: Vec<&str> = repo_id.splitn(2, '/').collect();
         if parts.len() != 2 {
             return Err(PumasError::Config {
-                message: format!("Invalid repo_id format (expected 'owner/name'): {}", repo_id),
+                message: format!(
+                    "Invalid repo_id format (expected 'owner/name'): {}",
+                    repo_id
+                ),
             });
         }
         let family = parts[0];
@@ -199,14 +202,14 @@ impl PumasApi {
     /// Uses the stored `repo_id` if available, otherwise falls back to
     /// filename-based lookup via `lookup_metadata()`. Returns the updated
     /// metadata on success.
-    pub async fn refetch_metadata_from_hf(
-        &self,
-        model_id: &str,
-    ) -> Result<models::ModelMetadata> {
+    pub async fn refetch_metadata_from_hf(&self, model_id: &str) -> Result<models::ModelMetadata> {
         let primary = self.primary();
-        let hf_client = primary.hf_client.as_ref().ok_or_else(|| PumasError::Config {
-            message: "HuggingFace client not initialized".to_string(),
-        })?;
+        let hf_client = primary
+            .hf_client
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })?;
 
         // Handle download-in-progress models: extract repo_id and fetch directly
         if let Some(repo_id) = model_id.strip_prefix("download:") {
@@ -272,10 +275,7 @@ impl PumasApi {
             let file_path = primary_file.ok_or_else(|| PumasError::NotFound {
                 resource: format!("primary model file for: {}", model_id),
             })?;
-            let filename = file_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
             hf_client
                 .lookup_metadata(filename, Some(&file_path), None)
                 .await?
@@ -301,7 +301,8 @@ impl PumasApi {
     ) -> Result<Option<model_library::HfMetadataResult>> {
         if let Some(ref client) = self.primary().hf_client {
             let path = std::path::Path::new(file_path);
-            let filename = path.file_name()
+            let filename = path
+                .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(file_path);
             client.lookup_metadata(filename, Some(path), None).await
@@ -357,10 +358,7 @@ impl PumasApi {
     }
 
     /// Get repository file tree from HuggingFace.
-    pub async fn get_hf_repo_files(
-        &self,
-        repo_id: &str,
-    ) -> Result<model_library::RepoFileTree> {
+    pub async fn get_hf_repo_files(&self, repo_id: &str) -> Result<model_library::RepoFileTree> {
         if let Some(ref client) = self.primary().hf_client {
             client.get_repo_files(repo_id).await
         } else {

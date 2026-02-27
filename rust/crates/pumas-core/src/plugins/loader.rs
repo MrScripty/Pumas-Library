@@ -48,9 +48,10 @@ impl PluginLoader {
     ///
     /// This will clear the cache and reload all plugin configurations.
     pub fn reload(&self) -> Result<usize> {
-        let mut plugins = self.plugins.write().map_err(|e| PumasError::Other(
-            format!("Failed to acquire plugins lock: {}", e),
-        ))?;
+        let mut plugins = self
+            .plugins
+            .write()
+            .map_err(|e| PumasError::Other(format!("Failed to acquire plugins lock: {}", e)))?;
 
         plugins.clear();
 
@@ -78,16 +79,16 @@ impl PluginLoader {
                     loaded_count += 1;
                 }
                 Err(e) => {
-                    warn!(
-                        "Failed to load plugin from {}: {}",
-                        path.display(),
-                        e
-                    );
+                    warn!("Failed to load plugin from {}: {}", path.display(), e);
                 }
             }
         }
 
-        debug!("Loaded {} plugins from {}", loaded_count, self.plugins_dir.display());
+        debug!(
+            "Loaded {} plugins from {}",
+            loaded_count,
+            self.plugins_dir.display()
+        );
 
         Ok(loaded_count)
     }
@@ -100,10 +101,15 @@ impl PluginLoader {
             source: Some(e),
         })?;
 
-        let config: PluginConfig = serde_json::from_str(&content).map_err(|e| PumasError::Json {
-            message: format!("Failed to parse plugin config from {}: {}", path.display(), e),
-            source: None,
-        })?;
+        let config: PluginConfig =
+            serde_json::from_str(&content).map_err(|e| PumasError::Json {
+                message: format!(
+                    "Failed to parse plugin config from {}: {}",
+                    path.display(),
+                    e
+                ),
+                source: None,
+            })?;
 
         // Validate required fields
         if config.id.is_empty() {

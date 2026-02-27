@@ -253,5 +253,4 @@ mod tests {
         let result = verify_sha256(file.path(), "wrong_hash");
         assert!(result.is_err());
     }
-
 }

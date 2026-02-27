@@ -6,8 +6,8 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use pumas_app_manager::{CustomNodesManager, VersionManager, SizeCalculator};
-use pumas_library::{PumasApi, PluginLoader};
+use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
+use pumas_library::{PluginLoader, PumasApi};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -90,9 +90,7 @@ pub async fn start_server(
 
     // Spawn the server in the background
     tokio::spawn(async move {
-        axum::serve(listener, app)
-            .await
-            .expect("Server error");
+        axum::serve(listener, app).await.expect("Server error");
     });
 
     Ok(actual_addr)

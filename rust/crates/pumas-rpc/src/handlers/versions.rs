@@ -63,10 +63,7 @@ pub async fn get_installed_versions(
     }
 }
 
-pub async fn get_active_version(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_active_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     let managers = state.version_managers.read().await;
     if let Some(vm) = managers.get(app_id_str) {
@@ -78,10 +75,7 @@ pub async fn get_active_version(
     }
 }
 
-pub async fn get_default_version(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     let managers = state.version_managers.read().await;
     if let Some(vm) = managers.get(app_id_str) {
@@ -93,10 +87,7 @@ pub async fn get_default_version(
     }
 }
 
-pub async fn set_default_version(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn set_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = get_str_param(params, "tag", "tag");
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     let managers = state.version_managers.read().await;
@@ -170,10 +161,7 @@ pub async fn remove_version(state: &AppState, params: &Value) -> pumas_library::
     }
 }
 
-pub async fn cancel_installation(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn cancel_installation(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     let managers = state.version_managers.read().await;
     if let Some(vm) = managers.get(app_id_str) {
@@ -194,9 +182,9 @@ pub async fn get_installation_progress(
         let progress = vm.get_installation_progress().await;
         Ok(serde_json::to_value(progress)?)
     } else {
-        Ok(
-            serde_json::to_value::<Option<pumas_library::models::InstallationProgress>>(None)?,
-        )
+        Ok(serde_json::to_value::<
+            Option<pumas_library::models::InstallationProgress>,
+        >(None)?)
     }
 }
 
@@ -218,10 +206,7 @@ pub async fn validate_installations(
     }
 }
 
-pub async fn get_version_status(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_version_status(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     let managers = state.version_managers.read().await;
     if let Some(vm) = managers.get(app_id_str) {
@@ -291,8 +276,7 @@ pub async fn get_release_size_info(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
-    let archive_size =
-        get_i64_param(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
+    let archive_size = get_i64_param(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
 
     // Calculate release size using size_calculator from state
     let mut calc = state.size_calculator.write().await;
@@ -325,8 +309,7 @@ pub async fn calculate_release_size(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
-    let archive_size =
-        get_i64_param(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
+    let archive_size = get_i64_param(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
 
     // Parse optional requirements array
     let requirements: Option<Vec<String>> = params

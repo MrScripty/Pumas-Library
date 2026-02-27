@@ -5,10 +5,7 @@ use crate::server::AppState;
 use serde_json::{json, Value};
 use tracing::{info, warn};
 
-pub async fn is_comfyui_running(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn is_comfyui_running(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     // Ensure process manager has current version paths for accurate detection
     sync_version_paths_to_process_manager(state).await;
     let running = state.api.is_comfyui_running().await;
@@ -88,10 +85,7 @@ pub async fn stop_ollama(state: &AppState, _params: &Value) -> pumas_library::Re
     Ok(json!({ "success": result }))
 }
 
-pub async fn is_ollama_running(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn is_ollama_running(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let running = state.api.is_ollama_running().await;
     Ok(serde_json::to_value(running)?)
 }
@@ -104,10 +98,7 @@ pub async fn launch_torch(state: &AppState, _params: &Value) -> pumas_library::R
         info!("launch_torch: active version: {:?}", active);
         if let Some(tag) = active {
             let version_dir = vm.version_path(&tag);
-            info!(
-                "launch_torch: launching tag={} from {:?}",
-                tag, version_dir
-            );
+            info!("launch_torch: launching tag={} from {:?}", tag, version_dir);
             drop(managers);
             let response = state.api.launch_torch(&tag, &version_dir).await?;
             info!("launch_torch: result success={}", response.success);
@@ -154,10 +145,7 @@ pub async fn open_url(state: &AppState, params: &Value) -> pumas_library::Result
     }
 }
 
-pub async fn open_active_install(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn open_active_install(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     // Get the active version from version_manager and open its directory
     let managers = state.version_managers.read().await;
@@ -177,6 +165,8 @@ pub async fn open_active_install(
             Ok(json!({"success": false, "error": "No active version set"}))
         }
     } else {
-        Ok(json!({"success": false, "error": format!("Version manager not initialized for app: {}", app_id_str)}))
+        Ok(
+            json!({"success": false, "error": format!("Version manager not initialized for app: {}", app_id_str)}),
+        )
     }
 }

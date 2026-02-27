@@ -4,10 +4,7 @@ use super::{get_str_param, require_str_param};
 use crate::server::AppState;
 use serde_json::{json, Value};
 
-pub async fn ollama_list_models(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
     let client = pumas_app_manager::OllamaClient::new(connection_url);
     let models = client.list_models().await?;
@@ -17,10 +14,7 @@ pub async fn ollama_list_models(
     }))
 }
 
-pub async fn ollama_create_model(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
     let model_name = get_str_param(params, "model_name", "modelName");
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
@@ -60,13 +54,7 @@ pub async fn ollama_create_model(
             let display = model_record
                 .as_ref()
                 .map(|r| r.cleaned_name.clone())
-                .unwrap_or_else(|| {
-                    model_id
-                        .split('/')
-                        .last()
-                        .unwrap_or(&model_id)
-                        .to_string()
-                });
+                .unwrap_or_else(|| model_id.split('/').last().unwrap_or(&model_id).to_string());
             pumas_app_manager::derive_ollama_name(&display)
         }
     };
@@ -104,10 +92,7 @@ pub async fn ollama_delete_model(
     Ok(json!({ "success": true }))
 }
 
-pub async fn ollama_load_model(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn ollama_load_model(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 

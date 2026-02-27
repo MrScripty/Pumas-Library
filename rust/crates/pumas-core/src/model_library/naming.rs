@@ -18,8 +18,7 @@ const NTFS_RESERVED_NAMES: &[&str] = &[
 ];
 
 /// Regex for consecutive underscores/hyphens.
-static CONSECUTIVE_SEPARATORS: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"[-_]{2,}").unwrap());
+static CONSECUTIVE_SEPARATORS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[-_]{2,}").unwrap());
 
 /// Regex for non-alphanumeric characters (except - and _).
 static NON_ALNUM: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[^a-zA-Z0-9\-_]").unwrap());
@@ -162,7 +161,10 @@ mod tests {
     fn test_normalize_name_basic() {
         assert_eq!(normalize_name("Llama 2 7B"), "llama_2_7b");
         assert_eq!(normalize_name("SDXL-1.0-Base"), "sdxl-1_0-base");
-        assert_eq!(normalize_name("stable_diffusion_v1.5"), "stable_diffusion_v1_5");
+        assert_eq!(
+            normalize_name("stable_diffusion_v1.5"),
+            "stable_diffusion_v1_5"
+        );
     }
 
     #[test]
@@ -200,7 +202,10 @@ mod tests {
 
     #[test]
     fn test_normalize_filename() {
-        assert_eq!(normalize_filename("My Model.safetensors"), "my_model.safetensors");
+        assert_eq!(
+            normalize_filename("My Model.safetensors"),
+            "my_model.safetensors"
+        );
         assert_eq!(normalize_filename("TEST.GGUF"), "test.gguf");
     }
 

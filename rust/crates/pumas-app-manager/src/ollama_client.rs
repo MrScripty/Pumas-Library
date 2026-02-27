@@ -143,10 +143,7 @@ impl OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
-            return Err(net_err(format!(
-                "Ollama API returned {}: {}",
-                status, body
-            )));
+            return Err(net_err(format!("Ollama API returned {}: {}", status, body)));
         }
 
         let tags: TagsResponse = response
@@ -184,7 +181,10 @@ impl OllamaClient {
                 hash.to_string()
             }
             None => {
-                info!("Computing SHA256 for {} (this may take a moment for large files)", gguf_path.display());
+                info!(
+                    "Computing SHA256 for {} (this may take a moment for large files)",
+                    gguf_path.display()
+                );
                 let path = gguf_path.to_path_buf();
                 compute_sha256_async(&path).await?
             }
@@ -197,7 +197,10 @@ impl OllamaClient {
             // Step 3: Upload the GGUF file as a blob.
             self.upload_blob(&digest_ref, gguf_path).await?;
         } else {
-            debug!("Blob {} already exists in Ollama, skipping upload", digest_ref);
+            debug!(
+                "Blob {} already exists in Ollama, skipping upload",
+                digest_ref
+            );
         }
 
         // Step 4: Create the model using the files mapping.
@@ -223,9 +226,7 @@ impl OllamaClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                net_err(format!("Failed to send create request to Ollama: {}", e))
-            })?;
+            .map_err(|e| net_err(format!("Failed to send create request to Ollama: {}", e)))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -250,10 +251,7 @@ impl OllamaClient {
             }
             if let Ok(progress) = serde_json::from_str::<CreateProgressLine>(trimmed) {
                 if let Some(err) = progress.error {
-                    return Err(net_err(format!(
-                        "Ollama model creation failed: {}",
-                        err
-                    )));
+                    return Err(net_err(format!("Ollama model creation failed: {}", err)));
                 }
                 debug!("Ollama create progress: {}", progress.status);
             }
@@ -319,9 +317,7 @@ impl OllamaClient {
             .body(body)
             .send()
             .await
-            .map_err(|e| {
-                net_err(format!("Failed to upload blob to Ollama: {}", e))
-            })?;
+            .map_err(|e| net_err(format!("Failed to upload blob to Ollama: {}", e)))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -422,10 +418,7 @@ impl OllamaClient {
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
-            return Err(net_err(format!(
-                "Ollama API returned {}: {}",
-                status, body
-            )));
+            return Err(net_err(format!("Ollama API returned {}: {}", status, body)));
         }
 
         let ps: PsResponse = response
@@ -451,9 +444,7 @@ impl OllamaClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                net_err(format!("Failed to send delete request to Ollama: {}", e))
-            })?;
+            .map_err(|e| net_err(format!("Failed to send delete request to Ollama: {}", e)))?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -533,10 +524,7 @@ mod tests {
     #[test]
     fn test_derive_ollama_name() {
         assert_eq!(derive_ollama_name("Llama 2 7B"), "llama-2-7b");
-        assert_eq!(
-            derive_ollama_name("Mistral 7B Q4_K_M"),
-            "mistral-7b-q4_k_m"
-        );
+        assert_eq!(derive_ollama_name("Mistral 7B Q4_K_M"), "mistral-7b-q4_k_m");
         assert_eq!(derive_ollama_name("my-model"), "my-model");
         assert_eq!(
             derive_ollama_name("Model  With   Spaces"),

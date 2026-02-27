@@ -12,11 +12,11 @@ impl PumasApi {
     /// Start a model format conversion (GGUF <-> Safetensors).
     ///
     /// Returns a conversion ID for tracking progress.
-    pub async fn start_conversion(
-        &self,
-        request: conversion::ConversionRequest,
-    ) -> Result<String> {
-        self.primary().conversion_manager.start_conversion(request).await
+    pub async fn start_conversion(&self, request: conversion::ConversionRequest) -> Result<String> {
+        self.primary()
+            .conversion_manager
+            .start_conversion(request)
+            .await
     }
 
     /// Get progress for a specific conversion.
@@ -24,12 +24,17 @@ impl PumasApi {
         &self,
         conversion_id: &str,
     ) -> Option<conversion::ConversionProgress> {
-        self.primary().conversion_manager.get_progress(conversion_id)
+        self.primary()
+            .conversion_manager
+            .get_progress(conversion_id)
     }
 
     /// Cancel a running conversion.
     pub async fn cancel_conversion(&self, conversion_id: &str) -> Result<bool> {
-        self.primary().conversion_manager.cancel_conversion(conversion_id).await
+        self.primary()
+            .conversion_manager
+            .cancel_conversion(conversion_id)
+            .await
     }
 
     /// List all tracked conversions (active and recently completed).

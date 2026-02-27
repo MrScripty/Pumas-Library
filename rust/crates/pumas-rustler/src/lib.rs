@@ -423,7 +423,11 @@ fn new_base_response(success: bool, error: Option<String>) -> ElixirBaseResponse
 /// Create a download option struct.
 #[rustler::nif]
 fn new_download_option(quant: String, size_bytes: Option<u64>) -> ElixirDownloadOption {
-    ElixirDownloadOption { quant, size_bytes, file_group: None }
+    ElixirDownloadOption {
+        quant,
+        size_bytes,
+        file_group: None,
+    }
 }
 
 // ============================================================================

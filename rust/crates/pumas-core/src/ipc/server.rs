@@ -187,10 +187,7 @@ impl IpcServer {
         }
     }
 
-    async fn process_request<D: IpcDispatch>(
-        request_str: &str,
-        dispatch: &D,
-    ) -> IpcResponse {
+    async fn process_request<D: IpcDispatch>(request_str: &str, dispatch: &D) -> IpcResponse {
         let request: IpcRequest = match serde_json::from_str(request_str) {
             Ok(req) => req,
             Err(e) => {
@@ -207,7 +204,9 @@ impl IpcServer {
             );
         }
 
-        let params = request.params.unwrap_or(serde_json::Value::Object(Default::default()));
+        let params = request
+            .params
+            .unwrap_or(serde_json::Value::Object(Default::default()));
 
         match dispatch.dispatch(&request.method, params).await {
             Ok(result) => IpcResponse::success(request.id, result),
@@ -272,10 +271,7 @@ mod tests {
         let response: IpcResponse = serde_json::from_slice(&response_bytes).unwrap();
 
         assert!(response.error.is_none());
-        assert_eq!(
-            response.result,
-            Some(serde_json::json!({"hello": "world"}))
-        );
+        assert_eq!(response.result, Some(serde_json::json!({"hello": "world"})));
 
         handle.shutdown();
     }

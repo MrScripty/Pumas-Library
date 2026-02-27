@@ -63,11 +63,7 @@ impl IpcClient {
     ///
     /// Returns the result value on success, or a `PumasError` on failure.
     /// If the connection is broken, returns `SharedInstanceLost`.
-    pub async fn call(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<serde_json::Value> {
+    pub async fn call(&self, method: &str, params: serde_json::Value) -> Result<serde_json::Value> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let request = IpcRequest::new(method, params, id);
         let request_bytes = serde_json::to_vec(&request)?;
@@ -150,12 +146,9 @@ mod tests {
         let dispatch = Arc::new(TestDispatch);
         let mut handle = IpcServer::start(dispatch).await.unwrap();
 
-        let client = IpcClient::connect(
-            handle.addr(),
-            std::process::id(),
-        )
-        .await
-        .unwrap();
+        let client = IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
 
         let result = client.call("ping", serde_json::json!({})).await.unwrap();
         assert_eq!(result, serde_json::json!("pong"));
@@ -168,12 +161,9 @@ mod tests {
         let dispatch = Arc::new(TestDispatch);
         let mut handle = IpcServer::start(dispatch).await.unwrap();
 
-        let client = IpcClient::connect(
-            handle.addr(),
-            std::process::id(),
-        )
-        .await
-        .unwrap();
+        let client = IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
 
         let result = client
             .call("add", serde_json::json!({"a": 3, "b": 4}))
@@ -189,12 +179,9 @@ mod tests {
         let dispatch = Arc::new(TestDispatch);
         let mut handle = IpcServer::start(dispatch).await.unwrap();
 
-        let client = IpcClient::connect(
-            handle.addr(),
-            std::process::id(),
-        )
-        .await
-        .unwrap();
+        let client = IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
 
         let result = client.call("nonexistent", serde_json::json!({})).await;
         assert!(result.is_err());
@@ -223,12 +210,9 @@ mod tests {
         let dispatch = Arc::new(TestDispatch);
         let mut handle = IpcServer::start(dispatch).await.unwrap();
 
-        let client = IpcClient::connect(
-            handle.addr(),
-            std::process::id(),
-        )
-        .await
-        .unwrap();
+        let client = IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
 
         // Verify it works first
         let result = client.call("ping", serde_json::json!({})).await;

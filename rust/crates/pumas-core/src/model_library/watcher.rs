@@ -59,14 +59,17 @@ impl ModelLibraryWatcher {
         let (event_tx, event_rx) = std::sync::mpsc::channel();
 
         // Create the debounced watcher
-        let mut debouncer = new_debouncer(debounce_duration, event_tx)
-            .map_err(|e| crate::error::PumasError::Other(format!("Failed to create file watcher: {}", e)))?;
+        let mut debouncer = new_debouncer(debounce_duration, event_tx).map_err(|e| {
+            crate::error::PumasError::Other(format!("Failed to create file watcher: {}", e))
+        })?;
 
         // Start watching the library root
         debouncer
             .watcher()
             .watch(&library_root, RecursiveMode::Recursive)
-            .map_err(|e| crate::error::PumasError::Other(format!("Failed to watch directory: {}", e)))?;
+            .map_err(|e| {
+                crate::error::PumasError::Other(format!("Failed to watch directory: {}", e))
+            })?;
 
         info!("Started watching model library at {:?}", library_root);
 
@@ -87,9 +90,8 @@ impl ModelLibraryWatcher {
                     Ok(result) => {
                         if let Ok(events) = result {
                             // Filter for relevant file changes
-                            let relevant_changes = events.iter().any(|event| {
-                                is_relevant_change(&event.path)
-                            });
+                            let relevant_changes =
+                                events.iter().any(|event| is_relevant_change(&event.path));
 
                             if relevant_changes {
                                 debug!("Detected relevant model library changes");

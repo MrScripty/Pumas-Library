@@ -82,7 +82,13 @@ impl ShortcutManager {
             .trim()
             .to_lowercase()
             .chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '-' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect();
 
         safe.trim_matches(|c| c == '-' || c == '_')
@@ -137,9 +143,7 @@ impl ShortcutManager {
         let main_py = version_dir.join("main.py");
 
         if !venv_python.exists() || !main_py.exists() {
-            return Ok(ShortcutResult {
-                success: false,
-            });
+            return Ok(ShortcutResult { success: false });
         }
 
         // Install base icon
@@ -193,9 +197,7 @@ impl ShortcutManager {
             tag, menu_created, desktop_created
         );
 
-        Ok(ShortcutResult {
-            success,
-        })
+        Ok(ShortcutResult { success })
     }
 
     /// Create a menu shortcut.
@@ -300,9 +302,7 @@ impl ShortcutManager {
             tag, remove_menu, remove_desktop
         );
 
-        Ok(ShortcutResult {
-            success: true,
-        })
+        Ok(ShortcutResult { success: true })
     }
 
     /// Set shortcut state for a version.

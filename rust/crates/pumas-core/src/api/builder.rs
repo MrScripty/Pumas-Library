@@ -112,7 +112,10 @@ impl PumasApiBuilder {
             // Create launcher_root if it doesn't exist
             if !self.launcher_root.exists() {
                 std::fs::create_dir_all(&self.launcher_root).map_err(|e| PumasError::Io {
-                    message: format!("Failed to create launcher root: {}", self.launcher_root.display()),
+                    message: format!(
+                        "Failed to create launcher root: {}",
+                        self.launcher_root.display()
+                    ),
                     path: Some(self.launcher_root.clone()),
                     source: Some(e),
                 })?;
@@ -122,7 +125,10 @@ impl PumasApiBuilder {
             // Ensure the launcher root exists
             if !self.launcher_root.exists() {
                 return Err(PumasError::Config {
-                    message: format!("Launcher root does not exist: {}", self.launcher_root.display()),
+                    message: format!(
+                        "Launcher root does not exist: {}",
+                        self.launcher_root.display()
+                    ),
                 });
             }
         }
@@ -132,11 +138,12 @@ impl PumasApiBuilder {
         }));
 
         // Initialize network manager for connectivity checking
-        let network_manager = Arc::new(
-            network::NetworkManager::new().map_err(|e| PumasError::Config {
-                message: format!("Failed to initialize network manager: {}", e),
-            })?,
-        );
+        let network_manager =
+            Arc::new(
+                network::NetworkManager::new().map_err(|e| PumasError::Config {
+                    message: format!("Failed to initialize network manager: {}", e),
+                })?,
+            );
 
         // Check initial connectivity (non-blocking, will update state)
         let nm_clone = network_manager.clone();
@@ -161,16 +168,16 @@ impl PumasApiBuilder {
         let system_utils = Arc::new(system::SystemUtils::new(&self.launcher_root));
 
         // Initialize model library for AI model management
-        let model_library_dir = self.launcher_root
-            .join("shared-resources")
-            .join("models");
-        let mapping_config_dir = self.launcher_root
+        let model_library_dir = self.launcher_root.join("shared-resources").join("models");
+        let mapping_config_dir = self
+            .launcher_root
             .join("launcher-data")
             .join("mapping-configs");
 
         // Initialize HuggingFace client (if enabled)
         let mut hf_client = if self.enable_hf_client {
-            let cache_dir = self.launcher_root
+            let cache_dir = self
+                .launcher_root
                 .join("launcher-data")
                 .join(config::PathsConfig::CACHE_DIR_NAME);
             let hf_cache_dir = cache_dir.join("hf");
@@ -188,9 +195,8 @@ impl PumasApiBuilder {
 
             // Initialize download persistence
             let data_dir = self.launcher_root.join("launcher-data");
-            let download_persistence = std::sync::Arc::new(
-                model_library::DownloadPersistence::new(&data_dir)
-            );
+            let download_persistence =
+                std::sync::Arc::new(model_library::DownloadPersistence::new(&data_dir));
 
             match model_library::HuggingFaceClient::new(&hf_cache_dir) {
                 Ok(mut client) => {
@@ -220,93 +226,107 @@ impl PumasApiBuilder {
                 message: format!("Model library initialization failed: {}", e),
             })?;
         let model_library = Arc::new(model_library);
-        let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
+        let model_mapper =
+            model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
         // Wire aux-complete callback -> early metadata stub (model appears in index during download)
         if let Some(ref mut client) = hf_client {
             let lib = model_library.clone();
-            client.set_aux_complete_callback(std::sync::Arc::new(move |info: model_library::AuxFilesCompleteInfo| {
-                let lib = lib.clone();
-                tokio::spawn(async move {
-                    let req = &info.download_request;
-                    let cleaned_name = model_library::normalize_name(&req.official_name);
-                    let model_type = req.model_type.clone().unwrap_or_else(|| "unknown".to_string());
-                    let model_id = format!("{}/{}/{}", model_type, req.family, cleaned_name);
-                    let now = chrono::Utc::now().to_rfc3339();
+            client.set_aux_complete_callback(std::sync::Arc::new(
+                move |info: model_library::AuxFilesCompleteInfo| {
+                    let lib = lib.clone();
+                    tokio::spawn(async move {
+                        let req = &info.download_request;
+                        let cleaned_name = model_library::normalize_name(&req.official_name);
+                        let model_type = req
+                            .model_type
+                            .clone()
+                            .unwrap_or_else(|| "unknown".to_string());
+                        let model_id = format!("{}/{}/{}", model_type, req.family, cleaned_name);
+                        let now = chrono::Utc::now().to_rfc3339();
 
-                    let metadata = model_library::ModelMetadata {
-                        model_id: Some(model_id),
-                        family: Some(req.family.clone()),
-                        model_type: Some(model_type),
-                        official_name: Some(req.official_name.clone()),
-                        cleaned_name: Some(cleaned_name),
-                        repo_id: Some(req.repo_id.clone()),
-                        expected_files: Some(info.filenames.clone()),
-                        added_date: Some(now.clone()),
-                        updated_date: Some(now),
-                        size_bytes: info.total_bytes,
-                        match_source: Some("download".to_string()),
-                        pending_online_lookup: Some(true),
-                        lookup_attempts: Some(0),
-                        ..Default::default()
-                    };
+                        let metadata = model_library::ModelMetadata {
+                            model_id: Some(model_id),
+                            family: Some(req.family.clone()),
+                            model_type: Some(model_type),
+                            official_name: Some(req.official_name.clone()),
+                            cleaned_name: Some(cleaned_name),
+                            repo_id: Some(req.repo_id.clone()),
+                            expected_files: Some(info.filenames.clone()),
+                            added_date: Some(now.clone()),
+                            updated_date: Some(now),
+                            size_bytes: info.total_bytes,
+                            match_source: Some("download".to_string()),
+                            pending_online_lookup: Some(true),
+                            lookup_attempts: Some(0),
+                            ..Default::default()
+                        };
 
-                    if let Err(e) = lib.save_metadata(&info.dest_dir, &metadata).await {
-                        tracing::warn!("Failed to write early metadata stub: {}", e);
-                        return;
-                    }
-                    if let Err(e) = lib.index_model_dir(&info.dest_dir).await {
-                        tracing::warn!("Failed to index early metadata stub: {}", e);
-                    }
+                        if let Err(e) = lib.save_metadata(&info.dest_dir, &metadata).await {
+                            tracing::warn!("Failed to write early metadata stub: {}", e);
+                            return;
+                        }
+                        if let Err(e) = lib.index_model_dir(&info.dest_dir).await {
+                            tracing::warn!("Failed to index early metadata stub: {}", e);
+                        }
 
-                    tracing::info!(
-                        "Early metadata stub created for {} (download in progress)",
-                        req.official_name,
-                    );
-                });
-            }));
+                        tracing::info!(
+                            "Early metadata stub created for {} (download in progress)",
+                            req.official_name,
+                        );
+                    });
+                },
+            ));
         }
 
         // Wire download completion -> in-place import (metadata + indexing)
         if let Some(ref mut client) = hf_client {
             let lib = model_library.clone();
-            client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
-                let lib = lib.clone();
-                tokio::spawn(async move {
-                    // Remove stale metadata (including early stub) so import_in_place
-                    // re-scans all files now present and creates the full metadata
-                    let metadata_path = info.dest_dir.join("metadata.json");
-                    if metadata_path.exists() {
-                        tracing::info!("Removing stale metadata before re-import: {}", metadata_path.display());
-                        let _ = tokio::fs::remove_file(&metadata_path).await;
-                    }
+            client.set_completion_callback(std::sync::Arc::new(
+                move |info: model_library::DownloadCompletionInfo| {
+                    let lib = lib.clone();
+                    tokio::spawn(async move {
+                        // Remove stale metadata (including early stub) so import_in_place
+                        // re-scans all files now present and creates the full metadata
+                        let metadata_path = info.dest_dir.join("metadata.json");
+                        if metadata_path.exists() {
+                            tracing::info!(
+                                "Removing stale metadata before re-import: {}",
+                                metadata_path.display()
+                            );
+                            let _ = tokio::fs::remove_file(&metadata_path).await;
+                        }
 
-                    let importer = model_library::ModelImporter::new(lib);
-                    let spec = model_library::InPlaceImportSpec {
-                        model_dir: info.dest_dir,
-                        official_name: info.download_request.official_name,
-                        family: info.download_request.family,
-                        model_type: info.download_request.model_type,
-                        repo_id: Some(info.download_request.repo_id.clone()),
-                        known_sha256: info.known_sha256,
-                        compute_hashes: false,
-                        expected_files: Some(info.filenames.clone()),
-                        pipeline_tag: info.download_request.pipeline_tag,
-                    };
-                    match importer.import_in_place(&spec).await {
-                        Ok(r) if r.success => {
-                            tracing::info!("Post-download import succeeded: {:?}", r.model_path);
+                        let importer = model_library::ModelImporter::new(lib);
+                        let spec = model_library::InPlaceImportSpec {
+                            model_dir: info.dest_dir,
+                            official_name: info.download_request.official_name,
+                            family: info.download_request.family,
+                            model_type: info.download_request.model_type,
+                            repo_id: Some(info.download_request.repo_id.clone()),
+                            known_sha256: info.known_sha256,
+                            compute_hashes: false,
+                            expected_files: Some(info.filenames.clone()),
+                            pipeline_tag: info.download_request.pipeline_tag,
+                        };
+                        match importer.import_in_place(&spec).await {
+                            Ok(r) if r.success => {
+                                tracing::info!(
+                                    "Post-download import succeeded: {:?}",
+                                    r.model_path
+                                );
+                            }
+                            Ok(r) => {
+                                tracing::warn!("Post-download import failed: {:?}", r.error);
+                            }
+                            Err(e) => {
+                                tracing::error!("Post-download import error: {}", e);
+                            }
                         }
-                        Ok(r) => {
-                            tracing::warn!("Post-download import failed: {:?}", r.error);
-                        }
-                        Err(e) => {
-                            tracing::error!("Post-download import error: {}", e);
-                        }
-                    }
-                });
-            }));
+                    });
+                },
+            ));
         }
 
         // Initialize conversion manager
@@ -395,7 +415,7 @@ impl PumasApiBuilder {
                         family: recovery.family,
                         official_name: recovery.official_name,
                         model_type: recovery.model_type,
-                        quant: None,     // Download all files for this repo
+                        quant: None, // Download all files for this repo
                         filename: None,
                         filenames: None,
                         pipeline_tag: None,
@@ -443,7 +463,8 @@ impl PumasApiBuilder {
                     // Use repo_id from marker file, or fall back to inferred path
                     let repo_id = item.repo_id.unwrap_or_else(|| {
                         // Best-guess: {family}/{dir_name} using raw directory name
-                        let dir_name = item.model_dir
+                        let dir_name = item
+                            .model_dir
                             .file_name()
                             .and_then(|n| n.to_str())
                             .unwrap_or(&item.inferred_name);

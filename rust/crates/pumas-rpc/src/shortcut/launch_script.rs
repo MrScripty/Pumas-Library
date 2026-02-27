@@ -72,11 +72,12 @@ impl LaunchScriptGenerator {
             source: Some(e),
         })?;
 
-        file.write_all(content.as_bytes()).map_err(|e| PumasError::Io {
-            message: "write launch script".to_string(),
-            path: Some(script_path.clone()),
-            source: Some(e),
-        })?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| PumasError::Io {
+                message: "write launch script".to_string(),
+                path: Some(script_path.clone()),
+                source: Some(e),
+            })?;
 
         // Make executable (uses platform module for cross-platform handling)
         platform::set_executable(&script_path)?;
@@ -208,7 +209,6 @@ wait $SERVER_PID
 
         Ok(())
     }
-
 }
 
 #[cfg(test)]
@@ -227,7 +227,9 @@ mod tests {
 
         let generator = LaunchScriptGenerator::new(&scripts_dir, &profiles_dir);
 
-        let script_path = generator.generate("v1.0.0", &version_dir, "v1-0-0").unwrap();
+        let script_path = generator
+            .generate("v1.0.0", &version_dir, "v1-0-0")
+            .unwrap();
 
         assert!(script_path.exists());
 
@@ -256,7 +258,9 @@ mod tests {
         fs::create_dir_all(&version_dir).unwrap();
 
         let generator = LaunchScriptGenerator::new(&scripts_dir, &profiles_dir);
-        let script_path = generator.generate("v1.0.0", &version_dir, "v1-0-0").unwrap();
+        let script_path = generator
+            .generate("v1.0.0", &version_dir, "v1-0-0")
+            .unwrap();
 
         assert!(script_path.exists());
 

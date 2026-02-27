@@ -131,10 +131,7 @@ impl ProcessDetector {
 
         // Check if process is alive
         if !self.is_process_alive(pid) {
-            debug!(
-                "Stale PID file {:?}: process {} not running",
-                pid_file, pid
-            );
+            debug!("Stale PID file {:?}: process {} not running", pid_file, pid);
             return;
         }
 
@@ -248,10 +245,7 @@ mod tests {
         let detector = ProcessDetector::new(temp_dir.path(), version_paths);
 
         let version_path = temp_dir.path().join("versions").join("v1.0.0");
-        let cmdline = format!(
-            "python {}/main.py",
-            version_path.display()
-        );
+        let cmdline = format!("python {}/main.py", version_path.display());
         let tag = detector.infer_tag_from_cmdline(&cmdline);
 
         assert_eq!(tag, Some("v1.0.0".to_string()));

@@ -2,10 +2,10 @@
 //!
 //! Handles checking and installing dependencies using pip/uv.
 
-use pumas_library::config::AppId;
-use pumas_library::models::DependencyStatus;
 use crate::version_manager::constraints::ConstraintsManager;
 use crate::version_manager::progress::ProgressUpdate;
+use pumas_library::config::AppId;
+use pumas_library::models::DependencyStatus;
 use pumas_library::{PumasError, Result};
 use regex::Regex;
 use std::collections::HashSet;
@@ -44,7 +44,10 @@ impl DependencyManager {
 
     /// Get the venv python path for a version.
     fn venv_python(&self, tag: &str) -> PathBuf {
-        self.version_path(tag).join("venv").join("bin").join("python")
+        self.version_path(tag)
+            .join("venv")
+            .join("bin")
+            .join("python")
     }
 
     /// Check if a venv exists for a version.
@@ -93,7 +96,10 @@ impl DependencyManager {
         let installed = self.get_installed_packages(tag).await?;
 
         // Find missing packages
-        let installed_set: HashSet<_> = installed.iter().map(|s| self.canonicalize_name(s)).collect();
+        let installed_set: HashSet<_> = installed
+            .iter()
+            .map(|s| self.canonicalize_name(s))
+            .collect();
         let missing: Vec<_> = required
             .iter()
             .filter(|r| !installed_set.contains(&self.canonicalize_name(r)))
@@ -369,9 +375,12 @@ impl DependencyManager {
         }
 
         // Wait for process
-        let status = child.wait().await.map_err(|e| PumasError::InstallationFailed {
-            message: format!("Failed to wait for pip: {}", e),
-        })?;
+        let status = child
+            .wait()
+            .await
+            .map_err(|e| PumasError::InstallationFailed {
+                message: format!("Failed to wait for pip: {}", e),
+            })?;
 
         // Read any remaining stderr
         if let Some(stderr) = stderr {

@@ -104,8 +104,13 @@ fn validate_status_response(response: &Value) -> Result<(), String> {
     validate_base_response(response)?;
 
     let required_fields = [
-        "version", "deps_ready", "patched", "menu_shortcut",
-        "desktop_shortcut", "message", "comfyui_running"
+        "version",
+        "deps_ready",
+        "patched",
+        "menu_shortcut",
+        "desktop_shortcut",
+        "message",
+        "comfyui_running",
     ];
 
     for field in required_fields {
@@ -143,7 +148,9 @@ fn validate_disk_space_response(response: &Value) -> Result<(), String> {
 fn validate_system_resources_response(response: &Value) -> Result<(), String> {
     validate_base_response(response)?;
 
-    let resources = response.get("resources").ok_or("Missing 'resources' field")?;
+    let resources = response
+        .get("resources")
+        .ok_or("Missing 'resources' field")?;
 
     // Check CPU
     let cpu = resources.get("cpu").ok_or("Missing 'resources.cpu'")?;
@@ -182,7 +189,11 @@ fn validate_launcher_version_response(response: &Value) -> Result<(), String> {
     if response.get("branch").and_then(|v| v.as_str()).is_none() {
         return Err("Missing 'branch' field".into());
     }
-    if response.get("isGitRepo").and_then(|v| v.as_bool()).is_none() {
+    if response
+        .get("isGitRepo")
+        .and_then(|v| v.as_bool())
+        .is_none()
+    {
         return Err("Missing 'isGitRepo' field".into());
     }
 
@@ -193,13 +204,25 @@ fn validate_launcher_version_response(response: &Value) -> Result<(), String> {
 fn validate_sandbox_info_response(response: &Value) -> Result<(), String> {
     validate_base_response(response)?;
 
-    if response.get("is_sandboxed").and_then(|v| v.as_bool()).is_none() {
+    if response
+        .get("is_sandboxed")
+        .and_then(|v| v.as_bool())
+        .is_none()
+    {
         return Err("Missing 'is_sandboxed' field".into());
     }
-    if response.get("sandbox_type").and_then(|v| v.as_str()).is_none() {
+    if response
+        .get("sandbox_type")
+        .and_then(|v| v.as_str())
+        .is_none()
+    {
         return Err("Missing 'sandbox_type' field".into());
     }
-    if response.get("limitations").and_then(|v| v.as_array()).is_none() {
+    if response
+        .get("limitations")
+        .and_then(|v| v.as_array())
+        .is_none()
+    {
         return Err("Missing 'limitations' field".into());
     }
 
@@ -211,9 +234,14 @@ fn validate_network_status_response(response: &Value) -> Result<(), String> {
     validate_base_response(response)?;
 
     let required_fields = [
-        "total_requests", "successful_requests", "failed_requests",
-        "circuit_breaker_rejections", "retries", "success_rate",
-        "circuit_states", "is_offline"
+        "total_requests",
+        "successful_requests",
+        "failed_requests",
+        "circuit_breaker_rejections",
+        "retries",
+        "success_rate",
+        "circuit_states",
+        "is_offline",
     ];
 
     for field in required_fields {
@@ -232,10 +260,18 @@ fn validate_library_status_response(response: &Value) -> Result<(), String> {
     if response.get("indexing").and_then(|v| v.as_bool()).is_none() {
         return Err("Missing 'indexing' field".into());
     }
-    if response.get("deep_scan_in_progress").and_then(|v| v.as_bool()).is_none() {
+    if response
+        .get("deep_scan_in_progress")
+        .and_then(|v| v.as_bool())
+        .is_none()
+    {
         return Err("Missing 'deep_scan_in_progress' field".into());
     }
-    if response.get("model_count").and_then(|v| v.as_i64()).is_none() {
+    if response
+        .get("model_count")
+        .and_then(|v| v.as_i64())
+        .is_none()
+    {
         return Err("Missing 'model_count' field".into());
     }
 
@@ -247,8 +283,13 @@ fn validate_link_health_response(response: &Value) -> Result<(), String> {
     validate_base_response(response)?;
 
     let required_fields = [
-        "status", "total_links", "healthy_links", "broken_links",
-        "orphaned_links", "warnings", "errors"
+        "status",
+        "total_links",
+        "healthy_links",
+        "broken_links",
+        "orphaned_links",
+        "warnings",
+        "errors",
     ];
 
     for field in required_fields {
@@ -288,24 +329,36 @@ mod tests {
         validate_disk_space_response(&response).expect("DiskSpaceResponse contract violation");
 
         // get_system_resources
-        let response = rpc_call(port, "get_system_resources", json!({})).await.unwrap();
-        validate_system_resources_response(&response).expect("SystemResourcesResponse contract violation");
+        let response = rpc_call(port, "get_system_resources", json!({}))
+            .await
+            .unwrap();
+        validate_system_resources_response(&response)
+            .expect("SystemResourcesResponse contract violation");
 
         // get_launcher_version
-        let response = rpc_call(port, "get_launcher_version", json!({})).await.unwrap();
-        validate_launcher_version_response(&response).expect("LauncherVersionResponse contract violation");
+        let response = rpc_call(port, "get_launcher_version", json!({}))
+            .await
+            .unwrap();
+        validate_launcher_version_response(&response)
+            .expect("LauncherVersionResponse contract violation");
 
         // get_sandbox_info
         let response = rpc_call(port, "get_sandbox_info", json!({})).await.unwrap();
         validate_sandbox_info_response(&response).expect("SandboxInfoResponse contract violation");
 
         // get_network_status
-        let response = rpc_call(port, "get_network_status", json!({})).await.unwrap();
-        validate_network_status_response(&response).expect("NetworkStatusResponse contract violation");
+        let response = rpc_call(port, "get_network_status", json!({}))
+            .await
+            .unwrap();
+        validate_network_status_response(&response)
+            .expect("NetworkStatusResponse contract violation");
 
         // get_library_status
-        let response = rpc_call(port, "get_library_status", json!({})).await.unwrap();
-        validate_library_status_response(&response).expect("LibraryStatusResponse contract violation");
+        let response = rpc_call(port, "get_library_status", json!({}))
+            .await
+            .unwrap();
+        validate_library_status_response(&response)
+            .expect("LibraryStatusResponse contract violation");
 
         // get_link_health
         let response = rpc_call(port, "get_link_health", json!({})).await.unwrap();
@@ -348,24 +401,50 @@ mod tests {
         let port = 9999;
 
         // get_available_versions should return an array
-        let response = rpc_call(port, "get_available_versions", json!({})).await.unwrap();
+        let response = rpc_call(port, "get_available_versions", json!({}))
+            .await
+            .unwrap();
         // Response is wrapped: { success: true, versions: [...] }
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
-        assert!(response.get("versions").and_then(|v| v.as_array()).is_some());
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+        assert!(response
+            .get("versions")
+            .and_then(|v| v.as_array())
+            .is_some());
 
         // get_installed_versions should return an array
-        let response = rpc_call(port, "get_installed_versions", json!({})).await.unwrap();
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
-        assert!(response.get("versions").and_then(|v| v.as_array()).is_some());
+        let response = rpc_call(port, "get_installed_versions", json!({}))
+            .await
+            .unwrap();
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+        assert!(response
+            .get("versions")
+            .and_then(|v| v.as_array())
+            .is_some());
 
         // get_active_version
-        let response = rpc_call(port, "get_active_version", json!({})).await.unwrap();
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        let response = rpc_call(port, "get_active_version", json!({}))
+            .await
+            .unwrap();
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
         // version can be null or a string
 
         // get_default_version
-        let response = rpc_call(port, "get_default_version", json!({})).await.unwrap();
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        let response = rpc_call(port, "get_default_version", json!({}))
+            .await
+            .unwrap();
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
     }
 
     /// Test process management methods
@@ -375,7 +454,9 @@ mod tests {
         let port = 9999;
 
         // is_comfyui_running should return a boolean
-        let response = rpc_call(port, "is_comfyui_running", json!({})).await.unwrap();
+        let response = rpc_call(port, "is_comfyui_running", json!({}))
+            .await
+            .unwrap();
         assert!(response.is_boolean());
     }
 
@@ -386,7 +467,9 @@ mod tests {
         let port = 9999;
 
         // get_version_shortcuts needs a tag parameter
-        let response = rpc_call(port, "get_version_shortcuts", json!({"tag": "v0.4.0"})).await.unwrap();
+        let response = rpc_call(port, "get_version_shortcuts", json!({"tag": "v0.4.0"}))
+            .await
+            .unwrap();
         // Should have tag, menu, desktop fields
         assert!(response.get("tag").is_some());
         assert!(response.get("menu").is_some());
@@ -400,15 +483,30 @@ mod tests {
         let port = 9999;
 
         // search_models_fts
-        let response = rpc_call(port, "search_models_fts", json!({
-            "query": "llama",
-            "limit": 10
-        })).await.unwrap();
+        let response = rpc_call(
+            port,
+            "search_models_fts",
+            json!({
+                "query": "llama",
+                "limit": 10
+            }),
+        )
+        .await
+        .unwrap();
 
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
         assert!(response.get("models").and_then(|v| v.as_array()).is_some());
-        assert!(response.get("total_count").and_then(|v| v.as_i64()).is_some());
-        assert!(response.get("query_time_ms").and_then(|v| v.as_i64()).is_some());
+        assert!(response
+            .get("total_count")
+            .and_then(|v| v.as_i64())
+            .is_some());
+        assert!(response
+            .get("query_time_ms")
+            .and_then(|v| v.as_i64())
+            .is_some());
     }
 
     /// Test utility methods
@@ -418,11 +516,20 @@ mod tests {
         let port = 9999;
 
         // get_file_link_count
-        let response = rpc_call(port, "get_file_link_count", json!({
-            "file_path": "/tmp/nonexistent"
-        })).await.unwrap();
+        let response = rpc_call(
+            port,
+            "get_file_link_count",
+            json!({
+                "file_path": "/tmp/nonexistent"
+            }),
+        )
+        .await
+        .unwrap();
 
-        assert!(response.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(response
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
         assert!(response.get("count").and_then(|v| v.as_i64()).is_some());
     }
 
@@ -448,18 +555,36 @@ mod tests {
         let port = 9999;
 
         // Test with snake_case
-        let response1 = rpc_call(port, "get_available_versions", json!({
-            "force_refresh": true
-        })).await.unwrap();
+        let response1 = rpc_call(
+            port,
+            "get_available_versions",
+            json!({
+                "force_refresh": true
+            }),
+        )
+        .await
+        .unwrap();
 
         // Test with camelCase
-        let response2 = rpc_call(port, "get_available_versions", json!({
-            "forceRefresh": true
-        })).await.unwrap();
+        let response2 = rpc_call(
+            port,
+            "get_available_versions",
+            json!({
+                "forceRefresh": true
+            }),
+        )
+        .await
+        .unwrap();
 
         // Both should work
-        assert!(response1.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
-        assert!(response2.get("success").and_then(|v| v.as_bool()).unwrap_or(false));
+        assert!(response1
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
+        assert!(response2
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false));
     }
 }
 

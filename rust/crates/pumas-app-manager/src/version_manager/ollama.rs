@@ -3,12 +3,12 @@
 //! Handles Ollama binary downloads and installation - simpler than ComfyUI
 //! since Ollama is a pre-built binary with no Python dependencies.
 
+use crate::version_manager::progress::ProgressUpdate;
+use crate::version_manager::state::VersionState;
 use pumas_library::config::{AppId, InstallationConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
 use pumas_library::network::{GitHubAsset, GitHubClient, GitHubRelease};
-use crate::version_manager::progress::ProgressUpdate;
-use crate::version_manager::state::VersionState;
 use pumas_library::{PumasError, Result};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
@@ -46,12 +46,7 @@ impl OllamaVersionManager {
         github_client: Arc<GitHubClient>,
     ) -> Result<Self> {
         let app_id = AppId::Ollama;
-        let state = VersionState::new(
-            &launcher_root,
-            app_id,
-            metadata_manager.clone(),
-        )
-        .await?;
+        let state = VersionState::new(&launcher_root, app_id, metadata_manager.clone()).await?;
 
         Ok(Self {
             launcher_root,
@@ -113,10 +108,7 @@ impl OllamaVersionManager {
             system
         };
 
-        debug!(
-            "Selecting Ollama asset for {}-{}",
-            desired_os, desired_arch
-        );
+        debug!("Selecting Ollama asset for {}-{}", desired_os, desired_arch);
 
         // Score each asset and find the best match
         let mut best_asset: Option<&GitHubAsset> = None;
@@ -164,7 +156,10 @@ impl OllamaVersionManager {
                 asset.name, best_score
             );
         } else {
-            warn!("No suitable Ollama asset found for {}-{}", desired_os, desired_arch);
+            warn!(
+                "No suitable Ollama asset found for {}-{}",
+                desired_os, desired_arch
+            );
         }
 
         best_asset
@@ -241,10 +236,11 @@ impl OllamaVersionManager {
             .get_releases(&self.github_repo, false)
             .await?;
 
-        let release = releases
-            .iter()
-            .find(|r| r.tag_name == tag)
-            .ok_or_else(|| PumasError::VersionNotFound { tag: tag.to_string() })?;
+        let release = releases.iter().find(|r| r.tag_name == tag).ok_or_else(|| {
+            PumasError::VersionNotFound {
+                tag: tag.to_string(),
+            }
+        })?;
 
         // Select appropriate asset
         let asset = Self::select_asset(release).ok_or_else(|| PumasError::InstallationFailed {
@@ -342,10 +338,14 @@ impl OllamaVersionManager {
                 cause: Some(e.to_string()),
             })?;
 
-        let response = client.get(url).send().await.map_err(|e| PumasError::Network {
-            message: format!("Download failed: {}", e),
-            cause: Some(e.to_string()),
-        })?;
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| PumasError::Network {
+                message: format!("Download failed: {}", e),
+                cause: Some(e.to_string()),
+            })?;
 
         if !response.status().is_success() {
             return Err(PumasError::Network {
@@ -437,14 +437,17 @@ impl OllamaVersionManager {
             source: Some(e),
         })?;
 
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
-            message: format!("Failed to read zip: {}", e),
-        })?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
+                message: format!("Failed to read zip: {}", e),
+            })?;
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i).map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to read zip entry: {}", e),
-            })?;
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| PumasError::InstallationFailed {
+                    message: format!("Failed to read zip entry: {}", e),
+                })?;
 
             let outpath = dest_dir.join(file.name());
 
@@ -460,11 +463,12 @@ impl OllamaVersionManager {
                     source: Some(e),
                 })?;
                 let mut contents = Vec::new();
-                file.read_to_end(&mut contents).map_err(|e| PumasError::Io {
-                    message: format!("Failed to read from archive: {}", e),
-                    path: None,
-                    source: Some(e),
-                })?;
+                file.read_to_end(&mut contents)
+                    .map_err(|e| PumasError::Io {
+                        message: format!("Failed to read from archive: {}", e),
+                        path: None,
+                        source: Some(e),
+                    })?;
                 std::io::Write::write_all(&mut outfile, &contents).map_err(|e| PumasError::Io {
                     message: format!("Failed to write file: {}", e),
                     path: Some(outpath),
@@ -493,21 +497,26 @@ impl OllamaVersionManager {
         // Handle different compression formats
         if archive_name.ends_with(".tar.zst") {
             // zstd compression
-            let decoder = zstd::stream::Decoder::new(BufReader::new(file))
-                .map_err(|e| PumasError::InstallationFailed {
+            let decoder = zstd::stream::Decoder::new(BufReader::new(file)).map_err(|e| {
+                PumasError::InstallationFailed {
                     message: format!("Failed to create zstd decoder: {}", e),
-                })?;
-            let mut archive = tar::Archive::new(decoder);
-            archive.unpack(dest_dir).map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to extract tar.zst: {}", e),
+                }
             })?;
+            let mut archive = tar::Archive::new(decoder);
+            archive
+                .unpack(dest_dir)
+                .map_err(|e| PumasError::InstallationFailed {
+                    message: format!("Failed to extract tar.zst: {}", e),
+                })?;
         } else {
             // gzip compression
             let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
             let mut archive = tar::Archive::new(decoder);
-            archive.unpack(dest_dir).map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to extract tarball: {}", e),
-            })?;
+            archive
+                .unpack(dest_dir)
+                .map_err(|e| PumasError::InstallationFailed {
+                    message: format!("Failed to extract tarball: {}", e),
+                })?;
         }
 
         Ok(())
@@ -713,7 +722,9 @@ impl OllamaVersionManager {
 
     /// Get available releases from GitHub.
     pub async fn get_available_releases(&self, force_refresh: bool) -> Result<Vec<GitHubRelease>> {
-        self.github_client.get_releases(&self.github_repo, force_refresh).await
+        self.github_client
+            .get_releases(&self.github_repo, force_refresh)
+            .await
     }
 }
 

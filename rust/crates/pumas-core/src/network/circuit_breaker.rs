@@ -220,13 +220,12 @@ impl CircuitBreaker {
         let state = *self.state.read().unwrap();
         match state {
             CircuitState::Closed => Duration::ZERO,
-            CircuitState::Open | CircuitState::HalfOpen => {
-                self.opened_at
-                    .read()
-                    .unwrap()
-                    .map(|t| t.elapsed())
-                    .unwrap_or(Duration::ZERO)
-            }
+            CircuitState::Open | CircuitState::HalfOpen => self
+                .opened_at
+                .read()
+                .unwrap()
+                .map(|t| t.elapsed())
+                .unwrap_or(Duration::ZERO),
         }
     }
 }

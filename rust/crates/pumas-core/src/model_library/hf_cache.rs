@@ -404,12 +404,11 @@ impl HfSearchCache {
         }
 
         // Parse repo IDs
-        let repo_ids: Vec<String> = serde_json::from_str(&repo_ids_json).map_err(|e| {
-            PumasError::Database {
+        let repo_ids: Vec<String> =
+            serde_json::from_str(&repo_ids_json).map_err(|e| PumasError::Database {
                 message: format!("Failed to parse repo IDs: {}", e),
                 source: None,
-            }
-        })?;
+            })?;
 
         // Get details for each repo
         let mut models = Vec::with_capacity(repo_ids.len());
@@ -494,10 +493,8 @@ impl HfSearchCache {
             params![now, repo_id],
         );
 
-        let formats: Vec<String> =
-            serde_json::from_str(&row.5).unwrap_or_default();
-        let quants: Vec<String> =
-            serde_json::from_str(&row.6).unwrap_or_default();
+        let formats: Vec<String> = serde_json::from_str(&row.5).unwrap_or_default();
+        let quants: Vec<String> = serde_json::from_str(&row.6).unwrap_or_default();
         let download_options: Vec<DownloadOption> = row
             .7
             .as_ref()
@@ -540,11 +537,7 @@ impl HfSearchCache {
     /// Returns true if:
     /// - No cache exists
     /// - Cache is older than threshold AND search result has newer lastModified
-    pub fn needs_refresh(
-        &self,
-        repo_id: &str,
-        search_last_modified: Option<&str>,
-    ) -> Result<bool> {
+    pub fn needs_refresh(&self, repo_id: &str, search_last_modified: Option<&str>) -> Result<bool> {
         let config = self.get_config()?;
         let cached = self.get_repo_details(repo_id)?;
 
@@ -571,7 +564,7 @@ impl HfSearchCache {
 
                 match (cached_dt, search_dt) {
                     (Some(c), Some(s)) => Ok(s > c), // Refresh if search is newer
-                    _ => Ok(true), // Can't compare, refresh to be safe
+                    _ => Ok(true),                   // Can't compare, refresh to be safe
                 }
             }
             (None, Some(_)) => Ok(true), // We have no lastModified, refresh
@@ -765,8 +758,11 @@ impl HfSearchCache {
                 break;
             }
 
-            conn.execute("DELETE FROM repo_details WHERE repo_id = ?1", params![repo_id])
-                .ok();
+            conn.execute(
+                "DELETE FROM repo_details WHERE repo_id = ?1",
+                params![repo_id],
+            )
+            .ok();
 
             evicted += size as u64;
             evicted_count += 1;
@@ -787,7 +783,11 @@ impl HfSearchCache {
         )
         .ok();
 
-        debug!("Evicted {} entries ({}MB)", evicted_count, evicted / 1_000_000);
+        debug!(
+            "Evicted {} entries ({}MB)",
+            evicted_count,
+            evicted / 1_000_000
+        );
 
         Ok(evicted_count)
     }
@@ -907,7 +907,10 @@ mod tests {
 
     #[test]
     fn test_query_normalization() {
-        assert_eq!(HfSearchCache::normalize_query("  Llama GGUF  "), "llama gguf");
+        assert_eq!(
+            HfSearchCache::normalize_query("  Llama GGUF  "),
+            "llama gguf"
+        );
         assert_eq!(HfSearchCache::normalize_query("TEST"), "test");
     }
 
@@ -944,9 +947,7 @@ mod tests {
             .unwrap();
 
         // Retrieve
-        let results = cache
-            .get_search_results("test query", None, 25, 0)
-            .unwrap();
+        let results = cache.get_search_results("test query", None, 25, 0).unwrap();
         assert!(results.is_some());
         assert_eq!(results.unwrap().len(), 2);
     }

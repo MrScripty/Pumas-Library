@@ -107,8 +107,9 @@ impl PatchManager {
                 || content.contains(&format!("setproctitle.setproctitle('{}')", title))
         } else {
             // Check for any ComfyUI Server setproctitle call
-            let pattern = Regex::new(r#"setproctitle\.setproctitle\(["']ComfyUI Server[^"']*["']\)"#)
-                .unwrap();
+            let pattern =
+                Regex::new(r#"setproctitle\.setproctitle\(["']ComfyUI Server[^"']*["']\)"#)
+                    .unwrap();
             pattern.is_match(&content)
         }
     }
@@ -185,7 +186,9 @@ impl PatchManager {
         let new_content = if pattern.is_match(&content) {
             // Upgrade existing patch
             info!("Upgrading existing patch to include version");
-            pattern.replace(&content, expected_line.as_str()).to_string()
+            pattern
+                .replace(&content, expected_line.as_str())
+                .to_string()
         } else {
             // Insert new patch code
             let insert_code = format!(
@@ -243,7 +246,13 @@ except ImportError:
         let repo_dir = main_py.parent().unwrap_or(Path::new("."));
         if repo_dir.join(".git").exists() {
             let result = std::process::Command::new("git")
-                .args(["-C", &repo_dir.to_string_lossy(), "checkout", "--", "main.py"])
+                .args([
+                    "-C",
+                    &repo_dir.to_string_lossy(),
+                    "checkout",
+                    "--",
+                    "main.py",
+                ])
                 .output();
 
             if let Ok(output) = result {
@@ -275,7 +284,10 @@ except ImportError:
 
         if !output.status.success() {
             return Err(PumasError::Network {
-                message: format!("Failed to download main.py: curl exit code {}", output.status),
+                message: format!(
+                    "Failed to download main.py: curl exit code {}",
+                    output.status
+                ),
                 cause: Some(String::from_utf8_lossy(&output.stderr).to_string()),
             });
         }
@@ -299,11 +311,7 @@ mod tests {
     #[test]
     fn test_build_server_title() {
         let temp_dir = TempDir::new().unwrap();
-        let patch_mgr = PatchManager::new(
-            temp_dir.path(),
-            temp_dir.path().join("main.py"),
-            None,
-        );
+        let patch_mgr = PatchManager::new(temp_dir.path(), temp_dir.path().join("main.py"), None);
 
         assert_eq!(patch_mgr.build_server_title(None), "ComfyUI Server");
         assert_eq!(
@@ -315,11 +323,7 @@ mod tests {
     #[test]
     fn test_is_patched_no_file() {
         let temp_dir = TempDir::new().unwrap();
-        let patch_mgr = PatchManager::new(
-            temp_dir.path(),
-            temp_dir.path().join("main.py"),
-            None,
-        );
+        let patch_mgr = PatchManager::new(temp_dir.path(), temp_dir.path().join("main.py"), None);
 
         assert!(!patch_mgr.is_patched(None));
     }
@@ -329,16 +333,16 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let main_py = temp_dir.path().join("main.py");
 
-        std::fs::write(&main_py, r#"
+        std::fs::write(
+            &main_py,
+            r#"
 if __name__ == "__main__":
     main()
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let patch_mgr = PatchManager::new(
-            temp_dir.path(),
-            &main_py,
-            None,
-        );
+        let patch_mgr = PatchManager::new(temp_dir.path(), &main_py, None);
 
         assert!(!patch_mgr.is_patched(None));
     }
@@ -348,7 +352,9 @@ if __name__ == "__main__":
         let temp_dir = TempDir::new().unwrap();
         let main_py = temp_dir.path().join("main.py");
 
-        std::fs::write(&main_py, r#"
+        std::fs::write(
+            &main_py,
+            r#"
 try:
     import setproctitle
     setproctitle.setproctitle("ComfyUI Server")
@@ -357,13 +363,11 @@ except ImportError:
 
 if __name__ == "__main__":
     main()
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let patch_mgr = PatchManager::new(
-            temp_dir.path(),
-            &main_py,
-            None,
-        );
+        let patch_mgr = PatchManager::new(temp_dir.path(), &main_py, None);
 
         assert!(patch_mgr.is_patched(None));
     }
@@ -373,18 +377,18 @@ if __name__ == "__main__":
         let temp_dir = TempDir::new().unwrap();
         let main_py = temp_dir.path().join("main.py");
 
-        std::fs::write(&main_py, r#"
+        std::fs::write(
+            &main_py,
+            r#"
 import sys
 
 if __name__ == "__main__":
     main()
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
-        let patch_mgr = PatchManager::new(
-            temp_dir.path(),
-            &main_py,
-            None,
-        );
+        let patch_mgr = PatchManager::new(temp_dir.path(), &main_py, None);
 
         assert!(!patch_mgr.is_patched(None));
         patch_mgr.apply_patch(&main_py, None).unwrap();

@@ -122,12 +122,7 @@ impl ModelLibrary {
     /// * `model_type` - Type of model (llm, diffusion)
     /// * `family` - Model family/architecture
     /// * `cleaned_name` - Normalized model name
-    pub fn build_model_path(
-        &self,
-        model_type: &str,
-        family: &str,
-        cleaned_name: &str,
-    ) -> PathBuf {
+    pub fn build_model_path(&self, model_type: &str, family: &str, cleaned_name: &str) -> PathBuf {
         let type_normalized = normalize_name(model_type);
         let family_normalized = normalize_name(family);
         let name_normalized = normalize_name(cleaned_name);
@@ -218,11 +213,11 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub async fn index_model_dir(&self, model_dir: &Path) -> Result<()> {
-        let metadata = self.load_metadata(model_dir)?.ok_or_else(|| {
-            PumasError::ModelNotFound {
+        let metadata = self
+            .load_metadata(model_dir)?
+            .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_dir.display().to_string(),
-            }
-        })?;
+            })?;
 
         let model_id = self.get_model_id(model_dir).ok_or_else(|| {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
@@ -280,10 +275,7 @@ impl ModelLibrary {
     where
         F: FnMut(DeepScanProgress),
     {
-        tracing::info!(
-            "Starting deep scan (verify_hashes={})",
-            verify_hashes
-        );
+        tracing::info!("Starting deep scan (verify_hashes={})", verify_hashes);
 
         // Collect all model directories first
         let model_dirs: Vec<_> = self.model_dirs().collect();
@@ -319,7 +311,9 @@ impl ModelLibrary {
             let metadata = match self.load_metadata(model_dir) {
                 Ok(Some(m)) => m,
                 Ok(None) => {
-                    result.errors.push((model_dir.clone(), "No metadata".to_string()));
+                    result
+                        .errors
+                        .push((model_dir.clone(), "No metadata".to_string()));
                     continue;
                 }
                 Err(e) => {
@@ -516,7 +510,9 @@ impl ModelLibrary {
         }
         if let Some(ref model_type) = hf_metadata.model_type {
             // Normalize pipeline_tags (e.g. "text-to-audio") to canonical names (e.g. "audio")
-            let normalized: crate::model_library::types::ModelType = model_type.parse().unwrap_or(crate::model_library::types::ModelType::Unknown);
+            let normalized: crate::model_library::types::ModelType = model_type
+                .parse()
+                .unwrap_or(crate::model_library::types::ModelType::Unknown);
             if normalized != crate::model_library::types::ModelType::Unknown {
                 metadata.model_type = Some(normalized.as_str().to_string());
             } else {
@@ -632,10 +628,7 @@ impl ModelLibrary {
 
         for model in all_models {
             // Count by type
-            *stats
-                .by_type
-                .entry(model.model_type.clone())
-                .or_insert(0) += 1;
+            *stats.by_type.entry(model.model_type.clone()).or_insert(0) += 1;
 
             // Count by family
             if let Some(metadata) = model.metadata.as_object() {
@@ -820,7 +813,11 @@ impl ModelLibrary {
         // Resolve type with priority chain
         let new_type = if let Some(tag) = stored_pipeline_tag {
             let mt = ModelType::from_pipeline_tag(tag);
-            if mt != ModelType::Unknown { mt } else { ModelType::Unknown }
+            if mt != ModelType::Unknown {
+                mt
+            } else {
+                ModelType::Unknown
+            }
         } else {
             ModelType::Unknown
         };
@@ -844,7 +841,8 @@ impl ModelLibrary {
         let new_type_str = new_type.as_str().to_string();
 
         // Detect dLLM subtype
-        let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir) {
+        let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir)
+        {
             Some("dllm".to_string())
         } else {
             None
@@ -863,7 +861,10 @@ impl ModelLibrary {
 
         // Check if anything changed (type or family)
         let current_subtype = metadata.subtype.clone();
-        if new_type_str == current_type && new_family == current_family && new_subtype == current_subtype {
+        if new_type_str == current_type
+            && new_family == current_family
+            && new_subtype == current_subtype
+        {
             // Even if type/family didn't change, update pipeline_tag if we discovered one
             if new_pipeline_tag.is_some() && metadata.pipeline_tag.is_none() {
                 metadata.pipeline_tag = new_pipeline_tag;
@@ -883,16 +884,15 @@ impl ModelLibrary {
         let cleaned_name = metadata
             .cleaned_name
             .clone()
-            .unwrap_or_else(|| {
-                model_id
-                    .split('/')
-                    .last()
-                    .unwrap_or(model_id)
-                    .to_string()
-            });
+            .unwrap_or_else(|| model_id.split('/').last().unwrap_or(model_id).to_string());
 
         let new_dir = self.build_model_path(&new_type_str, &new_family, &cleaned_name);
-        let new_model_id = format!("{}/{}/{}", normalize_name(&new_type_str), normalize_name(&new_family), normalize_name(&cleaned_name));
+        let new_model_id = format!(
+            "{}/{}/{}",
+            normalize_name(&new_type_str),
+            normalize_name(&new_family),
+            normalize_name(&cleaned_name)
+        );
 
         metadata.model_id = Some(new_model_id.clone());
         metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());

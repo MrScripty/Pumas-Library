@@ -23,7 +23,10 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        self.primary().model_library.search_models(query, limit, offset).await
+        self.primary()
+            .model_library
+            .search_models(query, limit, offset)
+            .await
     }
 
     /// Rebuild the model index from metadata files.
@@ -38,7 +41,10 @@ impl PumasApi {
 
     /// Mark a model's metadata as manually set (protected from auto-updates).
     pub async fn mark_model_metadata_as_manual(&self, model_id: &str) -> Result<()> {
-        self.primary().model_library.mark_metadata_as_manual(model_id).await
+        self.primary()
+            .model_library
+            .mark_metadata_as_manual(model_id)
+            .await
     }
 
     /// Get inference settings schema for a model.
@@ -130,7 +136,10 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
-        self.primary().model_importer.batch_import(specs, None).await
+        self.primary()
+            .model_importer
+            .batch_import(specs, None)
+            .await
     }
 
     /// Import a model in-place (files already in library directory).
@@ -159,7 +168,10 @@ impl PumasApi {
     /// Get the health status of model links for a version.
     ///
     /// Returns information about total links, healthy links, broken links, etc.
-    pub async fn get_link_health(&self, _version_tag: Option<&str>) -> Result<models::LinkHealthResponse> {
+    pub async fn get_link_health(
+        &self,
+        _version_tag: Option<&str>,
+    ) -> Result<models::LinkHealthResponse> {
         let registry = self.primary().model_library.link_registry().read().await;
         let all_links = registry.get_all().await;
 
@@ -185,7 +197,11 @@ impl PumasApi {
         Ok(models::LinkHealthResponse {
             success: true,
             error: None,
-            status: if broken.is_empty() { "healthy".to_string() } else { "degraded".to_string() },
+            status: if broken.is_empty() {
+                "healthy".to_string()
+            } else {
+                "degraded".to_string()
+            },
             total_links: all_links.len(),
             healthy_links: healthy,
             broken_links: broken,
@@ -216,7 +232,10 @@ impl PumasApi {
     }
 
     /// Get all links for a specific model.
-    pub async fn get_links_for_model(&self, model_id: &str) -> Result<models::LinksForModelResponse> {
+    pub async fn get_links_for_model(
+        &self,
+        model_id: &str,
+    ) -> Result<models::LinksForModelResponse> {
         let registry = self.primary().model_library.link_registry().read().await;
         let links = registry.get_links_for_model(model_id).await;
 
@@ -239,8 +258,14 @@ impl PumasApi {
     }
 
     /// Delete a model and cascade delete all its links.
-    pub async fn delete_model_with_cascade(&self, model_id: &str) -> Result<models::DeleteModelResponse> {
-        self.primary().model_library.delete_model(model_id, true).await?;
+    pub async fn delete_model_with_cascade(
+        &self,
+        model_id: &str,
+    ) -> Result<models::DeleteModelResponse> {
+        self.primary()
+            .model_library
+            .delete_model(model_id, true)
+            .await?;
         Ok(models::DeleteModelResponse {
             success: true,
             error: None,
@@ -259,7 +284,10 @@ impl PumasApi {
         if !models_path.exists() {
             return Ok(models::MappingPreviewResponse {
                 success: false,
-                error: Some(format!("Version models directory not found: {}", models_path.display())),
+                error: Some(format!(
+                    "Version models directory not found: {}",
+                    models_path.display()
+                )),
                 to_create: vec![],
                 to_skip_exists: vec![],
                 conflicts: vec![],
@@ -272,9 +300,14 @@ impl PumasApi {
 
         // Ensure default mapping config is up to date (idempotent write)
         let primary = self.primary();
-        primary.model_mapper.create_default_comfyui_config("*", models_path)?;
+        primary
+            .model_mapper
+            .create_default_comfyui_config("*", models_path)?;
 
-        let preview = primary.model_mapper.preview_mapping("comfyui", Some(version_tag), models_path).await?;
+        let preview = primary
+            .model_mapper
+            .preview_mapping("comfyui", Some(version_tag), models_path)
+            .await?;
 
         let to_action_info = |a: &crate::model_library::MappingAction| models::MappingActionInfo {
             model_id: a.model_id.clone(),
@@ -287,11 +320,15 @@ impl PumasApi {
         let to_create: Vec<_> = preview.creates.iter().map(to_action_info).collect();
         let to_skip_exists: Vec<_> = preview.skips.iter().map(to_action_info).collect();
         let conflicts: Vec<_> = preview.conflicts.iter().map(to_action_info).collect();
-        let broken_to_remove: Vec<_> = preview.broken.iter().map(|a| models::BrokenLinkEntry {
-            target_path: a.target.display().to_string(),
-            existing_target: a.source.display().to_string(),
-            reason: a.reason.clone().unwrap_or_default(),
-        }).collect();
+        let broken_to_remove: Vec<_> = preview
+            .broken
+            .iter()
+            .map(|a| models::BrokenLinkEntry {
+                target_path: a.target.display().to_string(),
+                existing_target: a.source.display().to_string(),
+                reason: a.reason.clone().unwrap_or_default(),
+            })
+            .collect();
         let total_actions = to_create.len() + broken_to_remove.len();
 
         Ok(models::MappingPreviewResponse {
@@ -322,9 +359,14 @@ impl PumasApi {
 
         // Ensure default mapping config is up to date (idempotent write)
         let primary = self.primary();
-        primary.model_mapper.create_default_comfyui_config("*", models_path)?;
+        primary
+            .model_mapper
+            .create_default_comfyui_config("*", models_path)?;
 
-        let result = primary.model_mapper.apply_mapping("comfyui", Some(version_tag), models_path).await?;
+        let result = primary
+            .model_mapper
+            .apply_mapping("comfyui", Some(version_tag), models_path)
+            .await?;
 
         Ok(models::MappingApplyResponse {
             success: true,
@@ -357,7 +399,10 @@ impl PumasApi {
 
     /// Reclassify a single model (re-detect type and relocate directory if needed).
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
-        self.primary().model_library.reclassify_model(model_id).await
+        self.primary()
+            .model_library
+            .reclassify_model(model_id)
+            .await
     }
 
     /// Reclassify all models in the library (re-detect types and relocate directories).

@@ -30,13 +30,10 @@ impl HuggingFaceClient {
             request = request.header("Authorization", auth);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| PumasError::Network {
-                message: format!("HuggingFace API request failed: {}", e),
-                cause: Some(e.to_string()),
-            })?;
+        let response = request.send().await.map_err(|e| PumasError::Network {
+            message: format!("HuggingFace API request failed: {}", e),
+            cause: Some(e.to_string()),
+        })?;
 
         if !response.status().is_success() {
             return Err(PumasError::Network {
@@ -89,13 +86,10 @@ impl HuggingFaceClient {
             request = request.header("Authorization", auth);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| PumasError::Network {
-                message: format!("Failed to fetch repo tree: {}", e),
-                cause: None,
-            })?;
+        let response = request.send().await.map_err(|e| PumasError::Network {
+            message: format!("Failed to fetch repo tree: {}", e),
+            cause: None,
+        })?;
 
         if !response.status().is_success() {
             return Err(PumasError::Network {

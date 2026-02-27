@@ -115,13 +115,7 @@ impl ConversionProgressTracker {
     ///
     /// Resets per-step progress fields (progress, tensor counts, current tensor)
     /// when transitioning between pipeline steps.
-    pub fn update_pipeline(
-        &self,
-        conversion_id: &str,
-        step: u32,
-        total: u32,
-        label: &str,
-    ) {
+    pub fn update_pipeline(&self, conversion_id: &str, step: u32, total: u32, label: &str) {
         let mut state = self.state.lock().expect("progress lock poisoned");
         if let Some(progress) = state.get_mut(conversion_id) {
             progress.pipeline_step = Some(step);
@@ -287,7 +281,10 @@ mod tests {
 
         assert_eq!(result.pipeline_step, Some(2));
         assert_eq!(result.pipeline_steps_total, Some(3));
-        assert_eq!(result.pipeline_step_label.as_deref(), Some("Quantizing to Q4_K_M"));
+        assert_eq!(
+            result.pipeline_step_label.as_deref(),
+            Some("Quantizing to Q4_K_M")
+        );
         // Per-step fields should be reset
         assert_eq!(result.progress, Some(0.0));
         assert_eq!(result.tensors_completed, None);

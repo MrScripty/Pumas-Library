@@ -227,10 +227,7 @@ pub async fn list_interrupted_downloads(
     }))
 }
 
-pub async fn recover_download(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn recover_download(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let repo_id = require_str_param(params, "repo_id", "repoId")?;
     let dest_dir = require_str_param(params, "dest_dir", "destDir")?;
 
@@ -264,10 +261,7 @@ pub async fn search_hf_models(state: &AppState, params: &Value) -> pumas_library
     }
 }
 
-pub async fn get_related_models(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_related_models(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
     let limit = get_i64_param(params, "limit", "limit").unwrap_or(25) as usize;
     // Use the model's name to search for related models on HuggingFace
@@ -385,10 +379,7 @@ pub async fn detect_sharded_sets(
     }))
 }
 
-pub async fn validate_file_type(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn validate_file_type(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let _file_path = require_str_param(params, "file_path", "filePath")?;
     // TODO: Implement file type validation
     Ok(json!({
@@ -499,30 +490,26 @@ pub async fn get_library_model_metadata(
             .unwrap_or_default();
 
         match extension.as_str() {
-            "gguf" => {
-                match pumas_library::model_library::extract_gguf_metadata(file_path) {
-                    Ok(metadata) => {
-                        let metadata_value: serde_json::Map<String, Value> = metadata
-                            .into_iter()
-                            .map(|(k, v)| (k, Value::String(v)))
-                            .collect();
-                        Some(json!({
-                            "file_type": "gguf",
-                            "metadata": metadata_value
-                        }))
-                    }
-                    Err(_) => None,
+            "gguf" => match pumas_library::model_library::extract_gguf_metadata(file_path) {
+                Ok(metadata) => {
+                    let metadata_value: serde_json::Map<String, Value> = metadata
+                        .into_iter()
+                        .map(|(k, v)| (k, Value::String(v)))
+                        .collect();
+                    Some(json!({
+                        "file_type": "gguf",
+                        "metadata": metadata_value
+                    }))
                 }
-            }
-            "safetensors" => {
-                match extract_safetensors_header(&file_path.to_string_lossy()) {
-                    Ok(header) => Some(json!({
-                        "file_type": "safetensors",
-                        "metadata": header
-                    })),
-                    Err(_) => None,
-                }
-            }
+                Err(_) => None,
+            },
+            "safetensors" => match extract_safetensors_header(&file_path.to_string_lossy()) {
+                Ok(header) => Some(json!({
+                    "file_type": "safetensors",
+                    "metadata": header
+                })),
+                Err(_) => None,
+            },
             _ => None,
         }
     } else {
@@ -591,8 +578,7 @@ pub async fn import_model_in_place(
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
     let repo_id = get_str_param(params, "repo_id", "repoId").map(String::from);
     let known_sha256 = get_str_param(params, "known_sha256", "knownSha256").map(String::from);
-    let compute_hashes =
-        get_bool_param(params, "compute_hashes", "computeHashes").unwrap_or(false);
+    let compute_hashes = get_bool_param(params, "compute_hashes", "computeHashes").unwrap_or(false);
 
     let expected_files: Option<Vec<String>> = params
         .get("expected_files")
@@ -641,10 +627,7 @@ pub async fn clear_hf_token(state: &AppState, _params: &Value) -> pumas_library:
     Ok(json!({ "success": true }))
 }
 
-pub async fn get_hf_auth_status(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_hf_auth_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let status = state.api.get_hf_auth_status().await?;
     Ok(json!({
         "success": true,

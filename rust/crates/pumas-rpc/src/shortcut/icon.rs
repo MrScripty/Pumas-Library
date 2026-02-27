@@ -33,7 +33,11 @@ impl IconManager {
     /// * `generated_icons_dir` - Directory for generated icons
     pub fn new(base_icon: impl AsRef<Path>, generated_icons_dir: impl AsRef<Path>) -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
-        let icon_theme_dir = home.join(".local").join("share").join("icons").join("hicolor");
+        let icon_theme_dir = home
+            .join(".local")
+            .join("share")
+            .join("icons")
+            .join("hicolor");
 
         Self {
             base_icon: base_icon.as_ref().to_path_buf(),
@@ -153,7 +157,9 @@ impl IconManager {
             return Ok(None);
         }
 
-        let output_path = self.generated_icons_dir.join(format!("comfyui-{}.png", slug));
+        let output_path = self
+            .generated_icons_dir
+            .join(format!("comfyui-{}.png", slug));
         let label = tag.trim_start_matches('v');
 
         // Use ImageMagick to create icon with version overlay
@@ -204,7 +210,10 @@ impl IconManager {
 
     /// Install an icon at a specific size.
     fn install_icon_at_size(&self, source: &Path, name: &str, size: u32) -> Result<()> {
-        let icon_dir = self.icon_theme_dir.join(format!("{}x{}", size, size)).join("apps");
+        let icon_dir = self
+            .icon_theme_dir
+            .join(format!("{}x{}", size, size))
+            .join("apps");
 
         fs::create_dir_all(&icon_dir).map_err(|e| PumasError::Io {
             message: "create icon directory".to_string(),

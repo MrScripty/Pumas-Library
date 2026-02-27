@@ -351,7 +351,12 @@ impl SystemUtils {
         for browser in &chromium_browsers {
             if command_exists(browser) {
                 let app_url = format!("--app={}", url);
-                debug!("Opening {} with {} in app mode (profile: {})", url, browser, profile_dir.display());
+                debug!(
+                    "Opening {} with {} in app mode (profile: {})",
+                    url,
+                    browser,
+                    profile_dir.display()
+                );
 
                 // Launch as standalone app window - matches working shell script exactly
                 match Command::new(browser)
@@ -407,7 +412,11 @@ impl SystemUtils {
         ];
 
         // Create profile directory for standalone app mode
-        let profile_dir = self.script_dir.join("launcher-data").join("profiles").join("comfyui-app");
+        let profile_dir = self
+            .script_dir
+            .join("launcher-data")
+            .join("profiles")
+            .join("comfyui-app");
         if let Err(e) = std::fs::create_dir_all(&profile_dir) {
             warn!("Failed to create profile directory: {}", e);
         }
@@ -422,7 +431,15 @@ impl SystemUtils {
 
                 // Use -n to open a new instance, --new-window for standalone app
                 match Command::new("open")
-                    .args(["-a", browser, "-n", "--args", "--new-window", &user_data_dir, &app_url])
+                    .args([
+                        "-a",
+                        browser,
+                        "-n",
+                        "--args",
+                        "--new-window",
+                        &user_data_dir,
+                        &app_url,
+                    ])
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
@@ -484,7 +501,11 @@ impl SystemUtils {
         ];
 
         // Create profile directory for standalone app mode
-        let profile_dir = self.script_dir.join("launcher-data").join("profiles").join("comfyui-app");
+        let profile_dir = self
+            .script_dir
+            .join("launcher-data")
+            .join("profiles")
+            .join("comfyui-app");
         if let Err(e) = std::fs::create_dir_all(&profile_dir) {
             warn!("Failed to create profile directory: {}", e);
         }

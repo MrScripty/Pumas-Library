@@ -5,9 +5,9 @@ use super::launcher::{BinaryLaunchConfig, LaunchConfig, LaunchResult, ProcessLau
 use crate::error::Result;
 use crate::system::{ProcessResources, ResourceTracker};
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use std::fs;
 use tracing::{error, info, warn};
 
 /// Process with resource information.
@@ -182,10 +182,7 @@ impl ProcessManager {
         let processes = detector.detect_processes();
         let timeout_ms = 2000; // 2 second grace period
 
-        info!(
-            "stop_all: detected {} processes to stop",
-            processes.len()
-        );
+        info!("stop_all: detected {} processes to stop", processes.len());
 
         let mut stopped_any = false;
 
@@ -253,7 +250,8 @@ impl ProcessManager {
         }
 
         // Also cleanup browser windows running ComfyUI app mode (cross-platform)
-        let browser_windows = ProcessLauncher::stop_processes_by_pattern("--app=http://127.0.0.1", 500)?;
+        let browser_windows =
+            ProcessLauncher::stop_processes_by_pattern("--app=http://127.0.0.1", 500)?;
         if browser_windows > 0 {
             info!("Stopped {} browser app windows", browser_windows);
         }
@@ -595,7 +593,11 @@ impl ProcessManager {
         if let Ok(entries) = fs::read_dir(&versions_dir) {
             for entry in entries.flatten() {
                 let pid_file = entry.path().join("ollama.pid");
-                info!("aggregate_ollama_resources: checking pid_file {:?}, exists={}", pid_file, pid_file.exists());
+                info!(
+                    "aggregate_ollama_resources: checking pid_file {:?}, exists={}",
+                    pid_file,
+                    pid_file.exists()
+                );
                 if pid_file.exists() {
                     if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                         if let Ok(pid) = pid_str.trim().parse::<u32>() {
@@ -625,7 +627,9 @@ impl ProcessManager {
                             #[cfg(windows)]
                             {
                                 // On Windows, try to get resources directly
-                                if let Ok(resources) = self.resource_tracker.get_process_resources(pid, true) {
+                                if let Ok(resources) =
+                                    self.resource_tracker.get_process_resources(pid, true)
+                                {
                                     total_cpu += resources.cpu;
                                     total_ram += resources.ram_memory;
                                     total_gpu += resources.gpu_memory;
@@ -638,7 +642,10 @@ impl ProcessManager {
             }
         }
 
-        info!("aggregate_ollama_resources: found_any={}, total_ram={}, total_gpu={}", found_any, total_ram, total_gpu);
+        info!(
+            "aggregate_ollama_resources: found_any={}, total_ram={}, total_gpu={}",
+            found_any, total_ram, total_gpu
+        );
         if !found_any {
             return None;
         }

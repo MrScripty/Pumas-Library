@@ -67,7 +67,10 @@ impl Nvfp4Backend {
             return Ok(());
         }
 
-        info!("Creating NVFP4 virtual environment at {}", venv_dir.display());
+        info!(
+            "Creating NVFP4 virtual environment at {}",
+            venv_dir.display()
+        );
 
         let output = Command::new("python3")
             .args(["-m", "venv", &venv_dir.to_string_lossy()])
@@ -107,7 +110,9 @@ impl Nvfp4Backend {
         info!("Installing nvidia-modelopt dependencies...");
         let output = Command::new(&python)
             .args([
-                "-m", "pip", "install",
+                "-m",
+                "pip",
+                "install",
                 "nvidia-modelopt[all]",
                 "transformers",
                 "torch",
@@ -176,7 +181,10 @@ impl QuantizationBackend for Nvfp4Backend {
         // -- PHASE 1: GATHER --
         if !params.model_path.is_dir() {
             return Err(PumasError::ConversionFailed {
-                message: format!("Source model path is not a directory: {}", params.model_path.display()),
+                message: format!(
+                    "Source model path is not a directory: {}",
+                    params.model_path.display()
+                ),
             });
         }
 
@@ -214,7 +222,11 @@ impl QuantizationBackend for Nvfp4Backend {
         // -- PHASE 3: CREATE --
         let output_dir_name = format!(
             "{}-nvfp4",
-            params.model_path.file_name().unwrap_or_default().to_string_lossy()
+            params
+                .model_path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
         );
         let output_dir = params
             .model_path
@@ -254,13 +266,8 @@ impl QuantizationBackend for Nvfp4Backend {
             })?;
 
         // Stream stderr for progress
-        pipeline::stream_subprocess_stderr_lines(
-            conversion_id,
-            &mut child,
-            progress,
-            cancel_token,
-        )
-        .await?;
+        pipeline::stream_subprocess_stderr_lines(conversion_id, &mut child, progress, cancel_token)
+            .await?;
 
         pipeline::wait_and_check_exit(&mut child, "nvfp4-quantize").await?;
 
@@ -283,10 +290,7 @@ mod tests {
     #[test]
     fn test_path_construction() {
         let backend = Nvfp4Backend::new(Path::new("/app"));
-        assert_eq!(
-            backend.base_dir,
-            PathBuf::from("/app/launcher-data/nvfp4")
-        );
+        assert_eq!(backend.base_dir, PathBuf::from("/app/launcher-data/nvfp4"));
         assert_eq!(
             backend.venv_python(),
             PathBuf::from("/app/launcher-data/nvfp4/venv/bin/python")

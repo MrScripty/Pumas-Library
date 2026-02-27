@@ -140,7 +140,11 @@ impl ResourceTracker {
     ///
     /// * `pid` - Process ID
     /// * `include_children` - Whether to aggregate resources from child processes
-    pub fn get_process_resources(&self, pid: u32, include_children: bool) -> Result<ProcessResources> {
+    pub fn get_process_resources(
+        &self,
+        pid: u32,
+        include_children: bool,
+    ) -> Result<ProcessResources> {
         // Check cache first
         {
             let cache = self.process_cache.read().unwrap();
@@ -170,11 +174,7 @@ impl ResourceTracker {
     }
 
     /// Recursively collect all descendant PIDs of a process.
-    fn collect_all_descendants(
-        system: &sysinfo::System,
-        parent_pid: Pid,
-        pids: &mut Vec<u32>,
-    ) {
+    fn collect_all_descendants(system: &sysinfo::System, parent_pid: Pid, pids: &mut Vec<u32>) {
         for (child_pid, child_process) in system.processes() {
             if child_process.parent() == Some(parent_pid) {
                 let child_pid_u32 = child_pid.as_u32();

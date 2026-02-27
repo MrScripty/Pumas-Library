@@ -15,10 +15,10 @@
 //! - [`auth`] - Authentication token management
 
 mod auth;
-mod types;
-mod search;
-mod metadata;
 mod download;
+mod metadata;
+mod search;
+mod types;
 
 pub use auth::HfAuthStatus;
 pub use types::{
@@ -130,7 +130,10 @@ impl HuggingFaceClient {
     ///
     /// * `cache_dir` - Directory for caching API responses (legacy JSON)
     /// * `search_cache` - SQLite search cache for intelligent caching
-    pub fn with_cache(cache_dir: impl Into<PathBuf>, search_cache: Arc<HfSearchCache>) -> Result<Self> {
+    pub fn with_cache(
+        cache_dir: impl Into<PathBuf>,
+        search_cache: Arc<HfSearchCache>,
+    ) -> Result<Self> {
         let mut client = Self::new(cache_dir)?;
         client.search_cache = Some(search_cache);
         Ok(client)
@@ -267,10 +270,14 @@ impl HuggingFaceClient {
 
     pub(super) fn get_cache_path(&self, repo_id: &str, suffix: &str) -> PathBuf {
         let safe_name = repo_id.replace('/', "_");
-        self.cache_dir.join(format!("hf_{}_{}.json", safe_name, suffix))
+        self.cache_dir
+            .join(format!("hf_{}_{}.json", safe_name, suffix))
     }
 
-    pub(super) fn read_cache<T: for<'de> Deserialize<'de>>(&self, path: &Path) -> Result<Option<T>> {
+    pub(super) fn read_cache<T: for<'de> Deserialize<'de>>(
+        &self,
+        path: &Path,
+    ) -> Result<Option<T>> {
         atomic_read_json(path)
     }
 
@@ -341,8 +348,8 @@ impl WebSource for HuggingFaceClient {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::types::HfSearchResult;
+    use super::*;
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, HuggingFaceClient) {
@@ -356,14 +363,18 @@ mod tests {
         let (_temp, _client) = setup();
 
         // Exact match
-        assert_eq!(HuggingFaceClient::compute_filename_confidence("llama", "llama"), 1.0);
+        assert_eq!(
+            HuggingFaceClient::compute_filename_confidence("llama", "llama"),
+            1.0
+        );
 
         // Substring match
         let confidence = HuggingFaceClient::compute_filename_confidence("llama", "llama-2-7b");
         assert!(confidence > 0.7);
 
         // Partial word match
-        let confidence = HuggingFaceClient::compute_filename_confidence("llama-7b", "llama-2-7b-chat");
+        let confidence =
+            HuggingFaceClient::compute_filename_confidence("llama-7b", "llama-2-7b-chat");
         assert!(confidence > 0.3); // Lower threshold for partial matches
 
         // No match

@@ -3,9 +3,9 @@
 //! Manages the state of installed, active, and default versions.
 //! Handles state persistence and validation.
 
+use crate::version_manager::ValidationResult;
 use pumas_library::config::AppId;
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
-use crate::version_manager::ValidationResult;
 use pumas_library::{PumasError, Result};
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -215,9 +215,7 @@ impl VersionState {
     pub fn set_default_version(&mut self, tag: Option<&str>) -> Result<bool> {
         if let Some(t) = tag {
             if !self.is_installed(t) {
-                return Err(PumasError::VersionNotFound {
-                    tag: t.to_string(),
-                });
+                return Err(PumasError::VersionNotFound { tag: t.to_string() });
             }
         }
 
@@ -288,7 +286,8 @@ impl VersionState {
             let version_path = if info.path.contains('/') || info.path.contains('\\') {
                 // Old format: path includes directory, use just the last component
                 let path = std::path::Path::new(&info.path);
-                let tag_name = path.file_name()
+                let tag_name = path
+                    .file_name()
                     .map(|n| n.to_string_lossy().to_string())
                     .unwrap_or_else(|| info.path.clone());
                 versions_dir.join(&tag_name)
@@ -298,7 +297,11 @@ impl VersionState {
             };
 
             if !self.is_version_complete(&version_path) {
-                warn!("Incomplete installation found: {} at {}", tag, version_path.display());
+                warn!(
+                    "Incomplete installation found: {} at {}",
+                    tag,
+                    version_path.display()
+                );
                 removed_tags.push(tag.clone());
             }
         }
@@ -306,7 +309,10 @@ impl VersionState {
         // Remove incomplete installations - ONLY remove metadata, NOT files
         // Files may be intentionally incomplete during installation or user may want to recover
         for tag in &removed_tags {
-            warn!("Removing stale metadata entry for incomplete installation: {}", tag);
+            warn!(
+                "Removing stale metadata entry for incomplete installation: {}",
+                tag
+            );
             self.remove_installed_version(tag)?;
             // NOTE: We no longer delete files automatically to prevent data loss
             // Orphaned directories will be reported but not deleted
@@ -394,9 +400,13 @@ mod tests {
         let metadata_manager = Arc::new(MetadataManager::new(temp_dir.path()));
         metadata_manager.ensure_directories().unwrap();
 
-        let state = VersionState::new(&temp_dir.path().to_path_buf(), AppId::ComfyUI, metadata_manager)
-            .await
-            .unwrap();
+        let state = VersionState::new(
+            &temp_dir.path().to_path_buf(),
+            AppId::ComfyUI,
+            metadata_manager,
+        )
+        .await
+        .unwrap();
 
         (state, temp_dir)
     }

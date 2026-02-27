@@ -225,10 +225,7 @@ impl ProcessLauncher {
                 success: false,
                 process: None,
                 log_path: None,
-                error: Some(format!(
-                    "main.py not found: {}",
-                    config.main_py.display()
-                )),
+                error: Some(format!("main.py not found: {}", config.main_py.display())),
                 ready: false,
             });
         }
@@ -292,7 +289,11 @@ impl ProcessLauncher {
         }
 
         // Spawn the process
-        info!("Launching {} from {}", config.tag, config.version_dir.display());
+        info!(
+            "Launching {} from {}",
+            config.tag,
+            config.version_dir.display()
+        );
 
         let child = match cmd.spawn() {
             Ok(c) => c,
@@ -359,7 +360,9 @@ impl ProcessLauncher {
             let addr = host_port.split('/').next().unwrap_or(host_port);
             match std::net::TcpStream::connect_timeout(
                 &addr.parse().unwrap_or_else(|_| {
-                    format!("127.0.0.1:{}", AppId::ComfyUI.default_port()).parse().unwrap()
+                    format!("127.0.0.1:{}", AppId::ComfyUI.default_port())
+                        .parse()
+                        .unwrap()
                 }),
                 Duration::from_secs(1),
             ) {
@@ -486,7 +489,11 @@ impl ProcessLauncher {
         }
 
         // Spawn the process
-        info!("Launching binary {} from {}", config.tag, config.version_dir.display());
+        info!(
+            "Launching binary {} from {}",
+            config.tag,
+            config.version_dir.display()
+        );
 
         let child = match cmd.spawn() {
             Ok(c) => c,
@@ -558,7 +565,10 @@ mod tests {
             .with_ready_timeout(Duration::from_secs(30));
 
         assert!(config.extra_args.contains(&"--port=8189".to_string()));
-        assert_eq!(config.env_vars.get("CUDA_VISIBLE_DEVICES"), Some(&"0".to_string()));
+        assert_eq!(
+            config.env_vars.get("CUDA_VISIBLE_DEVICES"),
+            Some(&"0".to_string())
+        );
         assert_eq!(config.log_file, Some(log_file));
         assert_eq!(config.ready_timeout, Duration::from_secs(30));
     }
@@ -574,6 +584,9 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.is_some());
-        assert!(result.error.unwrap().contains("Python executable not found"));
+        assert!(result
+            .error
+            .unwrap()
+            .contains("Python executable not found"));
     }
 }

@@ -52,50 +52,54 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let query = params["query"].as_str().unwrap_or("");
                 let limit = params["limit"].as_u64().unwrap_or(50) as usize;
                 let offset = params["offset"].as_u64().unwrap_or(0) as usize;
-                let result = self.model_library.search_models(query, limit, offset).await?;
+                let result = self
+                    .model_library
+                    .search_models(query, limit, offset)
+                    .await?;
                 Ok(serde_json::to_value(result)?)
             }
             "get_model" => {
-                let model_id = params["model_id"]
-                    .as_str()
-                    .ok_or_else(|| PumasError::InvalidParams {
-                        message: "model_id is required".to_string(),
-                    })?;
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
                 let model = self.model_library.get_model(model_id).await?;
                 Ok(serde_json::to_value(model)?)
             }
-            "get_status" => {
-                Ok(serde_json::json!({
-                    "success": true,
-                    "version": env!("CARGO_PKG_VERSION"),
-                    "is_primary": true,
-                }))
-            }
+            "get_status" => Ok(serde_json::json!({
+                "success": true,
+                "version": env!("CARGO_PKG_VERSION"),
+                "is_primary": true,
+            })),
             "ping" => Ok(serde_json::json!("pong")),
             // Conversion methods
             "start_conversion" => {
-                let request: conversion::ConversionRequest =
-                    serde_json::from_value(params).map_err(|e| PumasError::InvalidParams {
+                let request: conversion::ConversionRequest = serde_json::from_value(params)
+                    .map_err(|e| PumasError::InvalidParams {
                         message: format!("Invalid conversion request: {e}"),
                     })?;
                 let id = self.conversion_manager.start_conversion(request).await?;
                 Ok(serde_json::json!({ "conversion_id": id }))
             }
             "get_conversion_progress" => {
-                let id = params["conversion_id"]
-                    .as_str()
-                    .ok_or_else(|| PumasError::InvalidParams {
-                        message: "conversion_id is required".to_string(),
-                    })?;
+                let id =
+                    params["conversion_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "conversion_id is required".to_string(),
+                        })?;
                 let progress = self.conversion_manager.get_progress(id);
                 Ok(serde_json::to_value(progress)?)
             }
             "cancel_conversion" => {
-                let id = params["conversion_id"]
-                    .as_str()
-                    .ok_or_else(|| PumasError::InvalidParams {
-                        message: "conversion_id is required".to_string(),
-                    })?;
+                let id =
+                    params["conversion_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "conversion_id is required".to_string(),
+                        })?;
                 let cancelled = self.conversion_manager.cancel_conversion(id).await?;
                 Ok(serde_json::json!({ "cancelled": cancelled }))
             }
@@ -121,16 +125,18 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(status)?)
             }
             "ensure_backend_environment" => {
-                let backend_str = params["backend"]
-                    .as_str()
-                    .ok_or_else(|| PumasError::InvalidParams {
-                        message: "backend is required".to_string(),
-                    })?;
-                let backend: conversion::QuantBackend =
-                    serde_json::from_value(serde_json::json!(backend_str))
-                        .map_err(|e| PumasError::InvalidParams {
-                            message: format!("Invalid backend: {e}"),
+                let backend_str =
+                    params["backend"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "backend is required".to_string(),
                         })?;
+                let backend: conversion::QuantBackend =
+                    serde_json::from_value(serde_json::json!(backend_str)).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid backend: {e}"),
+                        }
+                    })?;
                 self.conversion_manager
                     .ensure_backend_environment(backend)
                     .await?;

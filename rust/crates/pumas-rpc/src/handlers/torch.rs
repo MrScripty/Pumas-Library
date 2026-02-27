@@ -42,13 +42,7 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let model_name = model_record
         .as_ref()
         .map(|r| r.cleaned_name.clone())
-        .unwrap_or_else(|| {
-            model_id
-                .split('/')
-                .last()
-                .unwrap_or(&model_id)
-                .to_string()
-        });
+        .unwrap_or_else(|| model_id.split('/').last().unwrap_or(&model_id).to_string());
 
     let compute_device = pumas_app_manager::ComputeDevice::from_server_string(device);
     let client = pumas_app_manager::TorchClient::new(connection_url);
@@ -67,10 +61,7 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     }))
 }
 
-pub async fn torch_unload_model(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn torch_unload_model(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let slot_id = require_str_param(params, "slot_id", "slotId")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
@@ -92,10 +83,7 @@ pub async fn torch_get_status(_state: &AppState, params: &Value) -> pumas_librar
     }))
 }
 
-pub async fn torch_list_devices(
-    _state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn torch_list_devices(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
     let client = pumas_app_manager::TorchClient::new(connection_url);
@@ -109,12 +97,12 @@ pub async fn torch_list_devices(
 
 pub async fn torch_configure(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
-    let config: pumas_app_manager::TorchServerConfig = serde_json::from_value(
-        params.get("config").cloned().unwrap_or_default(),
-    )
-    .map_err(|e| pumas_library::PumasError::InvalidParams {
-        message: format!("Invalid torch config: {}", e),
-    })?;
+    let config: pumas_app_manager::TorchServerConfig =
+        serde_json::from_value(params.get("config").cloned().unwrap_or_default()).map_err(|e| {
+            pumas_library::PumasError::InvalidParams {
+                message: format!("Invalid torch config: {}", e),
+            }
+        })?;
 
     let client = pumas_app_manager::TorchClient::new(connection_url);
     client.configure(&config).await?;

@@ -3,8 +3,8 @@
 //! Resolves unpinned dependencies to specific versions based on release dates
 //! for reproducible installations.
 
-use pumas_library::{PumasError, Result};
 use chrono::{DateTime, Utc};
+use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -48,8 +48,10 @@ impl ConstraintsManager {
             if let Ok(content) = std::fs::read_to_string(&cache_path) {
                 if let Ok(cache) = serde_json::from_str::<ConstraintsCacheFile>(&content) {
                     *self.constraints_cache.lock().unwrap() = cache.constraints;
-                    debug!("Loaded constraints cache with {} entries",
-                           self.constraints_cache.lock().unwrap().len());
+                    debug!(
+                        "Loaded constraints cache with {} entries",
+                        self.constraints_cache.lock().unwrap().len()
+                    );
                 }
             }
         }
@@ -80,7 +82,9 @@ impl ConstraintsManager {
 
     /// Get or build a constraints file for a tag.
     pub fn get_constraints_file(&self, tag: &str) -> Result<Option<PathBuf>> {
-        let constraints_path = self.constraints_dir.join(format!("{}.txt", self.safe_filename(tag)));
+        let constraints_path = self
+            .constraints_dir
+            .join(format!("{}.txt", self.safe_filename(tag)));
 
         // Check if file already exists
         if constraints_path.exists() {
@@ -108,9 +112,14 @@ impl ConstraintsManager {
         requirements_content: &str,
         release_date: Option<DateTime<Utc>>,
     ) -> Result<PathBuf> {
-        info!("Building constraints for {} (release date: {:?})", tag, release_date);
+        info!(
+            "Building constraints for {} (release date: {:?})",
+            tag, release_date
+        );
 
-        let constraints_path = self.constraints_dir.join(format!("{}.txt", self.safe_filename(tag)));
+        let constraints_path = self
+            .constraints_dir
+            .join(format!("{}.txt", self.safe_filename(tag)));
 
         // Ensure directory exists
         std::fs::create_dir_all(&self.constraints_dir).map_err(|e| PumasError::Io {
@@ -138,7 +147,8 @@ impl ConstraintsManager {
                     constraints_content.push_str(&format!("{}=={}\n", package, version));
                 } else if !spec.is_empty() {
                     // Need to resolve version
-                    if let Some(version) = self.resolve_version(&package, &spec, release_date).await {
+                    if let Some(version) = self.resolve_version(&package, &spec, release_date).await
+                    {
                         constraints.insert(package.clone(), version.clone());
                         constraints_content.push_str(&format!("{}=={}\n", package, version));
                     }
@@ -154,11 +164,22 @@ impl ConstraintsManager {
         })?;
 
         // Update cache
-        self.constraints_cache.lock().unwrap().insert(tag.to_string(), constraints);
+        self.constraints_cache
+            .lock()
+            .unwrap()
+            .insert(tag.to_string(), constraints);
         let _ = self.save_cache();
 
-        info!("Built constraints for {} with {} packages", tag,
-              self.constraints_cache.lock().unwrap().get(tag).map(|c| c.len()).unwrap_or(0));
+        info!(
+            "Built constraints for {} with {} packages",
+            tag,
+            self.constraints_cache
+                .lock()
+                .unwrap()
+                .get(tag)
+                .map(|c| c.len())
+                .unwrap_or(0)
+        );
 
         Ok(constraints_path)
     }
@@ -175,7 +196,8 @@ impl ConstraintsManager {
         let line = line.split(';').next()?.trim();
 
         // Find version specifier start
-        let spec_start = line.find(|c: char| c == '=' || c == '>' || c == '<' || c == '~' || c == '!');
+        let spec_start =
+            line.find(|c: char| c == '=' || c == '>' || c == '<' || c == '~' || c == '!');
 
         if let Some(idx) = spec_start {
             let package = line[..idx].trim();
@@ -235,10 +257,7 @@ impl ConstraintsManager {
     }
 
     /// Fetch available versions from PyPI.
-    async fn fetch_pypi_versions(
-        &self,
-        package: &str,
-    ) -> Result<HashMap<String, DateTime<Utc>>> {
+    async fn fetch_pypi_versions(&self, package: &str) -> Result<HashMap<String, DateTime<Utc>>> {
         // Check cache first
         {
             let cache = self.pypi_cache.lock().unwrap();
@@ -276,7 +295,8 @@ impl ConstraintsManager {
         let mut versions = HashMap::new();
         for (version, releases) in data.releases {
             if let Some(release) = releases.first() {
-                if let Ok(upload_time) = DateTime::parse_from_rfc3339(&release.upload_time_iso_8601) {
+                if let Ok(upload_time) = DateTime::parse_from_rfc3339(&release.upload_time_iso_8601)
+                {
                     versions.insert(version, upload_time.with_timezone(&Utc));
                 }
             }
@@ -344,13 +364,27 @@ impl ConstraintsManager {
 
     /// Compare two version strings.
     fn compare_versions(&self, a: &str, b: &str) -> std::cmp::Ordering {
-        let a_parts: Vec<u64> = a.split('.').filter_map(|p| {
-            p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
-        }).collect();
+        let a_parts: Vec<u64> = a
+            .split('.')
+            .filter_map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            })
+            .collect();
 
-        let b_parts: Vec<u64> = b.split('.').filter_map(|p| {
-            p.chars().take_while(|c| c.is_ascii_digit()).collect::<String>().parse().ok()
-        }).collect();
+        let b_parts: Vec<u64> = b
+            .split('.')
+            .filter_map(|p| {
+                p.chars()
+                    .take_while(|c| c.is_ascii_digit())
+                    .collect::<String>()
+                    .parse()
+                    .ok()
+            })
+            .collect();
 
         for (a_part, b_part) in a_parts.iter().zip(b_parts.iter()) {
             match a_part.cmp(b_part) {

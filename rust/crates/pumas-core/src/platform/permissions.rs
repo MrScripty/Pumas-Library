@@ -29,10 +29,7 @@ pub fn set_executable(path: &Path) -> Result<()> {
     #[cfg(windows)]
     {
         // Windows doesn't use executable bits - executability is determined by extension
-        debug!(
-            "Skipping executable bit on Windows for: {}",
-            path.display()
-        );
+        debug!("Skipping executable bit on Windows for: {}", path.display());
     }
 
     Ok(())

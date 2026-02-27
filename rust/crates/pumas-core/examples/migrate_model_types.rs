@@ -23,7 +23,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let library_root = PathBuf::from(&args[1]);
     if !library_root.exists() {
-        eprintln!("Error: Library path does not exist: {}", library_root.display());
+        eprintln!(
+            "Error: Library path does not exist: {}",
+            library_root.display()
+        );
         std::process::exit(1);
     }
 

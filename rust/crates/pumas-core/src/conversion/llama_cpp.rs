@@ -100,16 +100,20 @@ impl LlamaCppBackend {
             .map_err(|e| PumasError::io("creating llama-cpp source dir", &source, e))?;
 
         let output = Command::new("git")
-            .args(["clone", "--depth", "1", LLAMA_CPP_REPO, &source.to_string_lossy()])
+            .args([
+                "clone",
+                "--depth",
+                "1",
+                LLAMA_CPP_REPO,
+                &source.to_string_lossy(),
+            ])
             .output()
             .await
             .map_err(|e| PumasError::Other(format!("Failed to run git clone: {e}")))?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!(
-                "git clone failed: {stderr}"
-            )));
+            return Err(PumasError::Other(format!("git clone failed: {stderr}")));
         }
         Ok(())
     }
@@ -187,9 +191,7 @@ impl LlamaCppBackend {
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(PumasError::Other(format!(
-                "cmake build failed: {stderr}"
-            )));
+            return Err(PumasError::Other(format!("cmake build failed: {stderr}")));
         }
         Ok(())
     }
@@ -215,7 +217,13 @@ impl LlamaCppBackend {
         // Install convert_hf_to_gguf.py dependencies.
         // The llama.cpp repo has its own requirements but the core deps are:
         let deps = [
-            "torch", "transformers", "gguf", "sentencepiece", "numpy", "protobuf", "safetensors",
+            "torch",
+            "transformers",
+            "gguf",
+            "sentencepiece",
+            "numpy",
+            "protobuf",
+            "safetensors",
         ];
 
         info!("Installing Python dependencies for convert_hf_to_gguf.py...");
@@ -331,8 +339,7 @@ impl QuantizationBackend for LlamaCppBackend {
             });
         }
 
-        let needs_imatrix =
-            params.force_imatrix || params.target_quant.starts_with("IQ");
+        let needs_imatrix = params.force_imatrix || params.target_quant.starts_with("IQ");
         if needs_imatrix && params.calibration_file.is_none() {
             return Err(PumasError::ConversionFailed {
                 message: format!(
@@ -346,9 +353,9 @@ impl QuantizationBackend for LlamaCppBackend {
         // -- PHASE 2: VALIDATE --
         let needs_f16_conversion = is_safetensors_source && !is_gguf_source;
         let total_steps = match (needs_f16_conversion, needs_imatrix) {
-            (true, true) => 3u32,  // convert + imatrix + quantize
-            (true, false) => 2u32, // convert + quantize
-            (false, true) => 2u32, // imatrix + quantize
+            (true, true) => 3u32,   // convert + imatrix + quantize
+            (true, false) => 2u32,  // convert + quantize
+            (false, true) => 2u32,  // imatrix + quantize
             (false, false) => 1u32, // quantize only
         };
 
@@ -381,7 +388,9 @@ impl QuantizationBackend for LlamaCppBackend {
                 "Converting to F16 GGUF",
             );
             progress.set_status(&params.conversion_id, ConversionStatus::GeneratingF16Gguf);
-            cancel_token.check().map_err(|_| PumasError::ConversionCancelled)?;
+            cancel_token
+                .check()
+                .map_err(|_| PumasError::ConversionCancelled)?;
 
             let mut child = Command::new(self.venv_python())
                 .arg(self.convert_script())
@@ -425,7 +434,9 @@ impl QuantizationBackend for LlamaCppBackend {
                 "Computing importance matrix",
             );
             progress.set_status(&params.conversion_id, ConversionStatus::ComputingImatrix);
-            cancel_token.check().map_err(|_| PumasError::ConversionCancelled)?;
+            cancel_token
+                .check()
+                .map_err(|_| PumasError::ConversionCancelled)?;
 
             let cal = params.calibration_file.as_ref().expect("validated above");
             let mut child = Command::new(self.imatrix_binary())
@@ -463,7 +474,9 @@ impl QuantizationBackend for LlamaCppBackend {
             &format!("Quantizing to {}", params.target_quant),
         );
         progress.set_status(&params.conversion_id, ConversionStatus::Quantizing);
-        cancel_token.check().map_err(|_| PumasError::ConversionCancelled)?;
+        cancel_token
+            .check()
+            .map_err(|_| PumasError::ConversionCancelled)?;
 
         let mut cmd = Command::new(self.quantize_binary());
         if needs_imatrix && imatrix_file.exists() {
@@ -482,8 +495,7 @@ impl QuantizationBackend for LlamaCppBackend {
                 message: format!("Failed to spawn llama-quantize: {e}"),
             })?;
 
-        stream_quantize_progress(&params.conversion_id, &mut child, progress, cancel_token)
-            .await?;
+        stream_quantize_progress(&params.conversion_id, &mut child, progress, cancel_token).await?;
         pipeline::wait_and_check_exit(&mut child, "llama-quantize").await?;
 
         // -- PHASE 4: CLEANUP --
@@ -559,32 +571,200 @@ pub fn llama_cpp_quant_options() -> Vec<QuantOption> {
     let b = Some(QuantBackend::LlamaCpp);
     vec![
         // K-quants
-        QuantOption { name: "Q2_K".into(), description: "2-bit K-quant (smallest, lowest quality)".into(), bits_per_weight: 3.35, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q3_K_S".into(), description: "3-bit K-quant small".into(), bits_per_weight: 3.50, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q3_K_M".into(), description: "3-bit K-quant medium".into(), bits_per_weight: 3.91, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q3_K_L".into(), description: "3-bit K-quant large".into(), bits_per_weight: 4.27, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q4_K_S".into(), description: "4-bit K-quant small".into(), bits_per_weight: 4.58, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q4_K_M".into(), description: "4-bit K-quant medium — best balance of size and quality".into(), bits_per_weight: 4.85, recommended: true, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q5_K_S".into(), description: "5-bit K-quant small".into(), bits_per_weight: 5.54, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q5_K_M".into(), description: "5-bit K-quant medium".into(), bits_per_weight: 5.69, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q6_K".into(), description: "6-bit K-quant (high quality, larger)".into(), bits_per_weight: 6.56, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "Q8_0".into(), description: "8-bit (near-lossless)".into(), bits_per_weight: 8.50, recommended: false, backend: b, imatrix_recommended: false },
+        QuantOption {
+            name: "Q2_K".into(),
+            description: "2-bit K-quant (smallest, lowest quality)".into(),
+            bits_per_weight: 3.35,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q3_K_S".into(),
+            description: "3-bit K-quant small".into(),
+            bits_per_weight: 3.50,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q3_K_M".into(),
+            description: "3-bit K-quant medium".into(),
+            bits_per_weight: 3.91,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q3_K_L".into(),
+            description: "3-bit K-quant large".into(),
+            bits_per_weight: 4.27,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q4_K_S".into(),
+            description: "4-bit K-quant small".into(),
+            bits_per_weight: 4.58,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q4_K_M".into(),
+            description: "4-bit K-quant medium — best balance of size and quality".into(),
+            bits_per_weight: 4.85,
+            recommended: true,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q5_K_S".into(),
+            description: "5-bit K-quant small".into(),
+            bits_per_weight: 5.54,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q5_K_M".into(),
+            description: "5-bit K-quant medium".into(),
+            bits_per_weight: 5.69,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q6_K".into(),
+            description: "6-bit K-quant (high quality, larger)".into(),
+            bits_per_weight: 6.56,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "Q8_0".into(),
+            description: "8-bit (near-lossless)".into(),
+            bits_per_weight: 8.50,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
         // I-quants (importance matrix strongly recommended)
-        QuantOption { name: "IQ1_S".into(), description: "1-bit importance quant (extreme compression, needs imatrix)".into(), bits_per_weight: 1.56, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ1_M".into(), description: "1-bit importance quant medium (needs imatrix)".into(), bits_per_weight: 1.75, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ2_XXS".into(), description: "2-bit importance quant extra-extra-small (needs imatrix)".into(), bits_per_weight: 2.06, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ2_XS".into(), description: "2-bit importance quant extra-small (needs imatrix)".into(), bits_per_weight: 2.31, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ2_S".into(), description: "2-bit importance quant small (needs imatrix)".into(), bits_per_weight: 2.50, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ2_M".into(), description: "2-bit importance quant medium (needs imatrix)".into(), bits_per_weight: 2.70, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ3_XXS".into(), description: "3-bit importance quant extra-extra-small (needs imatrix)".into(), bits_per_weight: 3.06, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ3_XS".into(), description: "3-bit importance quant extra-small (needs imatrix)".into(), bits_per_weight: 3.30, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ3_S".into(), description: "3-bit importance quant small (needs imatrix)".into(), bits_per_weight: 3.44, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ3_M".into(), description: "3-bit importance quant medium (needs imatrix)".into(), bits_per_weight: 3.66, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ4_NL".into(), description: "4-bit non-linear importance quant (needs imatrix)".into(), bits_per_weight: 4.50, recommended: false, backend: b, imatrix_recommended: true },
-        QuantOption { name: "IQ4_XS".into(), description: "4-bit importance quant extra-small (needs imatrix)".into(), bits_per_weight: 4.25, recommended: false, backend: b, imatrix_recommended: true },
+        QuantOption {
+            name: "IQ1_S".into(),
+            description: "1-bit importance quant (extreme compression, needs imatrix)".into(),
+            bits_per_weight: 1.56,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ1_M".into(),
+            description: "1-bit importance quant medium (needs imatrix)".into(),
+            bits_per_weight: 1.75,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ2_XXS".into(),
+            description: "2-bit importance quant extra-extra-small (needs imatrix)".into(),
+            bits_per_weight: 2.06,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ2_XS".into(),
+            description: "2-bit importance quant extra-small (needs imatrix)".into(),
+            bits_per_weight: 2.31,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ2_S".into(),
+            description: "2-bit importance quant small (needs imatrix)".into(),
+            bits_per_weight: 2.50,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ2_M".into(),
+            description: "2-bit importance quant medium (needs imatrix)".into(),
+            bits_per_weight: 2.70,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ3_XXS".into(),
+            description: "3-bit importance quant extra-extra-small (needs imatrix)".into(),
+            bits_per_weight: 3.06,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ3_XS".into(),
+            description: "3-bit importance quant extra-small (needs imatrix)".into(),
+            bits_per_weight: 3.30,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ3_S".into(),
+            description: "3-bit importance quant small (needs imatrix)".into(),
+            bits_per_weight: 3.44,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ3_M".into(),
+            description: "3-bit importance quant medium (needs imatrix)".into(),
+            bits_per_weight: 3.66,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ4_NL".into(),
+            description: "4-bit non-linear importance quant (needs imatrix)".into(),
+            bits_per_weight: 4.50,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
+        QuantOption {
+            name: "IQ4_XS".into(),
+            description: "4-bit importance quant extra-small (needs imatrix)".into(),
+            bits_per_weight: 4.25,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: true,
+        },
         // Lossless / base types
-        QuantOption { name: "BF16".into(), description: "Brain float 16-bit (no quality loss)".into(), bits_per_weight: 16.0, recommended: false, backend: b, imatrix_recommended: false },
-        QuantOption { name: "F16".into(), description: "Half-precision float 16-bit (no quality loss)".into(), bits_per_weight: 16.0, recommended: false, backend: b, imatrix_recommended: false },
+        QuantOption {
+            name: "BF16".into(),
+            description: "Brain float 16-bit (no quality loss)".into(),
+            bits_per_weight: 16.0,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
+        QuantOption {
+            name: "F16".into(),
+            description: "Half-precision float 16-bit (no quality loss)".into(),
+            bits_per_weight: 16.0,
+            recommended: false,
+            backend: b,
+            imatrix_recommended: false,
+        },
     ]
 }
 
@@ -619,10 +799,7 @@ fn has_safetensors_files(path: &Path) -> bool {
             .ok()
             .map(|entries| {
                 entries.filter_map(|e| e.ok()).any(|e| {
-                    e.path()
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        == Some("safetensors")
+                    e.path().extension().and_then(|ext| ext.to_str()) == Some("safetensors")
                 })
             })
             .unwrap_or(false)
@@ -651,9 +828,12 @@ fn find_gguf_file(model_path: &Path) -> Result<PathBuf> {
         .collect();
 
     files.sort();
-    files.into_iter().next().ok_or_else(|| PumasError::ConversionFailed {
-        message: format!("No GGUF file found in {}", model_path.display()),
-    })
+    files
+        .into_iter()
+        .next()
+        .ok_or_else(|| PumasError::ConversionFailed {
+            message: format!("No GGUF file found in {}", model_path.display()),
+        })
 }
 
 // ---------------------------------------------------------------------------

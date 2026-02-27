@@ -35,7 +35,10 @@ impl PumasApi {
     /// This should be called by the RPC layer after obtaining version information
     /// from the VersionManager. Without this, PID file detection will only check
     /// the root-level PID file and may miss version-specific PID files.
-    pub async fn set_process_version_paths(&self, version_paths: std::collections::HashMap<String, std::path::PathBuf>) {
+    pub async fn set_process_version_paths(
+        &self,
+        version_paths: std::collections::HashMap<String, std::path::PathBuf>,
+    ) {
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.set_version_paths(version_paths);
@@ -78,11 +81,18 @@ impl PumasApi {
     ///
     /// The caller (RPC layer) is responsible for resolving the version tag to a directory
     /// using pumas-app-manager's VersionManager.
-    pub async fn launch_ollama(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+    pub async fn launch_ollama(
+        &self,
+        tag: &str,
+        version_dir: &std::path::Path,
+    ) -> Result<models::LaunchResponse> {
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
-                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
+                error: Some(format!(
+                    "Version directory does not exist: {}",
+                    version_dir.display()
+                )),
                 log_path: None,
                 ready: None,
             });
@@ -133,11 +143,18 @@ impl PumasApi {
     ///
     /// The caller (RPC layer) is responsible for resolving the version tag to a directory
     /// using pumas-app-manager's VersionManager.
-    pub async fn launch_torch(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+    pub async fn launch_torch(
+        &self,
+        tag: &str,
+        version_dir: &std::path::Path,
+    ) -> Result<models::LaunchResponse> {
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
-                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
+                error: Some(format!(
+                    "Version directory does not exist: {}",
+                    version_dir.display()
+                )),
                 log_path: None,
                 ready: None,
             });
@@ -168,11 +185,18 @@ impl PumasApi {
     ///
     /// The caller (RPC layer) is responsible for resolving the version tag to a directory
     /// using pumas-app-manager's VersionManager.
-    pub async fn launch_version(&self, tag: &str, version_dir: &std::path::Path) -> Result<models::LaunchResponse> {
+    pub async fn launch_version(
+        &self,
+        tag: &str,
+        version_dir: &std::path::Path,
+    ) -> Result<models::LaunchResponse> {
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
-                error: Some(format!("Version directory does not exist: {}", version_dir.display())),
+                error: Some(format!(
+                    "Version directory does not exist: {}",
+                    version_dir.display()
+                )),
                 log_path: None,
                 ready: None,
             });
@@ -203,7 +227,8 @@ impl PumasApi {
     pub async fn get_last_launch_log(&self) -> Option<String> {
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
-            mgr.last_launch_log().map(|p| p.to_string_lossy().to_string())
+            mgr.last_launch_log()
+                .map(|p| p.to_string_lossy().to_string())
         } else {
             None
         }

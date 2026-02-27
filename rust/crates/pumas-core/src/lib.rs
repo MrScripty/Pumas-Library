@@ -45,8 +45,8 @@ pub mod models;
 pub mod network;
 pub mod platform;
 pub mod plugins;
-pub mod registry;
 pub mod process;
+pub mod registry;
 pub mod system;
 
 mod api;
@@ -172,11 +172,12 @@ impl PumasApi {
         }));
 
         // Initialize network manager for connectivity checking
-        let network_manager = Arc::new(
-            network::NetworkManager::new().map_err(|e| PumasError::Config {
-                message: format!("Failed to initialize network manager: {}", e),
-            })?,
-        );
+        let network_manager =
+            Arc::new(
+                network::NetworkManager::new().map_err(|e| PumasError::Config {
+                    message: format!("Failed to initialize network manager: {}", e),
+                })?,
+            );
 
         // Check initial connectivity (non-blocking, will update state)
         let nm_clone = network_manager.clone();
@@ -198,12 +199,8 @@ impl PumasApi {
 
         // Initialize model library for AI model management
         // Uses shared-resources/models to match Python backend path
-        let model_library_dir = launcher_root
-            .join("shared-resources")
-            .join("models");
-        let mapping_config_dir = launcher_root
-            .join("launcher-data")
-            .join("mapping-configs");
+        let model_library_dir = launcher_root.join("shared-resources").join("models");
+        let mapping_config_dir = launcher_root.join("launcher-data").join("mapping-configs");
 
         // Initialize HuggingFace client for model search/download (optional - external service)
         let cache_dir = launcher_root
@@ -224,9 +221,8 @@ impl PumasApi {
 
         // Initialize download persistence
         let data_dir = launcher_root.join("launcher-data");
-        let download_persistence = std::sync::Arc::new(
-            model_library::DownloadPersistence::new(&data_dir)
-        );
+        let download_persistence =
+            std::sync::Arc::new(model_library::DownloadPersistence::new(&data_dir));
 
         let mut hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
             Ok(mut client) => {
@@ -253,48 +249,57 @@ impl PumasApi {
                 message: format!("Model library initialization failed: {}", e),
             })?;
         let model_library = Arc::new(model_library);
-        let model_mapper = model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
+        let model_mapper =
+            model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
 
         // Wire download completion -> in-place import (metadata + indexing)
         if let Some(ref mut client) = hf_client {
             let lib = model_library.clone();
-            client.set_completion_callback(std::sync::Arc::new(move |info: model_library::DownloadCompletionInfo| {
-                let lib = lib.clone();
-                tokio::spawn(async move {
-                    // Remove stale metadata from any previous partial download
-                    // so import_in_place re-scans all files now present
-                    let metadata_path = info.dest_dir.join("metadata.json");
-                    if metadata_path.exists() {
-                        tracing::info!("Removing stale metadata before re-import: {}", metadata_path.display());
-                        let _ = tokio::fs::remove_file(&metadata_path).await;
-                    }
+            client.set_completion_callback(std::sync::Arc::new(
+                move |info: model_library::DownloadCompletionInfo| {
+                    let lib = lib.clone();
+                    tokio::spawn(async move {
+                        // Remove stale metadata from any previous partial download
+                        // so import_in_place re-scans all files now present
+                        let metadata_path = info.dest_dir.join("metadata.json");
+                        if metadata_path.exists() {
+                            tracing::info!(
+                                "Removing stale metadata before re-import: {}",
+                                metadata_path.display()
+                            );
+                            let _ = tokio::fs::remove_file(&metadata_path).await;
+                        }
 
-                    let importer = model_library::ModelImporter::new(lib);
-                    let spec = model_library::InPlaceImportSpec {
-                        model_dir: info.dest_dir,
-                        official_name: info.download_request.official_name,
-                        family: info.download_request.family,
-                        model_type: info.download_request.model_type,
-                        repo_id: Some(info.download_request.repo_id.clone()),
-                        known_sha256: info.known_sha256,
-                        compute_hashes: false,
-                        expected_files: Some(info.filenames.clone()),
-                        pipeline_tag: info.download_request.pipeline_tag,
-                    };
-                    match importer.import_in_place(&spec).await {
-                        Ok(r) if r.success => {
-                            tracing::info!("Post-download import succeeded: {:?}", r.model_path);
+                        let importer = model_library::ModelImporter::new(lib);
+                        let spec = model_library::InPlaceImportSpec {
+                            model_dir: info.dest_dir,
+                            official_name: info.download_request.official_name,
+                            family: info.download_request.family,
+                            model_type: info.download_request.model_type,
+                            repo_id: Some(info.download_request.repo_id.clone()),
+                            known_sha256: info.known_sha256,
+                            compute_hashes: false,
+                            expected_files: Some(info.filenames.clone()),
+                            pipeline_tag: info.download_request.pipeline_tag,
+                        };
+                        match importer.import_in_place(&spec).await {
+                            Ok(r) if r.success => {
+                                tracing::info!(
+                                    "Post-download import succeeded: {:?}",
+                                    r.model_path
+                                );
+                            }
+                            Ok(r) => {
+                                tracing::warn!("Post-download import failed: {:?}", r.error);
+                            }
+                            Err(e) => {
+                                tracing::error!("Post-download import error: {}", e);
+                            }
                         }
-                        Ok(r) => {
-                            tracing::warn!("Post-download import failed: {:?}", r.error);
-                        }
-                        Err(e) => {
-                            tracing::error!("Post-download import error: {}", e);
-                        }
-                    }
-                });
-            }));
+                    });
+                },
+            ));
         }
 
         // Initialize conversion manager
@@ -421,10 +426,8 @@ impl PumasApi {
         // Check for a running instance
         if let Some(instance) = registry.get_instance(&library.path)? {
             if platform::is_process_alive(instance.pid) {
-                let addr = std::net::SocketAddr::from((
-                    std::net::Ipv4Addr::LOCALHOST,
-                    instance.port,
-                ));
+                let addr =
+                    std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
                 match ipc::IpcClient::connect(addr, instance.pid).await {
                     Ok(_client) => {
                         tracing::info!(
@@ -475,11 +478,7 @@ impl PumasApi {
                 .and_then(|n| n.to_str())
                 .unwrap_or("pumas-library");
             let _ = reg.register(&self.launcher_root, library_name);
-            let _ = reg.register_instance(
-                &self.launcher_root,
-                std::process::id(),
-                port,
-            );
+            let _ = reg.register_instance(&self.launcher_root, std::process::id(), port);
         }
 
         *state.server_handle.lock().await = Some(handle);
@@ -500,17 +499,20 @@ impl PumasApi {
 
     /// Get the metadata directory path.
     pub fn metadata_dir(&self) -> PathBuf {
-        self.launcher_data_dir().join(config::PathsConfig::METADATA_DIR_NAME)
+        self.launcher_data_dir()
+            .join(config::PathsConfig::METADATA_DIR_NAME)
     }
 
     /// Get the cache directory path.
     pub fn cache_dir(&self) -> PathBuf {
-        self.launcher_data_dir().join(config::PathsConfig::CACHE_DIR_NAME)
+        self.launcher_data_dir()
+            .join(config::PathsConfig::CACHE_DIR_NAME)
     }
 
     /// Get the shared resources directory path.
     pub fn shared_resources_dir(&self) -> PathBuf {
-        self.launcher_root.join(config::PathsConfig::SHARED_RESOURCES_DIR_NAME)
+        self.launcher_root
+            .join(config::PathsConfig::SHARED_RESOURCES_DIR_NAME)
     }
 
     /// Get the versions directory for a specific app.
@@ -551,7 +553,9 @@ mod tests {
 
         assert!(api.launcher_data_dir().ends_with("launcher-data"));
         assert!(api.metadata_dir().ends_with("metadata"));
-        assert!(api.versions_dir(AppId::ComfyUI).ends_with("comfyui-versions"));
+        assert!(api
+            .versions_dir(AppId::ComfyUI)
+            .ends_with("comfyui-versions"));
     }
 
     #[tokio::test]

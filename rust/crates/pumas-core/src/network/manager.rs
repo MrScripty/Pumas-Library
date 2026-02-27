@@ -431,10 +431,7 @@ impl NetworkManager {
 
                 // Try cache on failure
                 if let Some(cached) = get_cached() {
-                    warn!(
-                        "Request failed for {}, using cached data: {}",
-                        cache_key, e
-                    );
+                    warn!("Request failed for {}, using cached data: {}", cache_key, e);
                     return Ok(cached);
                 }
 
@@ -510,7 +507,11 @@ impl NetworkManager {
     pub async fn status(&self) -> NetworkStatus {
         NetworkStatus {
             connectivity: self.connectivity(),
-            last_check: self.last_connectivity_check.read().await.map(|t| t.elapsed()),
+            last_check: self
+                .last_connectivity_check
+                .read()
+                .await
+                .map(|t| t.elapsed()),
             last_offline: self.last_offline_time.read().await.map(|t| t.elapsed()),
             circuit_breakers: self.circuit_breaker_stats().await,
             registered_sources: self.source_ids().await,
@@ -579,7 +580,12 @@ mod tests {
             .execute(
                 "test.com",
                 "test-key",
-                || async { Err(PumasError::Network { message: "test".into(), cause: None }) },
+                || async {
+                    Err(PumasError::Network {
+                        message: "test".into(),
+                        cause: None,
+                    })
+                },
                 || Some("cached-value".to_string()),
             )
             .await;

@@ -8,8 +8,8 @@ use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::library::ModelLibrary;
 use crate::model_library::link_registry::{create_link_entry, LinkRegistry};
 use crate::model_library::types::{
-    ConflictResolution, LinkType, MappingAction, MappingActionType, MappingConfig,
-    MappingPreview, MappingRule, SandboxInfo,
+    ConflictResolution, LinkType, MappingAction, MappingActionType, MappingConfig, MappingPreview,
+    MappingRule, SandboxInfo,
 };
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -108,10 +108,7 @@ impl ModelMapper {
                 continue;
             }
 
-            let filename = path
-                .file_stem()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+            let filename = path.file_stem().and_then(|n| n.to_str()).unwrap_or("");
 
             // Parse filename pattern: {app}_{version}_{variant}
             let parts: Vec<&str> = filename.split('_').collect();
@@ -128,9 +125,8 @@ impl ModelMapper {
                 continue;
             }
 
-            let version_matches = file_version == "*"
-                || version.is_none()
-                || version == Some(file_version);
+            let version_matches =
+                file_version == "*" || version.is_none() || version == Some(file_version);
 
             if !version_matches {
                 continue;
@@ -196,16 +192,14 @@ impl ModelMapper {
             app: "comfyui".to_string(),
             version: version.to_string(),
             variant: Some("default".to_string()),
-            mappings: vec![
-                MappingRule {
-                    target_dir: ".".to_string(),
-                    model_types: None,
-                    subtypes: None,
-                    families: None,
-                    tags: None,
-                    exclude_tags: None,
-                },
-            ],
+            mappings: vec![MappingRule {
+                target_dir: ".".to_string(),
+                model_types: None,
+                subtypes: None,
+                families: None,
+                tags: None,
+                exclude_tags: None,
+            }],
         };
 
         self.save_config(&config)?;
@@ -229,11 +223,11 @@ impl ModelMapper {
         version: Option<&str>,
         app_models_root: &Path,
     ) -> Result<MappingPreview> {
-        let config = self.load_config(app_id, version)?.ok_or_else(|| {
-            PumasError::Config {
+        let config = self
+            .load_config(app_id, version)?
+            .ok_or_else(|| PumasError::Config {
                 message: format!("No mapping config found for {} {:?}", app_id, version),
-            }
-        })?;
+            })?;
 
         let mut preview = MappingPreview::new();
 
@@ -270,10 +264,7 @@ impl ModelMapper {
                 let files = self.get_model_files(&model_dir)?;
 
                 for file_path in files {
-                    let filename = file_path
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .unwrap_or("");
+                    let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
                     let target_path = app_models_root.join(&rule.target_dir).join(filename);
 
@@ -357,7 +348,9 @@ impl ModelMapper {
         version: Option<&str>,
         app_models_root: &Path,
     ) -> Result<MappingResult> {
-        let preview = self.preview_mapping(app_id, version, app_models_root).await?;
+        let preview = self
+            .preview_mapping(app_id, version, app_models_root)
+            .await?;
 
         let mut result = MappingResult {
             created: 0,
@@ -402,7 +395,9 @@ impl ModelMapper {
         app_models_root: &Path,
         resolutions: &HashMap<PathBuf, ConflictResolution>,
     ) -> Result<MappingResult> {
-        let preview = self.preview_mapping(app_id, version, app_models_root).await?;
+        let preview = self
+            .preview_mapping(app_id, version, app_models_root)
+            .await?;
 
         let mut result = MappingResult {
             created: 0,
@@ -541,14 +536,8 @@ impl ModelMapper {
 
     /// Get a renamed path to avoid conflict.
     fn get_renamed_path(&self, path: &Path) -> PathBuf {
-        let stem = path
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .unwrap_or("file");
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
         let mut counter = 1;
         loop {
@@ -722,10 +711,12 @@ impl ModelMapper {
                 app_models_root
                     .parent()
                     .map(std::fs::metadata)
-                    .unwrap_or_else(|| Err(std::io::Error::new(
-                        std::io::ErrorKind::NotFound,
-                        "Cannot determine app filesystem",
-                    )))
+                    .unwrap_or_else(|| {
+                        Err(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            "Cannot determine app filesystem",
+                        ))
+                    })
             })?;
             Ok(library_stat.dev() != app_stat.dev())
         }

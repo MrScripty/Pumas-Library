@@ -292,9 +292,7 @@ pub fn scripts_dir(launcher_root: &Path) -> PathBuf {
 
 /// Get the path to the converter virtual environment.
 pub fn venv_dir(launcher_root: &Path) -> PathBuf {
-    launcher_root
-        .join("launcher-data")
-        .join("converter-venv")
+    launcher_root.join("launcher-data").join("converter-venv")
 }
 
 /// Get the path to the Python binary inside the converter venv.
@@ -310,8 +308,16 @@ pub fn ensure_scripts_deployed(launcher_root: &Path) -> Result<()> {
     let dir = scripts_dir(launcher_root);
     std::fs::create_dir_all(&dir).with_path(&dir)?;
 
-    deploy_script(&dir, "convert_gguf_to_safetensors.py", GGUF_TO_SAFETENSORS_SCRIPT)?;
-    deploy_script(&dir, "convert_safetensors_to_gguf.py", SAFETENSORS_TO_GGUF_SCRIPT)?;
+    deploy_script(
+        &dir,
+        "convert_gguf_to_safetensors.py",
+        GGUF_TO_SAFETENSORS_SCRIPT,
+    )?;
+    deploy_script(
+        &dir,
+        "convert_safetensors_to_gguf.py",
+        SAFETENSORS_TO_GGUF_SCRIPT,
+    )?;
     deploy_script(&dir, "requirements.txt", REQUIREMENTS)?;
 
     info!("Conversion scripts deployed to {}", dir.display());

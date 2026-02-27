@@ -3,7 +3,10 @@
 //! Handles multi-file downloads with progress tracking, pause/resume,
 //! cancellation, retry with resume, and crash recovery via persistence.
 
-use super::types::{AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback, DownloadCompletionInfo, DownloadState, FileToDownload, HF_HUB_BASE};
+use super::types::{
+    AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
+    DownloadCompletionInfo, DownloadState, FileToDownload, HF_HUB_BASE,
+};
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
@@ -44,7 +47,9 @@ fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
         .iter()
         .filter(|path| {
             let filename = path.rsplit('/').next().unwrap_or(path);
-            AUXILIARY_FILE_PATTERNS.iter().any(|pattern| filename == *pattern)
+            AUXILIARY_FILE_PATTERNS
+                .iter()
+                .any(|pattern| filename == *pattern)
         })
         .cloned()
         .collect()
@@ -345,7 +350,11 @@ impl HuggingFaceClient {
         // affect progress accuracy)
         let total_bytes: Option<u64> = {
             let known_sum: u64 = files.iter().filter_map(|f| f.size).sum();
-            if known_sum > 0 { Some(known_sum) } else { None }
+            if known_sum > 0 {
+                Some(known_sum)
+            } else {
+                None
+            }
         };
         let first_filename = files[0].filename.clone();
 
@@ -410,7 +419,9 @@ impl HuggingFaceClient {
 
         info!(
             "Starting download {} for {} ({} file{})",
-            download_id, request.repo_id, files.len(),
+            download_id,
+            request.repo_id,
+            files.len(),
             if files.len() == 1 { "" } else { "s" }
         );
 
@@ -458,7 +469,10 @@ impl HuggingFaceClient {
                 // Update persistence with error status (preserve for resume)
                 if let Some(ref persistence) = persistence {
                     if let Ok(mut entries) = Ok::<Vec<_>, ()>(persistence.load_all()) {
-                        if let Some(entry) = entries.iter_mut().find(|d| d.download_id == download_id_clone) {
+                        if let Some(entry) = entries
+                            .iter_mut()
+                            .find(|d| d.download_id == download_id_clone)
+                        {
                             entry.status = DownloadStatus::Error;
                             let _ = persistence.save(entry);
                         }
@@ -558,13 +572,16 @@ impl HuggingFaceClient {
                     let info = {
                         let downloads = downloads.read().await;
                         downloads.get(download_id).and_then(|state| {
-                            state.download_request.as_ref().map(|req| AuxFilesCompleteInfo {
-                                download_id: download_id.to_string(),
-                                dest_dir: state.dest_dir.clone(),
-                                filenames: files.iter().map(|f| f.filename.clone()).collect(),
-                                download_request: req.clone(),
-                                total_bytes: state.total_bytes,
-                            })
+                            state
+                                .download_request
+                                .as_ref()
+                                .map(|req| AuxFilesCompleteInfo {
+                                    download_id: download_id.to_string(),
+                                    dest_dir: state.dest_dir.clone(),
+                                    filenames: files.iter().map(|f| f.filename.clone()).collect(),
+                                    download_request: req.clone(),
+                                    total_bytes: state.total_bytes,
+                                })
                         })
                     };
                     if let Some(info) = info {
@@ -657,12 +674,12 @@ impl HuggingFaceClient {
                 {
                     Ok(_) => {
                         // Rename .part to final path atomically
-                        tokio::fs::rename(&part_path, &dest_path).await.map_err(
-                            |e| PumasError::DownloadFailed {
+                        tokio::fs::rename(&part_path, &dest_path)
+                            .await
+                            .map_err(|e| PumasError::DownloadFailed {
                                 url: url.clone(),
                                 message: format!("Failed to rename temp file: {}", e),
-                            },
-                        )?;
+                            })?;
 
                         file_completed = true;
                         break;
@@ -827,8 +844,7 @@ impl HuggingFaceClient {
         }
 
         // Determine if we're actually resuming
-        let is_resuming =
-            resume_from_byte > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
+        let is_resuming = resume_from_byte > 0 && status == reqwest::StatusCode::PARTIAL_CONTENT;
         if resume_from_byte > 0 && !is_resuming {
             warn!("Server does not support Range requests, restarting from zero");
         }
@@ -917,10 +933,7 @@ impl HuggingFaceClient {
         if let Some(total) = file_total {
             if downloaded != total {
                 return Err(PumasError::Network {
-                    message: format!(
-                        "Incomplete download: got {} of {} bytes",
-                        downloaded, total
-                    ),
+                    message: format!("Incomplete download: got {} of {} bytes", downloaded, total),
                     cause: None,
                 });
             }
@@ -945,22 +958,24 @@ impl HuggingFaceClient {
     /// Get download progress.
     pub async fn get_download_progress(&self, download_id: &str) -> Option<ModelDownloadProgress> {
         let downloads = self.downloads.read().await;
-        downloads.get(download_id).map(|state| ModelDownloadProgress {
-            download_id: state.download_id.clone(),
-            repo_id: Some(state.repo_id.clone()),
-            status: state.status,
-            progress: Some(state.progress),
-            downloaded_bytes: Some(state.downloaded_bytes),
-            total_bytes: state.total_bytes,
-            speed: Some(state.speed),
-            eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
-                let remaining = state.total_bytes.unwrap() - state.downloaded_bytes;
-                Some(remaining as f64 / state.speed)
-            } else {
-                None
-            },
-            error: state.error.clone(),
-        })
+        downloads
+            .get(download_id)
+            .map(|state| ModelDownloadProgress {
+                download_id: state.download_id.clone(),
+                repo_id: Some(state.repo_id.clone()),
+                status: state.status,
+                progress: Some(state.progress),
+                downloaded_bytes: Some(state.downloaded_bytes),
+                total_bytes: state.total_bytes,
+                speed: Some(state.speed),
+                eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
+                    let remaining = state.total_bytes.unwrap() - state.downloaded_bytes;
+                    Some(remaining as f64 / state.speed)
+                } else {
+                    None
+                },
+                error: state.error.clone(),
+            })
     }
 
     /// Cancel a download.
@@ -992,7 +1007,10 @@ impl HuggingFaceClient {
                 total_bytes: state.total_bytes,
                 speed: Some(state.speed),
                 eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
-                    let remaining = state.total_bytes.unwrap().saturating_sub(state.downloaded_bytes);
+                    let remaining = state
+                        .total_bytes
+                        .unwrap()
+                        .saturating_sub(state.downloaded_bytes);
                     Some(remaining as f64 / state.speed)
                 } else {
                     None
@@ -1006,8 +1024,7 @@ impl HuggingFaceClient {
     pub async fn pause_download(&self, download_id: &str) -> Result<bool> {
         let downloads = self.downloads.read().await;
         if let Some(state) = downloads.get(download_id) {
-            if state.status == DownloadStatus::Downloading
-                || state.status == DownloadStatus::Queued
+            if state.status == DownloadStatus::Downloading || state.status == DownloadStatus::Queued
             {
                 state.pause_flag.store(true, Ordering::Relaxed);
                 drop(downloads);
@@ -1098,7 +1115,11 @@ impl HuggingFaceClient {
                 }
                 // Update persistence with error status
                 if let Some(ref persistence) = persistence {
-                    Self::persist_status_update(persistence, &download_id_clone, DownloadStatus::Error);
+                    Self::persist_status_update(
+                        persistence,
+                        &download_id_clone,
+                        DownloadStatus::Error,
+                    );
                 }
             }
         });

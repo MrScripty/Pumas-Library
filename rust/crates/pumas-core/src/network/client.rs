@@ -190,16 +190,16 @@ impl HttpClient {
     pub async fn post_json<T: serde::Serialize>(&self, url: &str, body: &T) -> Result<Response> {
         self.maybe_throttle().await;
 
-        let response = self
-            .client
-            .post(url)
-            .json(body)
-            .send()
-            .await
-            .map_err(|e| PumasError::Network {
-                message: format!("POST {} failed: {}", url, e),
-                cause: Some(e.to_string()),
-            })?;
+        let response =
+            self.client
+                .post(url)
+                .json(body)
+                .send()
+                .await
+                .map_err(|e| PumasError::Network {
+                    message: format!("POST {} failed: {}", url, e),
+                    cause: Some(e.to_string()),
+                })?;
 
         self.update_rate_limits(&response);
         self.check_response_status(response, url).await
@@ -207,10 +207,7 @@ impl HttpClient {
 
     /// Check if an HTTP status code indicates a retryable error.
     pub fn is_retryable_status(status: StatusCode) -> bool {
-        matches!(
-            status.as_u16(),
-            408 | 429 | 500 | 502 | 503 | 504
-        )
+        matches!(status.as_u16(), 408 | 429 | 500 | 502 | 503 | 504)
     }
 
     /// Check if an HTTP status code indicates a permanent failure.
@@ -384,10 +381,16 @@ mod tests {
     #[test]
     fn test_retryable_status_codes() {
         assert!(HttpClient::is_retryable_status(StatusCode::REQUEST_TIMEOUT));
-        assert!(HttpClient::is_retryable_status(StatusCode::TOO_MANY_REQUESTS));
-        assert!(HttpClient::is_retryable_status(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(HttpClient::is_retryable_status(
+            StatusCode::TOO_MANY_REQUESTS
+        ));
+        assert!(HttpClient::is_retryable_status(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
         assert!(HttpClient::is_retryable_status(StatusCode::BAD_GATEWAY));
-        assert!(HttpClient::is_retryable_status(StatusCode::SERVICE_UNAVAILABLE));
+        assert!(HttpClient::is_retryable_status(
+            StatusCode::SERVICE_UNAVAILABLE
+        ));
         assert!(HttpClient::is_retryable_status(StatusCode::GATEWAY_TIMEOUT));
 
         assert!(!HttpClient::is_retryable_status(StatusCode::OK));
@@ -403,7 +406,9 @@ mod tests {
         assert!(HttpClient::is_permanent_failure(StatusCode::NOT_FOUND));
 
         assert!(!HttpClient::is_permanent_failure(StatusCode::OK));
-        assert!(!HttpClient::is_permanent_failure(StatusCode::INTERNAL_SERVER_ERROR));
+        assert!(!HttpClient::is_permanent_failure(
+            StatusCode::INTERNAL_SERVER_ERROR
+        ));
     }
 
     #[tokio::test]

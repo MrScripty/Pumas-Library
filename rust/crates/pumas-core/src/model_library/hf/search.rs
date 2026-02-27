@@ -4,9 +4,7 @@
 //! SQLite caching, result enrichment with download options, and
 //! conversion from API response types to internal model types.
 
-use super::types::{
-    HfSearchResult, HfSibling, HF_API_BASE, infer_pipeline_tag_from_config,
-};
+use super::types::{infer_pipeline_tag_from_config, HfSearchResult, HfSibling, HF_API_BASE};
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
@@ -85,7 +83,10 @@ impl HuggingFaceClient {
     /// # Arguments
     ///
     /// * `params` - Search parameters
-    pub(super) async fn search_api(&self, params: &HfSearchParams) -> Result<Vec<HuggingFaceModel>> {
+    pub(super) async fn search_api(
+        &self,
+        params: &HfSearchParams,
+    ) -> Result<Vec<HuggingFaceModel>> {
         let limit = params.limit.unwrap_or(20);
         let offset = params.offset.unwrap_or(0);
 
@@ -117,13 +118,10 @@ impl HuggingFaceClient {
             request = request.header("Authorization", auth);
         }
 
-        let response = request
-            .send()
-            .await
-            .map_err(|e| PumasError::Network {
-                message: format!("HuggingFace API request failed: {}", e),
-                cause: Some(e.to_string()),
-            })?;
+        let response = request.send().await.map_err(|e| PumasError::Network {
+            message: format!("HuggingFace API request failed: {}", e),
+            cause: Some(e.to_string()),
+        })?;
 
         if !response.status().is_success() {
             return Err(PumasError::Network {
@@ -170,7 +168,10 @@ impl HuggingFaceClient {
                             // For non-quant repos, re-enrich if cached options
                             // lack file_group data (pre-grouping cache entries).
                             let needs_regroup = model.quants.is_empty()
-                                && cached.download_options.iter().all(|o| o.file_group.is_none());
+                                && cached
+                                    .download_options
+                                    .iter()
+                                    .all(|o| o.file_group.is_none());
                             if !needs_regroup {
                                 model.download_options = cached.download_options;
                                 model.total_size_bytes = cached.total_size_bytes;
@@ -185,17 +186,15 @@ impl HuggingFaceClient {
             // Fetch from API
             match self.get_repo_files(&model.repo_id).await {
                 Ok(tree) => {
-                    let download_options = Self::extract_download_options_from_tree(&tree, &model.quants);
+                    let download_options =
+                        Self::extract_download_options_from_tree(&tree, &model.quants);
                     let total_size = tree.lfs_files.iter().map(|f| f.size).sum();
 
                     model.download_options = download_options;
                     model.total_size_bytes = Some(total_size);
                 }
                 Err(e) => {
-                    debug!(
-                        "Failed to fetch repo files for {}: {}",
-                        model.repo_id, e
-                    );
+                    debug!("Failed to fetch repo files for {}: {}", model.repo_id, e);
                     // Keep model without download options
                 }
             }
@@ -227,10 +226,7 @@ impl HuggingFaceClient {
     }
 
     /// Quant-based option extraction for GGUF and precision-variant repos.
-    fn extract_quant_based_options(
-        tree: &RepoFileTree,
-        quants: &[String],
-    ) -> Vec<DownloadOption> {
+    fn extract_quant_based_options(tree: &RepoFileTree, quants: &[String]) -> Vec<DownloadOption> {
         let mut options = Vec::new();
 
         let quant_pattern =
@@ -319,12 +315,7 @@ impl HuggingFaceClient {
             .to_string();
 
         // Extract developer from modelId (before the /)
-        let developer = result
-            .model_id
-            .split('/')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let developer = result.model_id.split('/').next().unwrap_or("").to_string();
 
         // Determine kind: prefer pipeline_tag, fall back to config-based inference
         let kind = result
@@ -385,8 +376,9 @@ impl HuggingFaceClient {
     fn extract_quants_from_filenames(siblings: &[HfSibling]) -> Vec<String> {
         use std::collections::HashSet;
 
-        let quant_pattern = regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
-            .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap()); // fallback to never-match
+        let quant_pattern =
+            regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
+                .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap()); // fallback to never-match
 
         let mut quants: HashSet<String> = HashSet::new();
 

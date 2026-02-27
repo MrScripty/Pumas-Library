@@ -266,20 +266,17 @@ impl TorchClient {
         let url = format!("{}/api/slots", self.base_url);
         debug!("Listing Torch model slots from {}", url);
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| net_err(format!("Failed to connect to Torch server at {}: {}", url, e)))?;
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            net_err(format!(
+                "Failed to connect to Torch server at {}: {}",
+                url, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
             let body: String = response.text().await.unwrap_or_default();
-            return Err(net_err(format!(
-                "Torch API returned {}: {}",
-                status, body
-            )));
+            return Err(net_err(format!("Torch API returned {}: {}", status, body)));
         }
 
         let slots_response: SlotsResponse = response
@@ -287,7 +284,10 @@ impl TorchClient {
             .await
             .map_err(|e| net_err(format!("Failed to parse Torch slots response: {}", e)))?;
 
-        info!("Torch server has {} model slots", slots_response.slots.len());
+        info!(
+            "Torch server has {} model slots",
+            slots_response.slots.len()
+        );
         Ok(slots_response.slots)
     }
 
@@ -323,7 +323,12 @@ impl TorchClient {
             .json(&body)
             .send()
             .await
-            .map_err(|e| net_err(format!("Failed to send load request to Torch server: {}", e)))?;
+            .map_err(|e| {
+                net_err(format!(
+                    "Failed to send load request to Torch server: {}",
+                    e
+                ))
+            })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -382,12 +387,12 @@ impl TorchClient {
         let url = format!("{}/api/status", self.base_url);
         debug!("Getting Torch server status from {}", url);
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| net_err(format!("Failed to connect to Torch server at {}: {}", url, e)))?;
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            net_err(format!(
+                "Failed to connect to Torch server at {}: {}",
+                url, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();
@@ -411,12 +416,12 @@ impl TorchClient {
         let url = format!("{}/api/devices", self.base_url);
         debug!("Listing Torch compute devices from {}", url);
 
-        let response = self
-            .client
-            .get(&url)
-            .send()
-            .await
-            .map_err(|e| net_err(format!("Failed to connect to Torch server at {}: {}", url, e)))?;
+        let response = self.client.get(&url).send().await.map_err(|e| {
+            net_err(format!(
+                "Failed to connect to Torch server at {}: {}",
+                url, e
+            ))
+        })?;
 
         if !response.status().is_success() {
             let status = response.status();

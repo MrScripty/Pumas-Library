@@ -9,6 +9,4 @@ mod atomic;
 mod manager;
 
 pub use atomic::{atomic_read_json, atomic_write_json};
-pub use manager::{
-    InstalledVersionMetadata, MetadataManager, VersionConfig, VersionsMetadata,
-};
+pub use manager::{InstalledVersionMetadata, MetadataManager, VersionConfig, VersionsMetadata};

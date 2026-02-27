@@ -4,8 +4,8 @@
 //! allowing different apps to be launched, stopped, and monitored
 //! through a common interface.
 
-mod traits;
 mod factory;
+mod traits;
 
-pub use traits::{AppProcessManager, ProcessHandle, ProcessStatus};
 pub use factory::ProcessManagerFactory;
+pub use traits::{AppProcessManager, ProcessHandle, ProcessStatus};

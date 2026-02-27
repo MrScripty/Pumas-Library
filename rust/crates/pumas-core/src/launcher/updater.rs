@@ -308,7 +308,13 @@ impl LauncherUpdater {
             let short_hash = commit.sha[..7].to_string();
             commit_list.push(CommitInfo {
                 hash: short_hash.clone(),
-                message: commit.commit.message.lines().next().unwrap_or("").to_string(),
+                message: commit
+                    .commit
+                    .message
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
                 author: commit.commit.author.name.clone(),
                 date: commit.commit.author.date.clone(),
             });

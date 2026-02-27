@@ -385,7 +385,8 @@ pub fn group_weight_files(lfs_files: &[LfsFileInfo]) -> (Vec<WeightFileGroup>, V
         };
 
         // Try to detect shard pattern from the basename
-        let (base_name, group_key) = if let Some((shard_base, _, _)) = extract_shard_info(basename) {
+        let (base_name, group_key) = if let Some((shard_base, _, _)) = extract_shard_info(basename)
+        {
             // Sharded: group by dir + shard base name
             let label = if dir.is_empty() {
                 shard_base.clone()
@@ -492,10 +493,7 @@ mod tests {
         let groups = detect_sharded_sets(&files);
 
         assert_eq!(groups.len(), 3);
-        assert_eq!(
-            groups.get("model.safetensors").map(|v| v.len()),
-            Some(2)
-        );
+        assert_eq!(groups.get("model.safetensors").map(|v| v.len()), Some(2));
         assert_eq!(groups.get("standalone.gguf").map(|v| v.len()), Some(1));
         assert_eq!(groups.get("another.bin").map(|v| v.len()), Some(1));
     }
@@ -711,16 +709,28 @@ mod tests {
     #[test]
     fn test_group_weight_files_sharded_in_subdir() {
         let files = vec![
-            lfs("transformer/diffusion_pytorch_model-00001-of-00003.safetensors", 10_000),
-            lfs("transformer/diffusion_pytorch_model-00002-of-00003.safetensors", 10_000),
-            lfs("transformer/diffusion_pytorch_model-00003-of-00003.safetensors", 4_000),
+            lfs(
+                "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+                10_000,
+            ),
+            lfs(
+                "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+                10_000,
+            ),
+            lfs(
+                "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+                4_000,
+            ),
         ];
 
         let (groups, non_weight) = group_weight_files(&files);
 
         assert!(non_weight.is_empty());
         assert_eq!(groups.len(), 1);
-        assert_eq!(groups[0].label, "transformer/diffusion_pytorch_model.safetensors");
+        assert_eq!(
+            groups[0].label,
+            "transformer/diffusion_pytorch_model.safetensors"
+        );
         assert_eq!(groups[0].shard_count, 3);
         assert_eq!(groups[0].total_size, 24_000);
         assert_eq!(groups[0].filenames.len(), 3);
@@ -732,9 +742,18 @@ mod tests {
         let files = vec![
             lfs("flux1-krea-dev.safetensors", 23_800),
             lfs("ae.safetensors", 335),
-            lfs("transformer/diffusion_pytorch_model-00001-of-00003.safetensors", 9_980),
-            lfs("transformer/diffusion_pytorch_model-00002-of-00003.safetensors", 9_950),
-            lfs("transformer/diffusion_pytorch_model-00003-of-00003.safetensors", 3_870),
+            lfs(
+                "transformer/diffusion_pytorch_model-00001-of-00003.safetensors",
+                9_980,
+            ),
+            lfs(
+                "transformer/diffusion_pytorch_model-00002-of-00003.safetensors",
+                9_950,
+            ),
+            lfs(
+                "transformer/diffusion_pytorch_model-00003-of-00003.safetensors",
+                3_870,
+            ),
             lfs("text_encoder/model.safetensors", 246),
             lfs("text_encoder_2/model-00001-of-00002.safetensors", 4_990),
             lfs("text_encoder_2/model-00002-of-00002.safetensors", 4_530),
@@ -756,26 +775,38 @@ mod tests {
         assert_eq!(groups.len(), 6);
 
         let labels: Vec<&str> = groups.iter().map(|g| g.label.as_str()).collect();
-        assert_eq!(labels, vec![
-            "ae.safetensors",
-            "flux1-krea-dev.safetensors",
-            "text_encoder/model.safetensors",
-            "text_encoder_2/model.safetensors",
-            "transformer/diffusion_pytorch_model.safetensors",
-            "vae/diffusion_pytorch_model.safetensors",
-        ]);
+        assert_eq!(
+            labels,
+            vec![
+                "ae.safetensors",
+                "flux1-krea-dev.safetensors",
+                "text_encoder/model.safetensors",
+                "text_encoder_2/model.safetensors",
+                "transformer/diffusion_pytorch_model.safetensors",
+                "vae/diffusion_pytorch_model.safetensors",
+            ]
+        );
 
         // Check the sharded groups
-        let transformer = groups.iter().find(|g| g.label.contains("transformer/")).unwrap();
+        let transformer = groups
+            .iter()
+            .find(|g| g.label.contains("transformer/"))
+            .unwrap();
         assert_eq!(transformer.shard_count, 3);
         assert_eq!(transformer.total_size, 9_980 + 9_950 + 3_870);
 
-        let te2 = groups.iter().find(|g| g.label.contains("text_encoder_2/")).unwrap();
+        let te2 = groups
+            .iter()
+            .find(|g| g.label.contains("text_encoder_2/"))
+            .unwrap();
         assert_eq!(te2.shard_count, 2);
         assert_eq!(te2.total_size, 4_990 + 4_530);
 
         // Standalone groups
-        let flux = groups.iter().find(|g| g.label == "flux1-krea-dev.safetensors").unwrap();
+        let flux = groups
+            .iter()
+            .find(|g| g.label == "flux1-krea-dev.safetensors")
+            .unwrap();
         assert_eq!(flux.shard_count, 1);
         assert_eq!(flux.total_size, 23_800);
     }

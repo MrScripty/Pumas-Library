@@ -65,7 +65,10 @@ mod tests {
     #[test]
     fn test_escape_dot() {
         assert_eq!(escape_fts5_term("v1.5"), "\"v1.5\"");
-        assert_eq!(escape_fts5_term("model.safetensors"), "\"model.safetensors\"");
+        assert_eq!(
+            escape_fts5_term("model.safetensors"),
+            "\"model.safetensors\""
+        );
     }
 
     #[test]

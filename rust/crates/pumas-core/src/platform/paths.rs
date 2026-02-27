@@ -106,7 +106,10 @@ pub fn icon_theme_dir(fallback: &Path) -> PathBuf {
     #[cfg(target_os = "linux")]
     {
         if let Some(home) = dirs::home_dir() {
-            home.join(".local").join("share").join("icons").join("hicolor")
+            home.join(".local")
+                .join("share")
+                .join("icons")
+                .join("hicolor")
         } else {
             fallback.to_path_buf()
         }

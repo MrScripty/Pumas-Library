@@ -48,18 +48,14 @@ impl ProcessManagerFactory {
 
         // Create manager based on installation type
         let manager: Arc<dyn AppProcessManager> = match plugin.installation_type {
-            InstallationType::Binary => {
-                Arc::new(BinaryProcessManager::new(
-                    self.launcher_root.clone(),
-                    plugin.clone(),
-                ))
-            }
-            InstallationType::PythonVenv => {
-                Arc::new(PythonProcessManager::new(
-                    self.launcher_root.clone(),
-                    plugin.clone(),
-                ))
-            }
+            InstallationType::Binary => Arc::new(BinaryProcessManager::new(
+                self.launcher_root.clone(),
+                plugin.clone(),
+            )),
+            InstallationType::PythonVenv => Arc::new(PythonProcessManager::new(
+                self.launcher_root.clone(),
+                plugin.clone(),
+            )),
             InstallationType::Docker => {
                 // Docker support can be added later
                 return None;
@@ -100,7 +96,8 @@ impl BinaryProcessManager {
     }
 
     fn versions_dir(&self) -> PathBuf {
-        self.launcher_root.join(format!("{}-versions", self.plugin.id))
+        self.launcher_root
+            .join(format!("{}-versions", self.plugin.id))
     }
 
     fn binary_name(&self) -> String {
@@ -148,7 +145,8 @@ impl AppProcessManager for BinaryProcessManager {
                 .stdout(log.try_clone()?)
                 .stderr(log)
                 .spawn()
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(Ok(_child)) => Ok(super::ProcessHandle {
@@ -200,7 +198,10 @@ impl AppProcessManager for BinaryProcessManager {
         // Check if we can connect to the health endpoint
         if let Some(ref conn) = self.plugin.connection {
             if let Some(ref health) = conn.health_endpoint {
-                let url = format!("{}://localhost:{}{}", conn.protocol, conn.default_port, health);
+                let url = format!(
+                    "{}://localhost:{}{}",
+                    conn.protocol, conn.default_port, health
+                );
                 if let Ok(resp) = reqwest::Client::new()
                     .get(&url)
                     .timeout(std::time::Duration::from_secs(2))
@@ -227,13 +228,19 @@ impl AppProcessManager for BinaryProcessManager {
     }
 
     async fn get_logs(&self, lines: usize) -> Vec<String> {
-        let log_file = self.launcher_root
+        let log_file = self
+            .launcher_root
             .join("launcher-data")
             .join("logs")
             .join(format!("{}.log", self.plugin.id));
 
         if let Ok(content) = std::fs::read_to_string(&log_file) {
-            content.lines().rev().take(lines).map(String::from).collect()
+            content
+                .lines()
+                .rev()
+                .take(lines)
+                .map(String::from)
+                .collect()
         } else {
             vec![]
         }
@@ -265,7 +272,8 @@ impl PythonProcessManager {
     }
 
     fn versions_dir(&self) -> PathBuf {
-        self.launcher_root.join(format!("{}-versions", self.plugin.id))
+        self.launcher_root
+            .join(format!("{}-versions", self.plugin.id))
     }
 }
 
@@ -321,7 +329,8 @@ impl AppProcessManager for PythonProcessManager {
                 .stdout(log.try_clone()?)
                 .stderr(log)
                 .spawn()
-        }).await;
+        })
+        .await;
 
         match result {
             Ok(Ok(_child)) => Ok(super::ProcessHandle {
@@ -367,7 +376,10 @@ impl AppProcessManager for PythonProcessManager {
         // Check health endpoint if configured
         if let Some(ref conn) = self.plugin.connection {
             if let Some(ref health) = conn.health_endpoint {
-                let url = format!("{}://localhost:{}{}", conn.protocol, conn.default_port, health);
+                let url = format!(
+                    "{}://localhost:{}{}",
+                    conn.protocol, conn.default_port, health
+                );
                 if let Ok(resp) = reqwest::Client::new()
                     .get(&url)
                     .timeout(std::time::Duration::from_secs(2))
@@ -394,13 +406,19 @@ impl AppProcessManager for PythonProcessManager {
     }
 
     async fn get_logs(&self, lines: usize) -> Vec<String> {
-        let log_file = self.launcher_root
+        let log_file = self
+            .launcher_root
             .join("launcher-data")
             .join("logs")
             .join(format!("{}.log", self.plugin.id));
 
         if let Ok(content) = std::fs::read_to_string(&log_file) {
-            content.lines().rev().take(lines).map(String::from).collect()
+            content
+                .lines()
+                .rev()
+                .take(lines)
+                .map(String::from)
+                .collect()
         } else {
             vec![]
         }

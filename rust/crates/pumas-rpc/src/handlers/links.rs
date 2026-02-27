@@ -10,10 +10,7 @@ pub async fn get_link_health(state: &AppState, params: &Value) -> pumas_library:
     Ok(serde_json::to_value(response)?)
 }
 
-pub async fn clean_broken_links(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn clean_broken_links(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let response = state.api.clean_broken_links().await?;
     Ok(serde_json::to_value(response)?)
 }
@@ -31,10 +28,7 @@ pub async fn remove_orphaned_links(
     }))
 }
 
-pub async fn get_links_for_model(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_links_for_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
     let response = state.api.get_links_for_model(&model_id).await?;
     Ok(serde_json::to_value(response)?)
@@ -73,10 +67,7 @@ pub async fn preview_model_mapping(
     }
 }
 
-pub async fn apply_model_mapping(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn apply_model_mapping(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let version_tag = require_str_param(params, "version_tag", "versionTag")?;
     // Get the models path from comfyui version_manager
     let managers = state.version_managers.read().await;
@@ -222,14 +213,13 @@ pub async fn set_model_link_exclusion(
         .get("excluded")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let response = state.api.set_model_link_exclusion(&model_id, &app_id, excluded)?;
+    let response = state
+        .api
+        .set_model_link_exclusion(&model_id, &app_id, excluded)?;
     Ok(serde_json::to_value(response)?)
 }
 
-pub async fn get_link_exclusions(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_link_exclusions(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id = require_str_param(params, "app_id", "appId")?;
     let response = state.api.get_link_exclusions(&app_id)?;
     Ok(serde_json::to_value(response)?)

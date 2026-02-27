@@ -575,10 +575,7 @@ mod tests {
         let mut tracker = InstallationProgressTracker::new(temp_dir.path().to_path_buf());
 
         tracker.start_installation("v1.0.0", None, Some(3), None);
-        tracker.set_dependency_weights(&[
-            "torch".to_string(),
-            "numpy".to_string(),
-        ]);
+        tracker.set_dependency_weights(&["torch".to_string(), "numpy".to_string()]);
 
         tracker.update_stage(InstallationStage::Dependencies, 0.0, None);
         tracker.complete_package("torch");

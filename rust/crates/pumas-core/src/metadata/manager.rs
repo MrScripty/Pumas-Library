@@ -233,7 +233,8 @@ impl MetadataManager {
         match app_id {
             Some(app) if app != AppId::ComfyUI => {
                 let app_name = app.to_string().to_lowercase();
-                self.metadata_dir().join(format!("versions-{}.json", app_name))
+                self.metadata_dir()
+                    .join(format!("versions-{}.json", app_name))
             }
             _ => self.metadata_dir().join("versions.json"),
         }
@@ -368,10 +369,9 @@ impl MetadataManager {
     /// Save models metadata.
     pub fn save_models(&self, data: &ModelsMetadata) -> Result<()> {
         let path = self.models_path();
-        let _lock = self
-            .write_lock
-            .write()
-            .map_err(|_| PumasError::Other("Failed to acquire write lock for models".to_string()))?;
+        let _lock = self.write_lock.write().map_err(|_| {
+            PumasError::Other("Failed to acquire write lock for models".to_string())
+        })?;
 
         debug!("Saving models to {}", path.display());
         atomic_write_json(&path, data, true)

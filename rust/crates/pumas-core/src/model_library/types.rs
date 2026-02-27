@@ -52,31 +52,44 @@ impl ModelType {
     pub fn from_pipeline_tag(pipeline_tag: &str) -> Self {
         match pipeline_tag.to_lowercase().as_str() {
             // Text generation (LLMs)
-            "text-generation" | "text2text-generation"
-            | "question-answering" | "token-classification"
-            | "text-classification" | "fill-mask"
-            | "translation" | "summarization"
+            "text-generation"
+            | "text2text-generation"
+            | "question-answering"
+            | "token-classification"
+            | "text-classification"
+            | "fill-mask"
+            | "translation"
+            | "summarization"
             | "conversational" => ModelType::Llm,
 
             // Diffusion / image & video generation
-            "text-to-image" | "image-to-image"
+            "text-to-image"
+            | "image-to-image"
             | "unconditional-image-generation"
             | "image-inpainting"
-            | "text-to-video" | "video-classification"
-            | "text-to-3d" | "image-to-3d" => ModelType::Diffusion,
+            | "text-to-video"
+            | "video-classification"
+            | "text-to-3d"
+            | "image-to-3d" => ModelType::Diffusion,
 
             // Audio
-            "text-to-audio" | "text-to-speech"
+            "text-to-audio"
+            | "text-to-speech"
             | "automatic-speech-recognition"
-            | "audio-classification" | "audio-to-audio"
+            | "audio-classification"
+            | "audio-to-audio"
             | "voice-activity-detection" => ModelType::Audio,
 
             // Vision
-            "image-classification" | "image-segmentation"
-            | "object-detection" | "zero-shot-image-classification"
-            | "depth-estimation" | "image-feature-extraction"
+            "image-classification"
+            | "image-segmentation"
+            | "object-detection"
+            | "zero-shot-image-classification"
+            | "depth-estimation"
+            | "image-feature-extraction"
             | "zero-shot-object-detection"
-            | "image-to-text" | "visual-question-answering"
+            | "image-to-text"
+            | "visual-question-answering"
             | "document-question-answering"
             | "video-text-to-text" => ModelType::Vision,
 
@@ -660,38 +673,101 @@ mod tests {
     #[test]
     fn test_model_type_parsing() {
         assert_eq!("llm".parse::<ModelType>().unwrap(), ModelType::Llm);
-        assert_eq!("diffusion".parse::<ModelType>().unwrap(), ModelType::Diffusion);
-        assert_eq!("embedding".parse::<ModelType>().unwrap(), ModelType::Embedding);
+        assert_eq!(
+            "diffusion".parse::<ModelType>().unwrap(),
+            ModelType::Diffusion
+        );
+        assert_eq!(
+            "embedding".parse::<ModelType>().unwrap(),
+            ModelType::Embedding
+        );
         assert_eq!("unknown".parse::<ModelType>().unwrap(), ModelType::Unknown);
     }
 
     #[test]
     fn test_pipeline_tag_mapping() {
-        assert_eq!(ModelType::from_pipeline_tag("text-generation"), ModelType::Llm);
-        assert_eq!(ModelType::from_pipeline_tag("text2text-generation"), ModelType::Llm);
+        assert_eq!(
+            ModelType::from_pipeline_tag("text-generation"),
+            ModelType::Llm
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("text2text-generation"),
+            ModelType::Llm
+        );
         assert_eq!(ModelType::from_pipeline_tag("fill-mask"), ModelType::Llm);
-        assert_eq!(ModelType::from_pipeline_tag("text-to-image"), ModelType::Diffusion);
-        assert_eq!(ModelType::from_pipeline_tag("image-to-image"), ModelType::Diffusion);
-        assert_eq!(ModelType::from_pipeline_tag("text-to-audio"), ModelType::Audio);
-        assert_eq!(ModelType::from_pipeline_tag("text-to-speech"), ModelType::Audio);
-        assert_eq!(ModelType::from_pipeline_tag("automatic-speech-recognition"), ModelType::Audio);
-        assert_eq!(ModelType::from_pipeline_tag("audio-classification"), ModelType::Audio);
-        assert_eq!(ModelType::from_pipeline_tag("image-classification"), ModelType::Vision);
-        assert_eq!(ModelType::from_pipeline_tag("object-detection"), ModelType::Vision);
-        assert_eq!(ModelType::from_pipeline_tag("image-to-text"), ModelType::Vision);
-        assert_eq!(ModelType::from_pipeline_tag("feature-extraction"), ModelType::Embedding);
-        assert_eq!(ModelType::from_pipeline_tag("sentence-similarity"), ModelType::Embedding);
-        assert_eq!(ModelType::from_pipeline_tag("completely-unknown"), ModelType::Unknown);
+        assert_eq!(
+            ModelType::from_pipeline_tag("text-to-image"),
+            ModelType::Diffusion
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("image-to-image"),
+            ModelType::Diffusion
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("text-to-audio"),
+            ModelType::Audio
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("text-to-speech"),
+            ModelType::Audio
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("automatic-speech-recognition"),
+            ModelType::Audio
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("audio-classification"),
+            ModelType::Audio
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("image-classification"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("object-detection"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("image-to-text"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("feature-extraction"),
+            ModelType::Embedding
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("sentence-similarity"),
+            ModelType::Embedding
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("completely-unknown"),
+            ModelType::Unknown
+        );
     }
 
     #[test]
     fn test_from_str_recognizes_pipeline_tags() {
         // from_str should handle both canonical names and pipeline_tags
-        assert_eq!("text-to-audio".parse::<ModelType>().unwrap(), ModelType::Audio);
-        assert_eq!("text-to-image".parse::<ModelType>().unwrap(), ModelType::Diffusion);
-        assert_eq!("text-generation".parse::<ModelType>().unwrap(), ModelType::Llm);
-        assert_eq!("feature-extraction".parse::<ModelType>().unwrap(), ModelType::Embedding);
-        assert_eq!("image-classification".parse::<ModelType>().unwrap(), ModelType::Vision);
+        assert_eq!(
+            "text-to-audio".parse::<ModelType>().unwrap(),
+            ModelType::Audio
+        );
+        assert_eq!(
+            "text-to-image".parse::<ModelType>().unwrap(),
+            ModelType::Diffusion
+        );
+        assert_eq!(
+            "text-generation".parse::<ModelType>().unwrap(),
+            ModelType::Llm
+        );
+        assert_eq!(
+            "feature-extraction".parse::<ModelType>().unwrap(),
+            ModelType::Embedding
+        );
+        assert_eq!(
+            "image-classification".parse::<ModelType>().unwrap(),
+            ModelType::Vision
+        );
     }
 
     #[test]

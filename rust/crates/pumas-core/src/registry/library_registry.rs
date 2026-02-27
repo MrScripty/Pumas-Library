@@ -55,10 +55,7 @@ impl LibraryRegistry {
         if let Some(parent) = db_path.parent() {
             if !parent.exists() {
                 std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
-                    message: format!(
-                        "Failed to create registry directory: {}",
-                        parent.display()
-                    ),
+                    message: format!("Failed to create registry directory: {}", parent.display()),
                     path: Some(parent.to_path_buf()),
                     source: Some(e),
                 })?;
@@ -187,19 +184,14 @@ impl LibraryRegistry {
     /// Unregister a library path. Also removes any associated instance entry.
     pub fn unregister(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
 
         conn.execute(
             "DELETE FROM instances WHERE library_path = ?1",
             params![path_str],
         )?;
-        let rows = conn.execute(
-            "DELETE FROM libraries WHERE path = ?1",
-            params![path_str],
-        )?;
+        let rows = conn.execute("DELETE FROM libraries WHERE path = ?1", params![path_str])?;
 
         if rows > 0 {
             debug!("Unregistered library: {}", path_str);
@@ -239,9 +231,7 @@ impl LibraryRegistry {
     /// Get a library entry by its canonical path.
     pub fn get_by_path(&self, path: &Path) -> Result<Option<LibraryEntry>> {
         let conn = self.lock_conn()?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
 
         let result = conn
@@ -294,9 +284,7 @@ impl LibraryRegistry {
     /// Update the last_accessed timestamp for a library.
     pub fn touch(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
 
@@ -346,9 +334,7 @@ impl LibraryRegistry {
     /// Unregister a running instance for a library path.
     pub fn unregister_instance(&self, path: &Path) -> Result<bool> {
         let conn = self.lock_conn()?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
 
         let rows = conn.execute(
@@ -366,9 +352,7 @@ impl LibraryRegistry {
     /// Get the running instance for a library path.
     pub fn get_instance(&self, path: &Path) -> Result<Option<InstanceEntry>> {
         let conn = self.lock_conn()?;
-        let canonical = path
-            .canonicalize()
-            .unwrap_or_else(|_| path.to_path_buf());
+        let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
 
         let result = conn
@@ -395,9 +379,7 @@ impl LibraryRegistry {
     pub fn cleanup_stale(&self) -> Result<usize> {
         let conn = self.lock_conn()?;
 
-        let mut stmt = conn.prepare(
-            "SELECT library_path, pid FROM instances",
-        )?;
+        let mut stmt = conn.prepare("SELECT library_path, pid FROM instances")?;
 
         let entries: Vec<(String, u32)> = stmt
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
@@ -441,10 +423,7 @@ impl LibraryRegistry {
                     "DELETE FROM instances WHERE library_path = ?1",
                     params![path_str],
                 )?;
-                conn.execute(
-                    "DELETE FROM libraries WHERE path = ?1",
-                    params![path_str],
-                )?;
+                conn.execute("DELETE FROM libraries WHERE path = ?1", params![path_str])?;
                 removed += 1;
                 warn!("Removed library with nonexistent path: {}", path_str);
             }
@@ -626,12 +605,8 @@ mod tests {
         let lib_dir = create_library_dir(temp_dir.path(), "my-library");
 
         registry.register(&lib_dir, "My Library").unwrap();
-        registry
-            .register_instance(&lib_dir, 100, 12345)
-            .unwrap();
-        registry
-            .register_instance(&lib_dir, 200, 54321)
-            .unwrap();
+        registry.register_instance(&lib_dir, 100, 12345).unwrap();
+        registry.register_instance(&lib_dir, 200, 54321).unwrap();
 
         let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
         assert_eq!(instance.pid, 200);
@@ -746,7 +721,9 @@ mod tests {
         // Register with a path that includes ".." - should resolve to same
         let non_canonical = temp_dir.path().join("other").join("..").join("my-library");
         std::fs::create_dir_all(temp_dir.path().join("other")).unwrap();
-        registry.register(&non_canonical, "My Library Again").unwrap();
+        registry
+            .register(&non_canonical, "My Library Again")
+            .unwrap();
 
         // Should only have one entry
         let entries = registry.list().unwrap();

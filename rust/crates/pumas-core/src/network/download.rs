@@ -159,16 +159,10 @@ impl DownloadManager {
             }
         }
 
-        let temp_path = PathBuf::from(format!(
-            "{}{}",
-            destination.display(),
-            self.temp_suffix
-        ));
+        let temp_path = PathBuf::from(format!("{}{}", destination.display(), self.temp_suffix));
 
         // Perform download to temp file
-        let result = self
-            .do_download(url, &temp_path, progress_tx.clone())
-            .await;
+        let result = self.do_download(url, &temp_path, progress_tx.clone()).await;
 
         match result {
             Ok(bytes) => {
@@ -268,9 +262,7 @@ impl DownloadManager {
 
         // Send initial progress
         if let Some(ref tx) = progress_tx {
-            let _ = tx
-                .send(DownloadProgress::new(0, total_bytes, 0.0))
-                .await;
+            let _ = tx.send(DownloadProgress::new(0, total_bytes, 0.0)).await;
         }
 
         while let Some(chunk_result) = stream.next().await {

@@ -128,10 +128,7 @@ pub async fn get_supported_quant_types(
     }))
 }
 
-pub async fn get_backend_status(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_backend_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let status = state.api.backend_status();
     Ok(json!({
         "success": true,

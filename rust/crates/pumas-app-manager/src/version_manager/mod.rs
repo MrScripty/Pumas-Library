@@ -257,7 +257,9 @@ impl VersionManager {
         for tag in &installed {
             let is_active = active.as_deref() == Some(tag);
             let is_default = default.as_deref() == Some(tag);
-            let info = self.metadata_manager.get_installed_version(tag, Some(self.app_id))?;
+            let info = self
+                .metadata_manager
+                .get_installed_version(tag, Some(self.app_id))?;
 
             versions.push(VersionStatusEntry {
                 tag: tag.clone(),
@@ -354,10 +356,7 @@ impl VersionManager {
     /// Install a version with progress channel.
     ///
     /// Returns a channel receiver for progress updates.
-    pub async fn install_version(
-        &self,
-        tag: &str,
-    ) -> Result<mpsc::Receiver<ProgressUpdate>> {
+    pub async fn install_version(&self, tag: &str) -> Result<mpsc::Receiver<ProgressUpdate>> {
         // Check if already installed
         {
             let state = self.state.read().await;
@@ -384,12 +383,11 @@ impl VersionManager {
         let (tx, rx) = mpsc::channel(32);
 
         // Get release info
-        let release = self
-            .get_release_by_tag(tag, false)
-            .await?
-            .ok_or_else(|| PumasError::VersionNotFound {
+        let release = self.get_release_by_tag(tag, false).await?.ok_or_else(|| {
+            PumasError::VersionNotFound {
                 tag: tag.to_string(),
-            })?;
+            }
+        })?;
 
         // Create installer
         let installer = VersionInstaller::new(
@@ -424,12 +422,14 @@ impl VersionManager {
             }
 
             // Send final status
-            let _ = tx.send(match result {
-                Ok(_) => ProgressUpdate::Completed { success: true },
-                Err(e) => ProgressUpdate::Error {
-                    message: e.to_string(),
-                },
-            }).await;
+            let _ = tx
+                .send(match result {
+                    Ok(_) => ProgressUpdate::Completed { success: true },
+                    Err(e) => ProgressUpdate::Error {
+                        message: e.to_string(),
+                    },
+                })
+                .await;
 
             // Schedule progress state cleanup after frontend has time to poll final status
             tokio::spawn(async move {
@@ -494,7 +494,10 @@ impl VersionManager {
     // ========================================
 
     /// Check dependencies for a version.
-    pub async fn check_dependencies(&self, tag: &str) -> Result<pumas_library::models::DependencyStatus> {
+    pub async fn check_dependencies(
+        &self,
+        tag: &str,
+    ) -> Result<pumas_library::models::DependencyStatus> {
         let dep_manager = DependencyManager::new(
             self.launcher_root.clone(),
             self.app_id,
@@ -538,20 +541,14 @@ impl VersionManager {
         // Check dependencies
         let deps = self.check_dependencies(tag).await?;
         if !deps.missing.is_empty() {
-            warn!(
-                "Missing dependencies for {}: {:?}",
-                tag, deps.missing
-            );
+            warn!("Missing dependencies for {}: {:?}", tag, deps.missing);
             // Install missing deps
             self.install_dependencies(tag, None).await?;
         }
 
         // Create launcher
-        let launcher = VersionLauncher::new(
-            self.launcher_root.clone(),
-            self.app_id,
-            self.logs_dir(),
-        );
+        let launcher =
+            VersionLauncher::new(self.launcher_root.clone(), self.app_id, self.logs_dir());
 
         launcher.launch_version(tag, extra_args).await
     }
@@ -636,18 +633,9 @@ mod tests {
     async fn test_path_helpers() {
         let (manager, temp) = create_test_manager().await;
 
-        assert_eq!(
-            manager.versions_dir(),
-            temp.path().join("comfyui-versions")
-        );
-        assert_eq!(
-            manager.logs_dir(),
-            temp.path().join("launcher-data/logs")
-        );
-        assert_eq!(
-            manager.cache_dir(),
-            temp.path().join("launcher-data/cache")
-        );
+        assert_eq!(manager.versions_dir(), temp.path().join("comfyui-versions"));
+        assert_eq!(manager.logs_dir(), temp.path().join("launcher-data/logs"));
+        assert_eq!(manager.cache_dir(), temp.path().join("launcher-data/cache"));
         assert_eq!(
             manager.version_path("v1.0.0"),
             temp.path().join("comfyui-versions/v1.0.0")

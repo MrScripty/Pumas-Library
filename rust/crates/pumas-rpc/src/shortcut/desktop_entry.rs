@@ -76,7 +76,12 @@ impl DesktopEntry {
 
         writeln!(content, "Exec={}", self.exec).unwrap();
         writeln!(content, "Icon={}", self.icon).unwrap();
-        writeln!(content, "Terminal={}", if self.terminal { "true" } else { "false" }).unwrap();
+        writeln!(
+            content,
+            "Terminal={}",
+            if self.terminal { "true" } else { "false" }
+        )
+        .unwrap();
         writeln!(content, "Type={}", self.entry_type).unwrap();
 
         if !self.categories.is_empty() {
@@ -121,11 +126,12 @@ impl DesktopEntry {
             source: Some(e),
         })?;
 
-        file.write_all(content.as_bytes()).map_err(|e| PumasError::Io {
-            message: "write desktop file".to_string(),
-            path: Some(path.to_path_buf()),
-            source: Some(e),
-        })?;
+        file.write_all(content.as_bytes())
+            .map_err(|e| PumasError::Io {
+                message: "write desktop file".to_string(),
+                path: Some(path.to_path_buf()),
+                source: Some(e),
+            })?;
 
         // Make executable (required for desktop files to be trusted on Linux)
         // Uses platform module which handles cross-platform differences

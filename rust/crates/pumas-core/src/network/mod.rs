@@ -17,10 +17,12 @@ mod manager;
 mod retry;
 mod web_source;
 
-pub use circuit_breaker::{CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState};
+pub use circuit_breaker::{
+    CircuitBreaker, CircuitBreakerConfig, CircuitBreakerStats, CircuitState,
+};
 pub use client::{HttpClient, RateLimitState};
 pub use download::{DownloadManager, DownloadProgress};
-pub use github::{GitHubClient, GitHubRelease, GitHubAsset, ReleasesCache};
+pub use github::{GitHubAsset, GitHubClient, GitHubRelease, ReleasesCache};
 pub use manager::{ConnectivityConfig, ConnectivityState, NetworkManager, NetworkStatus};
-pub use retry::{RetryConfig, RetryStats, retry_async};
+pub use retry::{retry_async, RetryConfig, RetryStats};
 pub use web_source::{CacheStrategy, DynWebSource, WebSource, WebSourceId};

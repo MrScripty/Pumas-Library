@@ -119,7 +119,10 @@ pub enum PumasError {
 
     // GitHub API errors
     #[error("GitHub API error: {message}")]
-    GitHubApi { message: String, status_code: Option<u16> },
+    GitHubApi {
+        message: String,
+        status_code: Option<u16>,
+    },
 
     #[error("Release not found: {tag}")]
     ReleaseNotFound { tag: String },
@@ -142,8 +145,10 @@ pub enum PumasError {
     InvalidParams { message: String },
 
     // Instance convergence errors
-    #[error("Shared pumas-core instance lost (PID {pid} on port {port}). \
-             The host application was using a shared instance that is no longer running.")]
+    #[error(
+        "Shared pumas-core instance lost (PID {pid} on port {port}). \
+             The host application was using a shared instance that is no longer running."
+    )]
     SharedInstanceLost { pid: u32, port: u16 },
 
     #[error("No libraries registered. Initialize with an explicit path first.")]
@@ -307,9 +312,7 @@ impl PumasError {
     pub fn is_retryable(&self) -> bool {
         matches!(
             self,
-            PumasError::Network { .. }
-                | PumasError::Timeout(_)
-            // RateLimited is intentionally NOT retryable - see doc comment above
+            PumasError::Network { .. } | PumasError::Timeout(_) // RateLimited is intentionally NOT retryable - see doc comment above
         )
     }
 }

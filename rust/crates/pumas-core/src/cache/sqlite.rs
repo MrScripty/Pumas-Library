@@ -158,20 +158,18 @@ impl SqliteCache {
         };
 
         let default_ttl_secs: u64 = get_value(
-                "default_ttl_seconds",
-                &CacheConfig::DEFAULT_TTL_SECS.to_string(),
-            )
-            .parse()
-            .unwrap_or(CacheConfig::DEFAULT_TTL_SECS);
+            "default_ttl_seconds",
+            &CacheConfig::DEFAULT_TTL_SECS.to_string(),
+        )
+        .parse()
+        .unwrap_or(CacheConfig::DEFAULT_TTL_SECS);
         let max_size_bytes: u64 = get_value(
-                "max_size_bytes",
-                &CacheConfig::DEFAULT_MAX_SIZE_BYTES.to_string(),
-            )
-            .parse()
-            .unwrap_or(CacheConfig::DEFAULT_MAX_SIZE_BYTES);
-        let enable_eviction: bool = get_value("enable_eviction", "true")
-            .parse()
-            .unwrap_or(true);
+            "max_size_bytes",
+            &CacheConfig::DEFAULT_MAX_SIZE_BYTES.to_string(),
+        )
+        .parse()
+        .unwrap_or(CacheConfig::DEFAULT_MAX_SIZE_BYTES);
+        let enable_eviction: bool = get_value("enable_eviction", "true").parse().unwrap_or(true);
 
         Ok(CacheConfig {
             default_ttl: Duration::from_secs(default_ttl_secs),
@@ -188,7 +186,10 @@ impl SqliteCache {
         })?;
 
         let values = [
-            ("default_ttl_seconds", config.default_ttl.as_secs().to_string()),
+            (
+                "default_ttl_seconds",
+                config.default_ttl.as_secs().to_string(),
+            ),
             ("max_size_bytes", config.max_size_bytes.to_string()),
             ("enable_eviction", config.enable_eviction.to_string()),
         ];
@@ -420,7 +421,10 @@ impl CacheBackend for SqliteCache {
         )
         .ok();
 
-        debug!("Invalidated {} entries from namespace '{}'", deleted, namespace);
+        debug!(
+            "Invalidated {} entries from namespace '{}'",
+            deleted, namespace
+        );
 
         Ok(deleted)
     }
@@ -467,14 +471,7 @@ impl CacheBackend for SqliteCache {
                 WHERE namespace = ?1
                 "#,
                 params![namespace],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                    ))
-                },
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .optional()
             .map_err(|e| PumasError::Database {
@@ -582,9 +579,7 @@ impl CacheBackend for SqliteCache {
 
         // Get affected namespaces before deletion
         let mut stmt = conn
-            .prepare(
-                "SELECT DISTINCT namespace FROM cache_entries WHERE expires_at <= ?1",
-            )
+            .prepare("SELECT DISTINCT namespace FROM cache_entries WHERE expires_at <= ?1")
             .map_err(|e| PumasError::Database {
                 message: format!("Failed to prepare cleanup query: {}", e),
                 source: Some(e),
@@ -686,7 +681,8 @@ impl CacheBackend for SqliteCache {
         // Evict until under limit
         let mut evicted_bytes = 0u64;
         let mut evicted_count = 0;
-        let mut affected_namespaces: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut affected_namespaces: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
 
         for (namespace, key, size) in entries {
             if evicted_bytes >= excess {
@@ -874,8 +870,12 @@ mod tests {
 
         // Add some expired entries
         let past = Utc::now() - chrono::Duration::seconds(100);
-        cache.set_with_expiry("test_ns", "old1", b"data", past).unwrap();
-        cache.set_with_expiry("test_ns", "old2", b"data", past).unwrap();
+        cache
+            .set_with_expiry("test_ns", "old1", b"data", past)
+            .unwrap();
+        cache
+            .set_with_expiry("test_ns", "old2", b"data", past)
+            .unwrap();
 
         // Add some valid entries
         cache

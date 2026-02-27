@@ -138,7 +138,10 @@ impl From<pumas_library::PumasError> for FfiError {
             PumasError::InvalidFileType { expected, actual } => FfiError::Validation {
                 message: format!("Invalid file type: expected {}, got {}", expected, actual),
             },
-            PumasError::GitHubApi { message, status_code } => FfiError::Network {
+            PumasError::GitHubApi {
+                message,
+                status_code,
+            } => FfiError::Network {
                 message: format!(
                     "GitHub API error ({}): {}",
                     status_code.unwrap_or(0),
@@ -838,12 +841,18 @@ impl From<pumas_library::model_library::ReclassifyResult> for FfiReclassifyResul
             changes: r
                 .changes
                 .into_iter()
-                .map(|(f, s)| FfiStringPair { first: f, second: s })
+                .map(|(f, s)| FfiStringPair {
+                    first: f,
+                    second: s,
+                })
                 .collect(),
             errors: r
                 .errors
                 .into_iter()
-                .map(|(f, s)| FfiStringPair { first: f, second: s })
+                .map(|(f, s)| FfiStringPair {
+                    first: f,
+                    second: s,
+                })
                 .collect(),
         }
     }
@@ -931,7 +940,9 @@ impl From<FfiParamConstraints> for pumas_library::models::ParamConstraints {
         Self {
             min: c.min,
             max: c.max,
-            allowed_values: c.allowed_values_json.and_then(|s| serde_json::from_str(&s).ok()),
+            allowed_values: c
+                .allowed_values_json
+                .and_then(|s| serde_json::from_str(&s).ok()),
         }
     }
 }
@@ -982,7 +993,9 @@ impl From<FfiInferenceParamSchema> for pumas_library::models::InferenceParamSche
             },
             default: serde_json::from_str(&s.default_json).unwrap_or(serde_json::Value::Null),
             description: s.description,
-            constraints: s.constraints.map(pumas_library::models::ParamConstraints::from),
+            constraints: s
+                .constraints
+                .map(pumas_library::models::ParamConstraints::from),
         }
     }
 }
@@ -1126,10 +1139,7 @@ impl FfiPumasApi {
     }
 
     /// Delete a model and all its links.
-    pub async fn delete_model(
-        &self,
-        model_id: String,
-    ) -> Result<FfiDeleteModelResponse, FfiError> {
+    pub async fn delete_model(&self, model_id: String) -> Result<FfiDeleteModelResponse, FfiError> {
         let resp = self
             .inner
             .delete_model_with_cascade(&model_id)
@@ -1179,10 +1189,7 @@ impl FfiPumasApi {
     /// Re-detect a model's type and move it to the correct directory if misclassified.
     ///
     /// Returns the new model_id if the model was reclassified, None if unchanged.
-    pub async fn reclassify_model(
-        &self,
-        model_id: String,
-    ) -> Result<Option<String>, FfiError> {
+    pub async fn reclassify_model(&self, model_id: String) -> Result<Option<String>, FfiError> {
         self.inner
             .reclassify_model(&model_id)
             .await
@@ -1254,10 +1261,7 @@ impl FfiPumasApi {
     }
 
     /// Start downloading a model from HuggingFace.
-    pub async fn start_hf_download(
-        &self,
-        request: FfiDownloadRequest,
-    ) -> Result<String, FfiError> {
+    pub async fn start_hf_download(&self, request: FfiDownloadRequest) -> Result<String, FfiError> {
         let core_req = pumas_library::model_library::DownloadRequest::from(request);
         self.inner
             .start_hf_download(&core_req)
@@ -1319,10 +1323,7 @@ impl FfiPumasApi {
     }
 
     /// Get the file tree for a HuggingFace repository.
-    pub async fn get_hf_repo_files(
-        &self,
-        repo_id: String,
-    ) -> Result<FfiRepoFileTree, FfiError> {
+    pub async fn get_hf_repo_files(&self, repo_id: String) -> Result<FfiRepoFileTree, FfiError> {
         let tree = self
             .inner
             .get_hf_repo_files(&repo_id)
@@ -1478,10 +1479,7 @@ mod tests {
         let ffi_model = FfiHuggingFaceModel::from(model);
         assert_eq!(ffi_model.quant_sizes.len(), 2);
 
-        let q4 = ffi_model
-            .quant_sizes
-            .iter()
-            .find(|qs| qs.quant == "Q4_K_M");
+        let q4 = ffi_model.quant_sizes.iter().find(|qs| qs.quant == "Q4_K_M");
         assert!(q4.is_some());
         assert_eq!(q4.unwrap().size_bytes, 4_200_000_000);
     }

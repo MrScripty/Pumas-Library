@@ -115,10 +115,7 @@ pub async fn read_frame<R: AsyncReadExt + Unpin>(reader: &mut R) -> Result<Optio
 /// Write a length-prefixed frame to an async writer.
 ///
 /// Frame format: `[4-byte BE u32 length][payload bytes]`
-pub async fn write_frame<W: AsyncWriteExt + Unpin>(
-    writer: &mut W,
-    payload: &[u8],
-) -> Result<()> {
+pub async fn write_frame<W: AsyncWriteExt + Unpin>(writer: &mut W, payload: &[u8]) -> Result<()> {
     let len = payload.len() as u32;
     writer.write_all(&len.to_be_bytes()).await?;
     writer.write_all(payload).await?;

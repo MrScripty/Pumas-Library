@@ -67,9 +67,7 @@ pub fn default_inference_settings(
                     label: "Denoising Steps".into(),
                     param_type: ParamType::Integer,
                     default: json!(8),
-                    description: Some(
-                        "Number of refinement iterations per block".into(),
-                    ),
+                    description: Some("Number of refinement iterations per block".into()),
                     constraints: Some(ParamConstraints {
                         min: Some(1.0),
                         max: Some(64.0),
@@ -81,9 +79,7 @@ pub fn default_inference_settings(
                     label: "Block Length".into(),
                     param_type: ParamType::Integer,
                     default: json!(8),
-                    description: Some(
-                        "Tokens generated per diffusion block".into(),
-                    ),
+                    description: Some("Tokens generated per diffusion block".into()),
                     constraints: Some(ParamConstraints {
                         min: Some(1.0),
                         max: Some(64.0),
@@ -112,9 +108,7 @@ pub fn default_inference_settings(
                 label: "CFG Scale".into(),
                 param_type: ParamType::Number,
                 default: json!(7.0),
-                description: Some(
-                    "Classifier-free guidance scale".into(),
-                ),
+                description: Some("Classifier-free guidance scale".into()),
                 constraints: Some(ParamConstraints {
                     min: Some(1.0),
                     max: Some(30.0),

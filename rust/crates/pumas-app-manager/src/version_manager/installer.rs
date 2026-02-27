@@ -2,13 +2,13 @@
 //!
 //! Handles downloading, extracting, and setting up new versions.
 
+use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
+use chrono::Utc;
 use pumas_library::config::{AppId, InstallationConfig, PathsConfig};
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::models::InstallationStage;
 use pumas_library::network::{GitHubAsset, GitHubRelease};
-use crate::version_manager::progress::{InstallationProgressTracker, ProgressUpdate};
 use pumas_library::{PumasError, Result};
-use chrono::Utc;
 use std::fs::File;
 use std::io::{BufReader, Write};
 use std::path::PathBuf;
@@ -195,7 +195,11 @@ impl VersionInstaller {
         }
 
         // Use download cache directory to avoid re-downloading on reinstalls
-        let cache_downloads = self.launcher_root.join("launcher-data").join("cache").join("downloads");
+        let cache_downloads = self
+            .launcher_root
+            .join("launcher-data")
+            .join("cache")
+            .join("downloads");
         std::fs::create_dir_all(&cache_downloads).map_err(|e| PumasError::Io {
             message: format!("Failed to create download cache directory: {}", e),
             path: Some(cache_downloads.clone()),
@@ -208,11 +212,18 @@ impl VersionInstaller {
         let cache_valid = if archive_path.exists() {
             match std::fs::metadata(&archive_path) {
                 Ok(meta) if meta.len() == total_size => {
-                    info!("Using cached download: {} ({} bytes)", asset_name, total_size);
+                    info!(
+                        "Using cached download: {} ({} bytes)",
+                        asset_name, total_size
+                    );
                     true
                 }
                 Ok(meta) => {
-                    info!("Cached download size mismatch ({} != {}), re-downloading", meta.len(), total_size);
+                    info!(
+                        "Cached download size mismatch ({} != {}), re-downloading",
+                        meta.len(),
+                        total_size
+                    );
                     let _ = std::fs::remove_file(&archive_path);
                     false
                 }
@@ -273,7 +284,11 @@ impl VersionInstaller {
             // Update progress to show we're using cache
             {
                 let mut tracker = self.progress_tracker.write().await;
-                tracker.update_stage(InstallationStage::Download, 100.0, Some("Using cached download"));
+                tracker.update_stage(
+                    InstallationStage::Download,
+                    100.0,
+                    Some("Using cached download"),
+                );
             }
             let _ = progress_tx
                 .send(ProgressUpdate::Download {
@@ -301,7 +316,11 @@ impl VersionInstaller {
         // Step 3: Extract binary from archive
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Extract, 0.0, Some("Extracting binary..."));
+            tracker.update_stage(
+                InstallationStage::Extract,
+                0.0,
+                Some("Extracting binary..."),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::StageChanged {
@@ -314,7 +333,11 @@ impl VersionInstaller {
 
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Extract, 100.0, Some("Extraction complete"));
+            tracker.update_stage(
+                InstallationStage::Extract,
+                100.0,
+                Some("Extraction complete"),
+            );
         }
 
         // Check cancellation
@@ -385,7 +408,11 @@ impl VersionInstaller {
             self.extract_zip(archive_path, version_dir)?;
         } else {
             // Raw binary (e.g., ollama-linux-amd64 without extension)
-            let binary_name = if cfg!(windows) { "ollama.exe" } else { "ollama" };
+            let binary_name = if cfg!(windows) {
+                "ollama.exe"
+            } else {
+                "ollama"
+            };
             let dest = version_dir.join(binary_name);
             std::fs::copy(archive_path, &dest).map_err(|e| PumasError::Io {
                 message: format!("Failed to copy binary: {}", e),
@@ -472,7 +499,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Setup, 0.0, Some("Finalizing installation..."));
+            tracker.update_stage(
+                InstallationStage::Setup,
+                0.0,
+                Some("Finalizing installation..."),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::StageChanged {
@@ -482,8 +513,12 @@ impl VersionInstaller {
             .await;
 
         // Find the download URL for metadata
-        let download_url = release.assets.iter()
-            .find(|a| a.name.contains("linux") || a.name.contains("darwin") || a.name.contains("windows"))
+        let download_url = release
+            .assets
+            .iter()
+            .find(|a| {
+                a.name.contains("linux") || a.name.contains("darwin") || a.name.contains("windows")
+            })
             .map(|a| a.download_url.clone());
 
         // Create metadata entry (no Python version for Ollama)
@@ -508,7 +543,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Setup, 100.0, Some("Installation complete"));
+            tracker.update_stage(
+                InstallationStage::Setup,
+                100.0,
+                Some("Installation complete"),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::Setup {
@@ -586,7 +625,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Download, 0.0, Some("Starting download..."));
+            tracker.update_stage(
+                InstallationStage::Download,
+                0.0,
+                Some("Starting download..."),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::StageChanged {
@@ -718,7 +761,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Extract, 0.0, Some("Extracting archive..."));
+            tracker.update_stage(
+                InstallationStage::Extract,
+                0.0,
+                Some("Extracting archive..."),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::StageChanged {
@@ -742,7 +789,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Extract, 100.0, Some("Extraction complete"));
+            tracker.update_stage(
+                InstallationStage::Extract,
+                100.0,
+                Some("Extraction complete"),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::Extract {
@@ -761,14 +812,17 @@ impl VersionInstaller {
             source: Some(e),
         })?;
 
-        let mut archive = zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
-            message: format!("Invalid zip archive: {}", e),
-        })?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| PumasError::InstallationFailed {
+                message: format!("Invalid zip archive: {}", e),
+            })?;
 
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i).map_err(|e| PumasError::InstallationFailed {
-                message: format!("Failed to read zip entry {}: {}", i, e),
-            })?;
+            let mut file = archive
+                .by_index(i)
+                .map_err(|e| PumasError::InstallationFailed {
+                    message: format!("Failed to read zip entry {}: {}", i, e),
+                })?;
 
             let outpath = match file.enclosed_name() {
                 Some(path) => extract_dir.join(path),
@@ -828,9 +882,11 @@ impl VersionInstaller {
         let decoder = flate2::read::GzDecoder::new(BufReader::new(file));
         let mut archive = tar::Archive::new(decoder);
 
-        archive.unpack(extract_dir).map_err(|e| PumasError::InstallationFailed {
-            message: format!("Failed to extract tarball: {}", e),
-        })?;
+        archive
+            .unpack(extract_dir)
+            .map_err(|e| PumasError::InstallationFailed {
+                message: format!("Failed to extract tarball: {}", e),
+            })?;
 
         Ok(())
     }
@@ -840,10 +896,7 @@ impl VersionInstaller {
         extract_dir: &PathBuf,
         version_dir: &PathBuf,
     ) -> Result<()> {
-        info!(
-            "Moving extracted files to {}",
-            version_dir.display()
-        );
+        info!("Moving extracted files to {}", version_dir.display());
 
         // GitHub archives typically wrap content in a single directory
         // Find the actual source directory
@@ -881,27 +934,29 @@ impl VersionInstaller {
         }
 
         // Move (rename) the directory
-        std::fs::rename(&source_dir, version_dir).map_err(|e| {
-            // If rename fails (cross-device), fall back to copy + delete
-            debug!("Rename failed, falling back to copy: {}", e);
-            if let Err(copy_err) = self.copy_dir_recursive(&source_dir, version_dir) {
-                return copy_err;
-            }
-            if let Err(rm_err) = std::fs::remove_dir_all(&source_dir) {
-                warn!("Failed to remove source after copy: {}", rm_err);
-            }
-            PumasError::Io {
-                message: "Moved via copy".to_string(),
-                path: None,
-                source: None,
-            }
-        }).or_else(|e| {
-            if e.to_string().contains("Moved via copy") {
-                Ok(())
-            } else {
-                Err(e)
-            }
-        })?;
+        std::fs::rename(&source_dir, version_dir)
+            .map_err(|e| {
+                // If rename fails (cross-device), fall back to copy + delete
+                debug!("Rename failed, falling back to copy: {}", e);
+                if let Err(copy_err) = self.copy_dir_recursive(&source_dir, version_dir) {
+                    return copy_err;
+                }
+                if let Err(rm_err) = std::fs::remove_dir_all(&source_dir) {
+                    warn!("Failed to remove source after copy: {}", rm_err);
+                }
+                PumasError::Io {
+                    message: "Moved via copy".to_string(),
+                    path: None,
+                    source: None,
+                }
+            })
+            .or_else(|e| {
+                if e.to_string().contains("Moved via copy") {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            })?;
 
         Ok(())
     }
@@ -999,7 +1054,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Venv, 100.0, Some("Virtual environment created"));
+            tracker.update_stage(
+                InstallationStage::Venv,
+                100.0,
+                Some("Virtual environment created"),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::Venv {
@@ -1059,9 +1118,12 @@ impl VersionInstaller {
         .env("PIP_CACHE_DIR", &pip_cache_dir)
         .current_dir(version_dir);
 
-        let output = cmd.output().await.map_err(|e| PumasError::InstallationFailed {
-            message: format!("Failed to run pip install: {}", e),
-        })?;
+        let output = cmd
+            .output()
+            .await
+            .map_err(|e| PumasError::InstallationFailed {
+                message: format!("Failed to run pip install: {}", e),
+            })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -1107,7 +1169,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Setup, 0.0, Some("Finalizing installation..."));
+            tracker.update_stage(
+                InstallationStage::Setup,
+                0.0,
+                Some("Finalizing installation..."),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::StageChanged {
@@ -1153,7 +1219,11 @@ impl VersionInstaller {
         // Update progress
         {
             let mut tracker = self.progress_tracker.write().await;
-            tracker.update_stage(InstallationStage::Setup, 100.0, Some("Installation complete"));
+            tracker.update_stage(
+                InstallationStage::Setup,
+                100.0,
+                Some("Installation complete"),
+            );
         }
         let _ = progress_tx
             .send(ProgressUpdate::Setup {

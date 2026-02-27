@@ -55,11 +55,12 @@ impl LibraryMerger {
     /// - The source library directory is deleted if empty after merge.
     pub async fn merge(&self, source_path: &Path) -> Result<MergeResult> {
         // Phase 1: GATHER - Open source library and scan model directories
-        let source = ModelLibrary::new(source_path).await.map_err(|e| {
-            PumasError::ImportFailed {
-                message: format!("Failed to open source library: {}", e),
-            }
-        })?;
+        let source =
+            ModelLibrary::new(source_path)
+                .await
+                .map_err(|e| PumasError::ImportFailed {
+                    message: format!("Failed to open source library: {}", e),
+                })?;
 
         let source_dirs: Vec<PathBuf> = source.model_dirs().collect();
         info!(
@@ -110,7 +111,9 @@ impl LibraryMerger {
 
         info!(
             "Merge complete: {} moved, {} skipped, {} errors",
-            moved, skipped, errors.len()
+            moved,
+            skipped,
+            errors.len()
         );
 
         Ok(MergeResult {
@@ -133,18 +136,12 @@ impl LibraryMerger {
 
         // Check for duplicate by hash
         if let Some(ref hashes) = metadata.hashes {
-            let hash_to_check = hashes
-                .sha256
-                .as_deref()
-                .or(hashes.blake3.as_deref());
+            let hash_to_check = hashes.sha256.as_deref().or(hashes.blake3.as_deref());
 
             if let Some(hash) = hash_to_check {
                 let dest_index = self.destination.index();
                 if let Ok(Some(_existing)) = dest_index.find_by_hash(hash) {
-                    debug!(
-                        "Skipping duplicate (hash match): {}",
-                        source_dir.display()
-                    );
+                    debug!("Skipping duplicate (hash match): {}", source_dir.display());
                     return Ok(MergeSingleResult::Skipped);
                 }
             }
@@ -159,7 +156,9 @@ impl LibraryMerger {
             .or(metadata.official_name.as_deref())
             .unwrap_or("unnamed");
         let cleaned = normalize_name(name);
-        let dest_dir = self.destination.build_model_path(model_type, family, &cleaned);
+        let dest_dir = self
+            .destination
+            .build_model_path(model_type, family, &cleaned);
 
         // Move or copy the model directory
         if dest_dir.exists() {
@@ -175,11 +174,7 @@ impl LibraryMerger {
         // Index the moved model
         self.destination.index_model_dir(&dest_dir).await?;
 
-        debug!(
-            "Moved: {} -> {}",
-            source_dir.display(),
-            dest_dir.display()
-        );
+        debug!("Moved: {} -> {}", source_dir.display(), dest_dir.display());
 
         Ok(MergeSingleResult::Moved)
     }
@@ -349,12 +344,8 @@ mod tests {
         let (dest, dest_path) = create_test_library(temp.path(), "dest").await;
 
         // Create a model in destination with known hash
-        let dest_model = create_model_dir(
-            &dest_path,
-            "checkpoint",
-            "test-family",
-            "existing-model",
-        );
+        let dest_model =
+            create_model_dir(&dest_path, "checkpoint", "test-family", "existing-model");
         dest.index_model_dir(&dest_model).await.unwrap();
 
         // Create source with a model that has the same hash

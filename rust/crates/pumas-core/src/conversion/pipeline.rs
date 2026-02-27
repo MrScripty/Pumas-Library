@@ -63,9 +63,12 @@ pub async fn wait_and_check_exit(
     child: &mut tokio::process::Child,
     process_name: &str,
 ) -> Result<()> {
-    let status = child.wait().await.map_err(|e| PumasError::ConversionFailed {
-        message: format!("{process_name} process error: {e}"),
-    })?;
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| PumasError::ConversionFailed {
+            message: format!("{process_name} process error: {e}"),
+        })?;
 
     if !status.success() {
         return Err(PumasError::ConversionFailed {
@@ -147,9 +150,10 @@ pub async fn write_quantized_metadata(
         model_id: source_metadata.model_id.clone(),
         family: source_metadata.family.clone(),
         model_type: source_metadata.model_type.clone(),
-        official_name: source_metadata.official_name.as_ref().map(|name| {
-            format!("{} (GGUF {})", name, target_quant)
-        }),
+        official_name: source_metadata
+            .official_name
+            .as_ref()
+            .map(|name| format!("{} (GGUF {})", name, target_quant)),
         tags: Some(
             source_metadata
                 .tags
@@ -164,7 +168,9 @@ pub async fn write_quantized_metadata(
         ..Default::default()
     };
 
-    library.save_metadata(output_dir, &converted_metadata).await?;
+    library
+        .save_metadata(output_dir, &converted_metadata)
+        .await?;
     library.index_model_dir(output_dir).await?;
 
     let output_model_id = library

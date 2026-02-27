@@ -27,10 +27,7 @@ pub async fn get_plugin(state: &AppState, params: &Value) -> pumas_library::Resu
     }
 }
 
-pub async fn check_plugin_health(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn check_plugin_health(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id = require_str_param(params, "app_id", "appId")?;
     let plugin = state.plugin_loader.get(&app_id);
     match plugin {

@@ -213,16 +213,20 @@ fn default_true() -> bool {
 impl PluginConfig {
     /// Get the connection URL for this app.
     pub fn connection_url(&self) -> Option<String> {
-        self.connection.as_ref().map(|c| {
-            format!("{}://localhost:{}", c.protocol, c.default_port)
-        })
+        self.connection
+            .as_ref()
+            .map(|c| format!("{}://localhost:{}", c.protocol, c.default_port))
     }
 
     /// Check if this plugin supports a specific model format.
     pub fn supports_format(&self, format: &str) -> bool {
         self.model_compatibility
             .as_ref()
-            .map(|mc| mc.supported_formats.iter().any(|f| f.eq_ignore_ascii_case(format)))
+            .map(|mc| {
+                mc.supported_formats
+                    .iter()
+                    .any(|f| f.eq_ignore_ascii_case(format))
+            })
             .unwrap_or(false)
     }
 }
@@ -289,7 +293,10 @@ mod tests {
             enabled_by_default: true,
         };
 
-        assert_eq!(config.connection_url(), Some("http://localhost:11434".to_string()));
+        assert_eq!(
+            config.connection_url(),
+            Some("http://localhost:11434".to_string())
+        );
     }
 
     #[test]

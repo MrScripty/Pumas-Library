@@ -133,11 +133,7 @@ pub fn atomic_write_json<T: Serialize>(path: &Path, data: &T, keep_backup: bool)
     if keep_backup && path.exists() {
         let backup_path = path.with_extension("json.bak");
         if let Err(e) = fs::copy(path, &backup_path) {
-            warn!(
-                "Failed to create backup {}: {}",
-                backup_path.display(),
-                e
-            );
+            warn!("Failed to create backup {}: {}", backup_path.display(), e);
             // Continue anyway - backup failure is not fatal
         } else {
             debug!("Created backup: {}", backup_path.display());

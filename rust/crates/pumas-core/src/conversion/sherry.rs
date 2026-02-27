@@ -112,7 +112,9 @@ impl SherryBackend {
         info!("Installing AngelSlim dependencies...");
         let output = Command::new(&python)
             .args([
-                "-m", "pip", "install",
+                "-m",
+                "pip",
+                "install",
                 "angelslim",
                 "transformers",
                 "torch",
@@ -163,7 +165,9 @@ impl QuantizationBackend for SherryBackend {
     fn supported_quant_types(&self) -> Vec<QuantOption> {
         vec![QuantOption {
             name: "Sherry-1.25bit".to_string(),
-            description: "1.25-bit ternary QAT via AngelSlim (long training, best extreme compression)".to_string(),
+            description:
+                "1.25-bit ternary QAT via AngelSlim (long training, best extreme compression)"
+                    .to_string(),
             bits_per_weight: 1.25,
             recommended: false,
             backend: Some(QuantBackend::Sherry),
@@ -212,8 +216,9 @@ impl QuantizationBackend for SherryBackend {
         if !self.is_ready() {
             return Err(PumasError::QuantizationEnvNotReady {
                 backend: "sherry".to_string(),
-                message: "Sherry QAT environment not set up. Call setup_quantization_backend first."
-                    .to_string(),
+                message:
+                    "Sherry QAT environment not set up. Call setup_quantization_backend first."
+                        .to_string(),
             });
         }
 
@@ -266,13 +271,8 @@ impl QuantizationBackend for SherryBackend {
             })?;
 
         // Stream stderr for progress
-        pipeline::stream_subprocess_stderr_lines(
-            conversion_id,
-            &mut child,
-            progress,
-            cancel_token,
-        )
-        .await?;
+        pipeline::stream_subprocess_stderr_lines(conversion_id, &mut child, progress, cancel_token)
+            .await?;
 
         pipeline::wait_and_check_exit(&mut child, "sherry-qat").await?;
 
@@ -295,10 +295,7 @@ mod tests {
     #[test]
     fn test_path_construction() {
         let backend = SherryBackend::new(Path::new("/app"));
-        assert_eq!(
-            backend.base_dir,
-            PathBuf::from("/app/launcher-data/sherry")
-        );
+        assert_eq!(backend.base_dir, PathBuf::from("/app/launcher-data/sherry"));
         assert_eq!(
             backend.venv_python(),
             PathBuf::from("/app/launcher-data/sherry/venv/bin/python")

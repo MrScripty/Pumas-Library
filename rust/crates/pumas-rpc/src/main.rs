@@ -43,7 +43,11 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     // Set up logging
-    let log_level = if args.debug { Level::DEBUG } else { Level::INFO };
+    let log_level = if args.debug {
+        Level::DEBUG
+    } else {
+        Level::INFO
+    };
     FmtSubscriber::builder()
         .with_max_level(log_level)
         .with_target(false)
@@ -131,9 +135,7 @@ async fn main() -> Result<()> {
     info!("Custom nodes manager initialized");
 
     // Initialize size calculator
-    let cache_dir = launcher_root
-        .join("launcher-data")
-        .join("cache");
+    let cache_dir = launcher_root.join("launcher-data").join("cache");
     let size_calculator = SizeCalculator::new(cache_dir);
     info!("Size calculator initialized");
 
@@ -145,7 +147,10 @@ async fn main() -> Result<()> {
             loader
         }
         Err(e) => {
-            warn!("Failed to initialize plugin loader: {}, using empty loader", e);
+            warn!(
+                "Failed to initialize plugin loader: {}, using empty loader",
+                e
+            );
             PluginLoader::new(std::env::temp_dir().join("pumas-plugins-fallback")).unwrap()
         }
     };

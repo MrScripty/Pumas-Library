@@ -116,10 +116,7 @@ pub async fn check_brave(state: &AppState, _params: &Value) -> pumas_library::Re
     Ok(serde_json::to_value(result)?)
 }
 
-pub async fn check_setproctitle(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn check_setproctitle(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let result = state.api.check_setproctitle();
     Ok(serde_json::to_value(result)?)
 }

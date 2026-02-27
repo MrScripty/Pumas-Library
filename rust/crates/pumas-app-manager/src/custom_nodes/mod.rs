@@ -104,7 +104,13 @@ impl CustomNodesManager {
             if node.is_git_repo {
                 // Get remote URL
                 if let Ok(output) = std::process::Command::new("git")
-                    .args(["-C", &path.to_string_lossy(), "config", "--get", "remote.origin.url"])
+                    .args([
+                        "-C",
+                        &path.to_string_lossy(),
+                        "config",
+                        "--get",
+                        "remote.origin.url",
+                    ])
                     .output()
                 {
                     if output.status.success() {
@@ -117,7 +123,13 @@ impl CustomNodesManager {
 
                 // Get current branch
                 if let Ok(output) = std::process::Command::new("git")
-                    .args(["-C", &path.to_string_lossy(), "rev-parse", "--abbrev-ref", "HEAD"])
+                    .args([
+                        "-C",
+                        &path.to_string_lossy(),
+                        "rev-parse",
+                        "--abbrev-ref",
+                        "HEAD",
+                    ])
                     .output()
                 {
                     if output.status.success() {
@@ -130,7 +142,13 @@ impl CustomNodesManager {
 
                 // Get current commit (short hash)
                 if let Ok(output) = std::process::Command::new("git")
-                    .args(["-C", &path.to_string_lossy(), "rev-parse", "--short", "HEAD"])
+                    .args([
+                        "-C",
+                        &path.to_string_lossy(),
+                        "rev-parse",
+                        "--short",
+                        "HEAD",
+                    ])
                     .output()
                 {
                     if output.status.success() {
@@ -466,10 +484,7 @@ mod tests {
     fn test_custom_nodes_dir() {
         let manager = CustomNodesManager::new("/path/to/versions");
         let dir = manager.custom_nodes_dir("v0.2.0");
-        assert_eq!(
-            dir,
-            PathBuf::from("/path/to/versions/v0.2.0/custom_nodes")
-        );
+        assert_eq!(dir, PathBuf::from("/path/to/versions/v0.2.0/custom_nodes"));
     }
 
     #[test]
@@ -585,10 +600,7 @@ mod tests {
         let manager = CustomNodesManager::new(versions_dir);
 
         let result = manager
-            .install_from_git(
-                "https://github.com/ltdrdata/ComfyUI-Manager.git",
-                "v0.2.0",
-            )
+            .install_from_git("https://github.com/ltdrdata/ComfyUI-Manager.git", "v0.2.0")
             .await
             .unwrap();
 

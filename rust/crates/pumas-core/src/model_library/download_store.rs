@@ -55,7 +55,11 @@ impl DownloadPersistence {
     /// Upsert a download entry (insert or update by download_id).
     pub fn save(&self, download: &PersistedDownload) -> Result<()> {
         let mut data = self.load_data();
-        if let Some(existing) = data.downloads.iter_mut().find(|d| d.download_id == download.download_id) {
+        if let Some(existing) = data
+            .downloads
+            .iter_mut()
+            .find(|d| d.download_id == download.download_id)
+        {
             *existing = download.clone();
         } else {
             data.downloads.push(download.clone());
@@ -85,7 +89,11 @@ impl DownloadPersistence {
             Ok(Some(data)) => data,
             Ok(None) => DownloadStoreData::default(),
             Err(e) => {
-                warn!("Failed to read download store at {}: {}", self.path.display(), e);
+                warn!(
+                    "Failed to read download store at {}: {}",
+                    self.path.display(),
+                    e
+                );
                 DownloadStoreData::default()
             }
         }
@@ -93,7 +101,11 @@ impl DownloadPersistence {
 
     /// Write store data atomically.
     fn write_data(&self, data: &DownloadStoreData) -> Result<()> {
-        debug!("Writing {} downloads to {}", data.downloads.len(), self.path.display());
+        debug!(
+            "Writing {} downloads to {}",
+            data.downloads.len(),
+            self.path.display()
+        );
         atomic_write_json(&self.path, data, false)
     }
 }

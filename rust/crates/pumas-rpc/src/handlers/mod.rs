@@ -14,12 +14,7 @@ mod versions;
 
 use crate::server::AppState;
 use crate::wrapper::wrap_response;
-use axum::{
-    extract::State,
-    http::StatusCode,
-    response::IntoResponse,
-    Json,
-};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -151,7 +146,8 @@ pub(crate) fn extract_safetensors_header(path: &str) -> std::result::Result<Valu
 
     // Read JSON header
     let mut header_buf = vec![0u8; header_size];
-    file.read_exact(&mut header_buf).map_err(|e| e.to_string())?;
+    file.read_exact(&mut header_buf)
+        .map_err(|e| e.to_string())?;
 
     // Parse JSON - the header contains tensor metadata, not model metadata
     // Safetensors stores tensor shapes/dtypes, not general metadata like GGUF
@@ -221,20 +217,13 @@ pub(crate) fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static 
         return (
             true,
             "docker",
-            vec![
-                "Running in container",
-                "GPU access may require --gpus flag",
-            ],
+            vec!["Running in container", "GPU access may require --gpus flag"],
         );
     }
 
     // Check for AppImage
     if std::env::var("APPIMAGE").is_ok() {
-        return (
-            true,
-            "appimage",
-            vec!["Running as AppImage bundle"],
-        );
+        return (true, "appimage", vec!["Running as AppImage bundle"]);
     }
 
     (false, "none", vec![])
@@ -343,11 +332,15 @@ async fn dispatch_method(
         "get_release_size_breakdown" => versions::get_release_size_breakdown(state, params).await,
         "calculate_release_size" => versions::calculate_release_size(state, params).await,
         "calculate_all_release_sizes" => versions::calculate_all_release_sizes(state, params).await,
-        "has_background_fetch_completed" => versions::has_background_fetch_completed(state, params).await,
+        "has_background_fetch_completed" => {
+            versions::has_background_fetch_completed(state, params).await
+        }
         "reset_background_fetch_flag" => versions::reset_background_fetch_flag(state, params).await,
         "get_github_cache_status" => versions::get_github_cache_status(state, params).await,
         "check_version_dependencies" => versions::check_version_dependencies(state, params).await,
-        "install_version_dependencies" => versions::install_version_dependencies(state, params).await,
+        "install_version_dependencies" => {
+            versions::install_version_dependencies(state, params).await
+        }
         "get_release_dependencies" => versions::get_release_dependencies(state, params).await,
         "is_patched" => versions::is_patched(state, params).await,
         "toggle_patch" => versions::toggle_patch(state, params).await,
@@ -376,7 +369,9 @@ async fn dispatch_method(
         "mark_metadata_as_manual" => models::mark_metadata_as_manual(state, params).await,
         "get_embedded_metadata" => models::get_embedded_metadata(state, params).await,
         "get_library_model_metadata" => models::get_library_model_metadata(state, params).await,
-        "refetch_model_metadata_from_hf" => models::refetch_model_metadata_from_hf(state, params).await,
+        "refetch_model_metadata_from_hf" => {
+            models::refetch_model_metadata_from_hf(state, params).await
+        }
         "get_model_overrides" => models::get_model_overrides(state, params).await,
         "update_model_overrides" => models::update_model_overrides(state, params).await,
         "adopt_orphan_models" => models::adopt_orphan_models(state, params).await,
@@ -456,8 +451,12 @@ async fn dispatch_method(
         "get_conversion_progress" => conversion::get_conversion_progress(state, params).await,
         "cancel_model_conversion" => conversion::cancel_model_conversion(state, params).await,
         "list_model_conversions" => conversion::list_model_conversions(state, params).await,
-        "check_conversion_environment" => conversion::check_conversion_environment(state, params).await,
-        "setup_conversion_environment" => conversion::setup_conversion_environment(state, params).await,
+        "check_conversion_environment" => {
+            conversion::check_conversion_environment(state, params).await
+        }
+        "setup_conversion_environment" => {
+            conversion::setup_conversion_environment(state, params).await
+        }
         "get_supported_quant_types" => conversion::get_supported_quant_types(state, params).await,
         "get_backend_status" => conversion::get_backend_status(state, params).await,
         "setup_quantization_backend" => conversion::setup_quantization_backend(state, params).await,
@@ -512,8 +511,6 @@ mod tests {
         let (is_sandboxed, sandbox_type, _) = detect_sandbox_environment();
         // In normal development, we're not sandboxed
         // This test verifies the function runs without error
-        assert!(
-            !is_sandboxed || ["flatpak", "snap", "docker", "appimage"].contains(&sandbox_type)
-        );
+        assert!(!is_sandboxed || ["flatpak", "snap", "docker", "appimage"].contains(&sandbox_type));
     }
 }

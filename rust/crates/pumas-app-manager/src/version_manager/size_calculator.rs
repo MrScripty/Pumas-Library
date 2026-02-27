@@ -514,7 +514,10 @@ mod tests {
             SizeCalculator::parse_package_name("git+https://github.com/..."),
             ""
         );
-        assert_eq!(SizeCalculator::parse_package_name("--index-url https://..."), "");
+        assert_eq!(
+            SizeCalculator::parse_package_name("--index-url https://..."),
+            ""
+        );
     }
 
     #[test]
@@ -728,7 +731,7 @@ mod tests {
         let (mut calculator, _temp) = create_test_calculator();
 
         let requirements = vec![
-            "numpy>=1.20".to_string(),           // known: ~20MB
+            "numpy>=1.20".to_string(),            // known: ~20MB
             "unknown-package==1.0.0".to_string(), // unknown: 1MB default
         ];
 
@@ -749,6 +752,8 @@ mod tests {
 
         // Check that packages with hyphens/underscores are handled
         // opencv-python-headless should be found
-        assert!(calculator.known_packages.contains_key("opencv-python-headless"));
+        assert!(calculator
+            .known_packages
+            .contains_key("opencv-python-headless"));
     }
 }

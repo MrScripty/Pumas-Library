@@ -51,9 +51,10 @@ impl PluginApiProxy {
 
     /// Get the base URL for an app based on its connection config.
     fn get_base_url(&self, plugin: &PluginConfig) -> Option<String> {
-        plugin.connection.as_ref().map(|c| {
-            format!("{}://localhost:{}", c.protocol, c.default_port)
-        })
+        plugin
+            .connection
+            .as_ref()
+            .map(|c| format!("{}://localhost:{}", c.protocol, c.default_port))
     }
 
     /// Call an endpoint defined in the plugin config.
@@ -68,20 +69,34 @@ impl PluginApiProxy {
         endpoint_name: &str,
         params: HashMap<String, String>,
     ) -> Result<Value> {
-        let plugin = self.plugin_loader.get(app_id).ok_or_else(|| PumasError::Config {
-            message: format!("Plugin not found: {}", app_id),
-        })?;
+        let plugin = self
+            .plugin_loader
+            .get(app_id)
+            .ok_or_else(|| PumasError::Config {
+                message: format!("Plugin not found: {}", app_id),
+            })?;
 
-        let endpoint = plugin.api.get(endpoint_name).ok_or_else(|| PumasError::Config {
-            message: format!("Endpoint '{}' not found for app '{}'", endpoint_name, app_id),
-        })?;
+        let endpoint = plugin
+            .api
+            .get(endpoint_name)
+            .ok_or_else(|| PumasError::Config {
+                message: format!(
+                    "Endpoint '{}' not found for app '{}'",
+                    endpoint_name, app_id
+                ),
+            })?;
 
-        let base_url = self.get_base_url(&plugin).ok_or_else(|| PumasError::Config {
-            message: format!("No connection config for app '{}'", app_id),
-        })?;
+        let base_url = self
+            .get_base_url(&plugin)
+            .ok_or_else(|| PumasError::Config {
+                message: format!("No connection config for app '{}'", app_id),
+            })?;
 
         let url = format!("{}{}", base_url, endpoint.endpoint);
-        debug!("Calling {} {} with params: {:?}", endpoint.method, url, params);
+        debug!(
+            "Calling {} {} with params: {:?}",
+            endpoint.method, url, params
+        );
 
         let response = match endpoint.method.to_uppercase().as_str() {
             "GET" => {
@@ -155,7 +170,8 @@ impl PluginApiProxy {
 
     /// List models from an app.
     pub async fn list_models(&self, app_id: &str) -> Result<Value> {
-        self.call_endpoint(app_id, "listModels", HashMap::new()).await
+        self.call_endpoint(app_id, "listModels", HashMap::new())
+            .await
     }
 
     /// Load a model in an app.
@@ -174,21 +190,34 @@ impl PluginApiProxy {
 
     /// Check if an app is healthy via its health endpoint.
     pub async fn check_health(&self, app_id: &str) -> Result<bool> {
-        let plugin = self.plugin_loader.get(app_id).ok_or_else(|| PumasError::Config {
-            message: format!("Plugin not found: {}", app_id),
-        })?;
+        let plugin = self
+            .plugin_loader
+            .get(app_id)
+            .ok_or_else(|| PumasError::Config {
+                message: format!("Plugin not found: {}", app_id),
+            })?;
 
-        let conn = plugin.connection.as_ref().ok_or_else(|| PumasError::Config {
-            message: format!("No connection config for app '{}'", app_id),
-        })?;
+        let conn = plugin
+            .connection
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: format!("No connection config for app '{}'", app_id),
+            })?;
 
-        let health_endpoint = conn.health_endpoint.as_ref().ok_or_else(|| PumasError::Config {
-            message: format!("No health endpoint for app '{}'", app_id),
-        })?;
+        let health_endpoint = conn
+            .health_endpoint
+            .as_ref()
+            .ok_or_else(|| PumasError::Config {
+                message: format!("No health endpoint for app '{}'", app_id),
+            })?;
 
-        let url = format!("{}://localhost:{}{}", conn.protocol, conn.default_port, health_endpoint);
+        let url = format!(
+            "{}://localhost:{}{}",
+            conn.protocol, conn.default_port, health_endpoint
+        );
 
-        let result = self.http_client
+        let result = self
+            .http_client
             .get(&url)
             .timeout(Duration::from_secs(5))
             .send()
@@ -203,7 +232,11 @@ impl PluginApiProxy {
     /// Interpolate placeholders in the body template.
     ///
     /// Replaces `{{key}}` with the corresponding value from params.
-    fn interpolate_body(&self, template: &Option<Value>, params: &HashMap<String, String>) -> Value {
+    fn interpolate_body(
+        &self,
+        template: &Option<Value>,
+        params: &HashMap<String, String>,
+    ) -> Value {
         let template = match template {
             Some(t) => t.clone(),
             None => return Value::Null,
@@ -228,9 +261,11 @@ impl PluginApiProxy {
                 }
                 Value::Object(new_map)
             }
-            Value::Array(arr) => {
-                Value::Array(arr.into_iter().map(|v| self.interpolate_value(v, params)).collect())
-            }
+            Value::Array(arr) => Value::Array(
+                arr.into_iter()
+                    .map(|v| self.interpolate_value(v, params))
+                    .collect(),
+            ),
             other => other,
         }
     }
@@ -310,9 +345,7 @@ mod tests {
 
     #[test]
     fn test_interpolate_body() {
-        let plugin_loader = Arc::new(
-            PluginLoader::new("/tmp/test-plugins").unwrap()
-        );
+        let plugin_loader = Arc::new(PluginLoader::new("/tmp/test-plugins").unwrap());
         let proxy = PluginApiProxy::new(plugin_loader).unwrap();
 
         let template = Some(json!({
@@ -333,9 +366,7 @@ mod tests {
 
     #[test]
     fn test_extract_path_simple() {
-        let plugin_loader = Arc::new(
-            PluginLoader::new("/tmp/test-plugins").unwrap()
-        );
+        let plugin_loader = Arc::new(PluginLoader::new("/tmp/test-plugins").unwrap());
         let proxy = PluginApiProxy::new(plugin_loader).unwrap();
 
         let data = json!({

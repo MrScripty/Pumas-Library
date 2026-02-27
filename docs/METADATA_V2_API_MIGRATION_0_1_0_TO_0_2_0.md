@@ -1,17 +1,22 @@
-# Metadata v2 API Migration Guide
+# API Migration Guide: 0.1.0 -> 0.2.0
 
 ## Purpose
-This guide maps removed legacy metadata/dependency APIs to the Metadata v2 API surface.
+This guide maps removed legacy metadata/dependency APIs from release `0.1.0` to the
+Metadata v2 API surface introduced in release `0.2.0`.
 
-Use this when migrating local app/binding consumers from pre-v2 contracts to the current
+Use this when migrating local app/binding consumers from `0.1.0` contracts to `0.2.0`
 `pumas-core` / `pumas-rpc` APIs.
 
 ## Last Updated
 2026-02-27
 
+## Release Scope
+- Source release: `0.1.0`
+- Target release: `0.2.0`
+
 ## Cutover Summary
-- Metadata v2 is a breaking cutover.
-- Legacy metadata/dependency methods are removed at cutover.
+- `0.2.0` introduces a breaking metadata/dependency API cutover.
+- Legacy `0.1.0` metadata/dependency methods are removed at `0.2.0` cutover.
 - There is no compatibility window.
 
 Reference plan: `docs/plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md`.

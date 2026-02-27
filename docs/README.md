@@ -40,6 +40,13 @@ These documents explain how different parts of the system are designed and why:
 ### Theme System
 - **[../frontend/THEME_SYSTEM.md](../frontend/THEME_SYSTEM.md)** - Dark theme implementation, color tokens, and usage patterns
 
+## API Migration
+
+These migration docs are kept for API consumers moving from release `0.1.0` to `0.2.0`:
+
+- **[METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md](METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md)** - `0.1.0` to `0.2.0` endpoint mapping, migration patterns, and migration runner APIs
+- **[plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md](plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md)** - Full consumer migration/cutover plan
+
 ## Legal & Compliance
 
 - **[THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)** - License information for dependencies
@@ -55,7 +62,9 @@ docs/
 ├── SECURITY.md                        # Security practices
 ├── CODING_STANDARDS.md                # Code style standards
 ├── REACT_ARIA_ENFORCEMENT.md          # React Aria enforcement
+├── METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md # 0.1.0 -> 0.2.0 API consumer migration guide
 ├── THIRD-PARTY-NOTICES.md             # Legal notices
+├── plans/                             # Detailed implementation and migration plans
 └── architecture/                      # Architecture & design docs
     ├── FRONTEND_ARCHITECTURE.md       # Frontend design decisions
     ├── MULTI_APP_SYSTEM.md            # Multi-app architecture
@@ -100,3 +109,7 @@ All documentation should be in Markdown format and follow these guidelines:
 ### I want to understand licensing
 - See [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)
 - Main license: [../LICENSE](../LICENSE)
+
+### I need API migration instructions
+1. Read [METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md](METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md)
+2. Use [plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md](plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md) for rollout details

@@ -883,4 +883,4 @@ Acceptance checklist:
 ## Current Reference Docs
 1. `/media/jeremy/OrangeCream/Linux Software/Pantograph/PROPOSAL-pumas-library-metadata-dependency-v2.md`
 2. `/media/jeremy/OrangeCream/Linux Software/Pumas-Library/docs/plans/PUMAS_LIBRARY_METADATA_V2_CONSUMER_MIGRATION.md`
-3. `/media/jeremy/OrangeCream/Linux Software/Pumas-Library/docs/METADATA_V2_API_MIGRATION_GUIDE.md`
+3. `/media/jeremy/OrangeCream/Linux Software/Pumas-Library/docs/METADATA_V2_API_MIGRATION_0_1_0_TO_0_2_0.md`

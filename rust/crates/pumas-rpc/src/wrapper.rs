@@ -293,6 +293,16 @@ mod tests {
     }
 
     #[test]
+    fn test_refresh_model_mappings_passthrough() {
+        let data = json!({
+            "success": false,
+            "error": "No active version set for comfyui"
+        });
+        let wrapped = wrap_response("refresh_model_mappings", data.clone());
+        assert_eq!(wrapped, data);
+    }
+
+    #[test]
     fn test_wrap_active_version() {
         let wrapped = wrap_response("get_active_version", json!("v1.0.0"));
         assert!(wrapped.get("success").unwrap().as_bool().unwrap());

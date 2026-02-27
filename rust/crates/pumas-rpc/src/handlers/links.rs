@@ -6,6 +6,35 @@ use pumas_library::model_library::ConflictResolution;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
+fn parse_conflict_resolutions(
+    raw_resolutions: HashMap<String, String>,
+) -> std::result::Result<HashMap<String, ConflictResolution>, Vec<String>> {
+    let mut resolutions: HashMap<String, ConflictResolution> = HashMap::new();
+    let mut invalid_actions = Vec::new();
+
+    for (target, action) in raw_resolutions {
+        let parsed = match action.trim().to_ascii_lowercase().as_str() {
+            "skip" => Some(ConflictResolution::Skip),
+            "overwrite" => Some(ConflictResolution::Overwrite),
+            "rename" => Some(ConflictResolution::Rename),
+            _ => None,
+        };
+
+        if let Some(value) = parsed {
+            resolutions.insert(target, value);
+        } else {
+            invalid_actions.push(format!("{}={}", target, action));
+        }
+    }
+
+    if invalid_actions.is_empty() {
+        Ok(resolutions)
+    } else {
+        invalid_actions.sort();
+        Err(invalid_actions)
+    }
+}
+
 pub async fn get_link_health(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let version_tag = get_str_param(params, "version_tag", "versionTag");
     let response = state.api.get_link_health(version_tag).await?;
@@ -132,32 +161,18 @@ pub async fn sync_with_resolutions(
         None => HashMap::new(),
     };
 
-    let mut resolutions: HashMap<String, ConflictResolution> = HashMap::new();
-    let mut invalid_actions = Vec::new();
-    for (target, action) in raw_resolutions {
-        let parsed = match action.trim().to_ascii_lowercase().as_str() {
-            "skip" => Some(ConflictResolution::Skip),
-            "overwrite" => Some(ConflictResolution::Overwrite),
-            "rename" => Some(ConflictResolution::Rename),
-            _ => None,
-        };
-
-        if let Some(value) = parsed {
-            resolutions.insert(target, value);
-        } else {
-            invalid_actions.push(format!("{}={}", target, action));
+    let resolutions = match parse_conflict_resolutions(raw_resolutions) {
+        Ok(parsed) => parsed,
+        Err(invalid_actions) => {
+            return Ok(json!({
+                "success": false,
+                "error": format!(
+                    "Invalid conflict resolution action(s): {}. Supported values: skip, overwrite, rename",
+                    invalid_actions.join(", ")
+                ),
+            }));
         }
-    }
-
-    if !invalid_actions.is_empty() {
-        return Ok(json!({
-            "success": false,
-            "error": format!(
-                "Invalid conflict resolution action(s): {}. Supported values: skip, overwrite, rename",
-                invalid_actions.join(", ")
-            ),
-        }));
-    }
+    };
 
     let managers = state.version_managers.read().await;
     if let Some(vm) = managers.get("comfyui") {
@@ -286,4 +301,32 @@ pub async fn get_link_exclusions(state: &AppState, params: &Value) -> pumas_libr
     let app_id = require_str_param(params, "app_id", "appId")?;
     let response = state.api.get_link_exclusions(&app_id)?;
     Ok(serde_json::to_value(response)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_conflict_resolutions_accepts_valid_values() {
+        let mut raw = HashMap::new();
+        raw.insert("a".to_string(), "skip".to_string());
+        raw.insert("b".to_string(), "overwrite".to_string());
+        raw.insert("c".to_string(), "rename".to_string());
+
+        let parsed = parse_conflict_resolutions(raw).expect("expected valid resolutions");
+        assert_eq!(parsed.get("a"), Some(&ConflictResolution::Skip));
+        assert_eq!(parsed.get("b"), Some(&ConflictResolution::Overwrite));
+        assert_eq!(parsed.get("c"), Some(&ConflictResolution::Rename));
+    }
+
+    #[test]
+    fn test_parse_conflict_resolutions_rejects_invalid_values() {
+        let mut raw = HashMap::new();
+        raw.insert("a".to_string(), "skip".to_string());
+        raw.insert("b".to_string(), "invalid".to_string());
+
+        let invalid = parse_conflict_resolutions(raw).expect_err("expected invalid action");
+        assert_eq!(invalid, vec!["b=invalid".to_string()]);
+    }
 }

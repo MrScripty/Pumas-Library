@@ -94,3 +94,4 @@ Plan:
 4. Added `README.md` coverage for all currently missing Rust crate `src` directories.
 5. Added `README.md` coverage for all currently missing frontend/electron `src` directories (WS-02 complete).
 6. Resolved TODO formatting non-compliance by adding owner context to remaining TODO.
+7. Added RPC unit tests for conflict-resolution parsing and `refresh_model_mappings` passthrough behavior.

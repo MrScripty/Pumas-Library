@@ -14,11 +14,15 @@ use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::identify_model_type;
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
-use crate::model_library::types::{ModelMetadata, ModelOverrides, ModelType};
-use crate::model_library::{
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
-    LinkRegistry, ModelTypeResolution,
+use crate::model_library::types::{
+    ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem, ModelType,
+    SubmitModelReviewResult,
 };
+use crate::model_library::{
+    normalize_review_reasons, push_review_reason, resolve_model_type_with_rules,
+    validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution,
+};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -435,6 +439,189 @@ impl ModelLibrary {
         )
     }
 
+    /// List models currently requiring metadata review.
+    pub async fn list_models_needing_review(
+        &self,
+        filter: Option<ModelReviewFilter>,
+    ) -> Result<Vec<ModelReviewItem>> {
+        let filter = filter.unwrap_or_default();
+        let reason_filter = filter.reason.map(|r| r.trim().to_lowercase());
+        let status_filter = filter.review_status.map(|s| s.trim().to_lowercase());
+        let all_models = self.list_models().await?;
+
+        let mut review_items = Vec::new();
+        for model in all_models {
+            let Some(metadata) = self.load_effective_metadata_by_id(&model.id)? else {
+                continue;
+            };
+            if metadata.metadata_needs_review != Some(true) {
+                continue;
+            }
+
+            let mut reasons = metadata.review_reasons.clone().unwrap_or_default();
+            normalize_review_reasons(&mut reasons);
+
+            if let Some(ref reason) = reason_filter {
+                if !reasons.iter().any(|value| value == reason) {
+                    continue;
+                }
+            }
+
+            if let Some(ref status) = status_filter {
+                let current_status = metadata
+                    .review_status
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase();
+                if current_status != *status {
+                    continue;
+                }
+            }
+
+            review_items.push(ModelReviewItem {
+                model_id: model.id,
+                model_type: metadata.model_type,
+                family: metadata.family,
+                official_name: metadata.official_name,
+                metadata_needs_review: true,
+                review_status: metadata.review_status,
+                review_reasons: reasons,
+            });
+        }
+
+        review_items.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+        Ok(review_items)
+    }
+
+    /// Submit a metadata review patch for a model.
+    ///
+    /// The patch is applied as JSON Merge Patch against the current effective metadata.
+    /// A new overlay row is created and any prior active overlay is superseded.
+    pub async fn submit_model_review(
+        &self,
+        model_id: &str,
+        patch: Value,
+        reviewer: &str,
+        reason: Option<&str>,
+    ) -> Result<SubmitModelReviewResult> {
+        let reviewer = reviewer.trim();
+        if reviewer.is_empty() {
+            return Err(PumasError::Validation {
+                field: "reviewer".to_string(),
+                message: "reviewer must be non-empty".to_string(),
+            });
+        }
+        if !patch.is_object() {
+            return Err(PumasError::Validation {
+                field: "patch".to_string(),
+                message: "patch must be a JSON object (merge patch document)".to_string(),
+            });
+        }
+
+        let model_dir = self.library_root.join(model_id);
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
+
+        let baseline_value = self.load_baseline_metadata_value(model_id, &model_dir)?;
+        let mut target_value = self
+            .index
+            .get_effective_metadata_json(model_id)?
+            .map(|json| serde_json::from_str::<Value>(&json))
+            .transpose()?
+            .unwrap_or_else(|| baseline_value.clone());
+        apply_merge_patch_value(&mut target_value, &patch);
+
+        // Stamp review provenance and defaults unless explicitly overridden by patch.
+        let patch_fields = patch.as_object().ok_or_else(|| PumasError::Validation {
+            field: "patch".to_string(),
+            message: "patch must be a JSON object (merge patch document)".to_string(),
+        })?;
+        let now = chrono::Utc::now().to_rfc3339();
+        if !patch_fields.contains_key("review_status") {
+            set_object_field(
+                &mut target_value,
+                "review_status",
+                Value::String("reviewed".to_string()),
+            )?;
+        } else {
+            ensure_object_field(
+                &mut target_value,
+                "review_status",
+                Value::String("reviewed".to_string()),
+            )?;
+        }
+        if !patch_fields.contains_key("metadata_needs_review") {
+            set_object_field(
+                &mut target_value,
+                "metadata_needs_review",
+                Value::Bool(false),
+            )?;
+        } else {
+            ensure_object_field(
+                &mut target_value,
+                "metadata_needs_review",
+                Value::Bool(false),
+            )?;
+        }
+        if !patch_fields.contains_key("review_reasons") {
+            set_object_field(
+                &mut target_value,
+                "review_reasons",
+                Value::Array(Vec::new()),
+            )?;
+        } else {
+            ensure_object_field(
+                &mut target_value,
+                "review_reasons",
+                Value::Array(Vec::new()),
+            )?;
+        }
+        set_object_field(
+            &mut target_value,
+            "reviewed_by",
+            Value::String(reviewer.to_string()),
+        )?;
+        set_object_field(&mut target_value, "reviewed_at", Value::String(now.clone()))?;
+
+        let mut target_metadata: ModelMetadata = serde_json::from_value(target_value.clone())?;
+        if let Some(ref mut reasons) = target_metadata.review_reasons {
+            normalize_review_reasons(reasons);
+        }
+        validate_metadata_v2_with_index(&target_metadata, self.index())?;
+
+        // Re-serialize so overlay rows remain canonical after normalization.
+        target_value = serde_json::to_value(&target_metadata)?;
+        let overlay_patch = build_merge_patch_diff(&baseline_value, &target_value)
+            .unwrap_or_else(|| Value::Object(Default::default()));
+
+        let overlay_id = uuid::Uuid::new_v4().to_string();
+        self.index.apply_metadata_overlay(
+            model_id,
+            &overlay_id,
+            &overlay_patch,
+            reviewer,
+            reason,
+        )?;
+
+        let review_status = target_metadata
+            .review_status
+            .unwrap_or_else(|| "reviewed".to_string());
+        let metadata_needs_review = target_metadata.metadata_needs_review.unwrap_or(false);
+        let review_reasons = target_metadata.review_reasons.unwrap_or_default();
+
+        Ok(SubmitModelReviewResult {
+            model_id: model_id.to_string(),
+            overlay_id,
+            review_status,
+            metadata_needs_review,
+            review_reasons,
+        })
+    }
+
     /// Get models pending online lookup.
     ///
     /// Returns models that haven't been matched with HuggingFace metadata yet.
@@ -470,6 +657,29 @@ impl ModelLibrary {
         self.index_model_dir(&model_dir).await?;
 
         Ok(())
+    }
+
+    fn load_effective_metadata_by_id(&self, model_id: &str) -> Result<Option<ModelMetadata>> {
+        if let Some(effective_json) = self.index.get_effective_metadata_json(model_id)? {
+            let metadata: ModelMetadata = serde_json::from_str(&effective_json)?;
+            Ok(Some(metadata))
+        } else {
+            let model_dir = self.library_root.join(model_id);
+            self.load_metadata(&model_dir)
+        }
+    }
+
+    fn load_baseline_metadata_value(&self, model_id: &str, model_dir: &Path) -> Result<Value> {
+        if let Some(baseline_json) = self.index.get_baseline_metadata_json(model_id)? {
+            return Ok(serde_json::from_str(&baseline_json)?);
+        }
+
+        let metadata = self
+            .load_metadata(model_dir)?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        Ok(serde_json::to_value(metadata)?)
     }
 
     /// Mark a model's metadata as manually set (protected from auto-updates).
@@ -1015,6 +1225,97 @@ pub struct ReclassifyResult {
     pub errors: Vec<(String, String)>,
 }
 
+fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
+    match patch {
+        Value::Object(patch_map) => {
+            if !target.is_object() {
+                *target = Value::Object(serde_json::Map::new());
+            }
+            let target_map = target
+                .as_object_mut()
+                .expect("target must be object after initialization");
+
+            for (key, patch_value) in patch_map {
+                if patch_value.is_null() {
+                    target_map.remove(key);
+                    continue;
+                }
+
+                match target_map.get_mut(key) {
+                    Some(current) => apply_merge_patch_value(current, patch_value),
+                    None => {
+                        target_map.insert(key.clone(), patch_value.clone());
+                    }
+                }
+            }
+        }
+        _ => {
+            *target = patch.clone();
+        }
+    }
+}
+
+fn build_merge_patch_diff(source: &Value, target: &Value) -> Option<Value> {
+    if source == target {
+        return None;
+    }
+
+    match (source, target) {
+        (Value::Object(source_map), Value::Object(target_map)) => {
+            let mut patch = serde_json::Map::new();
+
+            for (key, source_value) in source_map {
+                match target_map.get(key) {
+                    Some(target_value) => {
+                        if let Some(child_patch) =
+                            build_merge_patch_diff(source_value, target_value)
+                        {
+                            patch.insert(key.clone(), child_patch);
+                        }
+                    }
+                    None => {
+                        patch.insert(key.clone(), Value::Null);
+                    }
+                }
+            }
+
+            for (key, target_value) in target_map {
+                if !source_map.contains_key(key) {
+                    patch.insert(key.clone(), target_value.clone());
+                }
+            }
+
+            Some(Value::Object(patch))
+        }
+        _ => Some(target.clone()),
+    }
+}
+
+fn ensure_object_field(target: &mut Value, key: &str, default_value: Value) -> Result<()> {
+    let object = target
+        .as_object_mut()
+        .ok_or_else(|| PumasError::Validation {
+            field: "patch".to_string(),
+            message: "effective metadata must be a JSON object".to_string(),
+        })?;
+
+    if !object.contains_key(key) {
+        object.insert(key.to_string(), default_value);
+    }
+    Ok(())
+}
+
+fn set_object_field(target: &mut Value, key: &str, value: Value) -> Result<()> {
+    let object = target
+        .as_object_mut()
+        .ok_or_else(|| PumasError::Validation {
+            field: "patch".to_string(),
+            message: "effective metadata must be a JSON object".to_string(),
+        })?;
+    object.insert(key.to_string(), value);
+    Ok(())
+}
+
 /// Apply resolver provenance/review fields and report whether resolution metadata changed.
 fn apply_model_type_resolution(
     metadata: &mut ModelMetadata,
@@ -1428,5 +1729,104 @@ mod tests {
             updated.model_type_resolution_source,
             Some("model-type-resolver-arch-rules".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_needing_review_and_submit_review() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "review-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("llm/llama/review-model".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Review Model".to_string()),
+            task_type_primary: Some("unknown".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("runtime-discovered-signature".to_string()),
+            task_classification_confidence: Some(0.0),
+            model_type_resolution_source: Some("model-type-resolver-arch-rules".to_string()),
+            model_type_resolution_confidence: Some(0.7),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let queue = library.list_models_needing_review(None).await.unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].model_id, "llm/llama/review-model");
+
+        let result = library
+            .submit_model_review(
+                "llm/llama/review-model",
+                serde_json::json!({
+                    "task_type_primary": "text-generation",
+                    "task_classification_source": "task-signature-mapping",
+                    "task_classification_confidence": 1.0
+                }),
+                "alice",
+                Some("manual-review"),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result.model_id, "llm/llama/review-model");
+        assert_eq!(result.review_status, "reviewed");
+        assert!(!result.metadata_needs_review);
+        assert!(result.review_reasons.is_empty());
+
+        let queue_after = library.list_models_needing_review(None).await.unwrap();
+        assert!(queue_after.is_empty());
+
+        let effective = library
+            .index()
+            .get_effective_metadata_json("llm/llama/review-model")
+            .unwrap()
+            .unwrap();
+        let effective: Value = serde_json::from_str(&effective).unwrap();
+        assert_eq!(
+            effective
+                .get("task_type_primary")
+                .and_then(|value| value.as_str()),
+            Some("text-generation")
+        );
+        assert_eq!(
+            effective
+                .get("reviewed_by")
+                .and_then(|value| value.as_str()),
+            Some("alice")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_submit_model_review_rejects_non_object_patch() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "bad-patch");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/bad-patch".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Bad Patch".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let err = library
+            .submit_model_review("llm/llama/bad-patch", Value::Bool(true), "alice", None)
+            .await
+            .unwrap_err();
+        match err {
+            PumasError::Validation { field, .. } => assert_eq!(field, "patch"),
+            _ => panic!("expected validation error"),
+        }
     }
 }

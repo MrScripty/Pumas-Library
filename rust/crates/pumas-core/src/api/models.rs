@@ -5,6 +5,7 @@ use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
 use crate::models;
 use crate::PumasApi;
+use serde_json::Value;
 
 impl PumasApi {
     // ========================================
@@ -184,6 +185,31 @@ impl PumasApi {
                 backend_key,
                 selected_binding_ids,
             )
+            .await
+    }
+
+    /// List models that currently require metadata review.
+    pub async fn list_models_needing_review(
+        &self,
+        filter: Option<model_library::ModelReviewFilter>,
+    ) -> Result<Vec<model_library::ModelReviewItem>> {
+        self.primary()
+            .model_library
+            .list_models_needing_review(filter)
+            .await
+    }
+
+    /// Submit a metadata review patch for a model.
+    pub async fn submit_model_review(
+        &self,
+        model_id: &str,
+        patch: Value,
+        reviewer: &str,
+        reason: Option<&str>,
+    ) -> Result<model_library::SubmitModelReviewResult> {
+        self.primary()
+            .model_library
+            .submit_model_review(model_id, patch, reviewer, reason)
             .await
     }
 

@@ -666,6 +666,48 @@ pub struct RepoFileTree {
     pub cache_version: u32,
 }
 
+/// Optional filter for listing models that still need metadata review.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ModelReviewFilter {
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub review_status: Option<String>,
+}
+
+/// Lightweight review queue row for one model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ModelReviewItem {
+    pub model_id: String,
+    #[serde(default)]
+    pub model_type: Option<String>,
+    #[serde(default)]
+    pub family: Option<String>,
+    #[serde(default)]
+    pub official_name: Option<String>,
+    pub metadata_needs_review: bool,
+    #[serde(default)]
+    pub review_status: Option<String>,
+    #[serde(default)]
+    pub review_reasons: Vec<String>,
+}
+
+/// Result of submitting a metadata review/edit patch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct SubmitModelReviewResult {
+    pub model_id: String,
+    pub overlay_id: String,
+    pub review_status: String,
+    pub metadata_needs_review: bool,
+    pub review_reasons: Vec<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1564,6 +1564,26 @@ impl ModelIndex {
         }
     }
 
+    /// Return baseline metadata JSON for a model if present.
+    pub fn get_baseline_metadata_json(&self, model_id: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let baseline_json: Option<String> = conn
+            .query_row(
+                "SELECT baseline_json
+                 FROM model_metadata_baselines
+                 WHERE model_id = ?1",
+                params![model_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        Ok(baseline_json)
+    }
+
     /// Apply a metadata overlay in one transaction (supersede current active, create new active, append history).
     pub fn apply_metadata_overlay(
         &self,

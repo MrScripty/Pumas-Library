@@ -23,7 +23,7 @@ use crate::model_library::{
     validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution,
 };
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -249,18 +249,31 @@ impl ModelLibrary {
     pub async fn rebuild_index(&self) -> Result<usize> {
         tracing::info!("Rebuilding model index");
 
-        // Clear existing index
-        self.index.clear()?;
-
+        let mut discovered_model_ids: HashSet<String> = HashSet::new();
+        let mut discovered_records = Vec::new();
         let mut count = 0;
         for model_dir in self.model_dirs() {
             if let Ok(Some(metadata)) = self.load_metadata(&model_dir) {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
-                    let record = metadata_to_record(&model_id, &model_dir, &metadata);
-                    if self.index.upsert(&record).is_ok() {
-                        count += 1;
-                    }
+                    discovered_model_ids.insert(model_id.clone());
+                    discovered_records.push(metadata_to_record(&model_id, &model_dir, &metadata));
                 }
+            }
+        }
+
+        // Remove stale index rows for models that no longer exist on disk.
+        // Existing rows for still-present model IDs are kept so FK-linked tables
+        // (review overlays, dependency bindings/history) remain intact.
+        for existing_id in self.index.get_all_ids()? {
+            if !discovered_model_ids.contains(&existing_id) {
+                let _ = self.index.delete(&existing_id)?;
+            }
+        }
+
+        // Upsert current metadata-backed rows.
+        for record in discovered_records {
+            if self.index.upsert(&record).is_ok() {
+                count += 1;
             }
         }
 

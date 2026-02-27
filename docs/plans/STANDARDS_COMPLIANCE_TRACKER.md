@@ -59,7 +59,7 @@ Plan:
 ### WS-03: File Size Refactors (Priority P2)
 Goal: Move toward 500-line target from `CODING-STANDARDS.md`.
 
-Current baseline: 52 files exceed 500 lines (down from 53 after splitting `pumas-rpc/src/handlers/models.rs`).
+Current baseline: 51 files exceed 500 lines (down from 53 after splitting `pumas-rpc` handler modules).
 
 Top offenders:
 1. `rust/crates/pumas-core/src/model_library/library.rs` (3437)
@@ -96,3 +96,4 @@ Plan:
 6. Resolved TODO formatting non-compliance by adding owner context to remaining TODO.
 7. Added RPC unit tests for conflict-resolution parsing and `refresh_model_mappings` passthrough behavior.
 8. Split `pumas-rpc/src/handlers/models.rs` into focused submodules under `handlers/models/` (all under 500 lines).
+9. Split `pumas-rpc/src/handlers/versions.rs` into focused submodules under `handlers/versions/` (all under 500 lines).

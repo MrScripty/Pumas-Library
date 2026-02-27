@@ -43,7 +43,8 @@ mod watcher;
 
 pub use dependencies::{
     DependencyState, ModelDependencyBindingPlan, ModelDependencyCheckResult,
-    ModelDependencyInstallResult, ModelDependencyPlan,
+    ModelDependencyInstallResult, ModelDependencyPinSummary, ModelDependencyPlan,
+    ModelDependencyRequiredPin,
 };
 pub use download_store::DownloadPersistence;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};

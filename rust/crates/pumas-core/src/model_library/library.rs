@@ -12,10 +12,13 @@ use crate::index::{ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::identify_model_type;
-use crate::model_library::importer::{detect_dllm_from_config_json, infer_type_from_config_json};
+use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{ModelMetadata, ModelOverrides, ModelType};
-use crate::model_library::LinkRegistry;
+use crate::model_library::{
+    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2, LinkRegistry,
+    ModelTypeResolution,
+};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -676,31 +679,62 @@ impl ModelLibrary {
         };
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
+        let current_family = metadata.family.clone();
+        let current_subtype = metadata.subtype.clone();
+        let current_resolution_source = metadata.model_type_resolution_source.clone();
+        let current_resolution_confidence = metadata.model_type_resolution_confidence;
+        let current_review_reasons = metadata.review_reasons.clone();
+        let current_metadata_needs_review = metadata.metadata_needs_review;
+        let current_review_status = metadata.review_status.clone();
 
-        // Find primary model file
-        let primary_file = match find_primary_model_file(&model_dir) {
-            Some(f) => f,
-            None => return Ok(None),
-        };
+        let resolved = resolve_model_type_with_rules(
+            self.index(),
+            &model_dir,
+            metadata.pipeline_tag.as_deref(),
+            None,
+        )?;
+        let new_type = resolved.model_type.as_str().to_string();
 
-        // Re-detect type from file content
-        let type_info = identify_model_type(&primary_file)?;
-        let new_type = type_info.model_type.as_str().to_string();
-
-        // Also update family if detected
-        let new_family = type_info.family.map(|f| f.as_str().to_string());
-
-        // Check if type changed
-        if new_type == current_type && new_family == metadata.family {
-            return Ok(None);
-        }
+        // Keep family detection from file metadata (independent from model_type resolver).
+        let type_info = find_primary_model_file(&model_dir)
+            .as_ref()
+            .and_then(|f| identify_model_type(f).ok());
+        let detected_family = type_info
+            .as_ref()
+            .and_then(|ti| ti.family.as_ref())
+            .map(|f| f.as_str().to_string());
+        let new_subtype =
+            if resolved.model_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir) {
+                Some("dllm".to_string())
+            } else {
+                None
+            };
 
         // Update metadata
         metadata.model_type = Some(new_type.clone());
-        if let Some(family) = new_family {
+        if let Some(family) = detected_family {
             metadata.family = Some(family);
         }
+        metadata.subtype = new_subtype;
+        let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
         metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        let type_or_family_changed = metadata.model_type.as_deref().unwrap_or_default()
+            != current_type
+            || metadata.family != current_family
+            || metadata.subtype != current_subtype;
+        if !type_or_family_changed
+            && !resolution_changed
+            && metadata.model_type_resolution_source == current_resolution_source
+            && metadata.model_type_resolution_confidence == current_resolution_confidence
+            && metadata.review_reasons == current_review_reasons
+            && metadata.metadata_needs_review == current_metadata_needs_review
+            && metadata.review_status == current_review_status
+        {
+            return Ok(None);
+        }
+
+        validate_metadata_v2(&metadata)?;
 
         // Save and re-index
         self.save_metadata(&model_dir, &metadata).await?;
@@ -713,7 +747,11 @@ impl ModelLibrary {
             new_type
         );
 
-        Ok(Some(new_type))
+        if type_or_family_changed {
+            Ok(Some(new_type))
+        } else {
+            Ok(None)
+        }
     }
 
     /// Re-detect types for all models in the library.
@@ -794,51 +832,27 @@ impl ModelLibrary {
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
+        let current_subtype = metadata.subtype.clone();
+        let current_resolution_source = metadata.model_type_resolution_source.clone();
+        let current_resolution_confidence = metadata.model_type_resolution_confidence;
+        let current_review_reasons = metadata.review_reasons.clone();
+        let current_metadata_needs_review = metadata.metadata_needs_review;
+        let current_review_status = metadata.review_status.clone();
 
-        // Re-detect type using priority chain:
-        // 1. Stored pipeline_tag (from HuggingFace metadata)
-        // 2. config.json inference (architectures + model_type fields)
-        // 3. File-based tensor/header detection (last resort)
-        let stored_pipeline_tag = metadata.pipeline_tag.as_deref();
+        let resolved = resolve_model_type_with_rules(
+            self.index(),
+            &model_dir,
+            metadata.pipeline_tag.as_deref(),
+            None,
+        )?;
+        let new_type = resolved.model_type;
+        let new_type_str = new_type.as_str().to_string();
 
-        // Try config.json first (authoritative for HF-sourced models)
-        let config_result = infer_type_from_config_json(&model_dir);
-
-        // File-based detection as fallback
+        // Keep family detection from file metadata (independent from model_type resolver).
         let primary_file = find_primary_model_file(&model_dir);
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
-
-        // Resolve type with priority chain
-        let new_type = if let Some(tag) = stored_pipeline_tag {
-            let mt = ModelType::from_pipeline_tag(tag);
-            if mt != ModelType::Unknown {
-                mt
-            } else {
-                ModelType::Unknown
-            }
-        } else {
-            ModelType::Unknown
-        };
-        let new_type = if new_type == ModelType::Unknown {
-            config_result
-                .as_ref()
-                .map(|(mt, _)| *mt)
-                .unwrap_or(ModelType::Unknown)
-        } else {
-            new_type
-        };
-        let new_type = if new_type == ModelType::Unknown {
-            file_type_info
-                .as_ref()
-                .map(|ti| ti.model_type)
-                .unwrap_or(ModelType::Unknown)
-        } else {
-            new_type
-        };
-
-        let new_type_str = new_type.as_str().to_string();
 
         // Detect dLLM subtype
         let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir)
@@ -848,37 +862,40 @@ impl ModelLibrary {
             None
         };
 
-        // Update pipeline_tag if config.json provided one and we didn't have it
-        let new_pipeline_tag = stored_pipeline_tag
-            .map(String::from)
-            .or_else(|| config_result.map(|(_, tag)| tag));
-
         let new_family = file_type_info
             .as_ref()
             .and_then(|ti| ti.family.as_ref())
             .map(|f| f.as_str().to_string())
             .unwrap_or_else(|| current_family.clone());
 
-        // Check if anything changed (type or family)
-        let current_subtype = metadata.subtype.clone();
-        if new_type_str == current_type
-            && new_family == current_family
-            && new_subtype == current_subtype
-        {
-            // Even if type/family didn't change, update pipeline_tag if we discovered one
-            if new_pipeline_tag.is_some() && metadata.pipeline_tag.is_none() {
-                metadata.pipeline_tag = new_pipeline_tag;
-                self.save_metadata(&model_dir, &metadata).await?;
-            }
-            return Ok(None);
-        }
-
         // Update metadata fields
         metadata.model_type = Some(new_type_str.clone());
         metadata.family = Some(new_family.clone());
         metadata.subtype = new_subtype;
-        if new_pipeline_tag.is_some() {
-            metadata.pipeline_tag = new_pipeline_tag;
+        let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        let identity_changed = new_type_str != current_type
+            || new_family != current_family
+            || metadata.subtype != current_subtype;
+        if !identity_changed
+            && !resolution_changed
+            && metadata.model_type_resolution_source == current_resolution_source
+            && metadata.model_type_resolution_confidence == current_resolution_confidence
+            && metadata.review_reasons == current_review_reasons
+            && metadata.metadata_needs_review == current_metadata_needs_review
+            && metadata.review_status == current_review_status
+        {
+            return Ok(None);
+        }
+
+        validate_metadata_v2(&metadata)?;
+
+        if !identity_changed {
+            // Classification metadata changed, but canonical path did not.
+            self.save_metadata(&model_dir, &metadata).await?;
+            self.index_model_dir(&model_dir).await?;
+            return Ok(None);
         }
 
         let cleaned_name = metadata
@@ -895,7 +912,6 @@ impl ModelLibrary {
         );
 
         metadata.model_id = Some(new_model_id.clone());
-        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
 
         if new_dir == model_dir {
             // Path didn't change (directory already correct)
@@ -997,6 +1013,34 @@ pub struct ReclassifyResult {
     pub changes: Vec<(String, String)>,
     /// List of (model_id, error_message) for models that failed.
     pub errors: Vec<(String, String)>,
+}
+
+/// Apply resolver provenance/review fields and report whether resolution metadata changed.
+fn apply_model_type_resolution(
+    metadata: &mut ModelMetadata,
+    resolution: &ModelTypeResolution,
+) -> bool {
+    let prev_source = metadata.model_type_resolution_source.clone();
+    let prev_confidence = metadata.model_type_resolution_confidence;
+    let prev_reasons = metadata.review_reasons.clone();
+    let prev_needs_review = metadata.metadata_needs_review;
+    let prev_review_status = metadata.review_status.clone();
+
+    metadata.model_type_resolution_source = Some(resolution.source.clone());
+    metadata.model_type_resolution_confidence = Some(resolution.confidence);
+    for reason in &resolution.review_reasons {
+        push_review_reason(metadata, reason);
+    }
+    if !resolution.review_reasons.is_empty() {
+        metadata.metadata_needs_review = Some(true);
+        metadata.review_status = Some("pending".to_string());
+    }
+
+    metadata.model_type_resolution_source != prev_source
+        || metadata.model_type_resolution_confidence != prev_confidence
+        || metadata.review_reasons != prev_reasons
+        || metadata.metadata_needs_review != prev_needs_review
+        || metadata.review_status != prev_review_status
 }
 
 /// Find the primary model file in a directory (the largest model file).
@@ -1190,12 +1234,24 @@ pub struct LibraryStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Write;
     use tempfile::TempDir;
 
     async fn setup_library() -> (TempDir, ModelLibrary) {
         let temp_dir = TempDir::new().unwrap();
         let library = ModelLibrary::new(temp_dir.path()).await.unwrap();
         (temp_dir, library)
+    }
+
+    fn write_min_safetensors(path: &Path) {
+        let header = b"{}";
+        let header_size: u64 = header.len() as u64;
+        let mut content = header_size.to_le_bytes().to_vec();
+        content.extend_from_slice(header);
+        content.extend_from_slice(&[0u8; 64]);
+
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(&content).unwrap();
     }
 
     #[tokio::test]
@@ -1288,5 +1344,89 @@ mod tests {
         // Verify all models are indexed
         let all_models = library.list_models().await.unwrap();
         assert_eq!(all_models.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_uses_rule_resolver() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "test", "resolver-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/resolver-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("Resolver Model".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/test/resolver-model")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("diffusion".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("diffusion".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-resolver-arch-rules".to_string())
+        );
+        assert_eq!(updated.model_type_resolution_confidence, Some(0.7));
+        assert!(updated
+            .review_reasons
+            .unwrap_or_default()
+            .contains(&"model-type-low-confidence".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_uses_rule_resolver_for_move() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("llm", "llama", "resolver-move");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+        std::fs::write(
+            old_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/resolver-move".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Resolver Move".to_string()),
+            cleaned_name: Some("resolver-move".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("llm/llama/resolver-move")
+            .await
+            .unwrap();
+        assert_eq!(moved, Some("diffusion/llama/resolver-move".to_string()));
+
+        let new_dir = library.build_model_path("diffusion", "llama", "resolver-move");
+        assert!(new_dir.exists());
+        assert!(!old_dir.exists());
+
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("diffusion".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-resolver-arch-rules".to_string())
+        );
     }
 }

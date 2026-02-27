@@ -670,7 +670,9 @@ impl ModelLibrary {
             });
         }
 
-        let reset = self.index.reset_metadata_overlay(model_id, reviewer, reason)?;
+        let reset = self
+            .index
+            .reset_metadata_overlay(model_id, reviewer, reason)?;
         if reset {
             if let Some(metadata) = self.load_effective_metadata_by_id(model_id)? {
                 self.save_metadata(&model_dir, &metadata).await?;

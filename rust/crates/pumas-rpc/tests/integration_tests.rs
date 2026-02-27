@@ -174,9 +174,8 @@ async fn start_rpc_server(launcher_root: &std::path::Path) -> Result<RpcServerHa
         return Err(format!("pumas-rpc failed health check on port {port}"));
     }
 
-    let stdout_drain = tokio::spawn(async move {
-        while let Ok(Some(_)) = lines.next_line().await {}
-    });
+    let stdout_drain =
+        tokio::spawn(async move { while let Ok(Some(_)) = lines.next_line().await {} });
 
     Ok(RpcServerHandle {
         child,
@@ -542,7 +541,10 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(response.get("success").and_then(|v| v.as_bool()), Some(false));
+        assert_eq!(
+            response.get("success").and_then(|v| v.as_bool()),
+            Some(false)
+        );
         let error = response
             .get("error")
             .and_then(|v| v.as_str())

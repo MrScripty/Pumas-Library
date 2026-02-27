@@ -121,18 +121,12 @@ pub async fn check_setproctitle(state: &AppState, _params: &Value) -> pumas_libr
     Ok(serde_json::to_value(result)?)
 }
 
-pub async fn get_network_status(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_network_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let status = state.api.get_network_status_response().await;
     Ok(serde_json::to_value(status)?)
 }
 
-pub async fn get_library_status(
-    state: &AppState,
-    _params: &Value,
-) -> pumas_library::Result<Value> {
+pub async fn get_library_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let status = state.api.get_library_status().await?;
     Ok(serde_json::to_value(status)?)
 }

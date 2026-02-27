@@ -2,8 +2,8 @@
 
 use std::sync::Arc;
 
-use crate::models;
 use crate::model_library;
+use crate::models;
 use crate::network;
 use crate::PumasApi;
 
@@ -70,7 +70,8 @@ impl PumasApi {
             retries: 0,
             success_rate,
             circuit_states,
-            is_offline: status.connectivity == network::ConnectivityState::Offline || any_open_circuit,
+            is_offline: status.connectivity == network::ConnectivityState::Offline
+                || any_open_circuit,
         }
     }
 

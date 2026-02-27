@@ -30,6 +30,7 @@ pub struct ProcessInfo {
 }
 
 /// Process manager for ComfyUI and other managed applications.
+#[derive(Clone)]
 pub struct ProcessManager {
     /// Root directory (launcher root or app root).
     root_dir: PathBuf,

@@ -1,6 +1,6 @@
 //! Process management methods on PumasApi.
 
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::models;
 use crate::process;
 use crate::PumasApi;
@@ -49,9 +49,17 @@ impl PumasApi {
 
     /// Stop all running ComfyUI processes.
     pub async fn stop_comfyui(&self) -> Result<bool> {
-        let mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.stop_all()
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(mgr) = process_manager {
+            tokio::task::spawn_blocking(move || mgr.stop_all())
+                .await
+                .map_err(|e| {
+                    PumasError::Other(format!("Failed to join stop_comfyui task: {}", e))
+                })?
         } else {
             Ok(false)
         }
@@ -69,9 +77,15 @@ impl PumasApi {
 
     /// Stop Ollama processes.
     pub async fn stop_ollama(&self) -> Result<bool> {
-        let mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.stop_ollama()
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(mgr) = process_manager {
+            tokio::task::spawn_blocking(move || mgr.stop_ollama())
+                .await
+                .map_err(|e| PumasError::Other(format!("Failed to join stop_ollama task: {}", e)))?
         } else {
             Ok(false)
         }
@@ -98,10 +112,21 @@ impl PumasApi {
             });
         }
 
-        let proc_mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref pm) = *proc_mgr_lock {
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(pm) = process_manager {
             let log_dir = self.launcher_data_dir().join("logs");
-            let result = pm.launch_ollama(tag, version_dir, Some(&log_dir));
+            let tag = tag.to_string();
+            let version_dir = version_dir.to_path_buf();
+
+            let result = tokio::task::spawn_blocking(move || {
+                pm.launch_ollama(&tag, &version_dir, Some(&log_dir))
+            })
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join launch_ollama task: {}", e)))?;
 
             Ok(models::LaunchResponse {
                 success: result.success,
@@ -131,9 +156,15 @@ impl PumasApi {
 
     /// Stop the Torch inference server.
     pub async fn stop_torch(&self) -> Result<bool> {
-        let mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref mgr) = *mgr_lock {
-            mgr.stop_torch()
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(mgr) = process_manager {
+            tokio::task::spawn_blocking(move || mgr.stop_torch())
+                .await
+                .map_err(|e| PumasError::Other(format!("Failed to join stop_torch task: {}", e)))?
         } else {
             Ok(false)
         }
@@ -160,10 +191,21 @@ impl PumasApi {
             });
         }
 
-        let proc_mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref pm) = *proc_mgr_lock {
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(pm) = process_manager {
             let log_dir = self.launcher_data_dir().join("logs");
-            let result = pm.launch_torch(tag, version_dir, Some(&log_dir));
+            let tag = tag.to_string();
+            let version_dir = version_dir.to_path_buf();
+
+            let result = tokio::task::spawn_blocking(move || {
+                pm.launch_torch(&tag, &version_dir, Some(&log_dir))
+            })
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join launch_torch task: {}", e)))?;
 
             Ok(models::LaunchResponse {
                 success: result.success,
@@ -202,10 +244,21 @@ impl PumasApi {
             });
         }
 
-        let proc_mgr_lock = self.primary().process_manager.read().await;
-        if let Some(ref pm) = *proc_mgr_lock {
+        let process_manager = {
+            let mgr_lock = self.primary().process_manager.read().await;
+            mgr_lock.clone()
+        };
+
+        if let Some(pm) = process_manager {
             let log_dir = self.launcher_data_dir().join("logs");
-            let result = pm.launch_version(tag, version_dir, Some(&log_dir));
+            let tag = tag.to_string();
+            let version_dir = version_dir.to_path_buf();
+
+            let result = tokio::task::spawn_blocking(move || {
+                pm.launch_version(&tag, &version_dir, Some(&log_dir))
+            })
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join launch_version task: {}", e)))?;
 
             Ok(models::LaunchResponse {
                 success: result.success,

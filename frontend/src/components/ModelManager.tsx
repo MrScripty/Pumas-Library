@@ -552,7 +552,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   const handleConvertModel = useCallback((modelId: string) => {
     logger.info('Convert model requested', { modelId });
-    // TODO: Open conversion dialog with format/quant options
+    // TODO(@jeremy): Open conversion dialog with format/quant options
   }, []);
 
   const handleImportClick = useCallback(async () => {

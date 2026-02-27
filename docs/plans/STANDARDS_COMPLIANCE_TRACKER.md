@@ -23,9 +23,9 @@ Reviewed documents:
 
 ## Baseline Findings
 1. `RPC bridge stubs` (architecture/layering): multiple RPC methods returned placeholders instead of delegating to core.
-2. `src README coverage` (documentation): 23 source directories currently missing `README.md`.
+2. `src README coverage` (documentation): 0 source directories currently missing `README.md` (closed; was 23 at baseline).
 3. `file size target` (coding): 53 code files exceed 500 lines.
-4. `TODO format` (documentation): 1 TODO comment missing owner/ticket/date context.
+4. `TODO format` (documentation): 0 TODO comments missing owner/ticket/date context (closed).
 
 ## Workstreams
 
@@ -48,35 +48,13 @@ Follow-up:
 ### WS-02: Source Directory README Compliance (Priority P1)
 Goal: Satisfy `DOCUMENTATION-STANDARDS.md` requirement that every directory under source roots has a `README.md`.
 
-Missing READMEs (23):
-1. `rust/crates/pumas-app-manager/src`
-2. `rust/crates/pumas-app-manager/src/custom_nodes`
-3. `rust/crates/pumas-core/src`
-4. `rust/crates/pumas-core/src/api`
-5. `rust/crates/pumas-core/src/model_library/hf`
-6. `rust/crates/pumas-rpc/src`
-7. `rust/crates/pumas-rpc/src/handlers`
-8. `rust/crates/pumas-rustler/src`
-9. `rust/crates/pumas-uniffi/src`
-10. `rust/crates/pumas-uniffi/src/bin`
-11. `frontend/src`
-12. `frontend/src/test`
-13. `frontend/src/utils`
-14. `frontend/src/api`
-15. `frontend/src/components`
-16. `frontend/src/components/ui`
-17. `frontend/src/components/app-panels`
-18. `frontend/src/components/app-panels/sections`
-19. `frontend/src/types`
-20. `frontend/src/config`
-21. `frontend/src/errors`
-22. `frontend/src/hooks`
-23. `electron/src`
+Missing READMEs (0):
+1. None.
 
 Plan:
-- [ ] Add minimal README set for Rust crate `src/` trees first.
-- [ ] Add README set for `frontend/src` subdirectories.
-- [ ] Add README for `electron/src`.
+- [x] Add minimal README set for Rust crate `src/` trees first.
+- [x] Add README set for `frontend/src` subdirectories.
+- [x] Add README for `electron/src`.
 
 ### WS-03: File Size Refactors (Priority P2)
 Goal: Move toward 500-line target from `CODING-STANDARDS.md`.
@@ -103,13 +81,16 @@ Plan:
 Goal: Ensure TODO comments include ticket/owner/date context per documentation standard.
 
 Open TODOs without context:
-1. `frontend/src/components/ModelManager.tsx:555`
+1. None.
 
 Plan:
-- [ ] Replace remaining TODOs with `TODO(#id)` or `TODO(@owner)` format.
+- [x] Replace remaining TODOs with `TODO(#id)` or `TODO(@owner)` format.
 
 ## Changelog
 ### 2026-02-27
 1. Created tracker and baseline audit.
 2. Implemented core-backed RPC bridge for remaining mapping/cross-filesystem stubs.
 3. Corrected response wrapping behavior for `refresh_model_mappings`.
+4. Added `README.md` coverage for all currently missing Rust crate `src` directories.
+5. Added `README.md` coverage for all currently missing frontend/electron `src` directories (WS-02 complete).
+6. Resolved TODO formatting non-compliance by adding owner context to remaining TODO.

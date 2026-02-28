@@ -92,12 +92,15 @@ jobs:
           - os: ubuntu-latest
             upload_dist: true
             rollup_native_base: linux-x64-gnu
+            lightningcss_native_base: linux-x64-gnu
           - os: windows-latest
             upload_dist: false
             rollup_native_base: win32-x64-msvc
+            lightningcss_native_base: win32-x64-msvc
           - os: macos-14
             upload_dist: false
             rollup_native_base: darwin-arm64
+            lightningcss_native_base: darwin-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -122,6 +125,14 @@ jobs:
         run: |
           ROLLUP_VERSION="$(node -p "require('./node_modules/rollup/package.json').version")"
           npm install --no-save "@rollup/rollup-${{ matrix.rollup_native_base }}@${ROLLUP_VERSION}"
+
+      - name: Ensure Lightning CSS native package is present
+        # Same npm optional dependency bug can skip Lightning CSS binaries too.
+        working-directory: ./frontend
+        shell: bash
+        run: |
+          LIGHTNINGCSS_VERSION="$(node -p "require('./node_modules/lightningcss/package.json').version")"
+          npm install --no-save "lightningcss-${{ matrix.lightningcss_native_base }}@${LIGHTNINGCSS_VERSION}"
 
       - name: Lint
         working-directory: ./frontend

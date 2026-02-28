@@ -234,14 +234,9 @@ async fn dispatch_method(
         // Inference Settings
         "get_inference_settings" => models::get_inference_settings(state, params).await,
         "update_inference_settings" => models::update_inference_settings(state, params).await,
-        "get_model_dependency_profiles" => {
-            models::get_model_dependency_profiles(state, params).await
+        "resolve_model_dependency_requirements" => {
+            models::resolve_model_dependency_requirements(state, params).await
         }
-        "resolve_model_dependency_plan" => {
-            models::resolve_model_dependency_plan(state, params).await
-        }
-        "check_model_dependencies" => models::check_model_dependencies(state, params).await,
-        "install_model_dependencies" => models::install_model_dependencies(state, params).await,
         "audit_dependency_pin_compliance" => {
             models::audit_dependency_pin_compliance(state, params).await
         }

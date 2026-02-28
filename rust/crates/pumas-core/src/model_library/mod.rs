@@ -43,9 +43,9 @@ mod watcher;
 
 pub use dependencies::{
     DependencyPinAuditBindingIssue, DependencyPinAuditProfileIssue, DependencyPinAuditReport,
-    DependencyState, ModelDependencyBindingPlan, ModelDependencyCheckResult,
-    ModelDependencyInstallResult, ModelDependencyPinSummary, ModelDependencyPlan,
-    ModelDependencyRequiredPin,
+    DependencyValidationError, DependencyValidationErrorScope, DependencyValidationState,
+    ModelDependencyBindingRequirements, ModelDependencyRequiredPin, ModelDependencyRequirement,
+    ModelDependencyRequirementsResolution, DEPENDENCY_CONTRACT_VERSION,
 };
 pub use download_store::DownloadPersistence;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};

@@ -18,10 +18,20 @@ static EXACT_PIN_RE: LazyLock<Regex> = LazyLock::new(|| {
 pub(crate) struct PythonPackagePin {
     pub name: String,
     pub version: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub index: Option<String>,
+    #[serde(default, alias = "index", skip_serializing_if = "Option::is_none")]
+    pub index_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_index_urls: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub markers: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_requires: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub platform_constraints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hashes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -208,8 +218,28 @@ fn parse_python_packages(
         pins.push(PythonPackagePin {
             name,
             version,
-            index: normalize_optional_string(obj.get("index")),
+            index_url: normalize_optional_string(obj.get("index_url").or_else(|| obj.get("index"))),
+            extra_index_urls: parse_optional_string_array(
+                obj.get("extra_index_urls"),
+                &format!(
+                    "{}.python_packages[{}].extra_index_urls",
+                    field_context, idx
+                ),
+            )?,
             markers: normalize_optional_string(obj.get("markers")),
+            python_requires: normalize_optional_string(obj.get("python_requires")),
+            platform_constraints: parse_optional_string_array(
+                obj.get("platform_constraints"),
+                &format!(
+                    "{}.python_packages[{}].platform_constraints",
+                    field_context, idx
+                ),
+            )?,
+            hashes: parse_optional_string_array(
+                obj.get("hashes"),
+                &format!("{}.python_packages[{}].hashes", field_context, idx),
+            )?,
+            source: normalize_optional_string(obj.get("source")),
         });
     }
 
@@ -223,6 +253,32 @@ fn parse_python_packages(
     }
 
     Ok(pins)
+}
+
+fn parse_optional_string_array(value: Option<&Value>, field: &str) -> Result<Vec<String>> {
+    let Some(raw) = value else {
+        return Ok(Vec::new());
+    };
+    let array = raw.as_array().ok_or_else(|| PumasError::Validation {
+        field: field.to_string(),
+        message: "invalid_dependency_pin: expected an array of strings".to_string(),
+    })?;
+    let mut values = Vec::new();
+    for (idx, item) in array.iter().enumerate() {
+        let parsed = item
+            .as_str()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(String::from)
+            .ok_or_else(|| PumasError::Validation {
+                field: format!("{}[{}]", field, idx),
+                message: "invalid_dependency_pin: expected a non-empty string".to_string(),
+            })?;
+        values.push(parsed);
+    }
+    values.sort();
+    values.dedup();
+    Ok(values)
 }
 
 fn parse_required_policy_packages(

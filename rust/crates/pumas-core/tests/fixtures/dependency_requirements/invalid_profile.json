@@ -1,0 +1,45 @@
+{
+  "model_id": "llm/llama/pytorch-unpinned",
+  "platform_key": "linux-x86_64",
+  "backend_key": "pytorch",
+  "dependency_contract_version": 1,
+  "validation_state": "invalid_profile",
+  "validation_errors": [
+    {
+      "code": "unpinned_dependency",
+      "scope": "binding",
+      "binding_id": "b-pt-1",
+      "field": "requirements",
+      "message": "Required dependency pins are missing for binding b-pt-1: torch"
+    }
+  ],
+  "bindings": [
+    {
+      "binding_id": "b-pt-1",
+      "profile_id": "pt-missing-torch",
+      "profile_version": 1,
+      "profile_hash": "h-pt-1",
+      "backend_key": "pytorch",
+      "platform_selector": "linux-x86_64",
+      "environment_kind": "python-venv",
+      "env_id": null,
+      "validation_state": "invalid_profile",
+      "validation_errors": [
+        {
+          "code": "unpinned_dependency",
+          "scope": "binding",
+          "binding_id": "b-pt-1",
+          "field": "requirements",
+          "message": "Required dependency pins are missing for binding b-pt-1: torch"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "python_package",
+          "name": "xformers",
+          "exact_pin": "==0.0.30"
+        }
+      ]
+    }
+  ]
+}

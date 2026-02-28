@@ -421,7 +421,8 @@ impl ModelLibrary {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        let result = self.index.search("", None, None, 10000, 0)?;
+        let mut result = self.index.search("", None, None, 10000, 0)?;
+        self.project_dependency_bindings_for_records(&mut result.models)?;
         Ok(result.models)
     }
 
@@ -447,7 +448,9 @@ impl ModelLibrary {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        self.index.search(query, None, None, limit, offset)
+        let mut result = self.index.search(query, None, None, limit, offset)?;
+        self.project_dependency_bindings_for_records(&mut result.models)?;
+        Ok(result)
     }
 
     /// Search with additional filters.
@@ -470,13 +473,15 @@ impl ModelLibrary {
         let model_types = model_type.map(|t| vec![t.to_string()]);
         let tags_owned = tags.map(|t| t.to_vec());
 
-        self.index.search(
+        let mut result = self.index.search(
             query,
-            model_types.as_ref().map(|v| v.as_slice()),
-            tags_owned.as_ref().map(|v| v.as_slice()),
+            model_types.as_deref(),
+            tags_owned.as_deref(),
             limit,
             offset,
-        )
+        )?;
+        self.project_dependency_bindings_for_records(&mut result.models)?;
+        Ok(result)
     }
 
     /// List models currently requiring metadata review.
@@ -786,6 +791,68 @@ impl ModelLibrary {
         Ok(())
     }
 
+    fn project_dependency_bindings_for_records(&self, records: &mut [ModelRecord]) -> Result<()> {
+        for record in records {
+            self.project_active_dependency_refs_value(&record.id, &mut record.metadata)?;
+        }
+        Ok(())
+    }
+
+    fn project_active_dependency_refs_value(
+        &self,
+        model_id: &str,
+        metadata: &mut Value,
+    ) -> Result<()> {
+        let active_bindings = self
+            .index()
+            .list_active_model_dependency_bindings(model_id, None)?;
+        if active_bindings.is_empty() {
+            return Ok(());
+        }
+
+        if !metadata.is_object() {
+            *metadata = Value::Object(Default::default());
+        }
+
+        let refs = active_bindings
+            .into_iter()
+            .map(|binding| {
+                let mut value = serde_json::Map::new();
+                value.insert("binding_id".to_string(), Value::String(binding.binding_id));
+                value.insert("profile_id".to_string(), Value::String(binding.profile_id));
+                value.insert(
+                    "profile_version".to_string(),
+                    Value::Number(binding.profile_version.into()),
+                );
+                value.insert(
+                    "binding_kind".to_string(),
+                    Value::String(binding.binding_kind),
+                );
+                value.insert(
+                    "backend_key".to_string(),
+                    binding
+                        .backend_key
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+                value.insert(
+                    "platform_selector".to_string(),
+                    binding
+                        .platform_selector
+                        .map(Value::String)
+                        .unwrap_or(Value::Null),
+                );
+                Value::Object(value)
+            })
+            .collect::<Vec<_>>();
+
+        let obj = metadata
+            .as_object_mut()
+            .ok_or_else(|| PumasError::Other("metadata must be a JSON object".to_string()))?;
+        obj.insert("dependency_bindings".to_string(), Value::Array(refs));
+        Ok(())
+    }
+
     fn load_baseline_metadata_value(&self, model_id: &str, model_dir: &Path) -> Result<Value> {
         if let Some(baseline_json) = self.index.get_baseline_metadata_json(model_id)? {
             return Ok(serde_json::from_str(&baseline_json)?);
@@ -939,8 +1006,10 @@ impl ModelLibrary {
     pub async fn get_stats(&self) -> Result<LibraryStats> {
         let all_models = self.list_models().await?;
 
-        let mut stats = LibraryStats::default();
-        stats.total_models = all_models.len();
+        let mut stats = LibraryStats {
+            total_models: all_models.len(),
+            ..LibraryStats::default()
+        };
 
         for model in all_models {
             // Count by type
@@ -1211,10 +1280,13 @@ impl ModelLibrary {
             return Ok(None);
         }
 
-        let cleaned_name = metadata
-            .cleaned_name
-            .clone()
-            .unwrap_or_else(|| model_id.split('/').last().unwrap_or(model_id).to_string());
+        let cleaned_name = metadata.cleaned_name.clone().unwrap_or_else(|| {
+            model_id
+                .split('/')
+                .next_back()
+                .unwrap_or(model_id)
+                .to_string()
+        });
 
         let new_dir = self.build_model_path(&new_type_str, &new_family, &cleaned_name);
         let new_model_id = format!(
@@ -2490,7 +2562,7 @@ fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
 
         if let Ok(meta) = entry.metadata() {
             let size = meta.len();
-            if largest.as_ref().map_or(true, |(_, s)| size > *s) {
+            if largest.as_ref().is_none_or(|(_, s)| size > *s) {
                 largest = Some((entry.path().to_path_buf(), size));
             }
         }
@@ -2565,10 +2637,13 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
     ModelRecord {
         id: model_id.to_string(),
         path: model_dir.display().to_string(),
-        cleaned_name: metadata
-            .cleaned_name
-            .clone()
-            .unwrap_or_else(|| model_id.split('/').last().unwrap_or(model_id).to_string()),
+        cleaned_name: metadata.cleaned_name.clone().unwrap_or_else(|| {
+            model_id
+                .split('/')
+                .next_back()
+                .unwrap_or(model_id)
+                .to_string()
+        }),
         official_name: metadata
             .official_name
             .clone()
@@ -3491,5 +3566,94 @@ mod tests {
             .iter()
             .any(|error| error.contains("metadata validation failed")));
         assert!(report.error_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_and_search_project_active_dependency_bindings_from_sqlite() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/projection-check";
+        let model_dir = library.build_model_path("llm", "llama", "projection-check");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("llama".to_string()),
+            cleaned_name: Some("projection-check".to_string()),
+            official_name: Some("Projection Check".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&crate::index::DependencyProfileRecord {
+                profile_id: "projection-profile".to_string(),
+                profile_version: 1,
+                profile_hash: Some("projection-hash".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1"}
+                    ]
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&crate::index::ModelDependencyBindingRecord {
+                binding_id: "projection-binding".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "projection-profile".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("pytorch".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let listed = library.list_models().await.unwrap();
+        let listed_model = listed.iter().find(|model| model.id == model_id).unwrap();
+        let listed_bindings = listed_model
+            .metadata
+            .get("dependency_bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(listed_bindings.len(), 1);
+        assert_eq!(
+            listed_bindings[0]
+                .get("binding_id")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            "projection-binding"
+        );
+
+        let searched = library.search_models("projection", 10, 0).await.unwrap();
+        let searched_model = searched
+            .models
+            .iter()
+            .find(|model| model.id == model_id)
+            .unwrap();
+        let searched_bindings = searched_model
+            .metadata
+            .get("dependency_bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(searched_bindings.len(), 1);
     }
 }

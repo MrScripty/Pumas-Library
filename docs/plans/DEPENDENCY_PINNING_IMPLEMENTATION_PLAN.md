@@ -86,7 +86,7 @@ Binding-level modality override shape:
 3. Allowed modality tokens are canonical lowercase modality tags already used by metadata v2 (`text`, `image`, `audio`, `video`, `document`, `mask`, `keypoints`, `action`, `3d`, `embedding`, `tabular`, `timeseries`, `rl-state`, `any`, `unknown`).
 
 If required-modality resolution is still unknown/ambiguous:
-1. Return `manual_intervention_required`
+1. Return `invalid_profile`
 2. Use deterministic code `modality_resolution_unknown`
 3. Do not infer required pins by guesswork
 
@@ -123,47 +123,46 @@ Canonical hash input rules:
 6. Serialize canonical JSON bytes and hash those bytes only
 
 ## Frozen Dependency Response Schema Snippet
-This snippet applies to `resolve_model_dependency_plan`, `check_model_dependencies`, and `install_model_dependencies` responses.
+This snippet applies to `resolve_model_dependency_requirements` responses.
 
 ```json
 {
-  "state": "ready | missing | failed | unknown_profile | manual_intervention_required | profile_conflict",
-  "error_code": "string | null",
-  "message": "string | null",
-  "missing_pins": [
-    "torch",
-    "torchvision"
+  "dependency_contract_version": 1,
+  "validation_state": "resolved | unknown_profile | invalid_profile | profile_conflict",
+  "validation_errors": [
+    {
+      "code": "string",
+      "scope": "top_level | binding",
+      "binding_id": "string | null",
+      "field": "string | null",
+      "message": "string"
+    }
   ],
   "bindings": [
     {
       "binding_id": "string",
-      "model_id": "string",
       "profile_id": "string",
       "profile_version": 2,
-      "binding_kind": "required_core | required_custom | optional_feature | optional_accel",
+      "profile_hash": "string | null",
       "backend_key": "string | null",
       "platform_selector": "string | null",
-      "state": "ready | missing | failed | unknown_profile | manual_intervention_required | profile_conflict",
-      "error_code": "string | null",
-      "message": "string | null",
-      "pin_summary": {
-        "pinned": true,
-        "required_count": 2,
-        "pinned_count": 2,
-        "missing_count": 0
-      },
-      "required_pins": [
+      "environment_kind": "string | null",
+      "env_id": "string | null",
+      "validation_state": "resolved | unknown_profile | invalid_profile | profile_conflict",
+      "validation_errors": [],
+      "requirements": [
         {
+          "kind": "python_package",
           "name": "torch",
-          "reasons": ["backend_required", "profile_policy_required"]
-        },
-        {
-          "name": "torchvision",
-          "reasons": ["modality_required"]
+          "exact_pin": "==2.5.1",
+          "index_url": "string (optional)",
+          "extra_index_urls": ["string (optional)"],
+          "markers": "string (optional)",
+          "python_requires": "string (optional)",
+          "platform_constraints": ["string (optional)"],
+          "hashes": ["sha256:<hex> (optional)"],
+          "source": "string (optional)"
         }
-      ],
-      "missing_pins": [
-        "torchvision"
       ]
     }
   ]
@@ -171,35 +170,28 @@ This snippet applies to `resolve_model_dependency_plan`, `check_model_dependenci
 ```
 
 Field rules:
-1. `pin_summary`, `required_pins`, and `missing_pins` are per-binding and always present.
-2. Top-level `missing_pins` is always present and follows required-only semantics.
-3. `pin_summary.pinned` means all required pins for that binding are present and exactly pinned (`==...`), regardless of optional packages.
-4. `required_pins[].reasons` is a deduped array (not a single value) so one pin can carry multiple requirement sources.
-5. Ordering is deterministic:
-   - `required_pins` sorted lexicographically by normalized `name`
-   - `required_pins[].reasons` sorted lexicographically
-   - per-binding `missing_pins` sorted lexicographically by normalized package name
-   - top-level `missing_pins` sorted lexicographically by normalized package name
-6. New fields may be added, existing fields are not renamed.
+1. Resolver output is declarative only; no readiness/install execution fields.
+2. `dependency_contract_version` is required and consumers must enforce exact match.
+3. Ordering is deterministic:
+   - bindings sorted by (`binding_kind`, `backend_key`, `platform_selector`, `profile_id`, `profile_version`, `priority`, `binding_id`)
+   - requirements sorted by (`kind`, `name`, `exact_pin`)
+   - validation errors sorted by (`binding_id`, `code`, `field`, `message`)
+4. Exact pin format is required (`==...`) for all required package entries.
+5. New fields may be added, existing fields are not renamed.
 
 ## Frozen Error-Code Table
 
 | Code | Surfaces | State | Trigger | Notes |
 |---|---|---|---|---|
-| `unpinned_dependency` | resolve/check/install (binding-level) | `manual_intervention_required` | Required pin absent or non-exact pin syntax | Deterministic across all three surfaces |
-| `modality_resolution_unknown` | resolve/check/install (binding-level) | `manual_intervention_required` | Cannot resolve modality using precedence rules | Distinct from unpinned syntax/content issues |
-| `unknown_profile` | resolve/check/install | `unknown_profile` | Binding references profile not resolvable/incomplete in SQLite | Existing behavior retained |
-| `profile_conflict` | resolve/check/install | `profile_conflict` | Conflicting profiles resolve to same deterministic environment target | Existing behavior retained |
-| `required_binding_omitted` | check/install | `failed` | Caller-provided `selected_binding_ids` omits required binding | Existing behavior retained |
+| `unpinned_dependency` | resolve requirements (binding-level) | `invalid_profile` | Required pin absent or non-exact pin syntax | Deterministic |
+| `modality_resolution_unknown` | resolve requirements (binding-level) | `invalid_profile` | Cannot resolve modality using precedence rules | Distinct from syntax/content issues |
+| `unknown_profile` | resolve requirements | `unknown_profile` | Binding references profile not resolvable/incomplete in SQLite | Existing behavior retained |
+| `profile_conflict` | resolve requirements | `profile_conflict` | Conflicting profiles resolve to same deterministic environment target | Existing behavior retained |
 | `dependency_profile_version_immutable` | profile write path | write rejected | Same `(profile_id, profile_version)` with different canonical hash | Hard fail; no upsert mutation |
 | `invalid_dependency_pin` | profile write path | write rejected | Invalid exact-version syntax or invalid required pin shape | Validation error with field path |
 
 Top-level aggregation rule:
-1. If any required binding has `unpinned_dependency` or `modality_resolution_unknown`, top-level state is `manual_intervention_required`.
-
-Install execution guardrail:
-1. For bindings in `manual_intervention_required` with `error_code` equal to `unpinned_dependency` or `modality_resolution_unknown`, no install command execution is allowed.
-2. These bindings are reported as skipped in install results with the same deterministic error code retained.
+1. If any required binding has `unpinned_dependency` or `modality_resolution_unknown`, top-level state is `invalid_profile`.
 
 ## Rollout Phases
 

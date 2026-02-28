@@ -767,7 +767,7 @@ mod tests {
     }
 
     fn create_mock_model_record(model_type: &str, subtype: &str, tags: Vec<&str>) -> ModelRecord {
-        let mut metadata = serde_json::json!({
+        let metadata = serde_json::json!({
             "subtype": subtype,
             "family": "test"
         });

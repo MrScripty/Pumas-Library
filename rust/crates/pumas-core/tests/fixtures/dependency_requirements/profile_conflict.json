@@ -1,0 +1,79 @@
+{
+  "model_id": "llm/llama/conflict",
+  "platform_key": "linux-x86_64",
+  "backend_key": "transformers",
+  "dependency_contract_version": 1,
+  "validation_state": "profile_conflict",
+  "validation_errors": [
+    {
+      "code": "profile_conflict",
+      "scope": "binding",
+      "binding_id": "b1",
+      "field": "profile_hash",
+      "message": "Conflicting profile hashes resolved to the same target environment"
+    },
+    {
+      "code": "profile_conflict",
+      "scope": "binding",
+      "binding_id": "b2",
+      "field": "profile_hash",
+      "message": "Conflicting profile hashes resolved to the same target environment"
+    }
+  ],
+  "bindings": [
+    {
+      "binding_id": "b1",
+      "profile_id": "p1",
+      "profile_version": 1,
+      "profile_hash": "h1",
+      "backend_key": "transformers",
+      "platform_selector": "linux-x86_64",
+      "environment_kind": "python-venv",
+      "env_id": null,
+      "validation_state": "profile_conflict",
+      "validation_errors": [
+        {
+          "code": "profile_conflict",
+          "scope": "binding",
+          "binding_id": "b1",
+          "field": "profile_hash",
+          "message": "Conflicting profile hashes resolved to the same target environment"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "python_package",
+          "name": "torch",
+          "exact_pin": "==2.4.0"
+        }
+      ]
+    },
+    {
+      "binding_id": "b2",
+      "profile_id": "p1",
+      "profile_version": 2,
+      "profile_hash": "h2",
+      "backend_key": "transformers",
+      "platform_selector": "linux-x86_64",
+      "environment_kind": "python-venv",
+      "env_id": null,
+      "validation_state": "profile_conflict",
+      "validation_errors": [
+        {
+          "code": "profile_conflict",
+          "scope": "binding",
+          "binding_id": "b2",
+          "field": "profile_hash",
+          "message": "Conflicting profile hashes resolved to the same target environment"
+        }
+      ],
+      "requirements": [
+        {
+          "kind": "python_package",
+          "name": "torch",
+          "exact_pin": "==2.5.0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
-//! Model-level dependency planning and validation.
+//! Model-level dependency requirement resolution and validation.
 //!
-//! This module provides deterministic dependency profile/binding resolution
+//! This module provides deterministic dependency requirement resolution
 //! using SQLite dependency tables.
 
 use crate::error::{PumasError, Result};
@@ -12,114 +12,98 @@ use crate::model_library::normalize_task_signature;
 use crate::models::ModelMetadata;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::{Path, PathBuf};
-use tokio::process::Command;
 
-/// Dependency lifecycle/check/install states.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub const DEPENDENCY_CONTRACT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
-pub enum DependencyState {
-    Ready,
-    Missing,
-    Failed,
+pub enum DependencyValidationState {
+    Resolved,
     UnknownProfile,
-    ManualInterventionRequired,
+    InvalidProfile,
     ProfileConflict,
 }
 
-/// Per-binding dependency pin summary.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum DependencyValidationErrorScope {
+    TopLevel,
+    Binding,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ModelDependencyPinSummary {
-    pub pinned: bool,
-    pub required_count: u32,
-    pub pinned_count: u32,
-    pub missing_count: u32,
+pub struct DependencyValidationError {
+    pub code: String,
+    pub scope: DependencyValidationErrorScope,
+    pub binding_id: Option<String>,
+    pub field: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ModelDependencyRequirement {
+    pub kind: String,
+    pub name: String,
+    pub exact_pin: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_index_urls: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub markers: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_requires: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub platform_constraints: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hashes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ModelDependencyBindingRequirements {
+    pub binding_id: String,
+    pub profile_id: String,
+    pub profile_version: i64,
+    pub profile_hash: Option<String>,
+    pub backend_key: Option<String>,
+    pub platform_selector: Option<String>,
+    pub environment_kind: Option<String>,
+    pub env_id: Option<String>,
+    pub validation_state: DependencyValidationState,
+    pub validation_errors: Vec<DependencyValidationError>,
+    pub requirements: Vec<ModelDependencyRequirement>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ModelDependencyRequirementsResolution {
+    pub model_id: String,
+    pub platform_key: String,
+    pub backend_key: Option<String>,
+    pub dependency_contract_version: u32,
+    pub validation_state: DependencyValidationState,
+    pub validation_errors: Vec<DependencyValidationError>,
+    pub bindings: Vec<ModelDependencyBindingRequirements>,
 }
 
 /// Per-binding required dependency pin with requirement provenance.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 #[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
 pub struct ModelDependencyRequiredPin {
     pub name: String,
     pub reasons: Vec<String>,
-}
-
-/// Per-binding resolution/check/install row.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ModelDependencyBindingPlan {
-    pub binding_id: String,
-    pub model_id: String,
-    pub profile_id: String,
-    pub profile_version: i64,
-    pub profile_hash: Option<String>,
-    pub environment_kind: String,
-    pub binding_kind: String,
-    pub backend_key: Option<String>,
-    pub platform_selector: Option<String>,
-    pub priority: i64,
-    pub env_id: String,
-    pub state: DependencyState,
-    pub error_code: Option<String>,
-    pub message: Option<String>,
-    pub pin_summary: ModelDependencyPinSummary,
-    pub required_pins: Vec<ModelDependencyRequiredPin>,
-    pub missing_pins: Vec<String>,
-}
-
-/// Deterministic dependency plan for a model/context.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ModelDependencyPlan {
-    pub model_id: String,
-    pub platform_key: String,
-    pub backend_key: Option<String>,
-    pub state: DependencyState,
-    pub error_code: Option<String>,
-    pub message: Option<String>,
-    pub missing_pins: Vec<String>,
-    pub bindings: Vec<ModelDependencyBindingPlan>,
-}
-
-/// Dependency check result for a model/context.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ModelDependencyCheckResult {
-    pub model_id: String,
-    pub platform_key: String,
-    pub backend_key: Option<String>,
-    pub state: DependencyState,
-    pub error_code: Option<String>,
-    pub message: Option<String>,
-    pub selected_binding_ids: Option<Vec<String>>,
-    pub missing_pins: Vec<String>,
-    pub bindings: Vec<ModelDependencyBindingPlan>,
-}
-
-/// Dependency install result for a model/context.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
-pub struct ModelDependencyInstallResult {
-    pub model_id: String,
-    pub platform_key: String,
-    pub backend_key: Option<String>,
-    pub state: DependencyState,
-    pub error_code: Option<String>,
-    pub message: Option<String>,
-    pub selected_binding_ids: Option<Vec<String>>,
-    pub attempted_binding_ids: Vec<String>,
-    pub installed_binding_ids: Vec<String>,
-    pub skipped_binding_ids: Vec<String>,
-    pub missing_pins: Vec<String>,
-    pub bindings: Vec<ModelDependencyBindingPlan>,
 }
 
 /// Per-binding audit finding for dependency pin compliance.
@@ -165,387 +149,202 @@ pub struct DependencyPinAuditReport {
 }
 
 impl ModelLibrary {
-    /// Return model dependency profiles/bindings for model + context.
-    pub async fn get_model_dependency_profiles(
+    /// Resolve deterministic dependency requirements for a model/context.
+    pub async fn resolve_model_dependency_requirements(
         &self,
         model_id: &str,
         platform_context: &str,
         backend_key: Option<&str>,
-    ) -> Result<Vec<ModelDependencyBindingPlan>> {
-        let plan = self
-            .resolve_model_dependency_plan(model_id, platform_context, backend_key)
-            .await?;
-        Ok(plan.bindings)
-    }
-
-    /// Resolve deterministic model dependency plan.
-    pub async fn resolve_model_dependency_plan(
-        &self,
-        model_id: &str,
-        platform_context: &str,
-        backend_key: Option<&str>,
-    ) -> Result<ModelDependencyPlan> {
+    ) -> Result<ModelDependencyRequirementsResolution> {
         ensure_model_exists(self, model_id)?;
 
         let platform_key = normalize_platform_key(platform_context);
+        let requested_backend_key = normalize_optional_token(backend_key);
         let model_metadata = self.get_effective_metadata(model_id)?;
-        let mut bindings = Vec::new();
-        for binding in self
+
+        let binding_rows = self
             .index()
-            .list_active_model_dependency_bindings(model_id, backend_key)?
+            .list_active_model_dependency_bindings(model_id, requested_backend_key.as_deref())?
             .into_iter()
-            .filter(|b| platform_selector_matches(b.platform_selector.as_deref(), &platform_key))
-        {
-            let profile_hash = binding.profile_hash.clone();
-            let environment_kind = binding
-                .environment_kind
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string());
-            let resolved_backend_key = binding
-                .backend_key
-                .clone()
-                .or_else(|| backend_key.map(String::from));
-            let env_id = build_env_id(
-                &environment_kind,
-                &binding.profile_id,
-                binding.profile_version,
-                profile_hash.as_deref(),
-                &platform_key,
-                resolved_backend_key.as_deref(),
-            );
+            .filter(|binding| {
+                platform_selector_matches(binding.platform_selector.as_deref(), &platform_key)
+            })
+            .collect::<Vec<_>>();
 
-            let mut plan = ModelDependencyBindingPlan {
-                binding_id: binding.binding_id.clone(),
-                model_id: binding.model_id,
-                profile_id: binding.profile_id.clone(),
-                profile_version: binding.profile_version,
-                profile_hash,
-                environment_kind: environment_kind.clone(),
-                binding_kind: binding.binding_kind.clone(),
-                backend_key: binding.backend_key.clone(),
-                platform_selector: binding.platform_selector,
-                priority: binding.priority,
-                env_id,
-                state: DependencyState::Ready,
-                error_code: None,
-                message: None,
-                pin_summary: ModelDependencyPinSummary::default(),
-                required_pins: Vec::new(),
-                missing_pins: Vec::new(),
-            };
-
-            if binding.spec_json.is_none() || plan.profile_hash.is_none() {
-                plan.state = DependencyState::UnknownProfile;
-                plan.error_code = Some("unknown_profile".to_string());
-                plan.message =
-                    Some("Dependency profile is missing or incomplete in SQLite".to_string());
-            } else if let Some(spec_json) = binding.spec_json.as_deref() {
-                let pin_eval = evaluate_binding_pin_requirements(
-                    &binding.binding_id,
-                    &binding.binding_kind,
-                    resolved_backend_key.as_deref(),
-                    &binding.profile_id,
-                    binding.profile_version,
-                    &environment_kind,
-                    spec_json,
-                    model_metadata.as_ref(),
+        if binding_rows.is_empty() {
+            let has_declared_refs = load_declared_binding_refs(self, model_id)?;
+            if has_declared_refs {
+                let error = top_level_error(
+                    "declared_bindings_unresolved",
+                    Some("dependency_bindings"),
+                    "Model declares dependency bindings, but no active bindings resolved for the requested context",
                 );
-                plan.pin_summary = pin_eval.pin_summary;
-                plan.required_pins = pin_eval.required_pins;
-                plan.missing_pins = pin_eval.missing_pins;
-                if let Some(code) = pin_eval.error_code {
-                    plan.state = DependencyState::ManualInterventionRequired;
-                    plan.error_code = Some(code);
-                    plan.message = pin_eval.message;
-                }
-            }
-
-            bindings.push(plan);
-        }
-
-        if bindings.is_empty() {
-            let declared_refs = load_declared_binding_refs(self, model_id)?;
-            if declared_refs {
-                return Ok(ModelDependencyPlan {
+                return Ok(ModelDependencyRequirementsResolution {
                     model_id: model_id.to_string(),
                     platform_key,
-                    backend_key: backend_key.map(String::from),
-                    state: DependencyState::UnknownProfile,
-                    error_code: Some("unknown_profile".to_string()),
-                    message: Some(
-                        "Model metadata references dependency bindings, but no active SQLite bindings were resolved"
-                            .to_string(),
-                    ),
-                    missing_pins: Vec::new(),
-                    bindings,
+                    backend_key: requested_backend_key,
+                    dependency_contract_version: DEPENDENCY_CONTRACT_VERSION,
+                    validation_state: DependencyValidationState::UnknownProfile,
+                    validation_errors: vec![error],
+                    bindings: Vec::new(),
                 });
             }
 
-            return Ok(ModelDependencyPlan {
+            return Ok(ModelDependencyRequirementsResolution {
                 model_id: model_id.to_string(),
                 platform_key,
-                backend_key: backend_key.map(String::from),
-                state: DependencyState::Ready,
-                error_code: None,
-                message: Some("No dependency bindings declared for model".to_string()),
-                missing_pins: Vec::new(),
-                bindings,
+                backend_key: requested_backend_key,
+                dependency_contract_version: DEPENDENCY_CONTRACT_VERSION,
+                validation_state: DependencyValidationState::Resolved,
+                validation_errors: Vec::new(),
+                bindings: Vec::new(),
             });
         }
 
-        let conflicting_binding_ids = detect_profile_conflicts(&bindings, &platform_key);
-        if !conflicting_binding_ids.is_empty() {
-            for binding in &mut bindings {
-                if conflicting_binding_ids.contains(&binding.binding_id) {
-                    binding.state = DependencyState::ProfileConflict;
-                    binding.error_code = Some("profile_conflict".to_string());
-                    binding.message = Some(
-                        "Different profile hashes resolved to the same deterministic environment id"
-                            .to_string(),
-                    );
-                }
+        let mut bindings = Vec::with_capacity(binding_rows.len());
+        for row in binding_rows {
+            let normalized_backend = normalize_optional_token(
+                row.backend_key
+                    .as_deref()
+                    .or(requested_backend_key.as_deref()),
+            );
+            let normalized_selector = normalize_optional_token(row.platform_selector.as_deref());
+            let normalized_environment_kind =
+                normalize_optional_token(row.environment_kind.as_deref());
+            let mut binding = ModelDependencyBindingRequirements {
+                binding_id: row.binding_id.clone(),
+                profile_id: row.profile_id.clone(),
+                profile_version: row.profile_version,
+                profile_hash: row.profile_hash.clone(),
+                backend_key: normalized_backend,
+                platform_selector: normalized_selector,
+                environment_kind: normalized_environment_kind,
+                env_id: None,
+                validation_state: DependencyValidationState::Resolved,
+                validation_errors: Vec::new(),
+                requirements: Vec::new(),
+            };
+
+            let Some(spec_json) = row.spec_json.as_deref() else {
+                binding.validation_state = DependencyValidationState::UnknownProfile;
+                push_binding_error(
+                    &mut binding,
+                    "unknown_profile",
+                    Some("spec_json"),
+                    "Dependency profile spec_json is missing for binding",
+                );
+                bindings.push(binding);
+                continue;
+            };
+
+            if binding.profile_hash.is_none() {
+                binding.validation_state = DependencyValidationState::UnknownProfile;
+                push_binding_error(
+                    &mut binding,
+                    "unknown_profile",
+                    Some("profile_hash"),
+                    "Dependency profile hash is missing for binding",
+                );
+                bindings.push(binding);
+                continue;
             }
-            return Ok(ModelDependencyPlan {
-                model_id: model_id.to_string(),
-                platform_key,
-                backend_key: backend_key.map(String::from),
-                state: DependencyState::ProfileConflict,
-                error_code: Some("profile_conflict".to_string()),
-                message: Some(
-                    "Conflicting profile hashes detected for identical env_id".to_string(),
-                ),
-                missing_pins: aggregate_missing_required_pins(&bindings),
-                bindings,
-            });
+
+            if binding.environment_kind.is_none() {
+                binding.validation_state = DependencyValidationState::UnknownProfile;
+                push_binding_error(
+                    &mut binding,
+                    "unknown_profile",
+                    Some("environment_kind"),
+                    "Dependency profile environment_kind is missing for binding",
+                );
+                bindings.push(binding);
+                continue;
+            }
+
+            let field_context = format!(
+                "dependency_profiles.{}:{}",
+                row.profile_id, row.profile_version
+            );
+            let parsed = match parse_and_canonicalize_profile_spec(
+                spec_json,
+                binding.environment_kind.as_deref().unwrap_or("unknown"),
+                &field_context,
+            ) {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    binding.validation_state = DependencyValidationState::InvalidProfile;
+                    push_binding_error(
+                        &mut binding,
+                        "invalid_profile",
+                        Some("spec_json"),
+                        &err.to_string(),
+                    );
+                    bindings.push(binding);
+                    continue;
+                }
+            };
+
+            let requirements = build_requirements(&parsed);
+            if let Err(err) = validate_requirement_duplicates(&requirements) {
+                binding.validation_state = DependencyValidationState::InvalidProfile;
+                push_binding_error(&mut binding, "invalid_profile", Some("requirements"), &err);
+                bindings.push(binding);
+                continue;
+            }
+
+            let pin_eval = evaluate_binding_pin_requirements(
+                &row.binding_id,
+                &row.binding_kind,
+                binding.backend_key.as_deref(),
+                &row.profile_id,
+                row.profile_version,
+                binding.environment_kind.as_deref().unwrap_or("unknown"),
+                spec_json,
+                model_metadata.as_ref(),
+            );
+
+            if let Some(code) = pin_eval.error_code {
+                binding.validation_state = DependencyValidationState::InvalidProfile;
+                push_binding_error(
+                    &mut binding,
+                    &code,
+                    Some("requirements"),
+                    pin_eval
+                        .message
+                        .as_deref()
+                        .unwrap_or("Dependency profile requirements are invalid"),
+                );
+            }
+
+            binding.requirements = requirements;
+            if binding.validation_state == DependencyValidationState::Resolved {
+                binding.env_id = Some(build_env_id(
+                    binding.environment_kind.as_deref().unwrap_or("unknown"),
+                    &binding.profile_id,
+                    binding.profile_version,
+                    binding.profile_hash.as_deref().unwrap_or("unknown"),
+                    &platform_key,
+                    binding.backend_key.as_deref(),
+                ));
+            }
+
+            bindings.push(binding);
         }
 
-        if bindings
-            .iter()
-            .any(|b| b.state == DependencyState::UnknownProfile)
-        {
-            return Ok(ModelDependencyPlan {
-                model_id: model_id.to_string(),
-                platform_key,
-                backend_key: backend_key.map(String::from),
-                state: DependencyState::UnknownProfile,
-                error_code: Some("unknown_profile".to_string()),
-                message: Some(
-                    "One or more dependency bindings reference unknown profiles".to_string(),
-                ),
-                missing_pins: aggregate_missing_required_pins(&bindings),
-                bindings,
-            });
-        }
+        mark_profile_conflicts(&mut bindings, &platform_key);
 
-        let plan_state = aggregate_dependency_state(DependencyState::Ready, &bindings);
-        let (plan_error_code, plan_message) = dependency_state_summary(&plan_state, &bindings);
+        let mut top_level_errors = collect_validation_errors_union(&bindings);
+        sort_validation_errors(&mut top_level_errors);
 
-        Ok(ModelDependencyPlan {
+        let validation_state = aggregate_validation_state(&bindings);
+
+        Ok(ModelDependencyRequirementsResolution {
             model_id: model_id.to_string(),
             platform_key,
-            backend_key: backend_key.map(String::from),
-            state: plan_state.clone(),
-            error_code: if plan_state == DependencyState::Ready {
-                None
-            } else {
-                plan_error_code
-            },
-            message: if plan_state == DependencyState::Ready {
-                None
-            } else {
-                plan_message
-            },
-            missing_pins: aggregate_missing_required_pins(&bindings),
-            bindings,
-        })
-    }
-
-    /// Check dependency readiness for model/context.
-    ///
-    /// Current implementation validates plan consistency and required-binding closure.
-    /// Environment probing/installation is not yet implemented, so resolved bindings
-    /// are reported as `missing`.
-    pub async fn check_model_dependencies(
-        &self,
-        model_id: &str,
-        platform_context: &str,
-        backend_key: Option<&str>,
-        selected_binding_ids: Option<Vec<String>>,
-    ) -> Result<ModelDependencyCheckResult> {
-        let plan = self
-            .resolve_model_dependency_plan(model_id, platform_context, backend_key)
-            .await?;
-
-        let mut bindings = plan.bindings.clone();
-        if let Some(ref selected) = selected_binding_ids {
-            let selected_set: HashSet<&str> = selected.iter().map(|s| s.as_str()).collect();
-            let missing_required = missing_required_binding_ids(&bindings, &selected_set);
-            if !missing_required.is_empty() {
-                for binding in &mut bindings {
-                    if missing_required.contains(&binding.binding_id) {
-                        binding.state = DependencyState::Failed;
-                        binding.error_code = Some("required_binding_omitted".to_string());
-                        binding.message =
-                            Some("Caller selection omitted a required binding".to_string());
-                    }
-                }
-                return Ok(ModelDependencyCheckResult {
-                    model_id: plan.model_id,
-                    platform_key: plan.platform_key,
-                    backend_key: plan.backend_key,
-                    state: DependencyState::Failed,
-                    error_code: Some("required_binding_omitted".to_string()),
-                    message: Some(format!(
-                        "Required bindings missing from selection: {}",
-                        missing_required.join(",")
-                    )),
-                    selected_binding_ids,
-                    missing_pins: aggregate_missing_required_pins(&bindings),
-                    bindings,
-                });
-            }
-        }
-
-        if plan.state == DependencyState::Ready {
-            let runtime_specs = load_runtime_specs(self, model_id, platform_context, backend_key)?;
-            let model_dir = self.library_root().join(model_id);
-            for binding in &mut bindings {
-                let Some(runtime_spec) = runtime_specs.get(&binding.binding_id) else {
-                    binding.state = DependencyState::UnknownProfile;
-                    binding.error_code = Some("unknown_profile".to_string());
-                    binding.message =
-                        Some("Dependency binding runtime profile could not be loaded".to_string());
-                    continue;
-                };
-
-                let outcome = probe_binding_readiness(runtime_spec, &model_dir).await;
-                binding.state = outcome.state;
-                binding.error_code = outcome.error_code;
-                binding.message = outcome.message;
-            }
-        }
-
-        let check_state = aggregate_dependency_state(plan.state.clone(), &bindings);
-        let (check_error_code, check_message) = dependency_state_summary(&check_state, &bindings);
-
-        Ok(ModelDependencyCheckResult {
-            model_id: plan.model_id,
-            platform_key: plan.platform_key,
-            backend_key: plan.backend_key,
-            state: check_state,
-            error_code: check_error_code.or(plan.error_code),
-            message: check_message.or(plan.message),
-            selected_binding_ids,
-            missing_pins: aggregate_missing_required_pins(&bindings),
-            bindings,
-        })
-    }
-
-    /// Return dependency install guidance for model/context.
-    ///
-    /// Pumas Core does not execute installers. It returns deterministic
-    /// readiness/installability data for consumer-managed environments.
-    pub async fn install_model_dependencies(
-        &self,
-        model_id: &str,
-        platform_context: &str,
-        backend_key: Option<&str>,
-        selected_binding_ids: Option<Vec<String>>,
-    ) -> Result<ModelDependencyInstallResult> {
-        let check = self
-            .check_model_dependencies(
-                model_id,
-                platform_context,
-                backend_key,
-                selected_binding_ids.clone(),
-            )
-            .await?;
-
-        let runtime_specs = load_runtime_specs(self, model_id, platform_context, backend_key)?;
-        let mut bindings = check.bindings.clone();
-
-        let selected_set = selected_binding_ids
-            .as_ref()
-            .map(|v| v.iter().cloned().collect::<HashSet<_>>());
-        let attempted = Vec::new();
-        let installed = Vec::new();
-        let mut skipped = Vec::new();
-        for binding in &mut bindings {
-            let selected = match selected_set.as_ref() {
-                Some(set) => set.contains(&binding.binding_id),
-                None => true,
-            };
-            if selected {
-                if matches!(
-                    binding.error_code.as_deref(),
-                    Some("unpinned_dependency" | "modality_resolution_unknown")
-                ) {
-                    // Guardrail: never execute install commands while required pin semantics
-                    // are unresolved for this binding.
-                    continue;
-                }
-
-                if binding.state != DependencyState::Missing {
-                    continue;
-                }
-
-                let Some(runtime_spec) = runtime_specs.get(&binding.binding_id) else {
-                    binding.state = DependencyState::UnknownProfile;
-                    binding.error_code = Some("unknown_profile".to_string());
-                    binding.message =
-                        Some("Dependency binding runtime profile could not be loaded".to_string());
-                    continue;
-                };
-
-                let install_commands = runtime_spec.install_commands.clone().unwrap_or_default();
-                if install_commands.is_empty() {
-                    binding.state = DependencyState::ManualInterventionRequired;
-                    binding.error_code = Some("manual_intervention_required".to_string());
-                    binding.message = Some(
-                        "No install commands are defined; consumer must install manually"
-                            .to_string(),
-                    );
-                    continue;
-                }
-
-                binding.state = DependencyState::ManualInterventionRequired;
-                binding.error_code = Some("installation_delegated_to_consumer".to_string());
-                let first = &install_commands[0];
-                let source = first.source_url.as_deref().unwrap_or("unknown-source");
-                let source_ref = first.source_ref.as_deref().unwrap_or("unknown-ref");
-                binding.message = Some(format!(
-                    "Pumas does not execute install commands; consumer should run '{}' {:?} (and {} total command(s), source={} ref={})",
-                    first.program,
-                    first.args,
-                    install_commands.len(),
-                    source,
-                    source_ref
-                ));
-            } else {
-                skipped.push(binding.binding_id.clone());
-            }
-        }
-
-        let aggregate_seed = if check.state == DependencyState::Missing {
-            DependencyState::Ready
-        } else {
-            check.state.clone()
-        };
-        let final_state = aggregate_dependency_state(aggregate_seed, &bindings);
-        let (final_error_code, final_message) = dependency_state_summary(&final_state, &bindings);
-
-        Ok(ModelDependencyInstallResult {
-            model_id: check.model_id,
-            platform_key: check.platform_key,
-            backend_key: check.backend_key,
-            state: final_state,
-            error_code: final_error_code.or(check.error_code),
-            message: final_message.or(check.message),
-            selected_binding_ids: check.selected_binding_ids,
-            attempted_binding_ids: attempted,
-            installed_binding_ids: installed,
-            skipped_binding_ids: skipped,
-            missing_pins: aggregate_missing_required_pins(&bindings),
+            backend_key: requested_backend_key,
+            dependency_contract_version: DEPENDENCY_CONTRACT_VERSION,
+            validation_state,
+            validation_errors: top_level_errors,
             bindings,
         })
     }
@@ -661,64 +460,6 @@ impl ModelLibrary {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct DependencyProfileSpec {
-    #[serde(default)]
-    probes: Vec<DependencyProbeSpec>,
-    #[serde(default)]
-    install: Option<DependencyInstallSpec>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct DependencyInstallSpec {
-    #[serde(default)]
-    commands: Vec<DependencyCommandSpec>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-enum DependencyProbeSpec {
-    Command {
-        program: String,
-        #[serde(default)]
-        args: Vec<String>,
-        #[serde(default)]
-        success_exit_codes: Option<Vec<i32>>,
-    },
-    PathExists {
-        path: String,
-    },
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "snake_case")]
-struct DependencyCommandSpec {
-    program: String,
-    #[serde(default)]
-    args: Vec<String>,
-    #[serde(default)]
-    source_url: Option<String>,
-    #[serde(default)]
-    source_ref: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-struct BindingRuntimeSpec {
-    binding_id: String,
-    profile_id: String,
-    profile_version: i64,
-    probes: Vec<DependencyProbeSpec>,
-    install_commands: Option<Vec<DependencyCommandSpec>>,
-}
-
-struct BindingProbeOutcome {
-    state: DependencyState,
-    error_code: Option<String>,
-    message: Option<String>,
-}
-
 const PIN_REASON_BACKEND_REQUIRED: &str = "backend_required";
 const PIN_REASON_MODALITY_REQUIRED: &str = "modality_required";
 const PIN_REASON_PROFILE_POLICY_REQUIRED: &str = "profile_policy_required";
@@ -727,7 +468,6 @@ const PIN_ERROR_UNPINNED_DEPENDENCY: &str = "unpinned_dependency";
 const PIN_ERROR_MODALITY_RESOLUTION_UNKNOWN: &str = "modality_resolution_unknown";
 
 pub(super) struct BindingPinEvaluation {
-    pub pin_summary: ModelDependencyPinSummary,
     pub required_pins: Vec<ModelDependencyRequiredPin>,
     pub missing_pins: Vec<String>,
     pub error_code: Option<String>,
@@ -739,6 +479,7 @@ enum ModalityResolution {
     Unknown(String),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn evaluate_binding_pin_requirements(
     binding_id: &str,
     binding_kind: &str,
@@ -755,12 +496,6 @@ pub(super) fn evaluate_binding_pin_requirements(
             Ok(parsed) => parsed,
             Err(err) => {
                 return BindingPinEvaluation {
-                    pin_summary: ModelDependencyPinSummary {
-                        pinned: false,
-                        required_count: 0,
-                        pinned_count: 0,
-                        missing_count: 0,
-                    },
                     required_pins: Vec::new(),
                     missing_pins: Vec::new(),
                     error_code: Some(PIN_ERROR_UNPINNED_DEPENDENCY.to_string()),
@@ -781,10 +516,7 @@ pub(super) fn evaluate_binding_pin_requirements(
         );
     }
 
-    let normalized_backend = backend_key
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .map(str::to_lowercase);
+    let normalized_backend = normalize_optional_token(backend_key);
     let mut modality_unknown_message = None;
     if normalized_backend.as_deref() == Some("pytorch") {
         register_required_pin(
@@ -836,11 +568,6 @@ pub(super) fn evaluate_binding_pin_requirements(
         .collect::<Vec<_>>();
     missing_pins.sort();
 
-    let required_count = required_pins.len() as u32;
-    let missing_count = missing_pins.len() as u32;
-    let pinned_count = required_count.saturating_sub(missing_count);
-    let pinned = missing_pins.is_empty() && modality_unknown_message.is_none();
-
     let mut error_code = None;
     let mut message = None;
     if let Some(modality_message) = modality_unknown_message {
@@ -858,12 +585,6 @@ pub(super) fn evaluate_binding_pin_requirements(
     }
 
     BindingPinEvaluation {
-        pin_summary: ModelDependencyPinSummary {
-            pinned,
-            required_count,
-            pinned_count,
-            missing_count,
-        },
         required_pins,
         missing_pins,
         error_code,
@@ -962,6 +683,53 @@ fn classify_modalities(
     ModalityResolution::Known(combined)
 }
 
+fn build_requirements(parsed: &ParsedDependencyPinSpec) -> Vec<ModelDependencyRequirement> {
+    let mut requirements = parsed
+        .python_packages
+        .iter()
+        .map(|package| ModelDependencyRequirement {
+            kind: "python_package".to_string(),
+            name: package.name.clone(),
+            exact_pin: package.version.clone(),
+            index_url: normalize_url(package.index_url.clone()),
+            extra_index_urls: normalize_urls(package.extra_index_urls.clone()),
+            markers: normalize_optional_owned(package.markers.clone()),
+            python_requires: normalize_optional_owned(package.python_requires.clone()),
+            platform_constraints: normalize_string_vec(package.platform_constraints.clone()),
+            hashes: normalize_hashes(package.hashes.clone()),
+            source: normalize_optional_owned(package.source.clone()),
+        })
+        .collect::<Vec<_>>();
+
+    requirements.sort_by(|a, b| {
+        a.kind
+            .cmp(&b.kind)
+            .then_with(|| a.name.cmp(&b.name))
+            .then_with(|| a.exact_pin.cmp(&b.exact_pin))
+    });
+    requirements
+}
+
+fn validate_requirement_duplicates(
+    requirements: &[ModelDependencyRequirement],
+) -> std::result::Result<(), String> {
+    let mut pins_by_key = HashMap::<(String, String), String>::new();
+    for requirement in requirements {
+        let key = (requirement.kind.clone(), requirement.name.clone());
+        if let Some(existing_pin) = pins_by_key.get(&key) {
+            if existing_pin != &requirement.exact_pin {
+                return Err(format!(
+                    "duplicate requirement '{}' has conflicting exact pins ('{}' vs '{}')",
+                    requirement.name, existing_pin, requirement.exact_pin
+                ));
+            }
+        } else {
+            pins_by_key.insert(key, requirement.exact_pin.clone());
+        }
+    }
+    Ok(())
+}
+
 fn ensure_model_exists(library: &ModelLibrary, model_id: &str) -> Result<()> {
     let model_dir = library.library_root().join(model_id);
     if model_dir.exists() {
@@ -992,237 +760,254 @@ fn normalize_platform_key(platform_context: &str) -> String {
     }
 }
 
-fn load_runtime_specs(
-    library: &ModelLibrary,
-    model_id: &str,
-    platform_context: &str,
-    backend_key: Option<&str>,
-) -> Result<HashMap<String, BindingRuntimeSpec>> {
-    let platform_key = normalize_platform_key(platform_context);
-    let records = library
-        .index()
-        .list_active_model_dependency_bindings(model_id, backend_key)?;
+fn normalize_optional_token(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_lowercase)
+}
 
-    let mut specs = HashMap::new();
-    for record in records.into_iter().filter(|record| {
-        platform_selector_matches(record.platform_selector.as_deref(), &platform_key)
+fn normalize_optional_owned(value: Option<String>) -> Option<String> {
+    value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn normalize_string_vec(values: Vec<String>) -> Vec<String> {
+    let mut normalized = values
+        .into_iter()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+fn normalize_urls(values: Vec<String>) -> Vec<String> {
+    let mut normalized = values
+        .into_iter()
+        .filter_map(|v| normalize_url(Some(v)))
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+fn normalize_hashes(values: Vec<String>) -> Vec<String> {
+    let mut normalized = values
+        .into_iter()
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.starts_with("sha256:") || value.contains(':') {
+                value
+            } else {
+                format!("sha256:{}", value)
+            }
+        })
+        .collect::<Vec<_>>();
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+fn normalize_url(value: Option<String>) -> Option<String> {
+    let raw = normalize_optional_owned(value)?;
+
+    let Some((scheme, remainder)) = raw.split_once("://") else {
+        return Some(raw.trim_end_matches('/').to_string());
+    };
+
+    let scheme = scheme.to_lowercase();
+    let mut split_idx = remainder.len();
+    for delimiter in ['/', '?', '#'] {
+        if let Some(idx) = remainder.find(delimiter) {
+            split_idx = split_idx.min(idx);
+        }
+    }
+
+    let (authority, suffix) = remainder.split_at(split_idx);
+    let authority = normalize_authority(authority);
+
+    let normalized_suffix = if suffix.is_empty() {
+        String::new()
+    } else if let Some(query_or_fragment_start) = suffix.find(['?', '#']) {
+        let (path_part, query_fragment) = suffix.split_at(query_or_fragment_start);
+        format!("{}{}", path_part.trim_end_matches('/'), query_fragment)
+    } else {
+        suffix.trim_end_matches('/').to_string()
+    };
+
+    Some(format!("{}://{}{}", scheme, authority, normalized_suffix))
+}
+
+fn normalize_authority(authority: &str) -> String {
+    let Some((userinfo, host_port)) = authority.rsplit_once('@') else {
+        return authority.to_lowercase();
+    };
+    format!("{}@{}", userinfo, host_port.to_lowercase())
+}
+
+fn top_level_error(code: &str, field: Option<&str>, message: &str) -> DependencyValidationError {
+    DependencyValidationError {
+        code: code.to_string(),
+        scope: DependencyValidationErrorScope::TopLevel,
+        binding_id: None,
+        field: field.map(String::from),
+        message: message.to_string(),
+    }
+}
+
+fn push_binding_error(
+    binding: &mut ModelDependencyBindingRequirements,
+    code: &str,
+    field: Option<&str>,
+    message: &str,
+) {
+    let error = DependencyValidationError {
+        code: code.to_string(),
+        scope: DependencyValidationErrorScope::Binding,
+        binding_id: Some(binding.binding_id.clone()),
+        field: field.map(String::from),
+        message: message.to_string(),
+    };
+
+    if !binding.validation_errors.iter().any(|existing| {
+        existing.code == error.code
+            && existing.scope == error.scope
+            && existing.binding_id == error.binding_id
+            && existing.field == error.field
+            && existing.message == error.message
     }) {
-        let Some(spec_json) = record.spec_json.as_ref() else {
+        binding.validation_errors.push(error);
+    }
+
+    sort_validation_errors(&mut binding.validation_errors);
+}
+
+fn sort_validation_errors(errors: &mut [DependencyValidationError]) {
+    errors.sort_by(|a, b| {
+        a.binding_id
+            .as_deref()
+            .unwrap_or("")
+            .cmp(b.binding_id.as_deref().unwrap_or(""))
+            .then_with(|| a.code.cmp(&b.code))
+            .then_with(|| {
+                a.field
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.field.as_deref().unwrap_or(""))
+            })
+            .then_with(|| a.message.cmp(&b.message))
+    });
+}
+
+fn collect_validation_errors_union(
+    bindings: &[ModelDependencyBindingRequirements],
+) -> Vec<DependencyValidationError> {
+    let mut seen = HashSet::<(
+        String,
+        DependencyValidationErrorScope,
+        String,
+        String,
+        String,
+    )>::new();
+    let mut errors = Vec::new();
+
+    for binding in bindings {
+        for error in &binding.validation_errors {
+            let key = (
+                error.binding_id.clone().unwrap_or_default(),
+                error.scope,
+                error.code.clone(),
+                error.field.clone().unwrap_or_default(),
+                error.message.clone(),
+            );
+            if seen.insert(key) {
+                errors.push(error.clone());
+            }
+        }
+    }
+
+    errors
+}
+
+fn aggregate_validation_state(
+    bindings: &[ModelDependencyBindingRequirements],
+) -> DependencyValidationState {
+    let mut state = DependencyValidationState::Resolved;
+    for binding in bindings {
+        state = match (
+            state_precedence(state),
+            state_precedence(binding.validation_state),
+        ) {
+            (current, next) if next > current => binding.validation_state,
+            _ => state,
+        };
+    }
+    state
+}
+
+fn state_precedence(state: DependencyValidationState) -> u8 {
+    match state {
+        DependencyValidationState::Resolved => 0,
+        DependencyValidationState::UnknownProfile => 1,
+        DependencyValidationState::InvalidProfile => 2,
+        DependencyValidationState::ProfileConflict => 3,
+    }
+}
+
+fn mark_profile_conflicts(bindings: &mut [ModelDependencyBindingRequirements], platform_key: &str) {
+    let mut by_target: HashMap<String, String> = HashMap::new();
+    let mut conflict_binding_ids = HashSet::new();
+
+    for binding in bindings.iter() {
+        let Some(profile_hash) = binding.profile_hash.as_deref() else {
             continue;
         };
-
-        let parsed: DependencyProfileSpec =
-            serde_json::from_str(spec_json).map_err(|err| PumasError::Validation {
-                field: format!(
-                    "dependency_profiles.{}:{}",
-                    record.profile_id, record.profile_version
-                ),
-                message: format!("invalid spec_json: {}", err),
-            })?;
-
-        specs.insert(
-            record.binding_id.clone(),
-            BindingRuntimeSpec {
-                binding_id: record.binding_id,
-                profile_id: record.profile_id,
-                profile_version: record.profile_version,
-                probes: parsed.probes,
-                install_commands: parsed.install.map(|install| install.commands),
-            },
+        let target_key = format!(
+            "{}:{}:{}",
+            binding.environment_kind.as_deref().unwrap_or("unknown"),
+            platform_key,
+            binding.backend_key.as_deref().unwrap_or("any")
         );
-    }
 
-    Ok(specs)
-}
-
-async fn probe_binding_readiness(
-    runtime_spec: &BindingRuntimeSpec,
-    model_dir: &Path,
-) -> BindingProbeOutcome {
-    if runtime_spec.probes.is_empty() {
-        return BindingProbeOutcome {
-            state: DependencyState::Missing,
-            error_code: Some("probe_not_defined".to_string()),
-            message: Some("No dependency probes are defined for this profile".to_string()),
-        };
-    }
-
-    for probe in &runtime_spec.probes {
-        match run_probe(probe, model_dir).await {
-            Ok(true) => {}
-            Ok(false) => {
-                return BindingProbeOutcome {
-                    state: DependencyState::Missing,
-                    error_code: Some("probe_failed".to_string()),
-                    message: Some(format!(
-                        "Dependency probe failed for {}:{} (binding {})",
-                        runtime_spec.profile_id,
-                        runtime_spec.profile_version,
-                        runtime_spec.binding_id
-                    )),
-                };
+        if let Some(existing_hash) = by_target.get(&target_key) {
+            if existing_hash != profile_hash {
+                conflict_binding_ids.insert(binding.binding_id.clone());
+                for prior in bindings.iter() {
+                    let prior_target_key = format!(
+                        "{}:{}:{}",
+                        prior.environment_kind.as_deref().unwrap_or("unknown"),
+                        platform_key,
+                        prior.backend_key.as_deref().unwrap_or("any")
+                    );
+                    if prior_target_key == target_key {
+                        conflict_binding_ids.insert(prior.binding_id.clone());
+                    }
+                }
             }
-            Err(message) => {
-                return BindingProbeOutcome {
-                    state: DependencyState::ManualInterventionRequired,
-                    error_code: Some("manual_intervention_required".to_string()),
-                    message: Some(message),
-                };
-            }
+        } else {
+            by_target.insert(target_key, profile_hash.to_string());
         }
     }
 
-    BindingProbeOutcome {
-        state: DependencyState::Ready,
-        error_code: None,
-        message: Some("Dependency probes passed".to_string()),
+    if conflict_binding_ids.is_empty() {
+        return;
     }
-}
 
-async fn run_probe(
-    probe: &DependencyProbeSpec,
-    model_dir: &Path,
-) -> std::result::Result<bool, String> {
-    match probe {
-        DependencyProbeSpec::PathExists { path } => {
-            let resolved = resolve_probe_path(model_dir, path);
-            Ok(resolved.exists())
+    for binding in bindings.iter_mut() {
+        if conflict_binding_ids.contains(&binding.binding_id) {
+            binding.validation_state = DependencyValidationState::ProfileConflict;
+            binding.env_id = None;
+            push_binding_error(
+                binding,
+                "profile_conflict",
+                Some("profile_hash"),
+                "Conflicting profile hashes resolved to the same target environment",
+            );
         }
-        DependencyProbeSpec::Command {
-            program,
-            args,
-            success_exit_codes,
-        } => run_command_probe(program, args, success_exit_codes.as_ref()).await,
-    }
-}
-
-async fn run_command_probe(
-    program: &str,
-    args: &[String],
-    success_exit_codes: Option<&Vec<i32>>,
-) -> std::result::Result<bool, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .await
-        .map_err(|err| format!("failed to execute probe command {}: {}", program, err))?;
-
-    let code = output.status.code().unwrap_or(-1);
-    let allowed_codes = success_exit_codes.cloned().unwrap_or_else(|| vec![0]);
-    Ok(allowed_codes.contains(&code))
-}
-
-fn resolve_probe_path(model_dir: &Path, path: &str) -> PathBuf {
-    let raw = PathBuf::from(path);
-    if raw.is_absolute() {
-        raw
-    } else {
-        model_dir.join(raw)
-    }
-}
-
-fn aggregate_dependency_state(
-    initial_state: DependencyState,
-    bindings: &[ModelDependencyBindingPlan],
-) -> DependencyState {
-    if initial_state != DependencyState::Ready {
-        return initial_state;
-    }
-
-    if bindings
-        .iter()
-        .any(|binding| binding.state == DependencyState::Failed)
-    {
-        return DependencyState::Failed;
-    }
-    if bindings
-        .iter()
-        .any(|binding| binding.state == DependencyState::ManualInterventionRequired)
-    {
-        return DependencyState::ManualInterventionRequired;
-    }
-    if bindings
-        .iter()
-        .any(|binding| binding.state == DependencyState::UnknownProfile)
-    {
-        return DependencyState::UnknownProfile;
-    }
-    if bindings
-        .iter()
-        .any(|binding| binding.state == DependencyState::ProfileConflict)
-    {
-        return DependencyState::ProfileConflict;
-    }
-    if bindings
-        .iter()
-        .any(|binding| binding.state == DependencyState::Missing)
-    {
-        return DependencyState::Missing;
-    }
-
-    DependencyState::Ready
-}
-
-fn dependency_state_summary(
-    state: &DependencyState,
-    bindings: &[ModelDependencyBindingPlan],
-) -> (Option<String>, Option<String>) {
-    match state {
-        DependencyState::Ready => (None, Some("All dependency bindings are ready".to_string())),
-        DependencyState::Missing => (
-            Some("missing_dependencies".to_string()),
-            Some(format!(
-                "{} dependency bindings are missing",
-                bindings
-                    .iter()
-                    .filter(|binding| binding.state == DependencyState::Missing)
-                    .count()
-            )),
-        ),
-        DependencyState::Failed => (
-            Some("dependency_install_failed".to_string()),
-            Some("One or more dependency bindings failed".to_string()),
-        ),
-        DependencyState::UnknownProfile => (
-            Some("unknown_profile".to_string()),
-            Some("One or more dependency profiles are unknown".to_string()),
-        ),
-        DependencyState::ManualInterventionRequired => {
-            if bindings.iter().any(|binding| {
-                is_required_binding_kind(&binding.binding_kind)
-                    && binding.error_code.as_deref() == Some(PIN_ERROR_MODALITY_RESOLUTION_UNKNOWN)
-            }) {
-                return (
-                    Some(PIN_ERROR_MODALITY_RESOLUTION_UNKNOWN.to_string()),
-                    Some(
-                        "Modality requirements could not be resolved for one or more required dependency bindings"
-                            .to_string(),
-                    ),
-                );
-            }
-
-            if bindings.iter().any(|binding| {
-                is_required_binding_kind(&binding.binding_kind)
-                    && binding.error_code.as_deref() == Some(PIN_ERROR_UNPINNED_DEPENDENCY)
-            }) {
-                return (
-                    Some(PIN_ERROR_UNPINNED_DEPENDENCY.to_string()),
-                    Some(
-                        "One or more required dependency bindings are missing exact required pins"
-                            .to_string(),
-                    ),
-                );
-            }
-
-            (
-                Some("manual_intervention_required".to_string()),
-                Some("Dependency configuration requires manual intervention".to_string()),
-            )
-        }
-        DependencyState::ProfileConflict => (
-            Some("profile_conflict".to_string()),
-            Some("Dependency profile conflict detected".to_string()),
-        ),
     }
 }
 
@@ -1244,7 +1029,7 @@ fn build_env_id(
     environment_kind: &str,
     profile_id: &str,
     profile_version: i64,
-    profile_hash: Option<&str>,
+    profile_hash: &str,
     platform_key: &str,
     backend_key: Option<&str>,
 ) -> String {
@@ -1253,74 +1038,10 @@ fn build_env_id(
         environment_kind,
         profile_id,
         profile_version,
-        profile_hash.unwrap_or("unknown"),
+        profile_hash,
         platform_key,
         backend_key.unwrap_or("any"),
     )
-}
-
-fn detect_profile_conflicts(
-    bindings: &[ModelDependencyBindingPlan],
-    platform_key: &str,
-) -> HashSet<String> {
-    let mut by_target: HashMap<String, String> = HashMap::new();
-    let mut conflicts = HashSet::new();
-    for binding in bindings {
-        let hash = binding.profile_hash.as_deref().unwrap_or("unknown");
-        let target_key = format!(
-            "{}:{}:{}",
-            binding.environment_kind,
-            platform_key,
-            binding.backend_key.as_deref().unwrap_or("any")
-        );
-
-        if let Some(existing_hash) = by_target.get(&target_key) {
-            if existing_hash != hash {
-                conflicts.insert(binding.binding_id.clone());
-                for prior in bindings {
-                    let prior_target_key = format!(
-                        "{}:{}:{}",
-                        prior.environment_kind,
-                        platform_key,
-                        prior.backend_key.as_deref().unwrap_or("any")
-                    );
-                    if prior_target_key == target_key {
-                        conflicts.insert(prior.binding_id.clone());
-                    }
-                }
-            }
-        } else {
-            by_target.insert(target_key, hash.to_string());
-        }
-    }
-    conflicts
-}
-
-fn missing_required_binding_ids(
-    bindings: &[ModelDependencyBindingPlan],
-    selected_binding_ids: &HashSet<&str>,
-) -> Vec<String> {
-    let mut missing = bindings
-        .iter()
-        .filter(|binding| is_required_binding_kind(&binding.binding_kind))
-        .filter(|binding| !selected_binding_ids.contains(binding.binding_id.as_str()))
-        .map(|binding| binding.binding_id.clone())
-        .collect::<Vec<_>>();
-    missing.sort();
-    missing
-}
-
-fn aggregate_missing_required_pins(bindings: &[ModelDependencyBindingPlan]) -> Vec<String> {
-    let mut missing = BTreeSet::new();
-    for binding in bindings
-        .iter()
-        .filter(|binding| is_required_binding_kind(&binding.binding_kind))
-    {
-        for pin in &binding.missing_pins {
-            missing.insert(pin.clone());
-        }
-    }
-    missing.into_iter().collect()
 }
 
 fn is_required_binding_kind(binding_kind: &str) -> bool {
@@ -1356,10 +1077,31 @@ mod tests {
         let model_dir = library.library_root().join(model_id);
         std::fs::create_dir_all(&model_dir).unwrap();
         let metadata = ModelMetadata {
+            schema_version: Some(2),
             model_id: Some(model_id.to_string()),
             model_type: Some("llm".to_string()),
             family: Some("llama".to_string()),
             official_name: Some("Test".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+    }
+
+    async fn create_model_with_declared_bindings(library: &ModelLibrary, model_id: &str) {
+        let model_dir = library.library_root().join(model_id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            dependency_bindings: Some(vec![crate::models::DependencyBindingRef {
+                binding_id: Some("declared-only".to_string()),
+                profile_id: Some("p1".to_string()),
+                profile_version: Some(1),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some("pytorch".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+            }]),
             ..Default::default()
         };
         library.save_metadata(&model_dir, &metadata).await.unwrap();
@@ -1395,21 +1137,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_plan_is_ready_when_no_bindings_declared() {
+    async fn resolve_requirements_is_resolved_when_no_bindings_declared() {
         let (_tmp, library) = setup_library().await;
         create_model(&library, "llm/llama/no-bindings").await;
 
-        let plan = library
-            .resolve_model_dependency_plan("llm/llama/no-bindings", "linux-x86_64", None)
+        let result = library
+            .resolve_model_dependency_requirements("llm/llama/no-bindings", "linux-x86_64", None)
             .await
             .unwrap();
 
-        assert_eq!(plan.state, DependencyState::Ready);
-        assert!(plan.bindings.is_empty());
+        assert_eq!(
+            result.dependency_contract_version,
+            DEPENDENCY_CONTRACT_VERSION
+        );
+        assert_eq!(result.validation_state, DependencyValidationState::Resolved);
+        assert!(result.validation_errors.is_empty());
+        assert!(result.bindings.is_empty());
     }
 
     #[tokio::test]
-    async fn resolve_plan_flags_profile_conflict_on_env_collision() {
+    async fn resolve_requirements_marks_unknown_when_declared_bindings_unresolved() {
+        let (_tmp, library) = setup_library().await;
+        create_model_with_declared_bindings(&library, "llm/llama/declared-only").await;
+
+        let result = library
+            .resolve_model_dependency_requirements("llm/llama/declared-only", "linux-x86_64", None)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            result.validation_state,
+            DependencyValidationState::UnknownProfile
+        );
+        assert_eq!(result.bindings.len(), 0);
+        assert_eq!(
+            result.validation_errors[0].code,
+            "declared_bindings_unresolved".to_string()
+        );
+    }
+
+    #[tokio::test]
+    async fn resolve_requirements_detects_conflicting_profiles_for_same_target() {
         let (_tmp, library) = setup_library().await;
         let model_id = "llm/llama/conflict";
         create_model(&library, model_id).await;
@@ -1429,8 +1197,8 @@ mod tests {
         library
             .index()
             .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "p2".to_string(),
-                profile_version: 1,
+                profile_id: "p1".to_string(),
+                profile_version: 2,
                 profile_hash: Some("h2".to_string()),
                 environment_kind: "python-venv".to_string(),
                 spec_json: pinned_profile_spec("torch", "==2.5.0"),
@@ -1462,58 +1230,93 @@ mod tests {
             .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
                 binding_id: "b2".to_string(),
                 model_id: model_id.to_string(),
-                profile_id: "p2".to_string(),
-                profile_version: 1,
+                profile_id: "p1".to_string(),
+                profile_version: 2,
                 binding_kind: "required_core".to_string(),
                 backend_key: Some("transformers".to_string()),
                 platform_selector: Some("linux-x86_64".to_string()),
                 status: "active".to_string(),
-                priority: 100,
+                priority: 110,
                 attached_by: Some("test".to_string()),
-                attached_at: now.clone(),
+                attached_at: now,
                 profile_hash: None,
                 environment_kind: None,
                 spec_json: None,
             })
             .unwrap();
 
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("transformers"))
+        let result = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("transformers"))
             .await
             .unwrap();
 
-        assert_eq!(plan.state, DependencyState::ProfileConflict);
-        assert_eq!(plan.error_code.as_deref(), Some("profile_conflict"));
+        assert_eq!(
+            result.validation_state,
+            DependencyValidationState::ProfileConflict
+        );
+        assert!(result
+            .bindings
+            .iter()
+            .all(|binding| binding.validation_state == DependencyValidationState::ProfileConflict));
     }
 
     #[tokio::test]
-    async fn check_requires_selected_required_bindings() {
+    async fn resolve_requirements_emits_deterministic_requirements_payload() {
         let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/selection";
-        create_model(&library, model_id).await;
+        let model_id = "audio/stable-audio/stable-audio-open";
+        create_model_with_modalities(
+            &library,
+            model_id,
+            vec!["audio"],
+            vec!["audio"],
+            Some("text-to-audio"),
+        )
+        .await;
 
         let now = chrono::Utc::now().to_rfc3339();
         library
             .index()
             .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "p1".to_string(),
+                profile_id: "stable-audio-profile".to_string(),
                 profile_version: 1,
-                profile_hash: Some("h1".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: pinned_profile_spec("torch", "==2.5.1"),
+                profile_hash: Some("stable-audio-hash".to_string()),
+                environment_kind: "Python-Venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {
+                            "name": "stable-audio-tools",
+                            "version": "==1.0.0",
+                            "index_url": "HTTPS://PYPI.ORG/simple/",
+                            "extra_index_urls": ["https://download.pytorch.org/whl/", " https://download.pytorch.org/whl/ "],
+                            "hashes": ["ABC123", "sha256:abc123"],
+                            "source": "stable-audio"
+                        },
+                        {
+                            "name": "torch",
+                            "version": "==2.5.1",
+                            "index": "https://download.pytorch.org/whl/"
+                        },
+                        {
+                            "name": "torchaudio",
+                            "version": "==2.5.1"
+                        }
+                    ]
+                })
+                .to_string(),
                 created_at: now.clone(),
             })
             .unwrap();
+
         library
             .index()
             .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b1".to_string(),
+                binding_id: "stable-audio-binding".to_string(),
                 model_id: model_id.to_string(),
-                profile_id: "p1".to_string(),
+                profile_id: "stable-audio-profile".to_string(),
                 profile_version: 1,
                 binding_kind: "required_core".to_string(),
-                backend_key: Some("transformers".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
+                backend_key: Some("PyTorch".to_string()),
+                platform_selector: Some("Linux-X86_64".to_string()),
                 status: "active".to_string(),
                 priority: 100,
                 attached_by: Some("test".to_string()),
@@ -1525,155 +1328,38 @@ mod tests {
             .unwrap();
 
         let result = library
-            .check_model_dependencies(model_id, "linux-x86_64", Some("transformers"), Some(vec![]))
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("PYTORCH"))
             .await
             .unwrap();
 
-        assert_eq!(result.state, DependencyState::Failed);
+        assert_eq!(result.validation_state, DependencyValidationState::Resolved);
+        assert_eq!(result.bindings.len(), 1);
+
+        let binding = &result.bindings[0];
+        assert_eq!(binding.backend_key.as_deref(), Some("pytorch"));
+        assert_eq!(binding.environment_kind.as_deref(), Some("python-venv"));
+        assert!(binding.env_id.is_some());
+
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "stable-audio-tools" && req.exact_pin == "==1.0.0"));
+
+        let stable_audio_req = binding
+            .requirements
+            .iter()
+            .find(|req| req.name == "stable-audio-tools")
+            .unwrap();
         assert_eq!(
-            result.error_code.as_deref(),
-            Some("required_binding_omitted")
+            stable_audio_req.index_url.as_deref(),
+            Some("https://pypi.org/simple")
         );
+        assert_eq!(stable_audio_req.extra_index_urls.len(), 1);
+        assert_eq!(stable_audio_req.hashes, vec!["sha256:abc123".to_string()]);
     }
 
     #[tokio::test]
-    async fn check_marks_binding_ready_when_probe_passes() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/probe-ready";
-        create_model(&library, model_id).await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "p-ready".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-ready".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: serde_json::json!({
-                    "python_packages": [
-                        {"name": "torch", "version": "==2.5.1"}
-                    ],
-                    "probes": [
-                        { "kind": "command", "program": "true" }
-                    ]
-                })
-                .to_string(),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-ready".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "p-ready".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("transformers".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let check = library
-            .check_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
-            .await
-            .unwrap();
-
-        assert_eq!(check.state, DependencyState::Ready);
-        assert_eq!(check.bindings.len(), 1);
-        assert_eq!(check.bindings[0].state, DependencyState::Ready);
-    }
-
-    #[tokio::test]
-    async fn install_is_informational_only_and_does_not_execute_commands() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/install-flow";
-        create_model(&library, model_id).await;
-
-        let model_dir = library.library_root().join(model_id);
-        let marker = model_dir.join("deps").join("ok.flag");
-        assert!(!marker.exists());
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "p-install".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-install".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: serde_json::json!({
-                    "python_packages": [
-                        {"name": "torch", "version": "==2.5.1"}
-                    ],
-                    "probes": [
-                        { "kind": "path_exists", "path": "deps/ok.flag" }
-                    ],
-                    "install": {
-                        "commands": [
-                            { "program": "sh", "args": ["-c", "mkdir -p deps && touch deps/ok.flag"], "source_url": "https://example.com/install", "source_ref": "README.md" }
-                        ]
-                    }
-                })
-                .to_string(),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-install".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "p-install".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("transformers".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let pre_check = library
-            .check_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
-            .await
-            .unwrap();
-        assert_eq!(pre_check.state, DependencyState::Missing);
-        assert_eq!(pre_check.bindings[0].state, DependencyState::Missing);
-
-        let install = library
-            .install_model_dependencies(model_id, "linux-x86_64", Some("transformers"), None)
-            .await
-            .unwrap();
-        assert_eq!(install.state, DependencyState::ManualInterventionRequired);
-        assert!(install.attempted_binding_ids.is_empty());
-        assert!(install.installed_binding_ids.is_empty());
-        assert_eq!(
-            install.bindings[0].state,
-            DependencyState::ManualInterventionRequired
-        );
-        assert_eq!(
-            install.bindings[0].error_code.as_deref(),
-            Some("installation_delegated_to_consumer")
-        );
-        assert!(!marker.exists());
-    }
-
-    #[tokio::test]
-    async fn resolve_plan_flags_unpinned_required_pytorch_binding() {
+    async fn resolve_requirements_invalid_profile_for_missing_required_pin() {
         let (_tmp, library) = setup_library().await;
         let model_id = "llm/llama/pytorch-unpinned";
         create_model_with_modalities(
@@ -1717,310 +1403,18 @@ mod tests {
             })
             .unwrap();
 
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("pytorch"))
+        let result = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("pytorch"))
             .await
             .unwrap();
 
-        assert_eq!(plan.state, DependencyState::ManualInterventionRequired);
-        assert_eq!(plan.error_code.as_deref(), Some("unpinned_dependency"));
-        assert_eq!(plan.missing_pins, vec!["torch".to_string()]);
         assert_eq!(
-            plan.bindings[0].error_code.as_deref(),
-            Some("unpinned_dependency")
-        );
-        assert_eq!(plan.bindings[0].missing_pins, vec!["torch".to_string()]);
-        assert!(!plan.bindings[0].pin_summary.pinned);
-    }
-
-    #[tokio::test]
-    async fn resolve_plan_uses_binding_modality_override_precedence() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/pytorch-override";
-        create_model_with_modalities(
-            &library,
-            model_id,
-            vec!["text"],
-            vec!["text"],
-            Some("text-generation"),
-        )
-        .await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "pt-override".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-pt-2".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: serde_json::json!({
-                    "python_packages": [
-                        {"name": "torch", "version": "==2.5.1"},
-                        {"name": "torchvision", "version": "==0.20.1"}
-                    ],
-                    "binding_modality_overrides": {
-                        "b-pt-2": {
-                            "input_modalities": ["image"],
-                            "output_modalities": ["text"]
-                        }
-                    }
-                })
-                .to_string(),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-pt-2".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "pt-override".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("pytorch".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("pytorch"))
-            .await
-            .unwrap();
-
-        assert_eq!(plan.state, DependencyState::Ready);
-        assert!(plan.bindings[0].pin_summary.pinned);
-        assert_eq!(plan.bindings[0].required_pins.len(), 2);
-        assert_eq!(plan.bindings[0].required_pins[0].name, "torch");
-        assert_eq!(plan.bindings[0].required_pins[1].name, "torchvision");
-    }
-
-    #[tokio::test]
-    async fn resolve_plan_marks_required_binding_when_modality_unknown() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/pytorch-modality-unknown";
-        create_model(&library, model_id).await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "pt-core".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-pt-3".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: pinned_profile_spec("torch", "==2.5.1"),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-pt-3".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "pt-core".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("pytorch".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("pytorch"))
-            .await
-            .unwrap();
-
-        assert_eq!(plan.state, DependencyState::ManualInterventionRequired);
-        assert_eq!(
-            plan.error_code.as_deref(),
-            Some("modality_resolution_unknown")
+            result.validation_state,
+            DependencyValidationState::InvalidProfile
         );
         assert_eq!(
-            plan.bindings[0].error_code.as_deref(),
-            Some("modality_resolution_unknown")
-        );
-        assert!(!plan.bindings[0].pin_summary.pinned);
-    }
-
-    #[tokio::test]
-    async fn top_level_missing_pins_only_include_required_bindings() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/pin-union";
-        create_model_with_modalities(
-            &library,
-            model_id,
-            vec!["audio"],
-            vec!["text"],
-            Some("automatic-speech-recognition"),
-        )
-        .await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "pt-required".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-pt-4".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: pinned_profile_spec("torch", "==2.5.1"),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "pt-optional".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-pt-5".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: pinned_profile_spec("torch", "==2.5.1"),
-                created_at: now.clone(),
-            })
-            .unwrap();
-
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-pt-4".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "pt-required".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("pytorch".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now.clone(),
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-pt-5".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "pt-optional".to_string(),
-                profile_version: 1,
-                binding_kind: "optional_feature".to_string(),
-                backend_key: Some("pytorch".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 200,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("pytorch"))
-            .await
-            .unwrap();
-
-        assert_eq!(plan.missing_pins, vec!["torchaudio".to_string()]);
-        assert_eq!(plan.bindings.len(), 2);
-        assert_eq!(
-            plan.bindings[0].missing_pins,
-            vec!["torchaudio".to_string()]
-        );
-        assert_eq!(
-            plan.bindings[1].missing_pins,
-            vec!["torchaudio".to_string()]
-        );
-    }
-
-    #[tokio::test]
-    async fn required_pin_reasons_include_backend_and_policy() {
-        let (_tmp, library) = setup_library().await;
-        let model_id = "llm/llama/pin-reasons";
-        create_model_with_modalities(
-            &library,
-            model_id,
-            vec!["text"],
-            vec!["text"],
-            Some("text-generation"),
-        )
-        .await;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        library
-            .index()
-            .upsert_dependency_profile(&DependencyProfileRecord {
-                profile_id: "pt-policy".to_string(),
-                profile_version: 1,
-                profile_hash: Some("h-pt-6".to_string()),
-                environment_kind: "python-venv".to_string(),
-                spec_json: serde_json::json!({
-                    "python_packages": [
-                        {"name": "torch", "version": "==2.5.1"}
-                    ],
-                    "pin_policy": {
-                        "required_packages": [
-                            {"name": "torch"}
-                        ]
-                    }
-                })
-                .to_string(),
-                created_at: now.clone(),
-            })
-            .unwrap();
-        library
-            .index()
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: "b-pt-6".to_string(),
-                model_id: model_id.to_string(),
-                profile_id: "pt-policy".to_string(),
-                profile_version: 1,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some("pytorch".to_string()),
-                platform_selector: Some("linux-x86_64".to_string()),
-                status: "active".to_string(),
-                priority: 100,
-                attached_by: Some("test".to_string()),
-                attached_at: now,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })
-            .unwrap();
-
-        let plan = library
-            .resolve_model_dependency_plan(model_id, "linux-x86_64", Some("pytorch"))
-            .await
-            .unwrap();
-
-        let torch = plan.bindings[0]
-            .required_pins
-            .iter()
-            .find(|pin| pin.name == "torch")
-            .unwrap();
-        assert_eq!(
-            torch.reasons,
-            vec![
-                "backend_required".to_string(),
-                "profile_policy_required".to_string()
-            ]
+            result.bindings[0].validation_errors[0].code,
+            "unpinned_dependency".to_string()
         );
     }
 

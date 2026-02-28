@@ -604,44 +604,39 @@ Resolution behavior:
 3. Resolver output must be deterministic: binding plan ordering uses stable key sort, not `binding_id`.
 4. Stable sort key:
    - (`binding_kind`, `backend_key`, `platform_selector`, `profile_id`, `profile_version`, `priority`, `binding_id`)
-5. If context still matches multiple incompatible required bindings, do not guess; return `manual_intervention_required` and add `dependency-binding-conflict` to `review_reasons`.
+5. If context still matches multiple incompatible required bindings, do not guess; return `profile_conflict` and add `dependency-binding-conflict` to `review_reasons`.
 6. If no profile can be resolved, return `unknown_profile`.
 7. Best-effort discovery is allowed; unresolved dependency details do not block download/import.
 
 Model-level dependency APIs:
-1. `get_model_dependency_profiles(model_id, platform_context, backend_key?)`
-2. `resolve_model_dependency_plan(model_id, platform_context, backend_key?)`
-3. `check_model_dependencies(model_id, platform_context, backend_key?, selected_binding_ids?)`
-4. `install_model_dependencies(model_id, platform_context, backend_key?, selected_binding_ids?)`
-5. `list_models_needing_review(filter)`
-6. `submit_model_review(model_id, patch, reviewer)`
+1. `resolve_model_dependency_requirements(model_id, platform_context, backend_key?)`
+2. `list_models_needing_review(filter)`
+3. `submit_model_review(model_id, patch, reviewer)`
 
 Dependency API response contract:
-1. Return per-binding results (not aggregate-only), including `binding_id`, `profile_id`, `profile_version`, `profile_hash`, `env_id`.
+1. Return per-binding results (not aggregate-only), including `binding_id`, `profile_id`, `profile_version`, `profile_hash`, `env_id`, `requirements[]`.
 2. Deterministic environment key format per binding:
    - `{environment_kind}:{profile_id}:{profile_version}:{profile_hash}:{platform_key}:{backend_key}`
-3. If same `env_id` is requested with different `profile_hash`, return `profile_conflict`.
-4. If `selected_binding_ids` is provided, it must include all required bindings from the resolved plan.
-5. Missing required bindings in caller selection return deterministic error code `required_binding_omitted` and no install action.
+3. If incompatible profiles resolve to the same deterministic target environment, return `profile_conflict`.
+4. Response includes `dependency_contract_version` and consumers must enforce exact match.
+5. Response is declarative-only; consumers execute checks/installs externally.
 
-Dependency check/install states:
-1. `ready`
-2. `missing`
-3. `failed`
-4. `unknown_profile`
-5. `manual_intervention_required`
-6. `profile_conflict`
+Dependency validation states:
+1. `resolved`
+2. `unknown_profile`
+3. `invalid_profile`
+4. `profile_conflict`
 
 Operational rules:
 1. Public internet sources are allowed (including GitHub and Hugging Face).
-2. Dependency install attempts must log source URL/ref and result.
+2. Pumas does not execute dependency install attempts.
 3. Failures must return structured actionable errors.
 4. Offline mode fails fast if required dependencies are absent.
-5. Install operations should be idempotent and safe to retry.
+5. Consumer install operations should be idempotent and safe to retry.
 
 Manual intervention workflow:
 1. Run best-effort dependency extraction from source metadata/config and any available README/model-card hints.
-2. If extraction is incomplete/ambiguous, set review-required metadata and dependency state `manual_intervention_required`.
+2. If extraction is incomplete/ambiguous, set review-required metadata and dependency state `invalid_profile`.
 3. User resolves/edits dependency bindings through existing local UI metadata/edit workflow.
 4. All manual dependency edits are audited in `dependency_binding_history` and remain resettable to baseline-derived values.
 
@@ -825,18 +820,18 @@ Phase 0: Inventory
 
 Phase 1: Contract Updates
 1. Replace legacy metadata parsing with v2 fields.
-2. Replace legacy dependency calls with model-level APIs.
+2. Replace legacy dependency calls with `resolve_model_dependency_requirements`.
 3. Treat `metadata_needs_review=true` as non-ready for automatic routing unless explicitly overridden.
-4. Treat dependency states `unknown_profile`, `manual_intervention_required`, and `profile_conflict` as non-ready and surface remediation actions.
+4. Treat dependency states `unknown_profile`, `invalid_profile`, and `profile_conflict` as non-ready and surface remediation actions.
 
 Phase 2: Path/ID Refactor
 1. Remove assumptions about stable absolute model paths.
 2. Resolve by model ID + index lookup.
 
 Phase 3: Dependency Flow Update
-1. Pre-execution call: `check_model_dependencies`.
-2. Optional: call `install_model_dependencies` only to retrieve install guidance for the consumer runtime.
-3. Surface structured errors and logs on failure.
+1. Pre-execution call: `resolve_model_dependency_requirements`.
+2. Enforce `dependency_contract_version == 1` before dependency execution.
+3. Consumer performs dependency check/install externally and surfaces structured errors on failure.
 
 Phase 4: Validation + Cutover
 1. Validate all consumers against migrated staging library.
@@ -855,7 +850,7 @@ Phase 4: Validation + Cutover
 3. Do not silently fallback to deprecated classification behavior.
 4. Use model dependency APIs before inference where dependency profiles exist.
 5. Never call removed legacy endpoints or parse removed legacy fields.
-6. Never auto-route models when dependency state is `unknown_profile`, `manual_intervention_required`, or `profile_conflict` unless policy explicitly allows it.
+6. Never auto-route models when dependency state is `unknown_profile`, `invalid_profile`, or `profile_conflict` unless policy explicitly allows it.
 
 ## Rollback Strategy
 Because legacy methods are removed, rollback is snapshot/artifact based:

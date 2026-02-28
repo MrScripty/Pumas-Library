@@ -1,0 +1,17 @@
+{
+  "model_id": "llm/llama/declared-only",
+  "platform_key": "linux-x86_64",
+  "backend_key": null,
+  "dependency_contract_version": 1,
+  "validation_state": "unknown_profile",
+  "validation_errors": [
+    {
+      "code": "declared_bindings_unresolved",
+      "scope": "top_level",
+      "binding_id": null,
+      "field": "dependency_bindings",
+      "message": "Model declares dependency bindings, but no active bindings resolved for the requested context"
+    }
+  ],
+  "bindings": []
+}

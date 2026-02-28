@@ -4,7 +4,7 @@ use crate::handlers::{get_str_param, require_str_param};
 use crate::server::AppState;
 use serde_json::{json, Value};
 
-pub async fn get_model_dependency_profiles(
+pub async fn resolve_model_dependency_requirements(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
@@ -13,95 +13,29 @@ pub async fn get_model_dependency_profiles(
         .unwrap_or("unknown")
         .to_string();
     let backend_key = get_str_param(params, "backend_key", "backendKey");
+    let expected_contract_version = params
+        .get("expected_dependency_contract_version")
+        .or_else(|| params.get("expectedDependencyContractVersion"))
+        .and_then(Value::as_u64);
+    if let Some(expected) = expected_contract_version {
+        let actual = pumas_library::model_library::DEPENDENCY_CONTRACT_VERSION as u64;
+        if expected != actual {
+            return Err(pumas_library::PumasError::InvalidParams {
+                message: format!(
+                    "dependency contract version mismatch: expected {}, actual {}",
+                    expected, actual
+                ),
+            });
+        }
+    }
 
-    let profiles = state
+    let requirements = state
         .api
-        .get_model_dependency_profiles(&model_id, &platform_context, backend_key)
+        .resolve_model_dependency_requirements(&model_id, &platform_context, backend_key)
         .await?;
     Ok(json!({
         "success": true,
-        "model_id": model_id,
-        "platform_context": platform_context,
-        "backend_key": backend_key,
-        "profiles": profiles
-    }))
-}
-
-pub async fn resolve_model_dependency_plan(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-    let platform_context = get_str_param(params, "platform_context", "platformContext")
-        .unwrap_or("unknown")
-        .to_string();
-    let backend_key = get_str_param(params, "backend_key", "backendKey");
-
-    let plan = state
-        .api
-        .resolve_model_dependency_plan(&model_id, &platform_context, backend_key)
-        .await?;
-    Ok(json!({
-        "success": true,
-        "plan": plan
-    }))
-}
-
-pub async fn check_model_dependencies(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-    let platform_context = get_str_param(params, "platform_context", "platformContext")
-        .unwrap_or("unknown")
-        .to_string();
-    let backend_key = get_str_param(params, "backend_key", "backendKey");
-    let selected_binding_ids: Option<Vec<String>> = params
-        .get("selected_binding_ids")
-        .or_else(|| params.get("selectedBindingIds"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-
-    let check = state
-        .api
-        .check_model_dependencies(
-            &model_id,
-            &platform_context,
-            backend_key,
-            selected_binding_ids,
-        )
-        .await?;
-    Ok(json!({
-        "success": true,
-        "check": check
-    }))
-}
-
-pub async fn install_model_dependencies(
-    state: &AppState,
-    params: &Value,
-) -> pumas_library::Result<Value> {
-    let model_id = require_str_param(params, "model_id", "modelId")?;
-    let platform_context = get_str_param(params, "platform_context", "platformContext")
-        .unwrap_or("unknown")
-        .to_string();
-    let backend_key = get_str_param(params, "backend_key", "backendKey");
-    let selected_binding_ids: Option<Vec<String>> = params
-        .get("selected_binding_ids")
-        .or_else(|| params.get("selectedBindingIds"))
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-
-    let install = state
-        .api
-        .install_model_dependencies(
-            &model_id,
-            &platform_context,
-            backend_key,
-            selected_binding_ids,
-        )
-        .await?;
-    Ok(json!({
-        "success": true,
-        "install": install
+        "requirements": requirements
     }))
 }
 

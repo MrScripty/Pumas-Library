@@ -1,0 +1,47 @@
+{
+  "model_id": "audio/stable-audio/stable-audio-open",
+  "platform_key": "linux-x86_64",
+  "backend_key": "pytorch",
+  "dependency_contract_version": 1,
+  "validation_state": "resolved",
+  "validation_errors": [],
+  "bindings": [
+    {
+      "binding_id": "stable-audio-binding",
+      "profile_id": "stable-audio-profile",
+      "profile_version": 1,
+      "profile_hash": "stable-audio-hash",
+      "backend_key": "pytorch",
+      "platform_selector": "linux-x86_64",
+      "environment_kind": "python-venv",
+      "env_id": "python-venv:stable-audio-profile:1:stable-audio-hash:linux-x86_64:pytorch",
+      "validation_state": "resolved",
+      "validation_errors": [],
+      "requirements": [
+        {
+          "kind": "python_package",
+          "name": "stable-audio-tools",
+          "exact_pin": "==1.0.0",
+          "index_url": "https://pypi.org/simple",
+          "extra_index_urls": [
+            "https://download.pytorch.org/whl"
+          ],
+          "hashes": [
+            "sha256:abc123"
+          ],
+          "source": "stable-audio"
+        },
+        {
+          "kind": "python_package",
+          "name": "torch",
+          "exact_pin": "==2.5.1"
+        },
+        {
+          "kind": "python_package",
+          "name": "torchaudio",
+          "exact_pin": "==2.5.1"
+        }
+      ]
+    }
+  ]
+}

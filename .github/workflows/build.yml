@@ -91,10 +91,13 @@ jobs:
         include:
           - os: ubuntu-latest
             upload_dist: true
+            rollup_native_base: linux-x64-gnu
           - os: windows-latest
             upload_dist: false
+            rollup_native_base: win32-x64-msvc
           - os: macos-14
             upload_dist: false
+            rollup_native_base: darwin-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -109,7 +112,16 @@ jobs:
 
       - name: Install dependencies
         working-directory: ./frontend
-        run: npm ci
+        run: npm ci --include=optional
+
+      - name: Ensure Rollup native package is present
+        # Workaround for npm optional dependency bug in cross-platform CI:
+        # https://github.com/npm/cli/issues/4828
+        working-directory: ./frontend
+        shell: bash
+        run: |
+          ROLLUP_VERSION="$(node -p "require('./node_modules/rollup/package.json').version")"
+          npm install --no-save "@rollup/rollup-${{ matrix.rollup_native_base }}@${ROLLUP_VERSION}"
 
       - name: Lint
         working-directory: ./frontend
@@ -278,7 +290,7 @@ jobs:
 
       - name: Install Electron dependencies
         working-directory: ./electron
-        run: npm ci
+        run: npm ci --include=optional
 
       - name: Install dmg-license (macOS only)
         if: matrix.platform == 'mac'

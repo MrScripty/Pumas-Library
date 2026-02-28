@@ -3,8 +3,8 @@
 ## Prerequisites
 
 - All CI checks pass on `main`
-- `cargo test --workspace` passes locally (from `rust/`)
-- `cargo clippy --workspace -- -D warnings` clean
+- `cargo test --workspace --exclude pumas_rustler` passes locally (from `rust/`)
+- `cargo clippy --workspace --exclude pumas_rustler -- -D warnings` clean
 - `cargo audit` shows no high/critical vulnerabilities
 
 ## Steps
@@ -29,9 +29,9 @@
 | Electron desktop app | Linux (AppImage, .deb), Windows (.exe), macOS (.dmg) |
 | `checksums-sha256.txt` | All |
 
-**Note:** `pumas-rustler` (Erlang NIF) is excluded from CI builds because it
-requires the BEAM runtime to link. It must be built locally with Erlang/OTP
-installed.
+**Note:** `pumas-rustler` (Erlang NIF) is excluded from CI builds and default
+workspace validation because it requires the BEAM runtime to link. Validate it
+separately on machines with Erlang/OTP installed.
 
 ## Version Locations
 

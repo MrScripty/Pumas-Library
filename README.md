@@ -187,7 +187,7 @@ The installer will:
 5. **Make launcher executable** (should already be executable):
 
    ```bash
-   chmod +x launcher
+   chmod +x launcher.sh
    ```
 
 ### Optional: Add to PATH (Linux)
@@ -195,13 +195,13 @@ The installer will:
 For system-wide access:
 
 ```bash
-ln -s $(pwd)/launcher ~/.local/bin/pumas-library
+ln -s $(pwd)/launcher.sh ~/.local/bin/pumas-library
 ```
 
 Then run from anywhere:
 
 ```bash
-pumas-library
+pumas-library --help
 ```
 
 ---
@@ -284,20 +284,15 @@ This creates:
 
 Run the launcher with different modes:
 
-| Command                                 | Description                                     |
-| --------------------------------------- | ----------------------------------------------- |
-| `./launcher`                            | Launch the application                          |
-| `./launcher dev`                        | Launch with developer tools                     |
-| `./launcher build`                      | Build all components (Rust, frontend, Electron) |
-| `./launcher build-rust`                 | Build Rust backend only                         |
-| `./launcher build-electron`             | Build Electron TypeScript only                  |
-| `./launcher package`                    | Package Electron app for distribution           |
-| `./launcher electron-install`           | Install Electron dependencies                   |
-| `./launcher generate-bindings --python` | Generate Python bindings                        |
-| `./launcher generate-bindings --csharp` | Generate C# bindings                            |
-| `./launcher generate-bindings --elixir` | Build Elixir Rustler NIF                        |
-| `./launcher generate-bindings --all`    | Generate all language bindings                  |
-| `./launcher help`                       | Display usage information                       |
+| Command | Description |
+| ------- | ----------- |
+| `./launcher.sh --install` | Install launcher dependencies (cargo/node/npm + workspace deps) |
+| `./launcher.sh --build` | Build debug backend + frontend + electron |
+| `./launcher.sh --build-release` | Build release backend + frontend + electron |
+| `./launcher.sh --run` | Run Electron in development mode |
+| `./launcher.sh --run -- --devtools` | Run development mode with app flags |
+| `./launcher.sh --run-release` | Run packaged artifacts directly |
+| `./launcher.sh --help` | Display usage information |
 
 ### Windows Commands
 
@@ -339,6 +334,26 @@ npm start
 | Linux    | `npm run package:linux` | AppImage, .deb           |
 | Windows  | `npm run package:win`   | NSIS installer, portable |
 | macOS    | `npm run package:mac`   | DMG                      |
+
+---
+
+## Release Validation
+
+Before cutting a release, run:
+
+```bash
+cd rust
+cargo test
+cargo build --workspace
+cd ..
+npm run -w frontend test:run
+npm run -w frontend check:types
+npm run -w frontend build
+npm run -w electron validate
+npm run -w electron build
+```
+
+For `pumas_rustler`, run tests separately on a machine with Erlang/OTP installed.
 
 ---
 
@@ -388,23 +403,7 @@ Pumas Library's core Rust crate can be used from other languages via cross-langu
 
 ### Generating Bindings
 
-Use the launcher to generate bindings:
-
-```bash
-# Generate Python bindings
-./launcher generate-bindings --python
-
-# Generate C# bindings
-./launcher generate-bindings --csharp
-
-# Build Elixir Rustler NIF
-./launcher generate-bindings --elixir
-
-# Generate all
-./launcher generate-bindings --all
-```
-
-Or use the standalone script directly:
+Use the standalone script:
 
 ```bash
 ./scripts/generate-bindings.sh python

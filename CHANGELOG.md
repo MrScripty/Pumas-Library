@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- No changes yet.
+
+## [0.2.0] - 2026-02-28
+
+### Added
+
 - Core model library with SQLite-backed index and full-text search
 - HuggingFace model search, download, and multi-file import pipeline
 - In-place import and orphan model recovery at startup

@@ -52,6 +52,7 @@ comfyui.pid
 launcher-data/*
 !launcher-data/plugins/
 .active-version
+.active-version-ollama
 shared-resources/
 comfyui.db
 

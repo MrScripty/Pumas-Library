@@ -12,7 +12,7 @@ use pumas_library::network::{GitHubAsset, GitHubClient, GitHubRelease};
 use pumas_library::{PumasError, Result};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
@@ -129,9 +129,8 @@ impl OllamaVersionManager {
             }
 
             // Prefer certain formats
-            if cfg!(windows) && name_lower.ends_with(".exe") {
-                score += 1;
-            } else if name_lower.ends_with(".tar.gz")
+            if (cfg!(windows) && name_lower.ends_with(".exe"))
+                || name_lower.ends_with(".tar.gz")
                 || name_lower.ends_with(".tgz")
                 || name_lower.ends_with(".zip")
                 || name_lower.ends_with(".tar.zst")
@@ -324,7 +323,7 @@ impl OllamaVersionManager {
     async fn download_file(
         &self,
         url: &str,
-        dest: &PathBuf,
+        dest: &Path,
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<()> {
         use std::io::Write;
@@ -359,7 +358,7 @@ impl OllamaVersionManager {
         let mut stream = response.bytes_stream();
         let mut file = std::fs::File::create(dest).map_err(|e| PumasError::Io {
             message: format!("Failed to create file: {}", e),
-            path: Some(dest.clone()),
+            path: Some(dest.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -374,7 +373,7 @@ impl OllamaVersionManager {
 
             file.write_all(&chunk).map_err(|e| PumasError::Io {
                 message: format!("Failed to write: {}", e),
-                path: Some(dest.clone()),
+                path: Some(dest.to_path_buf()),
                 source: Some(e),
             })?;
 
@@ -395,7 +394,7 @@ impl OllamaVersionManager {
     }
 
     /// Extract the binary from archive.
-    async fn extract_binary(&self, archive_path: &PathBuf, version_path: &PathBuf) -> Result<()> {
+    async fn extract_binary(&self, archive_path: &Path, version_path: &Path) -> Result<()> {
         let archive_name = archive_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -429,11 +428,11 @@ impl OllamaVersionManager {
         Ok(())
     }
 
-    fn extract_zip(&self, archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
+    fn extract_zip(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
         use std::io::Read;
         let file = std::fs::File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open archive: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -480,12 +479,12 @@ impl OllamaVersionManager {
         Ok(())
     }
 
-    fn extract_tarball(&self, archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
+    fn extract_tarball(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
         use std::io::BufReader;
 
         let file = std::fs::File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open archive: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -523,7 +522,7 @@ impl OllamaVersionManager {
     }
 
     /// Find and set up the binary in the version directory.
-    fn finalize_binary(&self, version_path: &PathBuf) -> Result<()> {
+    fn finalize_binary(&self, version_path: &Path) -> Result<()> {
         let binary_name = Self::binary_name();
         let final_path = version_path.join(binary_name);
 
@@ -585,17 +584,17 @@ impl OllamaVersionManager {
         Ok(())
     }
 
-    fn find_binary_recursive(&self, dir: &PathBuf) -> Result<Option<PathBuf>> {
+    fn find_binary_recursive(&self, dir: &Path) -> Result<Option<PathBuf>> {
         let binary_name = Self::binary_name();
 
         for entry in std::fs::read_dir(dir).map_err(|e| PumasError::Io {
             message: format!("Failed to read directory: {}", e),
-            path: Some(dir.clone()),
+            path: Some(dir.to_path_buf()),
             source: Some(e),
         })? {
             let entry = entry.map_err(|e| PumasError::Io {
                 message: format!("Failed to read entry: {}", e),
-                path: Some(dir.clone()),
+                path: Some(dir.to_path_buf()),
                 source: Some(e),
             })?;
             let path = entry.path();
@@ -616,17 +615,17 @@ impl OllamaVersionManager {
         Ok(None)
     }
 
-    fn cleanup_extracted_dirs(&self, version_path: &PathBuf) -> Result<()> {
+    fn cleanup_extracted_dirs(&self, version_path: &Path) -> Result<()> {
         let binary_name = Self::binary_name();
 
         for entry in std::fs::read_dir(version_path).map_err(|e| PumasError::Io {
             message: format!("Failed to read directory: {}", e),
-            path: Some(version_path.clone()),
+            path: Some(version_path.to_path_buf()),
             source: Some(e),
         })? {
             let entry = entry.map_err(|e| PumasError::Io {
                 message: format!("Failed to read entry: {}", e),
-                path: Some(version_path.clone()),
+                path: Some(version_path.to_path_buf()),
                 source: Some(e),
             })?;
             let path = entry.path();

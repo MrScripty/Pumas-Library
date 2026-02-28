@@ -316,8 +316,7 @@ impl PluginApiProxy {
         let remaining = &parts[1..];
 
         // Handle array wildcard
-        if part.ends_with("[*]") {
-            let field = &part[..part.len() - 3];
+        if let Some(field) = part.strip_suffix("[*]") {
             let array = if field.is_empty() {
                 value.as_array()?
             } else {

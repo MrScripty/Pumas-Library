@@ -152,7 +152,7 @@ impl HuggingFaceClient {
         // Convert to our model type
         let models: Vec<HuggingFaceModel> = results
             .into_iter()
-            .map(|r| Self::convert_search_result(r))
+            .map(Self::convert_search_result)
             .collect();
 
         Ok(models)
@@ -332,7 +332,7 @@ impl HuggingFaceClient {
         let name = result
             .model_id
             .split('/')
-            .last()
+            .next_back()
             .unwrap_or(&result.model_id)
             .to_string();
 

@@ -139,13 +139,12 @@ fn detect_format(header: &[u8], extension: &str) -> FileFormat {
     }
 
     // Pickle protocol marker
-    if header[0] == magic::PICKLE_V2 {
-        if header.len() > 1
-            && header[1] >= magic::PICKLE_PROTO_MIN
-            && header[1] <= magic::PICKLE_PROTO_MAX
-        {
-            return FileFormat::Pickle;
-        }
+    if header[0] == magic::PICKLE_V2
+        && header.len() > 1
+        && header[1] >= magic::PICKLE_PROTO_MIN
+        && header[1] <= magic::PICKLE_PROTO_MAX
+    {
+        return FileFormat::Pickle;
     }
 
     // Safetensors: 8-byte little-endian header size followed by JSON starting with '{'
@@ -165,7 +164,7 @@ fn detect_format(header: &[u8], extension: &str) -> FileFormat {
     }
 
     // Fall back to extension-based detection
-    match extension.as_ref() {
+    match extension {
         "gguf" => FileFormat::Gguf,
         "ggml" | "bin" => FileFormat::Ggml,
         "safetensors" => FileFormat::Safetensors,
@@ -495,28 +494,27 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
 
     // Check directory context for embedding indicators
     // This catches embedding models that don't have distinctive tensor patterns
-    if model_type != ModelType::Embedding {
-        if is_embedding_from_context(path) {
-            model_type = ModelType::Embedding;
-        }
+    if model_type != ModelType::Embedding && is_embedding_from_context(path) {
+        model_type = ModelType::Embedding;
     }
 
     // Check directory context for audio indicators.
     // Audio models often reuse transformer or diffusion architectures, so we check
     // for all types except Audio (already correct) and Embedding (has its own context).
-    if model_type != ModelType::Audio && model_type != ModelType::Embedding {
-        if is_audio_from_context(path) {
-            model_type = ModelType::Audio;
-        }
+    if model_type != ModelType::Audio
+        && model_type != ModelType::Embedding
+        && is_audio_from_context(path)
+    {
+        model_type = ModelType::Audio;
     }
 
     // Check directory context for vision indicators.
     // Only override Unknown/Diffusion to avoid false positives on VLMs (e.g. LLaVA)
     // that have vision_config but are fundamentally LLMs with lm_head.
-    if model_type == ModelType::Unknown || model_type == ModelType::Diffusion {
-        if is_vision_from_context(path) {
-            model_type = ModelType::Vision;
-        }
+    if (model_type == ModelType::Unknown || model_type == ModelType::Diffusion)
+        && is_vision_from_context(path)
+    {
+        model_type = ModelType::Vision;
     }
 
     Ok(ModelTypeInfo {

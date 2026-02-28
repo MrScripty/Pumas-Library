@@ -53,7 +53,7 @@ impl Nvfp4Backend {
 
         let script = include_str!("nvfp4_script.py");
         std::fs::write(self.quantize_script(), script)
-            .map_err(|e| PumasError::io("writing nvfp4 script", &self.quantize_script(), e))?;
+            .map_err(|e| PumasError::io("writing nvfp4 script", self.quantize_script(), e))?;
         Ok(())
     }
 

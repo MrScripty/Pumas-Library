@@ -335,9 +335,7 @@ impl GitHubClient {
             format!("ollama-{}-{}.zip", os, arch),     // Windows
         ];
 
-        assets
-            .iter()
-            .find(|a| exact_patterns.iter().any(|p| a.name == *p))
+        assets.iter().find(|a| exact_patterns.contains(&a.name))
     }
 
     /// Get the latest non-prerelease release.

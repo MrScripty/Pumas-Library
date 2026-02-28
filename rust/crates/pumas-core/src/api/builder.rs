@@ -1,6 +1,6 @@
 //! Builder for configuring PumasApi initialization.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -78,7 +78,7 @@ impl PumasApiBuilder {
     }
 
     /// Create the required directory structure.
-    fn create_directory_structure(launcher_root: &PathBuf) -> Result<()> {
+    fn create_directory_structure(launcher_root: &Path) -> Result<()> {
         use std::fs;
 
         let dirs = [

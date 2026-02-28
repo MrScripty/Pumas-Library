@@ -15,7 +15,7 @@ use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 use tokio::io::AsyncReadExt;
 use tracing::{debug, info};
@@ -465,8 +465,8 @@ impl OllamaClient {
 }
 
 /// Compute SHA256 of a file asynchronously (offloaded to blocking thread pool).
-async fn compute_sha256_async(path: &PathBuf) -> Result<String> {
-    let path = path.clone();
+async fn compute_sha256_async(path: &Path) -> Result<String> {
+    let path = path.to_path_buf();
     tokio::task::spawn_blocking(move || {
         let mut file =
             std::fs::File::open(&path).map_err(|e| PumasError::io_with_path(e, &path))?;

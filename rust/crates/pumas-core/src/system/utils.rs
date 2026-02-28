@@ -66,7 +66,7 @@ impl SystemUtils {
             let mount_point = disk.mount_point().to_string_lossy();
             if path_str.starts_with(mount_point.as_ref()) {
                 let match_len = mount_point.len();
-                if best_match.map_or(true, |(_, len)| match_len > len) {
+                if best_match.is_none_or(|(_, len)| match_len > len) {
                     best_match = Some((disk, match_len));
                 }
             }

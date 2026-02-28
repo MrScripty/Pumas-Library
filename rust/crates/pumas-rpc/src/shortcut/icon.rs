@@ -171,7 +171,7 @@ impl IconManager {
                 "-fill",
                 "rgba(0,0,0,0.75)",
                 "-draw",
-                &format!("rectangle 10,100 246,156"),
+                "rectangle 10,100 246,156",
             ])
             .args([
                 "-fill",

@@ -11,7 +11,7 @@ use pumas_library::network::{GitHubAsset, GitHubRelease};
 use pumas_library::{PumasError, Result};
 use std::fs::File;
 use std::io::{BufReader, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
@@ -59,7 +59,8 @@ impl VersionInstaller {
     ) -> Result<()> {
         match self.app_id {
             AppId::Ollama => self.install_ollama_binary(tag, release, progress_tx).await,
-            AppId::ComfyUI | _ => self.install_python_app(tag, release, progress_tx).await,
+            AppId::ComfyUI => self.install_python_app(tag, release, progress_tx).await,
+            _ => self.install_python_app(tag, release, progress_tx).await,
         }
     }
 
@@ -265,6 +266,7 @@ impl VersionInstaller {
     }
 
     /// Execute Ollama installation steps.
+    #[allow(clippy::too_many_arguments)]
     async fn do_ollama_install(
         &self,
         tag: &str,
@@ -272,7 +274,7 @@ impl VersionInstaller {
         download_url: &str,
         total_size: u64,
         asset_name: &str,
-        archive_path: &PathBuf,
+        archive_path: &Path,
         cache_valid: bool,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
@@ -371,7 +373,7 @@ impl VersionInstaller {
 
         assets
             .iter()
-            .find(|a| exact_patterns.iter().any(|p| a.name == *p))
+            .find(|a| exact_patterns.contains(&a.name))
             .ok_or_else(|| PumasError::InstallationFailed {
                 message: format!(
                     "No Ollama binary found for {}-{}. Looking for: {:?}. Available assets: {:?}",
@@ -391,8 +393,8 @@ impl VersionInstaller {
     /// - Windows: ollama-windows-amd64.zip (containing ollama.exe)
     fn extract_ollama_binary(
         &self,
-        archive_path: &PathBuf,
-        version_dir: &PathBuf,
+        archive_path: &Path,
+        version_dir: &Path,
         asset_name: &str,
     ) -> Result<()> {
         info!("Extracting Ollama binary from {}", asset_name);
@@ -429,25 +431,25 @@ impl VersionInstaller {
     }
 
     /// Extract a .tar.zst archive (Zstandard compressed tar).
-    fn extract_tar_zst(&self, archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
+    fn extract_tar_zst(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
         info!("Extracting tar.zst archive to {}", dest_dir.display());
 
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open archive: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
         let decoder = zstd::Decoder::new(BufReader::new(file)).map_err(|e| PumasError::Io {
             message: format!("Failed to create zstd decoder: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(std::io::Error::other(e)),
         })?;
 
         let mut archive = tar::Archive::new(decoder);
         archive.unpack(dest_dir).map_err(|e| PumasError::Io {
             message: format!("Failed to extract tar.zst: {}", e),
-            path: Some(dest_dir.clone()),
+            path: Some(dest_dir.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -455,7 +457,7 @@ impl VersionInstaller {
     }
 
     /// Find the ollama binary in the extracted directory and make it executable.
-    fn finalize_ollama_binary(&self, version_dir: &PathBuf) -> Result<()> {
+    fn finalize_ollama_binary(&self, version_dir: &Path) -> Result<()> {
         // Ollama archives typically extract to bin/ollama or just ollama
         let possible_paths = [
             version_dir.join("bin").join("ollama"),
@@ -491,7 +493,7 @@ impl VersionInstaller {
         &self,
         tag: &str,
         release: &GitHubRelease,
-        _version_dir: &PathBuf,
+        _version_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Finalizing Ollama installation for {}", tag);
@@ -559,14 +561,15 @@ impl VersionInstaller {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn do_install(
         &self,
         tag: &str,
         release: &GitHubRelease,
         download_url: &str,
         is_tarball: bool,
-        archive_path: &PathBuf,
-        extract_dir: &PathBuf,
+        archive_path: &Path,
+        extract_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         // Check cancellation
@@ -617,7 +620,7 @@ impl VersionInstaller {
     async fn download_archive(
         &self,
         url: &str,
-        archive_path: &PathBuf,
+        archive_path: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Downloading archive from {}", url);
@@ -689,7 +692,7 @@ impl VersionInstaller {
         // Create output file
         let mut file = File::create(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to create archive file: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -710,7 +713,7 @@ impl VersionInstaller {
 
             file.write_all(&chunk).map_err(|e| PumasError::Io {
                 message: format!("Failed to write to archive: {}", e),
-                path: Some(archive_path.clone()),
+                path: Some(archive_path.to_path_buf()),
                 source: Some(e),
             })?;
 
@@ -751,8 +754,8 @@ impl VersionInstaller {
 
     async fn extract_archive(
         &self,
-        archive_path: &PathBuf,
-        extract_dir: &PathBuf,
+        archive_path: &Path,
+        extract_dir: &Path,
         is_tarball: bool,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
@@ -776,7 +779,7 @@ impl VersionInstaller {
 
         std::fs::create_dir_all(extract_dir).map_err(|e| PumasError::Io {
             message: format!("Failed to create extract directory: {}", e),
-            path: Some(extract_dir.clone()),
+            path: Some(extract_dir.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -805,10 +808,10 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_zip(&self, archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<()> {
+    fn extract_zip(&self, archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open zip archive: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -872,10 +875,10 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_tarball(&self, archive_path: &PathBuf, extract_dir: &PathBuf) -> Result<()> {
+    fn extract_tarball(&self, archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open tarball: {}", e),
-            path: Some(archive_path.clone()),
+            path: Some(archive_path.to_path_buf()),
             source: Some(e),
         })?;
 
@@ -891,11 +894,7 @@ impl VersionInstaller {
         Ok(())
     }
 
-    async fn move_to_final_location(
-        &self,
-        extract_dir: &PathBuf,
-        version_dir: &PathBuf,
-    ) -> Result<()> {
+    async fn move_to_final_location(&self, extract_dir: &Path, version_dir: &Path) -> Result<()> {
         info!("Moving extracted files to {}", version_dir.display());
 
         // GitHub archives typically wrap content in a single directory
@@ -903,7 +902,7 @@ impl VersionInstaller {
         let entries: Vec<_> = std::fs::read_dir(extract_dir)
             .map_err(|e| PumasError::Io {
                 message: format!("Failed to read extract directory: {}", e),
-                path: Some(extract_dir.clone()),
+                path: Some(extract_dir.to_path_buf()),
                 source: Some(e),
             })?
             .filter_map(|e| e.ok())
@@ -912,7 +911,7 @@ impl VersionInstaller {
         let source_dir = if entries.len() == 1 && entries[0].path().is_dir() {
             entries[0].path()
         } else {
-            extract_dir.clone()
+            extract_dir.to_path_buf()
         };
 
         // Ensure versions directory exists
@@ -928,7 +927,7 @@ impl VersionInstaller {
         if version_dir.exists() {
             std::fs::remove_dir_all(version_dir).map_err(|e| PumasError::Io {
                 message: format!("Failed to remove existing version directory: {}", e),
-                path: Some(version_dir.clone()),
+                path: Some(version_dir.to_path_buf()),
                 source: Some(e),
             })?;
         }
@@ -961,21 +960,21 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn copy_dir_recursive(&self, src: &PathBuf, dst: &PathBuf) -> Result<()> {
+    fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
         std::fs::create_dir_all(dst).map_err(|e| PumasError::Io {
             message: format!("Failed to create directory: {}", e),
-            path: Some(dst.clone()),
+            path: Some(dst.to_path_buf()),
             source: Some(e),
         })?;
 
         for entry in std::fs::read_dir(src).map_err(|e| PumasError::Io {
             message: format!("Failed to read directory: {}", e),
-            path: Some(src.clone()),
+            path: Some(src.to_path_buf()),
             source: Some(e),
         })? {
             let entry = entry.map_err(|e| PumasError::Io {
                 message: format!("Failed to read entry: {}", e),
-                path: Some(src.clone()),
+                path: Some(src.to_path_buf()),
                 source: Some(e),
             })?;
 
@@ -999,7 +998,7 @@ impl VersionInstaller {
     async fn create_venv(
         &self,
         tag: &str,
-        version_dir: &PathBuf,
+        version_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Creating virtual environment for {}", tag);
@@ -1073,7 +1072,7 @@ impl VersionInstaller {
     async fn install_deps(
         &self,
         tag: &str,
-        version_dir: &PathBuf,
+        version_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Installing dependencies for {}", tag);
@@ -1161,7 +1160,7 @@ impl VersionInstaller {
         &self,
         tag: &str,
         release: &GitHubRelease,
-        version_dir: &PathBuf,
+        version_dir: &Path,
         progress_tx: &mpsc::Sender<ProgressUpdate>,
     ) -> Result<()> {
         info!("Finalizing installation for {}", tag);

@@ -4,18 +4,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Compatibility status for a custom node with a version.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CompatibilityStatus {
     Compatible,
     Incompatible,
+    #[default]
     Unknown,
-}
-
-impl Default for CompatibilityStatus {
-    fn default() -> Self {
-        CompatibilityStatus::Unknown
-    }
 }
 
 /// Per-version status of a custom node.

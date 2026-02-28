@@ -154,10 +154,7 @@ fn normalize_modalities(side: &str) -> (Vec<String>, Vec<String>) {
     if let Ok(and_word) = Regex::new(r"\band\b") {
         normalized = and_word.replace_all(&normalized, "+").to_string();
     }
-    normalized = normalized
-        .replace(',', "+")
-        .replace('&', "+")
-        .replace('/', "+");
+    normalized = normalized.replace([',', '&', '/'], "+");
 
     let mut known = HashSet::new();
     let mut unknown = HashSet::new();

@@ -47,9 +47,7 @@ fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
         .iter()
         .filter(|path| {
             let filename = path.rsplit('/').next().unwrap_or(path);
-            AUXILIARY_FILE_PATTERNS
-                .iter()
-                .any(|pattern| filename == *pattern)
+            AUXILIARY_FILE_PATTERNS.contains(&filename)
         })
         .cloned()
         .collect()
@@ -86,11 +84,10 @@ fn select_auxiliary_files_for_download(
 
         let include = if is_root {
             // Root-level: match by auxiliary pattern.
-            AUXILIARY_FILE_PATTERNS.iter().any(|p| filename == *p)
+            AUXILIARY_FILE_PATTERNS.contains(&filename)
         } else if weight_dirs.contains(dir) {
             // Subdirectory that has selected weight files: include configs.
-            AUXILIARY_FILE_PATTERNS.iter().any(|p| filename == *p)
-                || filename.ends_with(".index.json")
+            AUXILIARY_FILE_PATTERNS.contains(&filename) || filename.ends_with(".index.json")
         } else {
             // Always include globally-useful files regardless of directory.
             filename == "model_index.json" || filename == "scheduler_config.json"
@@ -504,6 +501,7 @@ impl HuggingFaceClient {
     ///
     /// Downloads all files sequentially. Files that already exist on disk
     /// (from a previous partial download) are skipped automatically.
+    #[allow(clippy::too_many_arguments)]
     async fn run_download(
         client: reqwest::Client,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
@@ -820,6 +818,7 @@ impl HuggingFaceClient {
     /// `file_size_expected` is the expected size of this individual file.
     /// `bytes_offset` is bytes already downloaded from previous files in a multi-file download.
     /// Overall progress is calculated as `(bytes_offset + file_downloaded) / overall_total`.
+    #[allow(clippy::too_many_arguments)]
     async fn download_attempt(
         client: &reqwest::Client,
         downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,

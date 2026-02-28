@@ -64,6 +64,7 @@ impl DesktopEntry {
     }
 
     /// Generate the .desktop file content.
+    #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let mut content = String::new();
 

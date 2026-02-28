@@ -569,21 +569,16 @@ impl BatchImportProgress {
 }
 
 /// Link type for model mapping.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum LinkType {
     /// Symbolic link (default, works across filesystems)
+    #[default]
     Symlink,
     /// Hard link (same filesystem only, saves space)
     Hardlink,
     /// Copy file (fallback, uses disk space)
     Copy,
-}
-
-impl Default for LinkType {
-    fn default() -> Self {
-        LinkType::Symlink
-    }
 }
 
 /// Link registry entry for tracking created links.

@@ -54,7 +54,13 @@ pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_libr
             let display = model_record
                 .as_ref()
                 .map(|r| r.cleaned_name.clone())
-                .unwrap_or_else(|| model_id.split('/').last().unwrap_or(&model_id).to_string());
+                .unwrap_or_else(|| {
+                    model_id
+                        .split('/')
+                        .next_back()
+                        .unwrap_or(&model_id)
+                        .to_string()
+                });
             pumas_app_manager::derive_ollama_name(&display)
         }
     };

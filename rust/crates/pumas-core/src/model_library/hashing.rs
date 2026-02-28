@@ -107,7 +107,7 @@ pub fn compute_fast_hash(path: impl AsRef<Path>) -> Result<String> {
     }
 
     // Include file size
-    hasher.update(&file_size.to_le_bytes());
+    hasher.update(file_size.to_le_bytes());
 
     Ok(hex::encode(hasher.finalize()))
 }

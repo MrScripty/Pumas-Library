@@ -123,6 +123,7 @@ pub fn finalize_output_dir(temp_dir: &Path, output_dir: &Path) -> Result<()> {
 /// # Postconditions
 /// - `metadata.json` written in `output_dir`.
 /// - Model indexed in the library.
+#[allow(clippy::too_many_arguments)]
 pub async fn write_quantized_metadata(
     conversion_id: &str,
     source_model_id: &str,

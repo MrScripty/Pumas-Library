@@ -85,6 +85,21 @@ pub struct CachedRepoDetails {
     pub cached_at: chrono::DateTime<chrono::Utc>,
 }
 
+type RepoDetailsRow = (
+    String,
+    Option<String>,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<i64>,
+    Option<i64>,
+    String,
+);
+
 impl From<CachedRepoDetails> for HuggingFaceModel {
     fn from(cached: CachedRepoDetails) -> Self {
         // Compute compatible engines from formats
@@ -436,20 +451,7 @@ impl HfSearchCache {
         repo_id: &str,
         now: &str,
     ) -> Result<Option<CachedRepoDetails>> {
-        let row: Option<(
-            String,
-            Option<String>,
-            String,
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            String,
-            Option<i64>,
-            Option<i64>,
-            String,
-        )> = conn
+        let row: Option<RepoDetailsRow> = conn
             .query_row(
                 r#"
                 SELECT repo_id, last_modified, name, developer, kind,

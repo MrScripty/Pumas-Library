@@ -42,7 +42,13 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let model_name = model_record
         .as_ref()
         .map(|r| r.cleaned_name.clone())
-        .unwrap_or_else(|| model_id.split('/').last().unwrap_or(&model_id).to_string());
+        .unwrap_or_else(|| {
+            model_id
+                .split('/')
+                .next_back()
+                .unwrap_or(&model_id)
+                .to_string()
+        });
 
     let compute_device = pumas_app_manager::ComputeDevice::from_server_string(device);
     let client = pumas_app_manager::TorchClient::new(connection_url);

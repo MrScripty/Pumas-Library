@@ -8,7 +8,7 @@ use pumas_library::config::AppId;
 use pumas_library::metadata::{InstalledVersionMetadata, MetadataManager};
 use pumas_library::{PumasError, Result};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::{debug, info, warn};
 
@@ -31,12 +31,12 @@ pub struct VersionState {
 impl VersionState {
     /// Create a new version state tracker.
     pub async fn new(
-        launcher_root: &PathBuf,
+        launcher_root: &Path,
         app_id: AppId,
         metadata_manager: Arc<MetadataManager>,
     ) -> Result<Self> {
         let mut state = Self {
-            launcher_root: launcher_root.clone(),
+            launcher_root: launcher_root.to_path_buf(),
             app_id,
             metadata_manager,
             installed_tags: HashSet::new(),
@@ -320,17 +320,17 @@ impl VersionState {
 
         // Check for orphaned directories (exist on disk but not in metadata)
         if versions_dir.exists() {
-            for entry in std::fs::read_dir(&versions_dir).map_err(|e| PumasError::Io {
+            for entry in (std::fs::read_dir(&versions_dir).map_err(|e| PumasError::Io {
                 message: format!("Failed to read versions directory: {}", e),
                 path: Some(versions_dir.clone()),
                 source: Some(e),
-            })? {
-                if let Ok(entry) = entry {
-                    let dir_name = entry.file_name().to_string_lossy().to_string();
-                    if entry.path().is_dir() && !self.installed_tags.contains(&dir_name) {
-                        warn!("Orphaned version directory found: {}", dir_name);
-                        orphaned_dirs.push(entry.path());
-                    }
+            })?)
+            .flatten()
+            {
+                let dir_name = entry.file_name().to_string_lossy().to_string();
+                if entry.path().is_dir() && !self.installed_tags.contains(&dir_name) {
+                    warn!("Orphaned version directory found: {}", dir_name);
+                    orphaned_dirs.push(entry.path());
                 }
             }
         }
@@ -351,7 +351,7 @@ impl VersionState {
     }
 
     /// Check if a version installation is complete.
-    fn is_version_complete(&self, version_path: &PathBuf) -> bool {
+    fn is_version_complete(&self, version_path: &Path) -> bool {
         if !version_path.exists() {
             return false;
         }
@@ -376,7 +376,7 @@ impl VersionState {
             }
             _ => {
                 // Generic check - just need the directory to exist
-                vec![version_path.clone()]
+                vec![version_path.to_path_buf()]
             }
         };
 
@@ -539,7 +539,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_installations() {
-        let (mut state, temp) = create_test_state().await;
+        let (mut state, _temp) = create_test_state().await;
 
         // Add a version in metadata but don't create files (incomplete)
         let metadata = InstalledVersionMetadata {

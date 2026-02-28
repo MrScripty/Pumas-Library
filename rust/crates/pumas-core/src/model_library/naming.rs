@@ -69,7 +69,7 @@ pub fn normalize_name(name: &str) -> String {
     if result.len() > MAX_NAME_LENGTH {
         result = result[..MAX_NAME_LENGTH].to_string();
         // Try to break at a separator
-        if let Some(pos) = result.rfind(|c| c == '-' || c == '_') {
+        if let Some(pos) = result.rfind(['-', '_']) {
             if pos > MAX_NAME_LENGTH / 2 {
                 result = result[..pos].to_string();
             }

@@ -43,6 +43,8 @@ pub trait GpuMonitor: Send + Sync {
     fn refresh(&self);
 }
 
+type ProcessGpuMemoryCache = Option<(HashMap<u32, u64>, Instant)>;
+
 /// NVIDIA GPU monitor using nvidia-smi.
 pub struct NvidiaSmiMonitor {
     /// Cache TTL in seconds.
@@ -50,7 +52,7 @@ pub struct NvidiaSmiMonitor {
     /// Cached GPU info.
     gpu_cache: Arc<RwLock<Option<(GpuInfo, Instant)>>>,
     /// Cached per-process GPU memory.
-    process_cache: Arc<RwLock<Option<(HashMap<u32, u64>, Instant)>>>,
+    process_cache: Arc<RwLock<ProcessGpuMemoryCache>>,
     /// Whether nvidia-smi is available.
     available: bool,
 }
@@ -79,11 +81,6 @@ impl NvidiaSmiMonitor {
             process_cache: Arc::new(RwLock::new(None)),
             available,
         }
-    }
-
-    /// Create with default settings (2 second cache TTL).
-    pub fn default() -> Self {
-        Self::new(Duration::from_secs(2))
     }
 
     /// Query nvidia-smi for GPU utilization and memory.
@@ -187,6 +184,12 @@ impl NvidiaSmiMonitor {
                 Ok(HashMap::new())
             }
         }
+    }
+}
+
+impl Default for NvidiaSmiMonitor {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(2))
     }
 }
 

@@ -142,7 +142,7 @@ impl DependencyManager {
 
             // Extract package name (before any version specifier)
             let package_name = line
-                .split(|c| c == '=' || c == '>' || c == '<' || c == '[' || c == ';')
+                .split(['=', '>', '<', '[', ';'])
                 .next()
                 .map(|s| s.trim())
                 .unwrap_or("");

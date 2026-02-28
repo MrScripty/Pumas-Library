@@ -88,11 +88,6 @@ impl ResourceTracker {
         }
     }
 
-    /// Create with default settings (2 second cache TTL).
-    pub fn default() -> Self {
-        Self::new(Duration::from_secs(2))
-    }
-
     /// Get a snapshot of system resources.
     pub fn get_system_resources(&self) -> Result<SystemResourceSnapshot> {
         // Refresh system info if needed
@@ -292,6 +287,12 @@ impl ResourceTracker {
         }
 
         children
+    }
+}
+
+impl Default for ResourceTracker {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(2))
     }
 }
 

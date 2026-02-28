@@ -55,7 +55,7 @@ impl SherryBackend {
 
         let script = include_str!("sherry_script.py");
         std::fs::write(self.train_script(), script)
-            .map_err(|e| PumasError::io("writing sherry script", &self.train_script(), e))?;
+            .map_err(|e| PumasError::io("writing sherry script", self.train_script(), e))?;
         Ok(())
     }
 

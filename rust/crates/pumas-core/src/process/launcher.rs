@@ -362,17 +362,15 @@ impl ProcessLauncher {
         // Simple TCP connect check
         if let Some(host_port) = url.strip_prefix("http://") {
             let addr = host_port.split('/').next().unwrap_or(host_port);
-            match std::net::TcpStream::connect_timeout(
+            std::net::TcpStream::connect_timeout(
                 &addr.parse().unwrap_or_else(|_| {
                     format!("127.0.0.1:{}", AppId::ComfyUI.default_port())
                         .parse()
                         .unwrap()
                 }),
                 Duration::from_secs(1),
-            ) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            )
+            .is_ok()
         } else {
             false
         }

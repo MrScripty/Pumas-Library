@@ -242,7 +242,7 @@ impl LlamaCppBackend {
             .arg("-m")
             .arg("pip")
             .arg("install")
-            .args(&deps)
+            .args(deps)
             .output()
             .await
             .map_err(|e| PumasError::Other(format!("pip install failed: {e}")))?;

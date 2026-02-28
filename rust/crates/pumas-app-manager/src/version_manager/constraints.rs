@@ -196,8 +196,7 @@ impl ConstraintsManager {
         let line = line.split(';').next()?.trim();
 
         // Find version specifier start
-        let spec_start =
-            line.find(|c: char| c == '=' || c == '>' || c == '<' || c == '~' || c == '!');
+        let spec_start = line.find(['=', '>', '<', '~', '!']);
 
         if let Some(idx) = spec_start {
             let package = line[..idx].trim();
@@ -252,7 +251,7 @@ impl ConstraintsManager {
             .collect();
 
         // Sort by version (descending) and take newest
-        matching.sort_by(|a, b| self.compare_versions(&b.0, &a.0));
+        matching.sort_by(|a, b| self.compare_versions(b.0, a.0));
         matching.first().map(|(v, _)| v.to_string())
     }
 
@@ -325,8 +324,8 @@ impl ConstraintsManager {
             // Extract operator and version
             let ops = ["===", "~=", "!=", ">=", "<=", "==", ">", "<"];
             for op in ops {
-                if part.starts_with(op) {
-                    let version = part[op.len()..].trim().to_string();
+                if let Some(stripped) = part.strip_prefix(op) {
+                    let version = stripped.trim().to_string();
                     specs.push((op.to_string(), version));
                     break;
                 }

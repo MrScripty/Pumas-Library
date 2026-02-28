@@ -178,13 +178,11 @@ impl HuggingFaceClient {
 
             // Try to match against top candidates
             for candidate in candidates.iter().take(2) {
-                if let Ok(result) = self
+                if let Ok(Some(result)) = self
                     .verify_candidate(&candidate.repo_id, filename, path, fast_hash.as_deref())
                     .await
                 {
-                    if let Some(result) = result {
-                        return Ok(Some(result));
-                    }
+                    return Ok(Some(result));
                 }
             }
         }

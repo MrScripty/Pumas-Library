@@ -5,7 +5,7 @@ use pumas_library::Result;
 use std::path::PathBuf;
 
 /// Status of a running app process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProcessStatus {
     /// Process ID if running.
     pub pid: Option<u32>,
@@ -19,19 +19,6 @@ pub struct ProcessStatus {
     pub uptime_secs: Option<u64>,
     /// Whether the app is responding to health checks.
     pub healthy: bool,
-}
-
-impl Default for ProcessStatus {
-    fn default() -> Self {
-        Self {
-            pid: None,
-            port: None,
-            ram_bytes: None,
-            gpu_bytes: None,
-            uptime_secs: None,
-            healthy: false,
-        }
-    }
 }
 
 /// Handle to a launched process.

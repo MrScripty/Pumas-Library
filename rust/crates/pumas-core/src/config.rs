@@ -118,8 +118,9 @@ impl RegistryConfig {
 }
 
 /// App-specific configurations for multi-app support.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppId {
+    #[default]
     ComfyUI,
     Ollama,
     OpenWebUI,
@@ -186,6 +187,7 @@ impl AppId {
     }
 
     /// Parse a case-insensitive string into an `AppId`, returning `None` if unrecognized.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "comfyui" => Some(AppId::ComfyUI),
@@ -196,12 +198,6 @@ impl AppId {
             "torch" => Some(AppId::Torch),
             _ => None,
         }
-    }
-}
-
-impl Default for AppId {
-    fn default() -> Self {
-        AppId::ComfyUI
     }
 }
 

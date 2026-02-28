@@ -423,6 +423,7 @@ impl ConversionManager {
     ///
     /// Finds the backend by ID, builds params from the request, and returns
     /// a static reference suitable for use in a spawned task.
+    #[allow(clippy::too_many_arguments)]
     fn prepare_backend_quantization(
         &self,
         backend_id: QuantBackend,
@@ -540,6 +541,7 @@ fn is_active_status(status: ConversionStatus) -> bool {
 // ---------------------------------------------------------------------------
 
 /// Run a quantization operation via a backend, then import the result.
+#[allow(clippy::too_many_arguments)]
 async fn run_quantization(
     conversion_id: &str,
     backend: &dyn QuantizationBackend,
@@ -600,6 +602,7 @@ async fn run_quantization(
 // ---------------------------------------------------------------------------
 
 /// Execute the existing Python-based format conversion in a spawned task.
+#[allow(clippy::too_many_arguments)]
 async fn run_conversion(
     conversion_id: &str,
     direction: ConversionDirection,
@@ -760,7 +763,7 @@ async fn run_conversion(
 
     // Build conversion source metadata
     let is_dequantized = direction == ConversionDirection::GgufToSafetensors
-        && target_quant.map_or(true, |q| q != "F16" && q != "F32");
+        && target_quant.is_none_or(|q| q != "F16" && q != "F32");
     let conversion_source = ConversionSource {
         source_model_id: source_model_id.to_string(),
         source_format: source_extension(direction).to_string(),

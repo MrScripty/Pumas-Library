@@ -327,7 +327,7 @@ impl SizeCalculator {
 
         // Find the package name (before any version specifier or extra)
         let name_end = trimmed
-            .find(|c: char| c == '=' || c == '>' || c == '<' || c == '[' || c == ';' || c == ' ')
+            .find(['=', '>', '<', '[', ';', ' '])
             .unwrap_or(trimmed.len());
 
         &trimmed[..name_end]

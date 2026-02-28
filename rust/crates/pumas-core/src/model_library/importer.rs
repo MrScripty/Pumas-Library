@@ -1111,7 +1111,7 @@ impl ModelImporter {
 
             // Check for at least one model file
             let has_model_files = entries.iter().any(|e| {
-                if !e.file_type().ok().map_or(false, |ft| ft.is_file()) {
+                if !e.file_type().ok().is_some_and(|ft| ft.is_file()) {
                     return false;
                 }
                 e.path()
@@ -1174,7 +1174,7 @@ impl ModelImporter {
 
             let model_files: Vec<String> = file_entries
                 .iter()
-                .filter(|e| e.file_type().ok().map_or(false, |ft| ft.is_file()))
+                .filter(|e| e.file_type().ok().is_some_and(|ft| ft.is_file()))
                 .filter_map(|e| {
                     let name = e.file_name().to_string_lossy().to_string();
                     // Skip .part files and metadata
@@ -1336,10 +1336,9 @@ impl ModelImporter {
                 } else if name != "metadata.json"
                     && name != "overrides.json"
                     && name != ".pumas_download"
+                    && e.file_type().ok().is_some_and(|ft| ft.is_file())
                 {
-                    if e.file_type().ok().map_or(false, |ft| ft.is_file()) {
-                        completed_files.push(name);
-                    }
+                    completed_files.push(name);
                 }
             }
 

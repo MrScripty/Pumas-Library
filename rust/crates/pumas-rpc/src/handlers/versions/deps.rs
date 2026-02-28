@@ -69,10 +69,7 @@ pub async fn get_release_dependencies(
                 !line.is_empty() && !line.starts_with('#') && !line.starts_with('-')
             })
             .filter_map(|line| {
-                let name = line
-                    .split(|c| c == '=' || c == '>' || c == '<' || c == '[' || c == ';')
-                    .next()?
-                    .trim();
+                let name = line.split(['=', '>', '<', '[', ';']).next()?.trim();
                 if !name.is_empty() {
                     Some(name.to_string())
                 } else {

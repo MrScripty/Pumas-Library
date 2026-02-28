@@ -123,9 +123,12 @@ export const Header: React.FC<HeaderProps> = ({
     if (activeModelDownload) {
       if (activeModelDownload.status === 'downloading' && activeModelDownloadCount > 0) {
         const modelLabel = activeModelDownloadCount === 1 ? 'model' : 'models';
+        const speedInfo = activeModelDownload.speed && activeModelDownload.speed > 0
+          ? ` at ${formatSpeed(activeModelDownload.speed)}`
+          : '';
         return {
           icon: Download,
-          text: `Downloading ${activeModelDownloadCount} ${modelLabel}`,
+          text: `Downloading ${activeModelDownloadCount} ${modelLabel}${speedInfo}`,
           spinning: false
         };
       }

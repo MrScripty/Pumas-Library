@@ -135,6 +135,7 @@ describe('Header Component', () => {
       />
     );
     expect(screen.getByText(/Downloading 1 model/)).toBeInTheDocument();
+    expect(screen.getByText(/10\.0 MB\/s/)).toBeInTheDocument();
   });
 
   it('shows aggregate download count when multiple models are active', () => {
@@ -157,5 +158,6 @@ describe('Header Component', () => {
       />
     );
     expect(screen.getByText(/Downloading 3 models/)).toBeInTheDocument();
+    expect(screen.getByText(/10\.0 MB\/s/)).toBeInTheDocument();
   });
 });

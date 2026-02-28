@@ -147,6 +147,7 @@ jobs:
         run: npm run test:run
 
       - name: Build
+        if: matrix.upload_dist
         working-directory: ./frontend
         run: npm run build
 

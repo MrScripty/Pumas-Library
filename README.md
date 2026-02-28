@@ -32,7 +32,7 @@ Pumas Library is an easy to use AI model library that downloads, organizes, and 
 
 - Link your apps to your library, no manual setup required
 - System and per-app resource monitoring
-- Install and run different app versions (ComfyUI, Ollama, OpenWebUI, InvokeAI, KritaDiffusion)
+- Install and run different app versions (currently ComfyUI, Ollama, Torch)
 - Smart system shortcuts that don't require the launcher to work
 - Plugin system for JSON-based app definitions
 
@@ -133,21 +133,21 @@ async fn main() -> pumas_library::Result<()> {
 
 ## Linux Installation
 
-### Quick Install (Recommended)
+### Launcher Setup (Recommended)
 
-Run the automated installation script:
+Use the root launcher script:
 
 ```bash
-./install.sh
+chmod +x launcher.sh
+./launcher.sh --install
+./launcher.sh --build-release
+./launcher.sh --run
 ```
 
-The installer will:
-
-1. Check and install system dependencies (with your permission)
-2. Build the Rust backend
-3. Install and build the frontend
-4. Install and build Electron
-5. Create the launcher script
+The launcher-managed flow:
+1. Verifies local tool/runtime dependencies (`cargo`, `node`, `npm`, workspace `node_modules`)
+2. Builds Rust backend + frontend + Electron artifacts
+3. Starts Electron with the Rust sidecar backend
 
 ### Manual Installation (Linux)
 
@@ -170,7 +170,7 @@ The installer will:
 
    ```bash
    cd frontend
-   npm install
+   npm ci
    npm run build
    cd ..
    ```
@@ -179,7 +179,7 @@ The installer will:
 
    ```bash
    cd electron
-   npm install
+   npm ci
    npm run build
    cd ..
    ```
@@ -241,7 +241,7 @@ Open PowerShell and run:
 
    ```powershell
    cd frontend
-   npm install
+   npm ci
    npm run build
    cd ..
    ```
@@ -250,7 +250,7 @@ Open PowerShell and run:
 
    ```powershell
    cd electron
-   npm install
+   npm ci
    npm run build
    cd ..
    ```
@@ -293,6 +293,8 @@ Run the launcher with different modes:
 | `./launcher.sh --run -- --devtools` | Run development mode with app flags |
 | `./launcher.sh --run-release` | Run packaged artifacts directly |
 | `./launcher.sh --help` | Display usage information |
+
+Note: `--run` currently expects the release Rust backend binary (`rust/target/release/pumas-rpc`), so run `./launcher.sh --build-release` first.
 
 ### Windows Commands
 
@@ -343,8 +345,9 @@ Before cutting a release, run:
 
 ```bash
 cd rust
-cargo test
-cargo build --workspace
+cargo test --workspace --exclude pumas_rustler
+cargo clippy --workspace --exclude pumas_rustler -- -D warnings
+cargo build --workspace --exclude pumas_rustler
 cd ..
 npm run -w frontend test:run
 npm run -w frontend check:types
@@ -366,13 +369,13 @@ Pumas-Library/
 ├── rust/                       # Rust workspace
 │   └── crates/
 │       ├── pumas-core/         # Core headless library (model library, IPC, registry, networking)
-│       ├── pumas-app-manager/  # App version and extension management (ComfyUI, Ollama)
+│       ├── pumas-app-manager/  # App version and extension management (ComfyUI, Ollama, Torch)
 │       ├── pumas-rpc/          # Axum JSON-RPC server (Electron backend)
 │       ├── pumas-uniffi/       # Python, C#, Kotlin, Swift, Ruby bindings (UniFFI)
 │       └── pumas-rustler/      # Elixir/Erlang NIFs (Rustler)
 ├── frontend/                   # React 19 + Vite frontend
 ├── electron/                   # Electron 38+ shell
-├── bindings/                   # Generated language bindings (not committed)
+├── bindings/                   # Generated language bindings and artifacts
 └── .github/workflows/          # CI/CD
 ```
 
@@ -388,7 +391,7 @@ All platform-specific code is centralized in `rust/crates/pumas-core/src/platfor
 
 Process management, version installation, and model mapping are supported for:
 
-ComfyUI, Ollama, OpenWebUI, InvokeAI, and KritaDiffusion.
+ComfyUI, Ollama, and Torch.
 
 Additional apps can be defined via the JSON plugin system without code changes.
 
@@ -412,7 +415,7 @@ Use the standalone script:
 ./scripts/generate-bindings.sh all
 ```
 
-Generated bindings are written to `bindings/` and are not committed to the repository.
+Generated bindings are written to `bindings/` and can be regenerated with `scripts/generate-bindings.sh`.
 
 ### Prerequisites
 

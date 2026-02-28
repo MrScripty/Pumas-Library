@@ -3,6 +3,7 @@ import { X, Minus, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, 
 import type { SystemResources } from '../types/apps';
 import { formatSpeed, formatBytes } from '../utils/formatters';
 import { Tooltip, IconButton } from './ui';
+import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 
 interface InstallationProgress {
   tag: string;
@@ -38,15 +39,11 @@ interface HeaderProps {
   launcherUpdateAvailable: boolean;
   onMinimize: () => void;
   onClose: () => void;
-  cacheStatus: {
-    has_cache: boolean;
-    is_valid: boolean;
-    is_fetching: boolean;
-    age_seconds?: number;
-    last_fetched?: string;
-    releases_count?: number;
-  };
+  networkAvailable?: boolean | null;
+  modelLibraryLoaded?: boolean | null;
   installationProgress?: InstallationProgress | null;
+  activeModelDownload?: ActiveModelDownload | null;
+  activeModelDownloadCount?: number;
 }
 
 // Helper to get color based on load percentage
@@ -63,8 +60,11 @@ export const Header: React.FC<HeaderProps> = ({
   launcherUpdateAvailable,
   onMinimize,
   onClose,
-  cacheStatus,
+  networkAvailable,
+  modelLibraryLoaded,
   installationProgress,
+  activeModelDownload,
+  activeModelDownloadCount = 0,
 }) => {
   const cpuUsage = Math.round(systemResources?.cpu?.usage ?? 0);
   const gpuUsage = Math.round(systemResources?.gpu?.usage ?? 0);
@@ -119,45 +119,85 @@ export const Header: React.FC<HeaderProps> = ({
       };
     }
 
-    // FETCHING STATE
-    if (cacheStatus.is_fetching) {
+    // MODEL DOWNLOAD IN PROGRESS STATE - Priority 2
+    if (activeModelDownload) {
+      if (activeModelDownload.status === 'downloading' && activeModelDownloadCount > 0) {
+        const modelLabel = activeModelDownloadCount === 1 ? 'model' : 'models';
+        return {
+          icon: Download,
+          text: `Downloading ${activeModelDownloadCount} ${modelLabel}`,
+          spinning: false
+        };
+      }
+
+      const progress = Math.max(0, Math.min(100, Math.round(activeModelDownload.progress)));
+      const modelName = activeModelDownload.repoId?.split('/').pop() || activeModelDownload.repoId || 'model';
+
+      if (activeModelDownload.status === 'downloading') {
+        const speedInfo = activeModelDownload.speed && activeModelDownload.speed > 0
+          ? ` at ${formatSpeed(activeModelDownload.speed)}`
+          : '';
+        const bytesInfo = !speedInfo && activeModelDownload.downloadedBytes !== null && activeModelDownload.totalBytes !== null
+          ? ` · ${formatBytes(activeModelDownload.downloadedBytes)} / ${formatBytes(activeModelDownload.totalBytes)}`
+          : '';
+
+        return {
+          icon: Download,
+          text: `Downloading ${modelName}${speedInfo} · ${progress}%${bytesInfo}`,
+          spinning: false
+        };
+      }
+
+      if (activeModelDownload.status === 'queued') {
+        return {
+          icon: Download,
+          text: `Queued model download · ${modelName}`,
+          spinning: false
+        };
+      }
+
+      if (activeModelDownload.status === 'pausing') {
+        return {
+          icon: Download,
+          text: `Pausing model download · ${modelName}`,
+          spinning: false
+        };
+      }
+
+      return {
+        icon: Download,
+        text: `Cancelling model download · ${modelName}`,
+        spinning: false
+      };
+    }
+
+    if (networkAvailable === null || networkAvailable === undefined || modelLibraryLoaded === null || modelLibraryLoaded === undefined) {
       return {
         icon: RefreshCw,
-        text: 'Fetching releases...',
+        text: 'Checking network and model library...',
         spinning: true
       };
     }
 
-    // NO CACHE STATE
-    if (!cacheStatus.has_cache) {
+    if (!networkAvailable) {
       return {
         icon: WifiOff,
-        text: 'No cache available - offline mode',
+        text: 'Network unavailable',
         spinning: false
       };
     }
 
-    // VALID CACHE STATE
-    if (cacheStatus.is_valid) {
-      const ageMinutes = cacheStatus.age_seconds
-        ? Math.floor(cacheStatus.age_seconds / 60)
-        : 0;
-
+    if (!modelLibraryLoaded) {
       return {
-        icon: Database,
-        text: `Cached data (${ageMinutes}m old) · ${cacheStatus.releases_count || 0} releases`,
+        icon: Clock,
+        text: 'Model library database unavailable',
         spinning: false
       };
     }
-
-    // STALE CACHE STATE
-    const ageHours = cacheStatus.age_seconds
-      ? Math.floor(cacheStatus.age_seconds / 3600)
-      : 0;
 
     return {
-      icon: Clock,
-      text: `Stale cache (${ageHours}h old) · offline mode`,
+      icon: Database,
+      text: 'Network online · model library ready',
       spinning: false
     };
   };
@@ -178,13 +218,13 @@ export const Header: React.FC<HeaderProps> = ({
               tooltip="Update available"
               size="sm"
             />
-          ) : !cacheStatus.has_cache ? (
+          ) : (
             <IconButton
               icon={<RefreshCw />}
               tooltip="Check for updates"
               size="sm"
             />
-          ) : null}
+          )}
         </div>
 
         {/* Center: Status badge */}

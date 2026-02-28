@@ -31,22 +31,20 @@ interface InstallationProgress {
 }
 
 interface StatusFooterProps {
-  cacheStatus: {
-    has_cache: boolean;
-    is_valid: boolean;
-    is_fetching: boolean;
-    age_seconds?: number;
-    last_fetched?: string;
-    releases_count?: number;
-  };
+  networkAvailable?: boolean | null;
+  modelLibraryLoaded?: boolean | null;
   installationProgress?: InstallationProgress | null;
 }
 
-export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, installationProgress }) => {
-  // Debug logging to trace cache status issues
+export const StatusFooter: React.FC<StatusFooterProps> = ({
+  networkAvailable,
+  modelLibraryLoaded,
+  installationProgress
+}) => {
+  // Debug logging to trace status issues
   React.useEffect(() => {
-    logger.debug('Cache status updated', { cacheStatus });
-  }, [cacheStatus]);
+    logger.debug('Footer status updated', { networkAvailable, modelLibraryLoaded });
+  }, [networkAvailable, modelLibraryLoaded]);
 
   const getStatusInfo = () => {
     // INSTALLATION IN PROGRESS STATE - Priority 1
@@ -99,53 +97,41 @@ export const StatusFooter: React.FC<StatusFooterProps> = ({ cacheStatus, install
       };
     }
 
-    // FETCHING STATE
-    if (cacheStatus.is_fetching) {
+    if (networkAvailable === null || networkAvailable === undefined || modelLibraryLoaded === null || modelLibraryLoaded === undefined) {
       return {
         icon: RefreshCw,
-        text: 'Fetching releases...',
+        text: 'Checking network and model library...',
         color: 'text-accent-info',
         bgColor: 'bg-[hsl(var(--accent-info)/0.1)]',
         spinning: true
       };
     }
 
-    // NO CACHE STATE
-    if (!cacheStatus.has_cache) {
+    if (!networkAvailable) {
       return {
         icon: WifiOff,
-        text: 'No cache available - offline mode',
+        text: 'Network unavailable',
         color: 'text-accent-warning',
         bgColor: 'bg-[hsl(var(--accent-warning)/0.1)]',
         spinning: false
       };
     }
 
-    // VALID CACHE STATE
-    if (cacheStatus.is_valid) {
-      const ageMinutes = cacheStatus.age_seconds
-        ? Math.floor(cacheStatus.age_seconds / 60)
-        : 0;
-
+    if (!modelLibraryLoaded) {
       return {
-        icon: Database,
-        text: `Cached data (${ageMinutes}m old) · ${cacheStatus.releases_count || 0} releases`,
-        color: 'text-accent-success',
-        bgColor: 'bg-[hsl(var(--accent-success)/0.1)]',
+        icon: Clock,
+        text: 'Model library database unavailable',
+        color: 'text-accent-warning',
+        bgColor: 'bg-[hsl(var(--accent-warning)/0.1)]',
         spinning: false
       };
     }
 
-    // STALE CACHE STATE
-    const ageHours = cacheStatus.age_seconds
-      ? Math.floor(cacheStatus.age_seconds / 3600)
-      : 0;
-
     return {
-      icon: Clock,
-      text: `Stale cache (${ageHours}h old) · offline mode`,
-      color: 'text-accent-warning',
-      bgColor: 'bg-[hsl(var(--accent-warning)/0.1)]',
+      icon: Database,
+      text: 'Network online · model library ready',
+      color: 'text-accent-success',
+      bgColor: 'bg-[hsl(var(--accent-success)/0.1)]',
       spinning: false
     };
   };

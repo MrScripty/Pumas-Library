@@ -13,6 +13,7 @@ import { useComfyUIProcess } from './hooks/useComfyUIProcess';
 import { useOllamaProcess } from './hooks/useOllamaProcess';
 import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
+import { useActiveModelDownload } from './hooks/useActiveModelDownload';
 import { useAppPanelState } from './hooks/useAppPanelState';
 import { api, isAPIAvailable, windowAPI } from './api/adapter';
 import { DEFAULT_APPS } from './config/apps';
@@ -46,7 +47,14 @@ export default function App() {
   const [showImportDialog, setShowImportDialog] = useState(false);
 
   // --- Custom Hooks ---
-  const { status, systemResources, isCheckingDeps, refetch: refetchStatus } = useStatus();
+  const {
+    status,
+    systemResources,
+    networkAvailable,
+    modelLibraryLoaded,
+    isCheckingDeps,
+    refetch: refetchStatus
+  } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
   const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, clearStartingState, clearStoppingState, openLogPath } = useComfyUIProcess();
   const {
@@ -72,6 +80,7 @@ export default function App() {
     openLogPath: openTorchLogPath
   } = useTorchProcess();
   const { modelGroups, scanModels, fetchModels } = useModels();
+  const { activeDownload, activeDownloadCount } = useActiveModelDownload();
 
   const comfyVersions = useVersions({ appId: 'comfyui' });
   const ollamaVersions = useVersions({ appId: 'ollama' });
@@ -94,7 +103,6 @@ export default function App() {
   const { installedVersions: ollamaInstalledVersions } = ollamaVersions;
   const { installedVersions: torchInstalledVersions } = torchVersions;
   const installationProgress = appVersions.installationProgress;
-  const cacheStatus = appVersions.cacheStatus;
 
   const comfyUIRunning = status?.comfyui_running || false;
   const ollamaRunning = status?.ollama_running || false;
@@ -607,8 +615,11 @@ export default function App() {
         launcherUpdateAvailable={launcherUpdateAvailable}
         onMinimize={minimizeWindow}
         onClose={closeWindow}
-        cacheStatus={cacheStatus}
+        networkAvailable={networkAvailable}
+        modelLibraryLoaded={modelLibraryLoaded}
         installationProgress={installationProgress}
+        activeModelDownload={activeDownload}
+        activeModelDownloadCount={activeDownloadCount}
       />
 
       <div className="flex flex-1 relative z-10 overflow-hidden">

@@ -26,8 +26,12 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [isLoading, setIsLoading] = useState(true);
   const [isCheckingDeps, setIsCheckingDeps] = useState(true);
   const [systemResources, setSystemResources] = useState<SystemResources | undefined>(undefined);
+  const [networkAvailable, setNetworkAvailable] = useState<boolean | null>(null);
+  const [modelLibraryLoaded, setModelLibraryLoaded] = useState<boolean | null>(null);
   const isPolling = useRef(false);
   const lastResourcesFetch = useRef(0);
+  const lastNetworkFetch = useRef(0);
+  const lastLibraryFetch = useRef(0);
 
   const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
     // Allow force=true to bypass the polling guard for manual refreshes
@@ -60,6 +64,35 @@ export function useStatus(options: UseStatusOptions = {}) {
           setSystemResources(resourcesResult.resources);
         }
         lastResourcesFetch.current = now;
+      }
+
+      if (now - lastNetworkFetch.current >= 5000) {
+        try {
+          const networkResult = await api.get_network_status();
+          if (networkResult?.success) {
+            setNetworkAvailable(!networkResult.is_offline);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.debug('Failed to fetch network status', { error: message });
+        }
+        lastNetworkFetch.current = now;
+      }
+
+      if (now - lastLibraryFetch.current >= 5000) {
+        try {
+          const libraryResult = await api.get_library_status();
+          if (libraryResult?.success) {
+            setModelLibraryLoaded(true);
+          } else {
+            setModelLibraryLoaded(false);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          logger.debug('Failed to fetch model library status', { error: message });
+          setModelLibraryLoaded(false);
+        }
+        lastLibraryFetch.current = now;
       }
 
       if (isInitialLoad) {
@@ -130,6 +163,8 @@ export function useStatus(options: UseStatusOptions = {}) {
   return {
     status: statusData,
     systemResources,
+    networkAvailable,
+    modelLibraryLoaded,
     isLoading,
     isCheckingDeps,
     refetch: fetchStatus,

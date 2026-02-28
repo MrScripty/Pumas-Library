@@ -19,25 +19,16 @@ describe('Header Component', () => {
     disk: { total: 500, free: 100, usage: 80 },
   };
 
-  const mockCacheStatus = {
-    has_cache: true,
-    is_valid: true,
-    is_fetching: false,
-    age_seconds: 120,
-    releases_count: 102,
-  };
-
   const defaultProps = {
     systemResources: mockSystemResources,
-    diskSpacePercent: 80,
-    launcherVersion: 'v1.0.0-abc1234',
     launcherUpdateAvailable: false,
-    isUpdatingLauncher: false,
-    onUpdate: vi.fn(),
     onMinimize: vi.fn(),
     onClose: vi.fn(),
-    cacheStatus: mockCacheStatus,
+    networkAvailable: true,
+    modelLibraryLoaded: true,
     installationProgress: null,
+    activeModelDownload: null,
+    activeModelDownloadCount: 0,
   };
 
   it('renders AI Manager title', () => {
@@ -67,10 +58,9 @@ describe('Header Component', () => {
     expect(vramBar).toBeInTheDocument();
   });
 
-  it('displays status message from cache', () => {
+  it('displays network and model library status', () => {
     render(<Header {...defaultProps} />);
-    expect(screen.getByText(/Cached data/)).toBeInTheDocument();
-    expect(screen.getByText(/102 releases/)).toBeInTheDocument();
+    expect(screen.getByText(/Network online · model library ready/)).toBeInTheDocument();
   });
 
   it('shows update button when update is available', () => {
@@ -80,13 +70,8 @@ describe('Header Component', () => {
     expect(updateIcon).toBeInTheDocument();
   });
 
-  it('shows check for updates button when no cache', () => {
-    const noCacheStatus = {
-      has_cache: false,
-      is_valid: false,
-      is_fetching: false,
-    };
-    const { container } = render(<Header {...defaultProps} cacheStatus={noCacheStatus} />);
+  it('shows check for updates button when no update is available', () => {
+    const { container } = render(<Header {...defaultProps} />);
     // Verify refresh icon is displayed
     const checkIcon = container.querySelector('.lucide-refresh-cw');
     expect(checkIcon).toBeInTheDocument();
@@ -115,24 +100,62 @@ describe('Header Component', () => {
     expect(screen.getByText(/25% complete/)).toBeInTheDocument();
   });
 
-  it('shows fetching state when cache is being updated', () => {
-    const fetchingCacheStatus = {
-      ...mockCacheStatus,
-      is_fetching: true,
-    };
-
-    render(<Header {...defaultProps} cacheStatus={fetchingCacheStatus} />);
-    expect(screen.getByText(/Fetching releases/)).toBeInTheDocument();
+  it('shows checking state while network and model library status are unresolved', () => {
+    render(<Header {...defaultProps} networkAvailable={null} modelLibraryLoaded={null} />);
+    expect(screen.getByText(/Checking network and model library/)).toBeInTheDocument();
   });
 
-  it('shows offline mode when no cache available', () => {
-    const noCacheStatus = {
-      has_cache: false,
-      is_valid: false,
-      is_fetching: false,
+  it('shows network unavailable when offline', () => {
+    render(<Header {...defaultProps} networkAvailable={false} modelLibraryLoaded={true} />);
+    expect(screen.getByText(/Network unavailable/)).toBeInTheDocument();
+  });
+
+  it('shows model library unavailable when db is not loaded', () => {
+    render(<Header {...defaultProps} networkAvailable={true} modelLibraryLoaded={false} />);
+    expect(screen.getByText(/Model library database unavailable/)).toBeInTheDocument();
+  });
+
+  it('shows singular download count when one model is downloading', () => {
+    const activeModelDownload = {
+      downloadId: 'dl-1',
+      repoId: 'meta-llama/Llama-3.2-1B-Instruct',
+      status: 'downloading' as const,
+      progress: 42,
+      downloadedBytes: 2 * 1024 * 1024 * 1024,
+      totalBytes: 5 * 1024 * 1024 * 1024,
+      speed: 10 * 1024 * 1024,
+      etaSeconds: 120,
     };
 
-    render(<Header {...defaultProps} cacheStatus={noCacheStatus} />);
-    expect(screen.getByText(/No cache available - offline mode/)).toBeInTheDocument();
+    render(
+      <Header
+        {...defaultProps}
+        activeModelDownload={activeModelDownload}
+        activeModelDownloadCount={1}
+      />
+    );
+    expect(screen.getByText(/Downloading 1 model/)).toBeInTheDocument();
+  });
+
+  it('shows aggregate download count when multiple models are active', () => {
+    const activeModelDownload = {
+      downloadId: 'dl-1',
+      repoId: 'meta-llama/Llama-3.2-1B-Instruct',
+      status: 'downloading' as const,
+      progress: 42,
+      downloadedBytes: 2 * 1024 * 1024 * 1024,
+      totalBytes: 5 * 1024 * 1024 * 1024,
+      speed: 10 * 1024 * 1024,
+      etaSeconds: 120,
+    };
+
+    render(
+      <Header
+        {...defaultProps}
+        activeModelDownload={activeModelDownload}
+        activeModelDownloadCount={3}
+      />
+    );
+    expect(screen.getByText(/Downloading 3 models/)).toBeInTheDocument();
   });
 });

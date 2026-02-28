@@ -326,7 +326,7 @@ export const DEFAULT_APPS: AppConfig[] = [
 - **Flexibility**: Per-app configuration (ports, models, etc.)
 - **Type safety**: Full TypeScript definitions
 
-See [docs/architecture/MULTI_APP_SYSTEM.md](../docs/architecture/MULTI_APP_SYSTEM.md) for details.
+See [docs/architecture/SYSTEM_ARCHITECTURE.md](../docs/architecture/SYSTEM_ARCHITECTURE.md) for current runtime architecture details.
 
 ## Component Guidelines
 
@@ -531,8 +531,8 @@ Pre-commit hook enforces file size limits:
 - [THEME_SYSTEM.md](THEME_SYSTEM.md) - Theme system documentation
 - [../docs/CODING_STANDARDS.md](../docs/CODING_STANDARDS.md) - General code standards
 - [../docs/REACT_ARIA_ENFORCEMENT.md](../docs/REACT_ARIA_ENFORCEMENT.md) - React Aria usage
-- [../docs/architecture/MULTI_APP_SYSTEM.md](../docs/architecture/MULTI_APP_SYSTEM.md) - Multi-app architecture
-- [../docs/architecture/FRONTEND_ARCHITECTURE.md](../docs/architecture/FRONTEND_ARCHITECTURE.md) - Refactoring history and decisions
+- [../docs/architecture/SYSTEM_ARCHITECTURE.md](../docs/architecture/SYSTEM_ARCHITECTURE.md) - Current system/runtime architecture
+- [../docs/architecture/MODEL_LIBRARY_ARCHITECTURE.md](../docs/architecture/MODEL_LIBRARY_ARCHITECTURE.md) - Model library and dependency contract architecture
 
 ## Future Enhancements
 

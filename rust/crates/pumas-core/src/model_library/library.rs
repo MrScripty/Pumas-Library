@@ -171,8 +171,12 @@ impl ModelLibrary {
     ///
     /// The model ID is the relative path from the library root.
     pub fn get_model_id(&self, model_dir: &Path) -> Option<String> {
-        self.get_relative_path(model_dir)
-            .map(|p| p.to_string_lossy().to_string())
+        self.get_relative_path(model_dir).map(|path| {
+            path.components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
     }
 
     // ========================================
@@ -2677,6 +2681,20 @@ mod tests {
 
         let path = library.build_model_path("llm", "llama", "Llama 2 7B");
         assert!(path.ends_with("llm/llama/llama_2_7b"));
+    }
+
+    #[tokio::test]
+    async fn test_get_model_id_is_forward_slash_canonical() {
+        let (_, library) = setup_library().await;
+        let model_dir = library
+            .library_root()
+            .join("llm")
+            .join("llama")
+            .join("canonical-id");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let model_id = library.get_model_id(&model_dir).unwrap();
+        assert_eq!(model_id, "llm/llama/canonical-id");
     }
 
     #[tokio::test]

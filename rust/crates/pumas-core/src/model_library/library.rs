@@ -242,6 +242,23 @@ impl ModelLibrary {
         Ok(())
     }
 
+    /// Upsert a model index record directly from in-memory metadata.
+    ///
+    /// This keeps SQLite as the source of truth when metadata is being
+    /// staged early (for example at download start) before JSON projection.
+    pub fn upsert_index_from_metadata(
+        &self,
+        model_dir: &Path,
+        metadata: &ModelMetadata,
+    ) -> Result<()> {
+        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
+            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
+        })?;
+        let record = metadata_to_record(&model_id, model_dir, metadata);
+        self.index.upsert(&record)?;
+        Ok(())
+    }
+
     /// Rebuild the entire index from metadata files.
     ///
     /// This is a fast operation that reads metadata.json files without
@@ -2643,6 +2660,10 @@ mod tests {
         file.write_all(&content).unwrap();
     }
 
+    fn normalize_path_separators(value: &str) -> String {
+        value.replace('\\', "/")
+    }
+
     #[tokio::test]
     async fn test_library_creation() {
         let (temp_dir, library) = setup_library().await;
@@ -2805,7 +2826,10 @@ mod tests {
             .reclassify_model("llm/llama/resolver-move")
             .await
             .unwrap();
-        assert_eq!(moved, Some("diffusion/llama/resolver-move".to_string()));
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("diffusion/llama/resolver-move".to_string())
+        );
 
         let new_dir = library.build_model_path("diffusion", "llama", "resolver-move");
         assert!(new_dir.exists());
@@ -2849,7 +2873,10 @@ mod tests {
 
         let queue = library.list_models_needing_review(None).await.unwrap();
         assert_eq!(queue.len(), 1);
-        assert_eq!(queue[0].model_id, "llm/llama/review-model");
+        assert_eq!(
+            normalize_path_separators(&queue[0].model_id),
+            "llm/llama/review-model"
+        );
 
         let result = library
             .submit_model_review(
@@ -2864,7 +2891,10 @@ mod tests {
             )
             .await
             .unwrap();
-        assert_eq!(result.model_id, "llm/llama/review-model");
+        assert_eq!(
+            normalize_path_separators(&result.model_id),
+            "llm/llama/review-model"
+        );
         assert_eq!(result.review_status, "reviewed");
         assert!(!result.metadata_needs_review);
         assert!(result.review_reasons.is_empty());
@@ -2972,7 +3002,10 @@ mod tests {
 
         let queue_after = library.list_models_needing_review(None).await.unwrap();
         assert_eq!(queue_after.len(), 1);
-        assert_eq!(queue_after[0].model_id, "llm/llama/reset-review");
+        assert_eq!(
+            normalize_path_separators(&queue_after[0].model_id),
+            "llm/llama/reset-review"
+        );
         assert_eq!(queue_after[0].review_status.as_deref(), Some("pending"));
         assert!(queue_after[0]
             .review_reasons
@@ -3014,11 +3047,16 @@ mod tests {
         assert_eq!(report.items.len(), 1);
 
         let item = &report.items[0];
-        assert_eq!(item.model_id, "llm/llama/dry-run-move");
+        assert_eq!(
+            normalize_path_separators(&item.model_id),
+            "llm/llama/dry-run-move"
+        );
         assert_eq!(item.action, "move");
         assert_eq!(
-            item.target_model_id.as_deref(),
-            Some("diffusion/llama/dry-run-move")
+            item.target_model_id
+                .as_deref()
+                .map(normalize_path_separators),
+            Some("diffusion/llama/dry-run-move".to_string())
         );
         assert!(item.findings.contains(&"metadata_needs_review".to_string()));
         assert!(item.findings.contains(&"license_unresolved".to_string()));

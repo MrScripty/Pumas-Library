@@ -4,6 +4,7 @@ use crate::error::{PumasError, Result};
 use crate::model_library;
 use crate::models;
 use crate::PumasApi;
+use tracing::{debug, warn};
 
 impl PumasApi {
     // ========================================
@@ -42,19 +43,55 @@ impl PumasApi {
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
         if let Some(ref client) = self.primary().hf_client {
+            // Resolve model_type early so destination path/classification is stable at
+            // download creation time (avoid landing in `unknown/` when we have signals).
+            let mut resolved_request = request.clone();
+            let mut resolved_model_type =
+                normalize_download_model_type(request.model_type.as_deref())
+                    .or_else(|| normalize_download_model_type(request.pipeline_tag.as_deref()));
+
+            if resolved_model_type.is_none() {
+                match client.get_model_info(&request.repo_id).await {
+                    Ok(info) => {
+                        if resolved_request.pipeline_tag.is_none() && !info.kind.is_empty() {
+                            resolved_request.pipeline_tag = Some(info.kind.clone());
+                        }
+                        resolved_model_type = normalize_download_model_type(Some(&info.kind));
+                    }
+                    Err(e) => {
+                        debug!(
+                            "Model info prefetch failed for {} (continuing with local hints): {}",
+                            request.repo_id, e
+                        );
+                    }
+                }
+            }
+
+            if resolved_model_type.is_none() {
+                resolved_model_type = infer_model_type_from_request(&resolved_request);
+            }
+
             // Determine destination directory.
             // Normalize through ModelType to handle raw pipeline_tags (e.g. "text-to-audio" → "audio").
-            let model_type_raw = request.model_type.as_deref().unwrap_or("unknown");
+            let model_type_raw = resolved_model_type.as_deref().unwrap_or("unknown");
             let model_type_parsed: crate::model_library::ModelType = model_type_raw
                 .parse()
                 .unwrap_or(crate::model_library::ModelType::Unknown);
             let model_type = model_type_parsed.as_str();
+            resolved_request.model_type = Some(model_type.to_string());
             let dest_dir = self.primary().model_library.build_model_path(
                 model_type,
-                &request.family,
-                &model_library::normalize_name(&request.official_name),
+                &resolved_request.family,
+                &model_library::normalize_name(&resolved_request.official_name),
             );
-            client.start_download(request, &dest_dir).await
+            if model_type == "unknown" {
+                warn!(
+                    "Download {} is starting with unknown model_type; destination={}",
+                    request.repo_id,
+                    dest_dir.display()
+                );
+            }
+            client.start_download(&resolved_request, &dest_dir).await
         } else {
             Err(PumasError::Config {
                 message: "HuggingFace client not initialized".to_string(),
@@ -366,5 +403,38 @@ impl PumasApi {
                 message: "HuggingFace client not initialized".to_string(),
             })
         }
+    }
+}
+
+fn normalize_download_model_type(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let parsed: crate::model_library::ModelType = raw
+        .parse()
+        .unwrap_or(crate::model_library::ModelType::Unknown);
+    if parsed == crate::model_library::ModelType::Unknown {
+        None
+    } else {
+        Some(parsed.as_str().to_string())
+    }
+}
+
+fn infer_model_type_from_request(request: &model_library::DownloadRequest) -> Option<String> {
+    let mentions_gguf = request
+        .filename
+        .as_deref()
+        .map(|f| f.to_lowercase().ends_with(".gguf"))
+        .unwrap_or(false)
+        || request
+            .filenames
+            .as_ref()
+            .map(|files| files.iter().any(|f| f.to_lowercase().ends_with(".gguf")))
+            .unwrap_or(false)
+        || request.repo_id.to_lowercase().contains("gguf")
+        || request.official_name.to_lowercase().contains("gguf");
+
+    if mentions_gguf {
+        Some("llm".to_string())
+    } else {
+        None
     }
 }

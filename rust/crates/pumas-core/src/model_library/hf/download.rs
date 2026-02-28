@@ -385,6 +385,10 @@ impl HuggingFaceClient {
             .await
             .insert(download_id.clone(), state);
 
+        // Ensure destination exists so early metadata projection can be written
+        // immediately at download start.
+        std::fs::create_dir_all(dest_dir)?;
+
         // Persist download metadata for crash recovery
         if let Some(ref persistence) = self.persistence {
             let _ = persistence.save(&PersistedDownload {
@@ -398,6 +402,18 @@ impl HuggingFaceClient {
                 download_request: request.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: known_sha256.clone(),
+            });
+        }
+
+        // Fire early callback immediately so metadata is available in SQLite
+        // as soon as the download is created (before file transfer begins).
+        if let Some(ref callback) = self.aux_complete_callback {
+            callback(AuxFilesCompleteInfo {
+                download_id: download_id.clone(),
+                dest_dir: dest_dir.to_path_buf(),
+                filenames: files.iter().map(|f| f.filename.clone()).collect(),
+                download_request: request.clone(),
+                total_bytes,
             });
         }
 

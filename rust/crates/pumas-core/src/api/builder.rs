@@ -238,6 +238,10 @@ impl PumasApiBuilder {
                     let lib = lib.clone();
                     tokio::spawn(async move {
                         let req = &info.download_request;
+                        let metadata_path = info.dest_dir.join("metadata.json");
+                        if metadata_path.exists() {
+                            return;
+                        }
                         let cleaned_name = model_library::normalize_name(&req.official_name);
                         let model_type = req
                             .model_type
@@ -263,12 +267,12 @@ impl PumasApiBuilder {
                             ..Default::default()
                         };
 
-                        if let Err(e) = lib.save_metadata(&info.dest_dir, &metadata).await {
-                            tracing::warn!("Failed to write early metadata stub: {}", e);
+                        if let Err(e) = lib.upsert_index_from_metadata(&info.dest_dir, &metadata) {
+                            tracing::warn!("Failed to upsert early metadata into SQLite: {}", e);
                             return;
                         }
-                        if let Err(e) = lib.index_model_dir(&info.dest_dir).await {
-                            tracing::warn!("Failed to index early metadata stub: {}", e);
+                        if let Err(e) = lib.save_metadata(&info.dest_dir, &metadata).await {
+                            tracing::warn!("Failed to write early metadata JSON projection: {}", e);
                         }
 
                         tracing::info!(

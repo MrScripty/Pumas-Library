@@ -10,6 +10,7 @@ use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
 use crate::models::{DownloadOption, FileGroup};
+use std::collections::BTreeMap;
 use tracing::{debug, info, warn};
 
 impl HuggingFaceClient {
@@ -46,7 +47,20 @@ impl HuggingFaceClient {
                     params.query,
                     models.len()
                 );
-                return Ok(models);
+                // Re-enrich cached search hits so extraction fixes and cache
+                // migration heuristics can self-heal stale repo entries.
+                let enriched = self.enrich_models_with_download_options(&models).await;
+
+                for model in &enriched {
+                    if let Err(e) = cache.cache_repo_details(model) {
+                        warn!(
+                            "Failed to refresh cached repo details for {}: {}",
+                            model.repo_id, e
+                        );
+                    }
+                }
+
+                return Ok(enriched);
             }
             Ok(None) => {
                 debug!("Cache miss for search '{}'", params.query);
@@ -172,7 +186,17 @@ impl HuggingFaceClient {
                                     .download_options
                                     .iter()
                                     .all(|o| o.file_group.is_none());
-                            if !needs_regroup {
+                            // Self-heal stale quant caches where only the first
+                            // shard size was stored per quant (shows as ~0.01 GB).
+                            let likely_truncated_quant_sizes = !model.quants.is_empty()
+                                && cached.download_options.len() > 1
+                                && cached.total_size_bytes.unwrap_or(0) > 10 * 1024 * 1024 * 1024
+                                && cached.download_options.iter().any(|o| {
+                                    o.file_group.is_none()
+                                        && matches!(o.size_bytes, Some(size) if size > 0 && size < 128 * 1024 * 1024)
+                                });
+
+                            if !needs_regroup && !likely_truncated_quant_sizes {
                                 model.download_options = cached.download_options;
                                 model.total_size_bytes = cached.total_size_bytes;
                                 enriched.push(model);
@@ -227,7 +251,9 @@ impl HuggingFaceClient {
 
     /// Quant-based option extraction for GGUF and precision-variant repos.
     fn extract_quant_based_options(tree: &RepoFileTree, quants: &[String]) -> Vec<DownloadOption> {
-        let mut options = Vec::new();
+        // Aggregate all matching files per quant so sharded variants report
+        // their total size instead of the first shard's size.
+        let mut quant_sizes: BTreeMap<String, u64> = BTreeMap::new();
 
         let quant_pattern =
             regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?").ok();
@@ -250,29 +276,25 @@ impl HuggingFaceClient {
             };
 
             if let Some(q) = quant {
-                options.push(DownloadOption {
-                    quant: q,
-                    size_bytes: Some(lfs_file.size),
-                    file_group: None,
-                });
+                *quant_sizes.entry(q).or_insert(0) += lfs_file.size;
             } else if quants.iter().any(|q| lfs_file.filename.contains(q)) {
                 for q in quants {
                     if lfs_file.filename.contains(q) {
-                        options.push(DownloadOption {
-                            quant: q.clone(),
-                            size_bytes: Some(lfs_file.size),
-                            file_group: None,
-                        });
+                        *quant_sizes.entry(q.clone()).or_insert(0) += lfs_file.size;
                         break;
                     }
                 }
             }
         }
 
-        options.sort_by(|a, b| a.quant.cmp(&b.quant));
-        options.dedup_by(|a, b| a.quant == b.quant);
-
-        options
+        quant_sizes
+            .into_iter()
+            .map(|(quant, size_bytes)| DownloadOption {
+                quant,
+                size_bytes: Some(size_bytes),
+                file_group: None,
+            })
+            .collect()
     }
 
     /// Shard-aware option extraction for repos without quant patterns.
@@ -400,5 +422,47 @@ impl HuggingFaceClient {
         let mut sorted: Vec<String> = quants.into_iter().collect();
         sorted.sort();
         sorted
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model_library::types::LfsFileInfo;
+
+    fn lfs(filename: &str, size: u64) -> LfsFileInfo {
+        LfsFileInfo {
+            filename: filename.to_string(),
+            size,
+            sha256: String::new(),
+        }
+    }
+
+    #[test]
+    fn test_quant_options_sum_sharded_sizes() {
+        let tree = RepoFileTree {
+            repo_id: "unsloth/Qwen3.5-122B-A10B-GGUF".to_string(),
+            lfs_files: vec![
+                lfs("UD-Q3_K_M/model-00001-of-00003.gguf", 10_900_000),
+                lfs("UD-Q3_K_M/model-00002-of-00003.gguf", 49_700_000_000),
+                lfs("UD-Q3_K_M/model-00003-of-00003.gguf", 37_500_000_000),
+                lfs("Q2_K/model-Q2_K.gguf", 41_800_000_000),
+            ],
+            regular_files: vec![],
+            cached_at: "2026-01-01T00:00:00Z".to_string(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        };
+
+        let options = HuggingFaceClient::extract_quant_based_options(
+            &tree,
+            &["Q2_K".into(), "Q3_K_M".into()],
+        );
+
+        assert_eq!(options.len(), 2);
+        assert_eq!(options[0].quant, "Q2_K");
+        assert_eq!(options[0].size_bytes, Some(41_800_000_000));
+        assert_eq!(options[1].quant, "Q3_K_M");
+        assert_eq!(options[1].size_bytes, Some(87_210_900_000));
     }
 }

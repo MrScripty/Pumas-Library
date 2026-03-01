@@ -286,6 +286,36 @@ fn model_id_from_path(library_root: &Path, path: &Path) -> Option<String> {
     ))
 }
 
+fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
+    let Ok(rel) = path.strip_prefix(library_root) else {
+        return false;
+    };
+    let mut components = rel.components();
+    let Some(first) = components.next() else {
+        // Root path events are internal noise for our purposes.
+        return true;
+    };
+
+    let first = match first {
+        Component::Normal(value) => value.to_string_lossy().to_lowercase(),
+        _ => return true,
+    };
+
+    if components.next().is_some() {
+        return false;
+    }
+
+    matches!(
+        first.as_str(),
+        "models.db"
+            | "models.db-wal"
+            | "models.db-shm"
+            | "link_registry.json"
+            | ".metadata_v2_migration_checkpoint.json"
+            | "migration-reports"
+    )
+}
+
 /// Process file-system change notifications from the model watcher.
 pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths: Vec<PathBuf>) {
     let library_root = primary.model_library.library_root().to_path_buf();
@@ -293,11 +323,19 @@ pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths:
     let mut requires_full_scope = false;
 
     for path in paths {
+        if is_internal_library_artifact_path(&library_root, &path) {
+            continue;
+        }
+
         if let Some(model_id) = model_id_from_path(&library_root, &path) {
             model_ids.insert(model_id);
         } else {
             requires_full_scope = true;
         }
+    }
+
+    if !requires_full_scope && model_ids.is_empty() {
+        return;
     }
 
     if requires_full_scope {
@@ -407,5 +445,41 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
             Ok(())
         }
         ReconcileScope::Model(model_id) => reconcile_model_scope(primary, model_id).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_internal_library_artifact_path_filtering() {
+        let root = Path::new("/library");
+
+        assert!(is_internal_library_artifact_path(
+            root,
+            Path::new("/library")
+        ));
+        assert!(is_internal_library_artifact_path(
+            root,
+            Path::new("/library/models.db")
+        ));
+        assert!(is_internal_library_artifact_path(
+            root,
+            Path::new("/library/models.db-wal")
+        ));
+        assert!(is_internal_library_artifact_path(
+            root,
+            Path::new("/library/link_registry.json")
+        ));
+
+        assert!(!is_internal_library_artifact_path(
+            root,
+            Path::new("/library/llm/llama/model-a/metadata.json")
+        ));
+        assert!(!is_internal_library_artifact_path(
+            root,
+            Path::new("/library/llm")
+        ));
     }
 }

@@ -2634,6 +2634,12 @@ fn verify_model_hash(
 
 /// Convert ModelMetadata to ModelRecord for indexing.
 fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata) -> ModelRecord {
+    let inferred_type_from_id = model_id
+        .split('/')
+        .next()
+        .map(str::to_string)
+        .unwrap_or_else(|| "unknown".to_string());
+
     ModelRecord {
         id: model_id.to_string(),
         path: model_dir.display().to_string(),
@@ -2648,10 +2654,7 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
             .official_name
             .clone()
             .unwrap_or_else(|| model_id.to_string()),
-        model_type: metadata
-            .model_type
-            .clone()
-            .unwrap_or_else(|| "unknown".to_string()),
+        model_type: metadata.model_type.clone().unwrap_or(inferred_type_from_id),
         tags: metadata.tags.clone().unwrap_or_default(),
         hashes: metadata
             .hashes

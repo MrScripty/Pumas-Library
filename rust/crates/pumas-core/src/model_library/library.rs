@@ -273,11 +273,34 @@ impl ModelLibrary {
         let mut discovered_model_ids: HashSet<String> = HashSet::new();
         let mut discovered_records = Vec::new();
         let mut count = 0;
+        let existing_ids = self.index.get_all_ids()?;
+        let mut existing_model_types: HashMap<String, String> = HashMap::new();
+        for existing_id in &existing_ids {
+            if let Some(existing_record) = self.index.get(existing_id)? {
+                existing_model_types.insert(existing_id.clone(), existing_record.model_type);
+            }
+        }
+
         for model_dir in self.model_dirs() {
             if let Ok(Some(metadata)) = self.load_metadata(&model_dir) {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
-                    discovered_records.push(metadata_to_record(&model_id, &model_dir, &metadata));
+
+                    let mut record = metadata_to_record(&model_id, &model_dir, &metadata);
+                    let metadata_type_missing = metadata
+                        .model_type
+                        .as_deref()
+                        .map(str::trim)
+                        .map(str::is_empty)
+                        .unwrap_or(true);
+                    if metadata_type_missing {
+                        if let Some(existing_type) = existing_model_types.get(&model_id) {
+                            // SQLite is source-of-truth for classification when metadata omits type.
+                            record.model_type = existing_type.clone();
+                        }
+                    }
+
+                    discovered_records.push(record);
                 }
             }
         }
@@ -285,7 +308,7 @@ impl ModelLibrary {
         // Remove stale index rows for models that no longer exist on disk.
         // Existing rows for still-present model IDs are kept so FK-linked tables
         // (review overlays, dependency bindings/history) remain intact.
-        for existing_id in self.index.get_all_ids()? {
+        for existing_id in existing_ids {
             if !discovered_model_ids.contains(&existing_id) {
                 let _ = self.index.delete(&existing_id)?;
             }
@@ -2850,6 +2873,41 @@ mod tests {
         // Verify all models are indexed
         let all_models = library.list_models().await.unwrap();
         assert_eq!(all_models.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_index_preserves_db_model_type_when_metadata_omits_type() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "db-source-of-truth");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/db-source-of-truth".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("embedding".to_string()),
+            official_name: Some("DB Source Of Truth".to_string()),
+            cleaned_name: Some("db-source-of-truth".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let mut metadata_without_type = metadata.clone();
+        metadata_without_type.model_type = None;
+        library
+            .save_metadata(&model_dir, &metadata_without_type)
+            .await
+            .unwrap();
+
+        let _ = library.rebuild_index().await.unwrap();
+
+        let model = library
+            .get_model("llm/llama/db-source-of-truth")
+            .await
+            .unwrap()
+            .expect("model should exist after rebuild");
+        assert_eq!(model.model_type, "embedding");
     }
 
     #[tokio::test]

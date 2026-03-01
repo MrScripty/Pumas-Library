@@ -1,13 +1,13 @@
 //! Model library methods on PumasApi.
 
-use super::{trigger_reconciliation, ReconcileScope};
+use super::{reconcile_on_demand, ReconcileScope};
 use crate::error::Result;
 use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 impl PumasApi {
@@ -17,13 +17,14 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        trigger_reconciliation(
-            self.primary().clone(),
+        let primary = self.primary();
+        let _ = reconcile_on_demand(
+            primary.as_ref(),
             ReconcileScope::AllModels,
             "api-list-models",
         )
-        .await;
-        self.primary().model_library.list_models().await
+        .await?;
+        primary.model_library.list_models().await
     }
 
     /// Search models using full-text search.
@@ -33,28 +34,48 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        let result = self
-            .primary()
-            .model_library
-            .search_models(query, limit, offset)
-            .await?;
+        let primary = self.primary();
 
         if query.trim().is_empty() {
-            trigger_reconciliation(
-                self.primary().clone(),
+            let _ = reconcile_on_demand(
+                primary.as_ref(),
                 ReconcileScope::AllModels,
                 "api-search-empty-query",
             )
-            .await;
-        } else {
-            for model in &result.models {
-                trigger_reconciliation(
-                    self.primary().clone(),
-                    ReconcileScope::Model(model.id.clone()),
-                    "api-search-model-hit",
-                )
+            .await?;
+            return primary
+                .model_library
+                .search_models(query, limit, offset)
                 .await;
+        }
+
+        let mut result = primary
+            .model_library
+            .search_models(query, limit, offset)
+            .await?;
+        let mut model_ids = HashSet::new();
+        for model in &result.models {
+            model_ids.insert(model.id.clone());
+        }
+
+        let mut reconciled_any = false;
+        for model_id in model_ids {
+            if reconcile_on_demand(
+                primary.as_ref(),
+                ReconcileScope::Model(model_id),
+                "api-search-model-hit",
+            )
+            .await?
+            {
+                reconciled_any = true;
             }
+        }
+
+        if reconciled_any {
+            result = primary
+                .model_library
+                .search_models(query, limit, offset)
+                .await?;
         }
 
         Ok(result)
@@ -67,13 +88,16 @@ impl PumasApi {
 
     /// Get model-library status information for GUI polling.
     pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
-        let model_count = self.primary().model_library.list_models().await?.len() as u32;
-        let pending_lookups = self
-            .primary()
-            .model_library
-            .get_pending_lookups()
-            .await?
-            .len() as u32;
+        let primary = self.primary();
+        let _ = reconcile_on_demand(
+            primary.as_ref(),
+            ReconcileScope::AllModels,
+            "api-get-library-status",
+        )
+        .await?;
+
+        let model_count = primary.model_library.list_models().await?.len() as u32;
+        let pending_lookups = primary.model_library.get_pending_lookups().await?.len() as u32;
 
         Ok(models::LibraryStatusResponse {
             success: true,
@@ -120,13 +144,14 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        trigger_reconciliation(
-            self.primary().clone(),
+        let primary = self.primary();
+        let _ = reconcile_on_demand(
+            primary.as_ref(),
             ReconcileScope::Model(model_id.to_string()),
             "api-get-model",
         )
-        .await;
-        self.primary().model_library.get_model(model_id).await
+        .await?;
+        primary.model_library.get_model(model_id).await
     }
 
     /// Get inference settings schema for a model.
@@ -271,15 +296,14 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Option<models::ModelMetadata>> {
-        trigger_reconciliation(
-            self.primary().clone(),
+        let primary = self.primary();
+        let _ = reconcile_on_demand(
+            primary.as_ref(),
             ReconcileScope::Model(model_id.to_string()),
             "api-get-effective-metadata",
         )
-        .await;
-        self.primary()
-            .model_library
-            .get_effective_metadata(model_id)
+        .await?;
+        primary.model_library.get_effective_metadata(model_id)
     }
 
     /// Import a model from a local path.

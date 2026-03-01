@@ -1,9 +1,10 @@
 //! Primary instance state and IPC dispatch.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::ReconciliationCoordinator;
+use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator};
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;
@@ -48,6 +49,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
     ) -> std::result::Result<serde_json::Value, PumasError> {
         match method {
             "list_models" => {
+                let _ =
+                    reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-list-models").await?;
                 let models = self.model_library.list_models().await?;
                 Ok(serde_json::to_value(models)?)
             }
@@ -55,10 +58,49 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let query = params["query"].as_str().unwrap_or("");
                 let limit = params["limit"].as_u64().unwrap_or(50) as usize;
                 let offset = params["offset"].as_u64().unwrap_or(0) as usize;
-                let result = self
-                    .model_library
-                    .search_models(query, limit, offset)
+
+                let result = if query.trim().is_empty() {
+                    let _ = reconcile_on_demand(
+                        self,
+                        ReconcileScope::AllModels,
+                        "ipc-search-empty-query",
+                    )
                     .await?;
+                    self.model_library
+                        .search_models(query, limit, offset)
+                        .await?
+                } else {
+                    let mut result = self
+                        .model_library
+                        .search_models(query, limit, offset)
+                        .await?;
+                    let mut model_ids = HashSet::new();
+                    for model in &result.models {
+                        model_ids.insert(model.id.clone());
+                    }
+
+                    let mut reconciled_any = false;
+                    for model_id in model_ids {
+                        if reconcile_on_demand(
+                            self,
+                            ReconcileScope::Model(model_id),
+                            "ipc-search-model-hit",
+                        )
+                        .await?
+                        {
+                            reconciled_any = true;
+                        }
+                    }
+
+                    if reconciled_any {
+                        result = self
+                            .model_library
+                            .search_models(query, limit, offset)
+                            .await?;
+                    }
+
+                    result
+                };
                 Ok(serde_json::to_value(result)?)
             }
             "get_model" => {
@@ -68,6 +110,12 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "model_id is required".to_string(),
                         })?;
+                let _ = reconcile_on_demand(
+                    self,
+                    ReconcileScope::Model(model_id.to_string()),
+                    "ipc-get-model",
+                )
+                .await?;
                 let model = self.model_library.get_model(model_id).await?;
                 Ok(serde_json::to_value(model)?)
             }

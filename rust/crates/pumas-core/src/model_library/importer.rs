@@ -118,21 +118,15 @@ impl ModelImporter {
         }
 
         // Determine model type and family
-        // Normalize through ModelType to handle HF pipeline_tags (e.g. "text-to-audio" → "audio")
-        let model_type = spec
-            .model_type
-            .as_ref()
-            .and_then(|s| {
-                let parsed: crate::model_library::types::ModelType = s
-                    .parse()
-                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
-                if parsed != crate::model_library::types::ModelType::Unknown {
-                    Some(parsed.as_str().to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| type_info.model_type.as_str().to_string());
+        // Resolve through SQLite model-type mapping rules first.
+        let model_type = if let Some(hint) = spec.model_type.as_deref() {
+            self.library
+                .index()
+                .resolve_model_type_hint(hint)?
+                .unwrap_or_else(|| type_info.model_type.as_str().to_string())
+        } else {
+            type_info.model_type.as_str().to_string()
+        };
 
         let family = type_info
             .family
@@ -250,21 +244,15 @@ impl ModelImporter {
             });
         }
 
-        // Normalize model_type through ModelType to handle HF pipeline_tags
-        let model_type = spec
-            .model_type
-            .as_ref()
-            .and_then(|s| {
-                let parsed: crate::model_library::types::ModelType = s
-                    .parse()
-                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
-                if parsed != crate::model_library::types::ModelType::Unknown {
-                    Some(parsed.as_str().to_string())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| type_info.model_type.as_str().to_string());
+        // Resolve through SQLite model-type mapping rules first.
+        let model_type = if let Some(hint) = spec.model_type.as_deref() {
+            self.library
+                .index()
+                .resolve_model_type_hint(hint)?
+                .unwrap_or_else(|| type_info.model_type.as_str().to_string())
+        } else {
+            type_info.model_type.as_str().to_string()
+        };
         let family = type_info
             .family
             .as_ref()
@@ -624,17 +612,15 @@ impl ModelImporter {
     ) -> Result<ModelMetadata> {
         let now = chrono::Utc::now().to_rfc3339();
 
-        // Normalize model_type through ModelType to handle HF pipeline_tags
-        let model_type = spec
-            .model_type
-            .as_ref()
-            .map(|s| {
-                let parsed: crate::model_library::types::ModelType = s
-                    .parse()
-                    .unwrap_or(crate::model_library::types::ModelType::Unknown);
-                parsed.as_str().to_string()
-            })
-            .unwrap_or_else(|| type_info.model_type.as_str().to_string());
+        // Resolve through SQLite model-type mapping rules first.
+        let model_type = if let Some(hint) = spec.model_type.as_deref() {
+            self.library
+                .index()
+                .resolve_model_type_hint(hint)?
+                .unwrap_or_else(|| type_info.model_type.as_str().to_string())
+        } else {
+            type_info.model_type.as_str().to_string()
+        };
         let model_type_resolution_confidence = if model_type == "unknown" { 0.0 } else { 0.7 };
 
         let family = type_info

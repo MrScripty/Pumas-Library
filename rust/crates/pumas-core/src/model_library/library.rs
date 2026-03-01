@@ -915,14 +915,14 @@ impl ModelLibrary {
             metadata.family = Some(family.clone());
         }
         if let Some(ref model_type) = hf_metadata.model_type {
-            // Normalize pipeline_tags (e.g. "text-to-audio") to canonical names (e.g. "audio")
-            let normalized: crate::model_library::types::ModelType = model_type
-                .parse()
-                .unwrap_or(crate::model_library::types::ModelType::Unknown);
-            if normalized != crate::model_library::types::ModelType::Unknown {
-                metadata.model_type = Some(normalized.as_str().to_string());
+            if let Some(translated) = self.index.resolve_model_type_hint(model_type)? {
+                metadata.model_type = Some(translated);
             } else {
-                metadata.model_type = Some(model_type.clone());
+                tracing::warn!(
+                    "No active SQLite model_type rule for HF hint '{}'; keeping existing model_type for {}",
+                    model_type,
+                    model_id
+                );
             }
         }
         if let Some(ref subtype) = hf_metadata.subtype {

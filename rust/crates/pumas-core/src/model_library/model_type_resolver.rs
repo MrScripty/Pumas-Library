@@ -75,7 +75,7 @@ pub fn resolve_model_type_with_rules(
         score += 0.20;
     }
 
-    let medium_hints = collect_medium_hints(pipeline_tag, spec_model_type);
+    let medium_hints = collect_medium_hints(index, pipeline_tag, spec_model_type)?;
     for hint in medium_hints {
         if hint == resolved {
             score += 0.10;
@@ -193,23 +193,20 @@ fn resolve_config_vote(
 }
 
 fn collect_medium_hints(
+    index: &ModelIndex,
     pipeline_tag: Option<&str>,
     spec_model_type: Option<&str>,
-) -> Vec<ModelType> {
+) -> Result<Vec<ModelType>> {
     let mut hints = HashSet::new();
-    if let Some(tag) = pipeline_tag {
-        let mt = ModelType::from_pipeline_tag(tag);
-        if mt != ModelType::Unknown {
-            hints.insert(mt);
+    for raw_hint in [pipeline_tag, spec_model_type].into_iter().flatten() {
+        if let Some(mapped) = index.resolve_model_type_hint(raw_hint)? {
+            let mt = parse_model_type(&mapped);
+            if mt != ModelType::Unknown {
+                hints.insert(mt);
+            }
         }
     }
-    if let Some(value) = spec_model_type {
-        let mt = parse_model_type(value);
-        if mt != ModelType::Unknown {
-            hints.insert(mt);
-        }
-    }
-    hints.into_iter().collect()
+    Ok(hints.into_iter().collect())
 }
 
 fn parse_model_type(value: &str) -> ModelType {

@@ -493,6 +493,48 @@ impl ModelIndex {
               ('DiffusionPipeline', 'exact', 'diffusion', 100, 'active', 'system');
 
             INSERT OR IGNORE INTO model_type_config_rules (config_model_type, model_type, priority, status, source) VALUES
+              ('llm', 'llm', 50, 'active', 'system'),
+              ('diffusion', 'diffusion', 50, 'active', 'system'),
+              ('embedding', 'embedding', 50, 'active', 'system'),
+              ('audio', 'audio', 50, 'active', 'system'),
+              ('vision', 'vision', 50, 'active', 'system'),
+              ('unknown', 'unknown', 50, 'active', 'system'),
+              ('text-generation', 'llm', 60, 'active', 'system'),
+              ('text2text-generation', 'llm', 60, 'active', 'system'),
+              ('question-answering', 'llm', 60, 'active', 'system'),
+              ('token-classification', 'llm', 60, 'active', 'system'),
+              ('text-classification', 'llm', 60, 'active', 'system'),
+              ('fill-mask', 'llm', 60, 'active', 'system'),
+              ('translation', 'llm', 60, 'active', 'system'),
+              ('summarization', 'llm', 60, 'active', 'system'),
+              ('conversational', 'llm', 60, 'active', 'system'),
+              ('text-to-image', 'diffusion', 60, 'active', 'system'),
+              ('image-to-image', 'diffusion', 60, 'active', 'system'),
+              ('unconditional-image-generation', 'diffusion', 60, 'active', 'system'),
+              ('image-inpainting', 'diffusion', 60, 'active', 'system'),
+              ('text-to-video', 'diffusion', 60, 'active', 'system'),
+              ('video-classification', 'diffusion', 60, 'active', 'system'),
+              ('text-to-3d', 'diffusion', 60, 'active', 'system'),
+              ('image-to-3d', 'diffusion', 60, 'active', 'system'),
+              ('text-to-audio', 'audio', 60, 'active', 'system'),
+              ('text-to-speech', 'audio', 60, 'active', 'system'),
+              ('automatic-speech-recognition', 'audio', 60, 'active', 'system'),
+              ('audio-classification', 'audio', 60, 'active', 'system'),
+              ('audio-to-audio', 'audio', 60, 'active', 'system'),
+              ('voice-activity-detection', 'audio', 60, 'active', 'system'),
+              ('image-classification', 'vision', 60, 'active', 'system'),
+              ('image-segmentation', 'vision', 60, 'active', 'system'),
+              ('object-detection', 'vision', 60, 'active', 'system'),
+              ('zero-shot-image-classification', 'vision', 60, 'active', 'system'),
+              ('depth-estimation', 'vision', 60, 'active', 'system'),
+              ('image-feature-extraction', 'vision', 60, 'active', 'system'),
+              ('zero-shot-object-detection', 'vision', 60, 'active', 'system'),
+              ('image-to-text', 'vision', 60, 'active', 'system'),
+              ('visual-question-answering', 'vision', 60, 'active', 'system'),
+              ('document-question-answering', 'vision', 60, 'active', 'system'),
+              ('video-text-to-text', 'vision', 60, 'active', 'system'),
+              ('feature-extraction', 'embedding', 60, 'active', 'system'),
+              ('sentence-similarity', 'embedding', 60, 'active', 'system'),
               ('llama', 'llm', 100, 'active', 'system'),
               ('mistral', 'llm', 100, 'active', 'system'),
               ('mixtral', 'llm', 100, 'active', 'system'),
@@ -1685,6 +1727,33 @@ impl ModelIndex {
         Ok(rules)
     }
 
+    /// Translate a raw model-type hint (HF pipeline tag, config model_type, or canonical type)
+    /// to a canonical Pumas model type using active SQLite config rules.
+    pub fn resolve_model_type_hint(&self, raw_hint: &str) -> Result<Option<String>> {
+        let hint = raw_hint.trim().to_lowercase();
+        if hint.is_empty() {
+            return Ok(None);
+        }
+
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let mut stmt = conn.prepare(
+            "SELECT model_type
+             FROM model_type_config_rules
+             WHERE status = 'active'
+               AND lower(config_model_type) = ?1
+             ORDER BY priority ASC
+             LIMIT 1",
+        )?;
+
+        let mapped: Option<String> = stmt.query_row(params![hint], |row| row.get(0)).optional()?;
+
+        Ok(mapped)
+    }
+
     /// Return the active metadata overlay row for a model, if present.
     pub fn get_active_metadata_overlay(
         &self,
@@ -2443,6 +2512,38 @@ mod tests {
         assert!(!config_rules.is_empty());
         assert!(arch_rules.iter().any(|r| r.pattern == "ForCausalLM"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llama"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "text-generation"));
+        assert!(config_rules.iter().any(|r| r.config_model_type == "llm"));
+    }
+
+    #[test]
+    fn test_resolve_model_type_hint_uses_seeded_rules() {
+        let (index, _temp) = create_test_index();
+
+        assert_eq!(
+            index
+                .resolve_model_type_hint("text-generation")
+                .unwrap()
+                .as_deref(),
+            Some("llm")
+        );
+        assert_eq!(
+            index
+                .resolve_model_type_hint("image-classification")
+                .unwrap()
+                .as_deref(),
+            Some("vision")
+        );
+        assert_eq!(
+            index.resolve_model_type_hint("llm").unwrap().as_deref(),
+            Some("llm")
+        );
+        assert_eq!(
+            index.resolve_model_type_hint("not-a-known-type").unwrap(),
+            None
+        );
     }
 
     #[test]

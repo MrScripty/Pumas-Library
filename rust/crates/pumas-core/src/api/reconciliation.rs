@@ -10,14 +10,16 @@
 //! - Dirty-bypass when watcher/app events mark stale state
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::collections::HashSet;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::sync::Mutex;
 
+use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
-use crate::model_library::InPlaceImportSpec;
+use crate::model_library::{InPlaceImportSpec, ModelLibraryWatcher};
 
 use super::state::PrimaryState;
 
@@ -162,7 +164,10 @@ impl ReconciliationCoordinator {
 }
 
 fn has_unreconciled_dirty(scope_state: &ScopeRuntimeState) -> bool {
-    match (scope_state.last_dirty_instant, scope_state.last_checked_instant) {
+    match (
+        scope_state.last_dirty_instant,
+        scope_state.last_checked_instant,
+    ) {
         (Some(_), None) => true,
         (Some(dirty), Some(last_checked)) => dirty > last_checked,
         _ => false,
@@ -198,8 +203,12 @@ pub(crate) async fn trigger_reconciliation(
     }
 
     tokio::spawn(async move {
-        tracing::debug!("Starting reconciliation: scope={:?} reason={}", scope, reason);
-        if let Err(err) = run_scope(primary.clone(), &scope).await {
+        tracing::debug!(
+            "Starting reconciliation: scope={:?} reason={}",
+            scope,
+            reason
+        );
+        if let Err(err) = run_scope(primary.as_ref(), &scope).await {
             tracing::warn!("Reconciliation failed for {:?}: {}", scope, err);
         }
         primary
@@ -207,6 +216,109 @@ pub(crate) async fn trigger_reconciliation(
             .complete(&scope, chrono::Utc::now().to_rfc3339())
             .await;
     });
+}
+
+/// Reconcile a scope inline for on-demand read paths.
+///
+/// Returns `true` if reconciliation ran, `false` if skipped due to cooldown/single-flight.
+pub(crate) async fn reconcile_on_demand(
+    primary: &PrimaryState,
+    scope: ReconcileScope,
+    reason: &'static str,
+) -> Result<bool> {
+    if !primary.reconciliation.try_start(&scope, false).await {
+        return Ok(false);
+    }
+
+    tracing::debug!(
+        "Running on-demand reconciliation: scope={:?} reason={}",
+        scope,
+        reason
+    );
+    let run_result = run_scope(primary, &scope).await;
+
+    primary
+        .reconciliation
+        .complete(&scope, chrono::Utc::now().to_rfc3339())
+        .await;
+    run_result?;
+    Ok(true)
+}
+
+/// Start a cross-platform model-library watcher and route events into reconciliation.
+pub(crate) fn start_model_library_watcher(
+    primary: Arc<PrimaryState>,
+) -> Result<ModelLibraryWatcher> {
+    let runtime = tokio::runtime::Handle::current();
+    let primary_for_watcher = primary.clone();
+    let library_root = primary.model_library.library_root().to_path_buf();
+
+    ModelLibraryWatcher::new(
+        library_root,
+        NetworkConfig::FILE_WATCHER_DEBOUNCE,
+        Box::new(move |paths| {
+            let primary = primary_for_watcher.clone();
+            let handle = runtime.clone();
+            handle.spawn(async move {
+                notify_filesystem_changes(primary, paths).await;
+            });
+        }),
+    )
+}
+
+fn model_id_from_path(library_root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(library_root).ok()?;
+    let components: Vec<String> = rel
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => Some(value.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+
+    if components.len() < 3 {
+        return None;
+    }
+
+    Some(format!(
+        "{}/{}/{}",
+        components[0], components[1], components[2]
+    ))
+}
+
+/// Process file-system change notifications from the model watcher.
+pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths: Vec<PathBuf>) {
+    let library_root = primary.model_library.library_root().to_path_buf();
+    let mut model_ids: HashSet<String> = HashSet::new();
+    let mut requires_full_scope = false;
+
+    for path in paths {
+        if let Some(model_id) = model_id_from_path(&library_root, &path) {
+            model_ids.insert(model_id);
+        } else {
+            requires_full_scope = true;
+        }
+    }
+
+    if requires_full_scope {
+        primary.reconciliation.mark_dirty_all().await;
+        trigger_reconciliation(
+            primary.clone(),
+            ReconcileScope::AllModels,
+            "watcher-full-scope-dirty",
+        )
+        .await;
+    }
+
+    for model_id in model_ids {
+        primary.reconciliation.mark_dirty_model(&model_id).await;
+        trigger_reconciliation(
+            primary.clone(),
+            ReconcileScope::Model(model_id),
+            "watcher-model-dirty",
+        )
+        .await;
+    }
 }
 
 fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec {
@@ -272,7 +384,7 @@ async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result
     Ok(())
 }
 
-async fn run_scope(primary: Arc<PrimaryState>, scope: &ReconcileScope) -> Result<()> {
+async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()> {
     match scope {
         ReconcileScope::AllModels => {
             let orphan_result = primary.model_importer.adopt_orphans(false).await;
@@ -294,6 +406,6 @@ async fn run_scope(primary: Arc<PrimaryState>, scope: &ReconcileScope) -> Result
             let _ = primary.model_library.rebuild_index().await?;
             Ok(())
         }
-        ReconcileScope::Model(model_id) => reconcile_model_scope(primary.as_ref(), model_id).await,
+        ReconcileScope::Model(model_id) => reconcile_model_scope(primary, model_id).await,
     }
 }

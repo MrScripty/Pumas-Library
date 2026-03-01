@@ -80,7 +80,8 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use api::{
-    trigger_reconciliation, ApiState, PrimaryState, ReconcileScope, ReconciliationCoordinator,
+    start_model_library_watcher, trigger_reconciliation, ApiState, PrimaryState, ReconcileScope,
+    ReconciliationCoordinator,
 };
 
 /// Main API struct for Pumas operations.
@@ -100,6 +101,8 @@ pub struct PumasApi {
     launcher_root: PathBuf,
     /// Internal mode dispatch
     inner: ApiInner,
+    /// Keeps the filesystem watcher alive for the lifetime of this API.
+    model_watcher: Option<model_library::ModelLibraryWatcher>,
 }
 
 /// Internal dispatch: Primary owns state, Client proxies via IPC.
@@ -418,6 +421,14 @@ impl PumasApi {
             });
         }
 
+        let model_watcher = match start_model_library_watcher(primary_state.clone()) {
+            Ok(watcher) => Some(watcher),
+            Err(err) => {
+                tracing::warn!("Failed to start model library watcher (non-fatal): {}", err);
+                None
+            }
+        };
+
         // Spawn one-time recovery for incomplete sharded models
         {
             let ps = primary_state.clone();
@@ -468,6 +479,7 @@ impl PumasApi {
         Ok(Self {
             launcher_root,
             inner: ApiInner::Primary(primary_state),
+            model_watcher,
         })
     }
 
@@ -507,6 +519,7 @@ impl PumasApi {
                         return Ok(Self {
                             launcher_root: library.path.clone(),
                             inner: ApiInner::Client,
+                            model_watcher: None,
                         });
                     }
                     Err(e) => {
@@ -592,6 +605,7 @@ impl PumasApi {
 
 impl Drop for PumasApi {
     fn drop(&mut self) {
+        let _ = self.model_watcher.take();
         if let ApiInner::Primary(ref state) = self.inner {
             // Best-effort: unregister instance from the global registry
             if let Some(ref reg) = state.registry {

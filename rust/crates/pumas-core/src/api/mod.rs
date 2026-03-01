@@ -14,5 +14,8 @@ mod state;
 mod system;
 
 pub use builder::PumasApiBuilder;
-pub(crate) use reconciliation::{trigger_reconciliation, ReconcileScope, ReconciliationCoordinator};
+pub(crate) use reconciliation::{
+    reconcile_on_demand, start_model_library_watcher, trigger_reconciliation, ReconcileScope,
+    ReconciliationCoordinator,
+};
 pub(crate) use state::{ApiState, PrimaryState};

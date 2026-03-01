@@ -10,7 +10,9 @@ use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
 
-use super::{trigger_reconciliation, ReconcileScope, ReconciliationCoordinator};
+use super::{
+    start_model_library_watcher, trigger_reconciliation, ReconcileScope, ReconciliationCoordinator,
+};
 
 /// Builder for configuring PumasApi initialization.
 ///
@@ -413,6 +415,14 @@ impl PumasApiBuilder {
             });
         }
 
+        let model_watcher = match start_model_library_watcher(primary_state.clone()) {
+            Ok(watcher) => Some(watcher),
+            Err(err) => {
+                tracing::warn!("Failed to start model library watcher (non-fatal): {}", err);
+                None
+            }
+        };
+
         // Spawn one-time recovery for incomplete sharded models
         {
             let ps = primary_state.clone();
@@ -523,6 +533,7 @@ impl PumasApiBuilder {
         Ok(PumasApi {
             launcher_root: self.launcher_root,
             inner: ApiInner::Primary(primary_state),
+            model_watcher,
         })
     }
 }

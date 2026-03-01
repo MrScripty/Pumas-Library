@@ -7,7 +7,7 @@ use crate::config::NetworkConfig;
 use crate::error::Result;
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_mini::{new_debouncer, Debouncer};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -26,7 +26,7 @@ const MODEL_EXTENSIONS: &[&str] = &[
 ];
 
 /// Callback type for when model library changes are detected.
-pub type ChangeCallback = Box<dyn Fn() + Send + Sync + 'static>;
+pub type ChangeCallback = Box<dyn Fn(Vec<PathBuf>) + Send + Sync + 'static>;
 
 /// File system watcher for the model library.
 ///
@@ -46,7 +46,7 @@ impl ModelLibraryWatcher {
     ///
     /// * `library_root` - Root directory of the model library to watch
     /// * `debounce_duration` - How long to wait after changes before triggering callback
-    /// * `on_change` - Callback to invoke when changes are detected
+    /// * `on_change` - Callback invoked with deduplicated changed paths
     pub fn new(
         library_root: impl AsRef<Path>,
         debounce_duration: Duration,
@@ -80,22 +80,35 @@ impl ModelLibraryWatcher {
         std::thread::spawn(move || {
             loop {
                 // Check for stop signal (non-blocking)
-                if stop_rx.try_recv().is_ok() {
-                    debug!("File watcher stopping");
-                    break;
+                match stop_rx.try_recv() {
+                    Ok(()) | Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        debug!("File watcher stopping");
+                        break;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 }
 
                 // Check for file events with timeout
                 match event_rx.recv_timeout(NetworkConfig::FILE_WATCHER_DEBOUNCE) {
                     Ok(result) => {
                         if let Ok(events) = result {
-                            // Filter for relevant file changes
-                            let relevant_changes =
-                                events.iter().any(|event| is_relevant_change(&event.path));
+                            // Filter and coalesce relevant paths.
+                            let mut relevant_paths: Vec<PathBuf> = events
+                                .iter()
+                                .filter_map(|event| {
+                                    if is_relevant_change(&event.path) {
+                                        Some(event.path.clone())
+                                    } else {
+                                        None
+                                    }
+                                })
+                                .collect();
 
-                            if relevant_changes {
+                            if !relevant_paths.is_empty() {
+                                relevant_paths.sort();
+                                relevant_paths.dedup();
                                 debug!("Detected relevant model library changes");
-                                on_change_clone();
+                                on_change_clone(relevant_paths);
                             }
                         }
                     }
@@ -137,6 +150,11 @@ fn is_relevant_change(path: &Path) -> bool {
         return true;
     }
 
+    // Deleted model directories often arrive as non-existent paths without extension.
+    if !path.exists() && path.extension().is_none() {
+        return true;
+    }
+
     false
 }
 
@@ -149,6 +167,9 @@ mod tests {
         assert!(is_relevant_change(Path::new("/models/test.safetensors")));
         assert!(is_relevant_change(Path::new("/models/test.gguf")));
         assert!(is_relevant_change(Path::new("/models/metadata.json")));
+        assert!(is_relevant_change(Path::new(
+            "/models/llm/family/model_without_extension"
+        )));
         assert!(!is_relevant_change(Path::new("/models/readme.md")));
         assert!(!is_relevant_change(Path::new("/models/test.txt")));
     }

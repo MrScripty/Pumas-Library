@@ -2,12 +2,15 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
 use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
+
+use super::{trigger_reconciliation, ReconcileScope, ReconciliationCoordinator};
 
 /// Builder for configuring PumasApi initialization.
 ///
@@ -393,9 +396,22 @@ impl PumasApiBuilder {
             hf_client,
             model_importer,
             conversion_manager,
+            reconciliation: Arc::new(ReconciliationCoordinator::new(
+                Duration::from_secs(5),
+                Duration::from_secs(5),
+            )),
             server_handle: tokio::sync::Mutex::new(None),
             registry,
         });
+
+        // Startup-triggered full-library reconciliation.
+        {
+            let ps = primary_state.clone();
+            tokio::spawn(async move {
+                ps.reconciliation.mark_dirty_all().await;
+                trigger_reconciliation(ps, ReconcileScope::AllModels, "startup").await;
+            });
+        }
 
         // Spawn one-time recovery for incomplete sharded models
         {

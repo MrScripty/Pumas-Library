@@ -3,6 +3,7 @@
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use super::ReconciliationCoordinator;
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;
@@ -26,6 +27,8 @@ pub(crate) struct PrimaryState {
     pub(crate) hf_client: Option<model_library::HuggingFaceClient>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
+    /// Internal scheduler for event-driven reconciliation.
+    pub(crate) reconciliation: Arc<ReconciliationCoordinator>,
     /// IPC server handle (Primary only). Protected by async Mutex for shutdown.
     pub(crate) server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
     /// Global registry connection (best-effort, None if unavailable).

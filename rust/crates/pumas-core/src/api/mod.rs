@@ -9,8 +9,10 @@ mod hf;
 mod models;
 mod network;
 mod process;
+mod reconciliation;
 mod state;
 mod system;
 
 pub use builder::PumasApiBuilder;
+pub(crate) use reconciliation::{trigger_reconciliation, ReconcileScope, ReconciliationCoordinator};
 pub(crate) use state::{ApiState, PrimaryState};

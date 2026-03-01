@@ -1,5 +1,6 @@
 //! Model library methods on PumasApi.
 
+use super::{trigger_reconciliation, ReconcileScope};
 use crate::error::Result;
 use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
@@ -16,6 +17,12 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        trigger_reconciliation(
+            self.primary().clone(),
+            ReconcileScope::AllModels,
+            "api-list-models",
+        )
+        .await;
         self.primary().model_library.list_models().await
     }
 
@@ -26,10 +33,31 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        self.primary()
+        let result = self
+            .primary()
             .model_library
             .search_models(query, limit, offset)
-            .await
+            .await?;
+
+        if query.trim().is_empty() {
+            trigger_reconciliation(
+                self.primary().clone(),
+                ReconcileScope::AllModels,
+                "api-search-empty-query",
+            )
+            .await;
+        } else {
+            for model in &result.models {
+                trigger_reconciliation(
+                    self.primary().clone(),
+                    ReconcileScope::Model(model.id.clone()),
+                    "api-search-model-hit",
+                )
+                .await;
+            }
+        }
+
+        Ok(result)
     }
 
     /// Rebuild the model index from metadata files.
@@ -92,6 +120,12 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        trigger_reconciliation(
+            self.primary().clone(),
+            ReconcileScope::Model(model_id.to_string()),
+            "api-get-model",
+        )
+        .await;
         self.primary().model_library.get_model(model_id).await
     }
 
@@ -237,6 +271,12 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Option<models::ModelMetadata>> {
+        trigger_reconciliation(
+            self.primary().clone(),
+            ReconcileScope::Model(model_id.to_string()),
+            "api-get-effective-metadata",
+        )
+        .await;
         self.primary()
             .model_library
             .get_effective_metadata(model_id)

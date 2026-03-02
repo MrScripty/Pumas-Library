@@ -33,6 +33,7 @@
   "build": {
     "appId": "com.pumas.library",
     "productName": "Pumas Library",
+    "icon": "build/icons/Pumas-Library_05.png",
     "directories": {
       "output": "release"
     },
@@ -50,6 +51,11 @@
         "from": "resources/bin",
         "to": ".",
         "filter": ["pumas-rpc", "pumas-rpc.exe"]
+      },
+      {
+        "from": "build/icons",
+        "to": "icons",
+        "filter": ["Pumas-Library_05.png", "icon.ico", "icon.icns"]
       }
     ],
     "linux": {
@@ -63,6 +69,7 @@
           "arch": ["x64"]
         }
       ],
+      "icon": "build/icons/Pumas-Library_05.png",
       "category": "Development",
       "maintainer": "Pumas Library Team"
     },
@@ -77,6 +84,7 @@
           "arch": ["x64"]
         }
       ],
+      "icon": "build/icons/icon.ico",
       "signtoolOptions": {
         "publisherName": "Pumas Library Team"
       }
@@ -86,7 +94,10 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Pumas Library"
+      "shortcutName": "Pumas Library",
+      "installerIcon": "build/icons/icon.ico",
+      "uninstallerIcon": "build/icons/icon.ico",
+      "installerHeaderIcon": "build/icons/icon.ico"
     },
     "mac": {
       "target": [
@@ -95,6 +106,7 @@
           "arch": ["arm64"]
         }
       ],
+      "icon": "build/icons/icon.icns",
       "category": "public.app-category.developer-tools"
     }
   }

@@ -8,6 +8,11 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+!electron/build/
+!electron/build/icons/
+!electron/build/icons/Pumas-Library_05.png
+!electron/build/icons/icon.ico
+!electron/build/icons/icon.icns
 *.spec.bak
 
 # Frontend

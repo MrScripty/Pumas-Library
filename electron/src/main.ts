@@ -7,6 +7,7 @@
 
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { PythonBridge } from './python-bridge';
 import log from 'electron-log';
 
@@ -71,10 +72,28 @@ function getFrontendPath(): string {
 }
 
 /**
+ * Resolve the runtime icon path for window/taskbar/dock usage.
+ */
+function getRuntimeIconPath(): string | undefined {
+  const iconFile = process.platform === 'win32' ? 'icon.ico' : 'Pumas-Library_05.png';
+  const iconPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'icons', iconFile)
+    : path.join(__dirname, '..', 'build', 'icons', iconFile);
+
+  if (fs.existsSync(iconPath)) {
+    return iconPath;
+  }
+
+  log.warn(`Runtime icon not found at ${iconPath}`);
+  return undefined;
+}
+
+/**
  * Create the main application window
  */
 async function createWindow(): Promise<void> {
   log.info('Creating main window...');
+  const windowIconPath = getRuntimeIconPath();
 
   mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
@@ -84,6 +103,7 @@ async function createWindow(): Promise<void> {
     resizable: true,
     frame: false, // Frameless window (custom title bar)
     backgroundColor: '#000000',
+    icon: windowIconPath,
     show: false, // Don't show until ready
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -257,6 +277,11 @@ configureLinuxDisplay();
 // App lifecycle handlers
 app.whenReady().then(async () => {
   log.info('App ready');
+  const runtimeIconPath = getRuntimeIconPath();
+
+  if (process.platform === 'darwin' && runtimeIconPath && app.dock) {
+    app.dock.setIcon(runtimeIconPath);
+  }
 
   try {
     // Initialize Rust backend first

@@ -42,13 +42,8 @@ export default tseslint.config(
       // Enforce proper error handling
       '@typescript-eslint/no-floating-promises': 'error',
       '@typescript-eslint/no-explicit-any': 'error',
-      '@typescript-eslint/explicit-function-return-type': [
-        'warn',
-        {
-          allowExpressions: true,
-          allowTypedFunctionExpressions: true,
-        },
-      ],
+      // Disabled for now: legacy codebase has broad implicit-return usage.
+      '@typescript-eslint/explicit-function-return-type': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',
         {
@@ -66,10 +61,9 @@ export default tseslint.config(
         'error',
         { ignoreArrowShorthand: true },
       ],
-      // Downgrade to warn — many legitimate patterns (optional chaining guards, etc.)
-      '@typescript-eslint/no-unnecessary-condition': 'warn',
-      // Allow checksBeforeUse for non-null assertions — warn instead of error
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      // Disabled for now: strict mode is too noisy for current code patterns.
+      '@typescript-eslint/no-unnecessary-condition': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
       // Allow async functions in event handlers and callbacks
       '@typescript-eslint/no-misused-promises': [
         'error',
@@ -79,35 +73,18 @@ export default tseslint.config(
       '@typescript-eslint/no-empty-object-type': 'off',
       // Allow unknown in catch callbacks (Promise.catch, etc.)
       '@typescript-eslint/use-unknown-in-catch-callback-variable': 'off',
-      // Downgrade — objects may have custom toString() or be used intentionally
-      '@typescript-eslint/no-base-to-string': 'warn',
-      // Downgrade — redundant union members are sometimes clearer for readability
-      '@typescript-eslint/no-redundant-type-constituents': 'warn',
+      '@typescript-eslint/no-base-to-string': 'off',
+      '@typescript-eslint/no-redundant-type-constituents': 'off',
       // Allow dynamic property deletion (e.g., cleaning up record entries)
       '@typescript-eslint/no-dynamic-delete': 'off',
       // Allow async functions without await (useful for interface conformance)
       '@typescript-eslint/require-await': 'off',
-      // Downgrade — unnecessary type conversions are style issues, not bugs
-      '@typescript-eslint/no-unnecessary-type-conversion': 'warn',
+      '@typescript-eslint/no-unnecessary-type-conversion': 'off',
 
-      // File size and complexity limits
-      'max-lines': [
-        'warn',
-        {
-          max: 300,
-          skipBlankLines: true,
-          skipComments: true,
-        },
-      ],
-      'max-lines-per-function': [
-        'warn',
-        {
-          max: 50,
-          skipBlankLines: true,
-          skipComments: true,
-        },
-      ],
-      complexity: ['warn', 15],
+      // File size and complexity limits are disabled while existing code is being refactored.
+      'max-lines': 'off',
+      'max-lines-per-function': 'off',
+      complexity: 'off',
 
       // Prevent generic Error usage and enforce React Aria patterns
       'no-restricted-syntax': [

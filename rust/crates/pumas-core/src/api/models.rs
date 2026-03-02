@@ -81,9 +81,21 @@ impl PumasApi {
         Ok(result)
     }
 
-    /// Rebuild the model index from metadata files.
+    /// Rebuild and reconcile the model index.
+    ///
+    /// This forces a full-scope reconciliation pass so SQLite remains the
+    /// source-of-truth for both metadata-backed models and metadata-less
+    /// partial downloads staged from persisted/HF download data.
     pub async fn rebuild_model_index(&self) -> Result<usize> {
-        self.primary().model_library.rebuild_index().await
+        let primary = self.primary();
+        primary.reconciliation.mark_dirty_all().await;
+        let _ = reconcile_on_demand(
+            primary.as_ref(),
+            ReconcileScope::AllModels,
+            "api-rebuild-model-index",
+        )
+        .await?;
+        Ok(primary.model_library.list_models().await?.len())
     }
 
     /// Get model-library status information for GUI polling.

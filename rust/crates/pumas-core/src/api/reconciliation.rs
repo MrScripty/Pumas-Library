@@ -15,11 +15,14 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use serde_json::Value;
 use tokio::sync::Mutex;
+use walkdir::WalkDir;
 
 use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
-use crate::model_library::{InPlaceImportSpec, ModelLibraryWatcher};
+use crate::model_library::download_store::PersistedDownload;
+use crate::model_library::{InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata, RepoFileTree};
 
 use super::state::PrimaryState;
 
@@ -84,14 +87,13 @@ impl ReconciliationCoordinator {
 
     pub(crate) async fn try_start(&self, scope: &ReconcileScope, force: bool) -> bool {
         let mut state = self.state.lock().await;
-        let now = Instant::now();
 
         match scope {
             ReconcileScope::AllModels => {
                 if state.all.in_flight {
                     return false;
                 }
-                if !should_run(&state.all, now, self.all_cooldown, force) {
+                if !should_run(&state.all, self.all_cooldown, force) {
                     return false;
                 }
                 state.all.in_flight = true;
@@ -106,7 +108,7 @@ impl ReconciliationCoordinator {
                 if model_state.in_flight {
                     return false;
                 }
-                if !should_run(model_state, now, self.model_cooldown, force) {
+                if !should_run(model_state, self.model_cooldown, force) {
                     return false;
                 }
                 model_state.in_flight = true;
@@ -174,22 +176,18 @@ fn has_unreconciled_dirty(scope_state: &ScopeRuntimeState) -> bool {
     }
 }
 
-fn should_run(
-    scope_state: &ScopeRuntimeState,
-    now: Instant,
-    cooldown: Duration,
-    force: bool,
-) -> bool {
+fn should_run(scope_state: &ScopeRuntimeState, cooldown: Duration, force: bool) -> bool {
     if force {
         return true;
     }
     if has_unreconciled_dirty(scope_state) {
         return true;
     }
-    match scope_state.last_checked_instant {
-        None => true,
-        Some(last_checked) => now.duration_since(last_checked) >= cooldown,
+    if cooldown.is_zero() {
+        return true;
     }
+    // Reconciliation is event-driven: run once for a fresh scope, then rerun only after dirty.
+    scope_state.last_checked_instant.is_none()
 }
 
 /// Schedule a reconciliation if allowed by scheduler rules.
@@ -301,6 +299,11 @@ fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
         _ => return true,
     };
 
+    // Migration reports are internal artifacts regardless of nested file paths.
+    if first == "migration-reports" {
+        return true;
+    }
+
     if components.next().is_some() {
         return false;
     }
@@ -312,7 +315,15 @@ fn is_internal_library_artifact_path(library_root: &Path, path: &Path) -> bool {
             | "models.db-shm"
             | "link_registry.json"
             | ".metadata_v2_migration_checkpoint.json"
-            | "migration-reports"
+    )
+}
+
+fn model_scope_depth(library_root: &Path, path: &Path) -> Option<usize> {
+    let rel = path.strip_prefix(library_root).ok()?;
+    Some(
+        rel.components()
+            .filter(|component| matches!(component, Component::Normal(_)))
+            .count(),
     )
 }
 
@@ -324,6 +335,16 @@ pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths:
 
     for path in paths {
         if is_internal_library_artifact_path(&library_root, &path) {
+            continue;
+        }
+
+        // Ignore type/family directory churn (depth < 3); model/file paths at depth >= 3
+        // carry enough scope for targeted reconciliation and avoid full-scope loops.
+        let Some(depth) = model_scope_depth(&library_root, &path) else {
+            requires_full_scope = true;
+            continue;
+        };
+        if depth < 3 {
             continue;
         }
 
@@ -389,6 +410,406 @@ fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec 
     }
 }
 
+const IMPORTABLE_MODEL_EXTENSIONS: &[&str] =
+    &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
+
+fn has_pending_download_artifacts(model_dir: &Path) -> bool {
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|entry| {
+            if !entry.file_type().is_file() {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy();
+            name.ends_with(".part") || name == ".pumas_download"
+        })
+}
+
+#[derive(Debug, Clone)]
+struct PartialDownloadCandidate {
+    model_id: String,
+    model_dir: PathBuf,
+    repo_id: Option<String>,
+    model_type: Option<String>,
+    family: Option<String>,
+    official_name: Option<String>,
+    expected_files: Vec<String>,
+    created_at: Option<String>,
+}
+
+fn split_model_id(model_id: &str) -> (Option<String>, Option<String>, Option<String>) {
+    let parts: Vec<&str> = model_id.split('/').collect();
+    let model_type = parts.first().map(|s| s.to_string());
+    let family = parts.get(1).map(|s| s.to_string());
+    let cleaned_name = parts.get(2).map(|s| s.to_string());
+    (model_type, family, cleaned_name)
+}
+
+fn dedupe_sort(mut items: Vec<String>) -> Vec<String> {
+    items.sort();
+    items.dedup();
+    items
+}
+
+fn expected_files_from_repo_tree(tree: &RepoFileTree) -> Vec<String> {
+    let mut files = tree.regular_files.clone();
+    files.extend(tree.lfs_files.iter().map(|f| f.filename.clone()));
+    dedupe_sort(files)
+}
+
+async fn fetch_expected_files_from_hf(primary: &PrimaryState, repo_id: &str) -> Vec<String> {
+    let Some(ref client) = primary.hf_client else {
+        return Vec::new();
+    };
+    match client.get_repo_files(repo_id).await {
+        Ok(tree) => expected_files_from_repo_tree(&tree),
+        Err(err) => {
+            tracing::debug!(
+                "Reconcile(partial-index): failed HF repo tree lookup for {}: {}",
+                repo_id,
+                err
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn load_persisted_downloads(primary: &PrimaryState) -> Vec<PersistedDownload> {
+    let Some(ref client) = primary.hf_client else {
+        return Vec::new();
+    };
+    let Some(persistence) = client.persistence() else {
+        return Vec::new();
+    };
+    persistence.load_all()
+}
+
+fn candidate_from_persisted(
+    library_root: &Path,
+    persisted: &PersistedDownload,
+) -> Option<PartialDownloadCandidate> {
+    if !persisted.dest_dir.starts_with(library_root) {
+        return None;
+    }
+    let model_id = model_id_from_path(library_root, &persisted.dest_dir)?;
+    let (path_model_type, path_family, _cleaned_name) = split_model_id(&model_id);
+    let request = &persisted.download_request;
+    let mut expected_files = if !persisted.filenames.is_empty() {
+        persisted.filenames.clone()
+    } else if !persisted.filename.trim().is_empty() {
+        vec![persisted.filename.clone()]
+    } else {
+        Vec::new()
+    };
+    expected_files = dedupe_sort(expected_files);
+
+    Some(PartialDownloadCandidate {
+        model_id,
+        model_dir: persisted.dest_dir.clone(),
+        repo_id: Some(persisted.repo_id.clone()),
+        model_type: request.model_type.clone().or(path_model_type),
+        family: if request.family.trim().is_empty() {
+            path_family
+        } else {
+            Some(request.family.clone())
+        },
+        official_name: if request.official_name.trim().is_empty() {
+            None
+        } else {
+            Some(request.official_name.clone())
+        },
+        expected_files,
+        created_at: Some(persisted.created_at.clone()),
+    })
+}
+
+fn candidate_from_interrupted(
+    library_root: &Path,
+    interrupted: crate::model_library::InterruptedDownload,
+) -> Option<PartialDownloadCandidate> {
+    if !interrupted.model_dir.starts_with(library_root) {
+        return None;
+    }
+    let model_id = model_id_from_path(library_root, &interrupted.model_dir)?;
+    let (_path_model_type, _path_family, cleaned_name) = split_model_id(&model_id);
+    let inferred_repo = interrupted.repo_id.or_else(|| {
+        cleaned_name
+            .as_ref()
+            .map(|name| format!("{}/{}", interrupted.family, name))
+    });
+
+    Some(PartialDownloadCandidate {
+        model_id,
+        model_dir: interrupted.model_dir,
+        repo_id: inferred_repo,
+        model_type: interrupted.model_type,
+        family: Some(interrupted.family),
+        official_name: Some(interrupted.inferred_name),
+        expected_files: Vec::new(),
+        created_at: None,
+    })
+}
+
+fn merge_partial_candidates(
+    preferred: PartialDownloadCandidate,
+    existing: PartialDownloadCandidate,
+) -> PartialDownloadCandidate {
+    PartialDownloadCandidate {
+        model_id: preferred.model_id,
+        model_dir: preferred.model_dir,
+        repo_id: preferred.repo_id.or(existing.repo_id),
+        model_type: preferred.model_type.or(existing.model_type),
+        family: preferred.family.or(existing.family),
+        official_name: preferred.official_name.or(existing.official_name),
+        expected_files: if preferred.expected_files.is_empty() {
+            existing.expected_files
+        } else {
+            preferred.expected_files
+        },
+        created_at: preferred.created_at.or(existing.created_at),
+    }
+}
+
+async fn stage_partial_candidate(
+    primary: &PrimaryState,
+    mut candidate: PartialDownloadCandidate,
+) -> Result<()> {
+    if candidate.model_dir.join("metadata.json").exists() {
+        return Ok(());
+    }
+    if !candidate.model_dir.exists() || !has_pending_download_artifacts(&candidate.model_dir) {
+        let _ = primary.model_library.index().delete(&candidate.model_id);
+        return Ok(());
+    }
+
+    if candidate.expected_files.is_empty() {
+        if let Some(ref repo_id) = candidate.repo_id {
+            candidate.expected_files = fetch_expected_files_from_hf(primary, repo_id).await;
+        }
+    }
+    candidate.expected_files = dedupe_sort(candidate.expected_files);
+
+    let now = chrono::Utc::now().to_rfc3339();
+    let (path_model_type, path_family, path_cleaned_name) = split_model_id(&candidate.model_id);
+    let family = candidate
+        .family
+        .clone()
+        .or(path_family)
+        .unwrap_or_else(|| "unknown".to_string());
+    let cleaned_name = path_cleaned_name.unwrap_or_else(|| {
+        candidate
+            .official_name
+            .clone()
+            .map(|name| crate::model_library::normalize_name(&name))
+            .unwrap_or_else(|| "unknown".to_string())
+    });
+    let official_name = candidate
+        .official_name
+        .clone()
+        .unwrap_or_else(|| cleaned_name.replace('_', " "));
+
+    let mut metadata = ModelMetadata {
+        model_id: Some(candidate.model_id.clone()),
+        family: Some(family),
+        model_type: candidate.model_type.clone().or(path_model_type),
+        official_name: Some(official_name),
+        cleaned_name: Some(cleaned_name),
+        repo_id: candidate.repo_id.clone(),
+        expected_files: if candidate.expected_files.is_empty() {
+            None
+        } else {
+            Some(candidate.expected_files.clone())
+        },
+        match_source: Some("download_partial".to_string()),
+        added_date: Some(candidate.created_at.unwrap_or_else(|| now.clone())),
+        updated_date: Some(now.clone()),
+        pending_online_lookup: Some(candidate.repo_id.is_none()),
+        ..Default::default()
+    };
+
+    if metadata.repo_id.is_some() {
+        metadata.match_method = Some("repo_id".to_string());
+        metadata.match_confidence = Some(1.0);
+    }
+
+    primary
+        .model_library
+        .upsert_index_from_metadata(&candidate.model_dir, &metadata)?;
+    Ok(())
+}
+
+async fn stage_partial_download_rows(primary: &PrimaryState) -> Result<()> {
+    let library_root = primary.model_library.library_root().to_path_buf();
+    let persisted = load_persisted_downloads(primary);
+    let known_dirs: HashSet<PathBuf> = persisted
+        .iter()
+        .map(|entry| entry.dest_dir.clone())
+        .collect();
+    let interrupted = primary
+        .model_importer
+        .find_interrupted_downloads(&known_dirs);
+
+    let mut candidates: HashMap<String, PartialDownloadCandidate> = HashMap::new();
+
+    for entry in &persisted {
+        if let Some(candidate) = candidate_from_persisted(&library_root, entry) {
+            if candidate.model_dir.join("metadata.json").exists() {
+                continue;
+            }
+            let key = candidate.model_id.clone();
+            let merged = if let Some(existing) = candidates.remove(&key) {
+                merge_partial_candidates(candidate, existing)
+            } else {
+                candidate
+            };
+            candidates.insert(key, merged);
+        }
+    }
+
+    for item in interrupted {
+        if let Some(candidate) = candidate_from_interrupted(&library_root, item) {
+            if candidate.model_dir.join("metadata.json").exists() {
+                continue;
+            }
+            let key = candidate.model_id.clone();
+            if let Some(existing) = candidates.remove(&key) {
+                candidates.insert(key, merge_partial_candidates(existing, candidate));
+            } else {
+                candidates.insert(key, candidate);
+            }
+        }
+    }
+
+    for candidate in candidates.into_values() {
+        stage_partial_candidate(primary, candidate).await?;
+    }
+
+    Ok(())
+}
+
+fn parse_download_marker(model_dir: &Path) -> Option<Value> {
+    let marker_path = model_dir.join(".pumas_download");
+    let text = std::fs::read_to_string(marker_path).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+fn candidate_from_marker(model_dir: &Path, model_id: &str) -> Option<PartialDownloadCandidate> {
+    let marker = parse_download_marker(model_dir)?;
+    let (path_model_type, path_family, _cleaned_name) = split_model_id(model_id);
+
+    let repo_id = marker
+        .get("repo_id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let family = marker
+        .get("family")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or(path_family);
+    let official_name = marker
+        .get("official_name")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    let model_type = marker
+        .get("model_type")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .or(path_model_type);
+
+    Some(PartialDownloadCandidate {
+        model_id: model_id.to_string(),
+        model_dir: model_dir.to_path_buf(),
+        repo_id,
+        model_type,
+        family,
+        official_name,
+        expected_files: Vec::new(),
+        created_at: None,
+    })
+}
+
+async fn stage_partial_download_row_for_model(
+    primary: &PrimaryState,
+    model_id: &str,
+    model_dir: &Path,
+) -> Result<()> {
+    let persisted = load_persisted_downloads(primary);
+    let mut candidate = persisted
+        .iter()
+        .find(|entry| entry.dest_dir == model_dir)
+        .and_then(|entry| {
+            candidate_from_persisted(primary.model_library.library_root(), entry).map(|mut c| {
+                c.model_id = model_id.to_string();
+                c
+            })
+        })
+        .or_else(|| candidate_from_marker(model_dir, model_id))
+        .unwrap_or_else(|| {
+            let (model_type, family, cleaned_name) = split_model_id(model_id);
+            PartialDownloadCandidate {
+                model_id: model_id.to_string(),
+                model_dir: model_dir.to_path_buf(),
+                repo_id: None,
+                model_type,
+                family,
+                official_name: cleaned_name,
+                expected_files: Vec::new(),
+                created_at: None,
+            }
+        });
+
+    if candidate.expected_files.is_empty() {
+        if let Some(entry) = persisted.iter().find(|entry| entry.dest_dir == model_dir) {
+            candidate.expected_files = if !entry.filenames.is_empty() {
+                entry.filenames.clone()
+            } else if !entry.filename.trim().is_empty() {
+                vec![entry.filename.clone()]
+            } else {
+                Vec::new()
+            };
+        }
+    }
+
+    stage_partial_candidate(primary, candidate).await
+}
+
+fn has_importable_model_files(model_dir: &Path) -> bool {
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|entry| {
+            if !entry.file_type().is_file() {
+                return false;
+            }
+            let path = entry.path();
+            let filename = entry.file_name().to_string_lossy();
+            if filename == "metadata.json" || filename == "overrides.json" {
+                return false;
+            }
+            let ext = path
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
+            IMPORTABLE_MODEL_EXTENSIONS.contains(&ext.as_str())
+        })
+}
+
+fn is_non_fatal_adoption_error(message: &str) -> bool {
+    message.contains("No model files found in directory")
+        || message.contains("Incomplete shard set")
+        || message.contains("Missing shard")
+}
+
+fn is_non_fatal_reclassify_error(message: &str) -> bool {
+    message.contains("destination") && message.contains("already exists")
+}
+
 async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result<()> {
     let model_dir = primary.model_library.library_root().join(model_id);
 
@@ -400,7 +821,30 @@ async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result
 
     if model_dir.join("metadata.json").exists() {
         primary.model_library.index_model_dir(&model_dir).await?;
-        let _ = primary.model_library.reclassify_model(model_id).await?;
+        if let Err(err) = primary.model_library.reclassify_model(model_id).await {
+            let message = err.to_string();
+            if is_non_fatal_reclassify_error(&message) {
+                tracing::debug!(
+                    "Reconcile(model): skipping reclassify collision for {}: {}",
+                    model_id,
+                    message
+                );
+            } else {
+                return Err(err);
+            }
+        }
+        return Ok(());
+    }
+
+    if has_pending_download_artifacts(&model_dir) {
+        // Partial downloads are indexed directly in SQLite as source-of-truth rows,
+        // even when metadata.json is absent.
+        stage_partial_download_row_for_model(primary, model_id, &model_dir).await?;
+        return Ok(());
+    }
+    if !has_importable_model_files(&model_dir) {
+        // Empty/non-model directory under library layout; remove any stale index row.
+        let _ = primary.model_library.index().delete(model_id);
         return Ok(());
     }
 
@@ -408,11 +852,14 @@ async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result
     let spec = infer_in_place_spec(model_dir.clone(), model_id);
     let import_result = primary.model_importer.import_in_place(&spec).await?;
     if !import_result.success {
-        return Err(PumasError::Other(
-            import_result
-                .error
-                .unwrap_or_else(|| "model reconcile adoption failed".to_string()),
-        ));
+        let message = import_result
+            .error
+            .unwrap_or_else(|| "model reconcile adoption failed".to_string());
+        if is_non_fatal_adoption_error(&message) {
+            let _ = primary.model_library.index().delete(model_id);
+            return Ok(());
+        }
+        return Err(PumasError::Other(message));
     }
 
     if let Some(ref adopted_id) = import_result.model_path {
@@ -433,6 +880,17 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
                 );
             }
 
+            let pre_cleanup = primary.model_library.cleanup_duplicate_repo_entries()?;
+            if pre_cleanup.duplicate_repo_groups > 0 {
+                tracing::info!(
+                    "Reconcile(all): pre-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",
+                    pre_cleanup.duplicate_repo_groups,
+                    pre_cleanup.removed_duplicate_dirs,
+                    pre_cleanup.unresolved_duplicate_groups,
+                    pre_cleanup.normalized_metadata_ids
+                );
+            }
+
             let reclassify = primary.model_library.reclassify_all_models().await?;
             if !reclassify.errors.is_empty() {
                 tracing::warn!(
@@ -441,7 +899,19 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
                 );
             }
 
+            let post_cleanup = primary.model_library.cleanup_duplicate_repo_entries()?;
+            if post_cleanup.duplicate_repo_groups > 0 {
+                tracing::info!(
+                    "Reconcile(all): post-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",
+                    post_cleanup.duplicate_repo_groups,
+                    post_cleanup.removed_duplicate_dirs,
+                    post_cleanup.unresolved_duplicate_groups,
+                    post_cleanup.normalized_metadata_ids
+                );
+            }
+
             let _ = primary.model_library.rebuild_index().await?;
+            stage_partial_download_rows(primary).await?;
             Ok(())
         }
         ReconcileScope::Model(model_id) => reconcile_model_scope(primary, model_id).await,
@@ -451,6 +921,7 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_internal_library_artifact_path_filtering() {
@@ -472,6 +943,10 @@ mod tests {
             root,
             Path::new("/library/link_registry.json")
         ));
+        assert!(is_internal_library_artifact_path(
+            root,
+            Path::new("/library/migration-reports/index.json")
+        ));
 
         assert!(!is_internal_library_artifact_path(
             root,
@@ -480,6 +955,61 @@ mod tests {
         assert!(!is_internal_library_artifact_path(
             root,
             Path::new("/library/llm")
+        ));
+    }
+
+    #[test]
+    fn test_should_run_event_driven_only() {
+        let mut scope = ScopeRuntimeState::default();
+        assert!(should_run(&scope, Duration::from_secs(5), false));
+
+        scope.last_checked_instant = Some(Instant::now());
+        assert!(!should_run(&scope, Duration::from_secs(5), false));
+
+        scope.last_dirty_instant = Some(Instant::now());
+        assert!(should_run(&scope, Duration::from_secs(5), false));
+    }
+
+    #[test]
+    fn test_partial_download_dir_is_not_importable() {
+        let temp = TempDir::new().unwrap();
+        let model_dir = temp.path().join("llm").join("test").join("partial");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.gguf.part"), b"partial").unwrap();
+
+        assert!(has_pending_download_artifacts(&model_dir));
+        assert!(!has_importable_model_files(&model_dir));
+    }
+
+    #[test]
+    fn test_completed_model_file_is_importable() {
+        let temp = TempDir::new().unwrap();
+        let model_dir = temp.path().join("llm").join("test").join("complete");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"ok").unwrap();
+
+        assert!(!has_pending_download_artifacts(&model_dir));
+        assert!(has_importable_model_files(&model_dir));
+    }
+
+    #[test]
+    fn test_non_fatal_adoption_error_classification() {
+        assert!(is_non_fatal_adoption_error(
+            "No model files found in directory"
+        ));
+        assert!(is_non_fatal_adoption_error(
+            "Incomplete shard set 'model': have 1/2 shards"
+        ));
+        assert!(!is_non_fatal_adoption_error("permission denied"));
+    }
+
+    #[test]
+    fn test_non_fatal_reclassify_error_classification() {
+        assert!(is_non_fatal_reclassify_error(
+            "Cannot reclassify unknown/a/b: destination /tmp/x already exists"
+        ));
+        assert!(!is_non_fatal_reclassify_error(
+            "Cannot reclassify: permission denied"
         ));
     }
 }

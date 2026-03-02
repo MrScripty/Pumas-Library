@@ -11,7 +11,7 @@ use crate::error::{PumasError, Result};
 use crate::index::{ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
-use crate::model_library::identifier::identify_model_type;
+use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{
@@ -23,7 +23,8 @@ use crate::model_library::{
     validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution,
 };
 use serde_json::Value;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
@@ -44,6 +45,12 @@ const MIGRATION_CHECKPOINT_FILENAME: &str = ".metadata_v2_migration_checkpoint.j
 const MIGRATION_REPORTS_DIR: &str = "migration-reports";
 /// Index file for generated migration report artifacts.
 const MIGRATION_REPORT_INDEX_FILENAME: &str = "index.json";
+/// Indexed metadata key indicating the model is part of a duplicate repo_id set.
+const INTEGRITY_ISSUE_DUPLICATE_REPO_ID: &str = "integrity_issue_duplicate_repo_id";
+/// Indexed metadata key indicating how many total entries shared the same repo_id.
+const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT: &str = "integrity_issue_duplicate_repo_id_count";
+/// Indexed metadata key listing alternate model IDs with the same repo_id.
+const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_OTHERS: &str = "integrity_issue_duplicate_repo_id_others";
 
 /// The core model library registry.
 ///
@@ -201,8 +208,16 @@ impl ModelLibrary {
     /// * `metadata` - Metadata to save
     pub async fn save_metadata(&self, model_dir: &Path, metadata: &ModelMetadata) -> Result<()> {
         let _lock = self.write_lock.lock().await;
+        if !model_dir.is_dir() {
+            return Err(PumasError::NotADirectory(model_dir.to_path_buf()));
+        }
+
+        let mut normalized = metadata.clone();
+        if let Some(model_id) = self.get_model_id(model_dir) {
+            normalized.model_id = Some(model_id);
+        }
         let path = model_dir.join(METADATA_FILENAME);
-        atomic_write_json(&path, metadata, true)
+        atomic_write_json(&path, &normalized, true)
     }
 
     /// Load user overrides from a model directory.
@@ -446,6 +461,7 @@ impl ModelLibrary {
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
         let mut result = self.index.search("", None, None, 10000, 0)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        annotate_and_dedupe_records_by_repo_id(&mut result.models);
         Ok(result.models)
     }
 
@@ -473,6 +489,8 @@ impl ModelLibrary {
     ) -> Result<SearchResult> {
         let mut result = self.index.search(query, None, None, limit, offset)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        annotate_and_dedupe_records_by_repo_id(&mut result.models);
+        result.total_count = result.models.len();
         Ok(result)
     }
 
@@ -504,6 +522,8 @@ impl ModelLibrary {
             offset,
         )?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        annotate_and_dedupe_records_by_repo_id(&mut result.models);
+        result.total_count = result.models.len();
         Ok(result)
     }
 
@@ -757,6 +777,11 @@ impl ModelLibrary {
     /// Mark a model's metadata lookup as failed.
     pub async fn mark_lookup_failed(&self, model_id: &str) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
         let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
 
         let attempts = metadata.lookup_attempts.unwrap_or(0) + 1;
@@ -900,6 +925,11 @@ impl ModelLibrary {
         force: bool,
     ) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
         let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
 
         // Don't overwrite manual metadata unless forced
@@ -1092,18 +1122,22 @@ impl ModelLibrary {
         let current_metadata_needs_review = metadata.metadata_needs_review;
         let current_review_status = metadata.review_status.clone();
 
-        let resolved = resolve_model_type_with_rules(
-            self.index(),
-            &model_dir,
-            metadata.pipeline_tag.as_deref(),
-            None,
-        )?;
-        let new_type = resolved.model_type.as_str().to_string();
-
-        // Keep family detection from file metadata (independent from model_type resolver).
+        // Keep file-signature detection independent from resolver rules and use it as fallback.
         let type_info = find_primary_model_file(&model_dir)
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
+        let resolved = apply_unresolved_model_type_fallbacks(
+            resolve_model_type_with_rules(
+                self.index(),
+                &model_dir,
+                metadata.pipeline_tag.as_deref(),
+                None,
+            )?,
+            &model_dir,
+            type_info.as_ref(),
+        );
+        let new_type = resolved.model_type.as_str().to_string();
+
         let detected_family = type_info
             .as_ref()
             .and_then(|ti| ti.family.as_ref())
@@ -1237,6 +1271,17 @@ impl ModelLibrary {
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone().unwrap_or_default();
+        let model_id_parts: Vec<&str> = model_id.split('/').collect();
+        let current_path_type = model_id_parts
+            .first()
+            .copied()
+            .unwrap_or_default()
+            .to_string();
+        let current_path_family = model_id_parts
+            .get(1)
+            .copied()
+            .unwrap_or_default()
+            .to_string();
         let current_subtype = metadata.subtype.clone();
         let current_resolution_source = metadata.model_type_resolution_source.clone();
         let current_resolution_confidence = metadata.model_type_resolution_confidence;
@@ -1244,20 +1289,23 @@ impl ModelLibrary {
         let current_metadata_needs_review = metadata.metadata_needs_review;
         let current_review_status = metadata.review_status.clone();
 
-        let resolved = resolve_model_type_with_rules(
-            self.index(),
-            &model_dir,
-            metadata.pipeline_tag.as_deref(),
-            None,
-        )?;
-        let new_type = resolved.model_type;
-        let new_type_str = new_type.as_str().to_string();
-
         // Keep family detection from file metadata (independent from model_type resolver).
         let primary_file = find_primary_model_file(&model_dir);
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
+        let resolved = apply_unresolved_model_type_fallbacks(
+            resolve_model_type_with_rules(
+                self.index(),
+                &model_dir,
+                metadata.pipeline_tag.as_deref(),
+                None,
+            )?,
+            &model_dir,
+            file_type_info.as_ref(),
+        );
+        let new_type = resolved.model_type;
+        let new_type_str = new_type.as_str().to_string();
 
         // Detect dLLM subtype
         let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir)
@@ -1280,8 +1328,8 @@ impl ModelLibrary {
         let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
         metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
 
-        let identity_changed = new_type_str != current_type
-            || new_family != current_family
+        let identity_changed = new_type_str != current_path_type
+            || new_family != current_path_family
             || metadata.subtype != current_subtype;
         if !identity_changed
             && !resolution_changed
@@ -1330,6 +1378,27 @@ impl ModelLibrary {
 
         // Check for collision at new path
         if new_dir.exists() {
+            if directories_have_identical_contents(&model_dir, &new_dir)? {
+                tracing::info!(
+                    "Reclassify dedupe: removing duplicate source {} in favor of existing destination {}",
+                    model_dir.display(),
+                    new_dir.display()
+                );
+
+                if let Some(mut existing_metadata) = self.load_metadata(&new_dir)? {
+                    existing_metadata.model_id = Some(new_model_id.clone());
+                    apply_target_identity_to_metadata(&mut existing_metadata, &new_model_id);
+                    existing_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+                    self.save_metadata(&new_dir, &existing_metadata).await?;
+                }
+
+                let _ = self.index.delete(model_id);
+                std::fs::remove_dir_all(&model_dir)?;
+                cleanup_empty_parent_dirs_after_move(&model_dir, &self.library_root);
+                self.index_model_dir(&new_dir).await?;
+                return Ok(Some(new_model_id));
+            }
+
             return Err(PumasError::Other(format!(
                 "Cannot reclassify {}: destination {} already exists",
                 model_id,
@@ -1407,6 +1476,130 @@ impl ModelLibrary {
         );
 
         Ok(result)
+    }
+
+    /// Cleanup duplicate model directories that share the same repo_id.
+    ///
+    /// The pass is conservative:
+    /// - metadata-only duplicate stubs are removed automatically
+    /// - byte-identical duplicate payload directories are deduped automatically
+    /// - non-identical payload collisions are preserved and reported
+    ///
+    /// The retained entry is re-indexed and metadata `model_id` is normalized to path.
+    pub fn cleanup_duplicate_repo_entries(&self) -> Result<DuplicateRepoCleanupReport> {
+        let mut report = DuplicateRepoCleanupReport::default();
+        let mut by_repo: HashMap<String, Vec<DuplicateRepoEntry>> = HashMap::new();
+        let model_dirs: Vec<PathBuf> = self.model_dirs().collect();
+
+        for model_dir in model_dirs {
+            let Some(model_id) = self.get_model_id(&model_dir) else {
+                continue;
+            };
+            let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+                continue;
+            };
+
+            if metadata.model_id.as_deref() != Some(&model_id) {
+                metadata.model_id = Some(model_id.clone());
+                metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+                let metadata_path = model_dir.join(METADATA_FILENAME);
+                atomic_write_json(&metadata_path, &metadata, true)?;
+                report.normalized_metadata_ids += 1;
+            }
+
+            let Some(repo_key) = normalized_repo_key_from_metadata(&metadata) else {
+                continue;
+            };
+            let payload_file_count = count_payload_files_in_model_dir(&model_dir);
+
+            by_repo
+                .entry(repo_key)
+                .or_default()
+                .push(DuplicateRepoEntry {
+                    model_id,
+                    model_dir,
+                    path_type: metadata
+                        .model_id
+                        .as_deref()
+                        .and_then(|id| id.split('/').next())
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    metadata_type: metadata.model_type.unwrap_or_else(|| "unknown".to_string()),
+                    payload_file_count,
+                });
+        }
+
+        for entries in by_repo.values_mut() {
+            if entries.len() <= 1 {
+                continue;
+            }
+            report.duplicate_repo_groups += 1;
+
+            entries.sort_by(|a, b| {
+                duplicate_preference_score(b)
+                    .cmp(&duplicate_preference_score(a))
+                    .then_with(|| a.model_id.cmp(&b.model_id))
+            });
+
+            let Some(preferred) = entries.first().cloned() else {
+                continue;
+            };
+            let mut unresolved = false;
+
+            for duplicate in entries.iter().skip(1) {
+                if !duplicate.model_dir.exists() {
+                    let _ = self.index.delete(&duplicate.model_id);
+                    continue;
+                }
+
+                let removable = if duplicate.payload_file_count == 0 {
+                    true
+                } else if preferred.payload_file_count == 0 {
+                    // Preferred candidate should normally be payload-bearing due score ordering.
+                    false
+                } else {
+                    directories_have_identical_contents(&duplicate.model_dir, &preferred.model_dir)?
+                };
+
+                if removable {
+                    let _ = self.index.delete(&duplicate.model_id);
+                    std::fs::remove_dir_all(&duplicate.model_dir)?;
+                    cleanup_empty_parent_dirs_after_move(&duplicate.model_dir, &self.library_root);
+                    report.removed_duplicate_dirs += 1;
+                } else {
+                    unresolved = true;
+                    report.unresolved_duplicate_dirs += 1;
+                }
+            }
+
+            if preferred.model_dir.exists() {
+                if let Some(mut preferred_metadata) = self.load_metadata(&preferred.model_dir)? {
+                    let preferred_model_id = self
+                        .get_model_id(&preferred.model_dir)
+                        .unwrap_or_else(|| preferred.model_id.clone());
+                    if preferred_metadata.model_id.as_deref() != Some(&preferred_model_id) {
+                        preferred_metadata.model_id = Some(preferred_model_id.clone());
+                        preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+                        let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
+                        atomic_write_json(&metadata_path, &preferred_metadata, true)?;
+                        report.normalized_metadata_ids += 1;
+                    }
+                    let record = metadata_to_record(
+                        &preferred_model_id,
+                        &preferred.model_dir,
+                        &preferred_metadata,
+                    );
+                    self.index.upsert(&record)?;
+                }
+            }
+
+            if unresolved {
+                report.unresolved_duplicate_groups += 1;
+            }
+        }
+
+        self.index.checkpoint_wal()?;
+        Ok(report)
     }
 
     /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
@@ -1574,18 +1767,22 @@ impl ModelLibrary {
                 .to_string()
         });
 
-        let resolved = resolve_model_type_with_rules(
-            self.index(),
-            model_dir,
-            metadata.pipeline_tag.as_deref(),
-            None,
-        )?;
-        let resolved_type = resolved.model_type.as_str().to_string();
-
         let primary_file = find_primary_model_file(model_dir);
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
+        let resolved = apply_unresolved_model_type_fallbacks(
+            resolve_model_type_with_rules(
+                self.index(),
+                model_dir,
+                metadata.pipeline_tag.as_deref(),
+                None,
+            )?,
+            model_dir,
+            file_type_info.as_ref(),
+        );
+        let resolved_type = resolved.model_type.as_str().to_string();
+
         let resolved_family = file_type_info
             .as_ref()
             .and_then(|ti| ti.family.as_ref())
@@ -2092,6 +2289,21 @@ pub struct MigrationReportArtifact {
     pub markdown_report_path: String,
 }
 
+/// Report for duplicate repo_id cleanup pass.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct DuplicateRepoCleanupReport {
+    /// Number of repo_id groups with >1 model directory.
+    pub duplicate_repo_groups: usize,
+    /// Number of duplicate directories removed.
+    pub removed_duplicate_dirs: usize,
+    /// Number of duplicate directories that require manual resolution.
+    pub unresolved_duplicate_dirs: usize,
+    /// Number of repo_id groups that still have unresolved duplicates.
+    pub unresolved_duplicate_groups: usize,
+    /// Number of metadata files whose `model_id` was normalized to on-disk path.
+    pub normalized_metadata_ids: usize,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 struct MigrationCheckpointState {
     created_at: String,
@@ -2111,6 +2323,15 @@ struct MigrationReportIndexEntry {
     report_kind: String,
     json_report_path: String,
     markdown_report_path: String,
+}
+
+#[derive(Debug, Clone)]
+struct DuplicateRepoEntry {
+    model_id: String,
+    model_dir: PathBuf,
+    path_type: String,
+    metadata_type: String,
+    payload_file_count: usize,
 }
 
 fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
@@ -2204,6 +2425,126 @@ fn set_object_field(target: &mut Value, key: &str, value: Value) -> Result<()> {
     Ok(())
 }
 
+fn normalized_repo_key_from_metadata(metadata: &ModelMetadata) -> Option<String> {
+    metadata
+        .repo_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase())
+}
+
+fn normalized_repo_key_from_value(metadata: &Value) -> Option<String> {
+    metadata
+        .as_object()
+        .and_then(|obj| obj.get("repo_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase())
+}
+
+fn is_metadata_artifact_filename(name: &str) -> bool {
+    name == "metadata.json"
+        || name == "metadata.json.bak"
+        || (name.starts_with("metadata.json.") && name.ends_with(".tmp"))
+        || name == "overrides.json"
+        || name == ".pumas_download"
+}
+
+fn count_payload_files_in_model_dir(model_dir: &Path) -> usize {
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !is_metadata_artifact_filename(&name)
+        })
+        .count()
+}
+
+fn duplicate_preference_score(entry: &DuplicateRepoEntry) -> i64 {
+    let has_payload = usize::from(entry.payload_file_count > 0) as i64;
+    let path_known = usize::from(entry.path_type != "unknown") as i64;
+    let metadata_known = usize::from(entry.metadata_type.to_lowercase() != "unknown") as i64;
+    (has_payload * 10_000)
+        + (path_known * 1_000)
+        + (metadata_known * 100)
+        + entry.payload_file_count as i64
+}
+
+fn annotate_and_dedupe_records_by_repo_id(records: &mut Vec<ModelRecord>) {
+    let mut by_repo: HashMap<String, Vec<ModelRecord>> = HashMap::new();
+    let mut passthrough = Vec::new();
+
+    for record in records.drain(..) {
+        if let Some(repo_key) = normalized_repo_key_from_value(&record.metadata) {
+            by_repo.entry(repo_key).or_default().push(record);
+        } else {
+            passthrough.push(record);
+        }
+    }
+
+    let mut deduped = passthrough;
+    for group in by_repo.into_values() {
+        if group.len() == 1 {
+            deduped.extend(group);
+            continue;
+        }
+
+        let mut ranked = group;
+        ranked.sort_by(|a, b| {
+            record_duplicate_preference_score(b)
+                .cmp(&record_duplicate_preference_score(a))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+
+        let mut keep = ranked.remove(0);
+        let duplicate_ids: Vec<String> = ranked.into_iter().map(|item| item.id).collect();
+
+        if !keep.metadata.is_object() {
+            keep.metadata = Value::Object(serde_json::Map::new());
+        }
+        if let Some(metadata_obj) = keep.metadata.as_object_mut() {
+            metadata_obj.insert(
+                INTEGRITY_ISSUE_DUPLICATE_REPO_ID.to_string(),
+                Value::Bool(true),
+            );
+            metadata_obj.insert(
+                INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT.to_string(),
+                Value::Number(serde_json::Number::from((duplicate_ids.len() + 1) as u64)),
+            );
+            metadata_obj.insert(
+                INTEGRITY_ISSUE_DUPLICATE_REPO_ID_OTHERS.to_string(),
+                Value::Array(duplicate_ids.into_iter().map(Value::String).collect()),
+            );
+        }
+
+        deduped.push(keep);
+    }
+
+    deduped.sort_by(|a, b| a.id.cmp(&b.id));
+    *records = deduped;
+}
+
+fn record_duplicate_preference_score(record: &ModelRecord) -> i64 {
+    let path_type = record.id.split('/').next().unwrap_or("unknown");
+    let model_type = record.model_type.to_lowercase();
+    let download_incomplete = record
+        .metadata
+        .as_object()
+        .and_then(|obj| obj.get("download_incomplete"))
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let path_known = usize::from(path_type != "unknown") as i64;
+    let type_known = usize::from(model_type != "unknown") as i64;
+    let complete_bonus = usize::from(!download_incomplete) as i64;
+    (path_known * 10_000) + (type_known * 1_000) + (complete_bonus * 100)
+}
+
 /// Apply resolver provenance/review fields and report whether resolution metadata changed.
 fn apply_model_type_resolution(
     metadata: &mut ModelMetadata,
@@ -2277,6 +2618,71 @@ fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) 
             if grandparent != library_root {
                 let _ = std::fs::remove_dir(grandparent);
             }
+        }
+    }
+}
+
+fn directories_have_identical_contents(left: &Path, right: &Path) -> Result<bool> {
+    let left_files = collect_relative_file_paths(left)?;
+    let right_files = collect_relative_file_paths(right)?;
+    if left_files != right_files {
+        return Ok(false);
+    }
+
+    for relative_path in left_files {
+        let left_file = left.join(&relative_path);
+        let right_file = right.join(&relative_path);
+
+        let left_meta = std::fs::metadata(&left_file)?;
+        let right_meta = std::fs::metadata(&right_file)?;
+        if left_meta.len() != right_meta.len() {
+            return Ok(false);
+        }
+
+        if !files_have_identical_contents(&left_file, &right_file)? {
+            return Ok(false);
+        }
+    }
+
+    Ok(true)
+}
+
+fn collect_relative_file_paths(root: &Path) -> Result<BTreeSet<PathBuf>> {
+    let mut files = BTreeSet::new();
+    for entry in WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let rel = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|err| PumasError::Other(err.to_string()))?;
+        files.insert(rel.to_path_buf());
+    }
+    Ok(files)
+}
+
+fn files_have_identical_contents(left: &Path, right: &Path) -> Result<bool> {
+    let mut left_reader = BufReader::new(std::fs::File::open(left)?);
+    let mut right_reader = BufReader::new(std::fs::File::open(right)?);
+    let mut left_buf = [0_u8; 8192];
+    let mut right_buf = [0_u8; 8192];
+
+    loop {
+        let left_read = left_reader.read(&mut left_buf)?;
+        let right_read = right_reader.read(&mut right_buf)?;
+        if left_read != right_read {
+            return Ok(false);
+        }
+        if left_read == 0 {
+            return Ok(true);
+        }
+        if left_buf[..left_read] != right_buf[..right_read] {
+            return Ok(false);
         }
     }
 }
@@ -2594,6 +3000,211 @@ fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
     largest.map(|(path, _)| path)
 }
 
+/// Apply deterministic local fallbacks when rule-based resolver is unresolved.
+fn apply_unresolved_model_type_fallbacks(
+    mut resolved: ModelTypeResolution,
+    model_dir: &Path,
+    file_type_info: Option<&ModelTypeInfo>,
+) -> ModelTypeResolution {
+    if resolved.model_type != ModelType::Unknown || resolved.source != "unresolved" {
+        return resolved;
+    }
+
+    if let Some(layout_type) = detect_model_type_from_directory_layout(model_dir) {
+        apply_fallback_resolution(
+            &mut resolved,
+            layout_type,
+            "model-type-directory-layout",
+            0.75,
+            "model-type-fallback-directory-layout",
+        );
+        return resolved;
+    }
+
+    let Some(file_type_info) = file_type_info else {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+            apply_fallback_resolution(
+                &mut resolved,
+                token_type,
+                "model-type-name-tokens",
+                0.60,
+                "model-type-fallback-name-tokens",
+            );
+        }
+        return resolved;
+    };
+    if file_type_info.model_type == ModelType::Unknown {
+        if let Some(token_type) = detect_model_type_from_name_tokens(model_dir) {
+            apply_fallback_resolution(
+                &mut resolved,
+                token_type,
+                "model-type-name-tokens",
+                0.60,
+                "model-type-fallback-name-tokens",
+            );
+        }
+        return resolved;
+    }
+
+    apply_fallback_resolution(
+        &mut resolved,
+        file_type_info.model_type,
+        "model-type-file-signature",
+        0.65,
+        "model-type-fallback-file-signature",
+    );
+    resolved
+}
+
+fn apply_fallback_resolution(
+    resolved: &mut ModelTypeResolution,
+    model_type: ModelType,
+    source: &str,
+    confidence: f64,
+    fallback_reason: &str,
+) {
+    let mut review_reasons = std::mem::take(&mut resolved.review_reasons);
+    review_reasons.retain(|reason| reason != "model-type-unresolved");
+    review_reasons.push(fallback_reason.to_string());
+    review_reasons.push("model-type-low-confidence".to_string());
+    normalize_review_reasons(&mut review_reasons);
+
+    resolved.model_type = model_type;
+    resolved.source = source.to_string();
+    resolved.confidence = confidence;
+    resolved.review_reasons = review_reasons;
+}
+
+fn detect_model_type_from_directory_layout(model_dir: &Path) -> Option<ModelType> {
+    let model_index = model_dir.join("model_index.json");
+    if let Ok(data) = std::fs::read_to_string(&model_index) {
+        if let Ok(json) = serde_json::from_str::<Value>(&data) {
+            if let Some(class_name) = json.get("_class_name").and_then(|v| v.as_str()) {
+                let class_name = class_name.trim().to_lowercase();
+                if class_name.contains("pipeline")
+                    || class_name.contains("flux")
+                    || class_name.contains("diffusion")
+                {
+                    return Some(ModelType::Diffusion);
+                }
+                if class_name.contains("audio")
+                    || class_name.contains("speech")
+                    || class_name.contains("music")
+                {
+                    return Some(ModelType::Audio);
+                }
+                if class_name.contains("vision")
+                    || class_name.contains("image-classification")
+                    || class_name.contains("segmentation")
+                {
+                    return Some(ModelType::Vision);
+                }
+            }
+        }
+    }
+
+    let mut has_transformer = false;
+    let mut has_vae = false;
+    let mut has_text_encoder = false;
+    let mut has_tokenizer = false;
+    let mut has_processor = false;
+    let mut has_vision_language_encoder = false;
+
+    if let Ok(entries) = std::fs::read_dir(model_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
+            if !is_dir {
+                continue;
+            }
+            match name.as_str() {
+                "transformer" => has_transformer = true,
+                "vae" => has_vae = true,
+                "text_encoder" | "text_encoder_2" => has_text_encoder = true,
+                "tokenizer" | "tokenizer_2" => has_tokenizer = true,
+                "processor" => has_processor = true,
+                "vision_language_encoder" => has_vision_language_encoder = true,
+                _ => {}
+            }
+        }
+    }
+
+    if has_transformer
+        && has_vae
+        && (has_text_encoder || has_tokenizer || has_processor || has_vision_language_encoder)
+    {
+        return Some(ModelType::Diffusion);
+    }
+
+    None
+}
+
+fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
+    let mut token_pool = model_dir.display().to_string().to_lowercase();
+    if let Ok(entries) = std::fs::read_dir(model_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            token_pool.push(' ');
+            token_pool.push_str(&name);
+        }
+    }
+
+    let contains_any = |needles: &[&str]| needles.iter().any(|needle| token_pool.contains(needle));
+
+    if contains_any(&[
+        "stable-audio",
+        "soundeffect",
+        "sound_effect",
+        "musicgen",
+        "whisper",
+        "audio",
+        "speech",
+        "bark",
+    ]) {
+        return Some(ModelType::Audio);
+    }
+
+    if contains_any(&[
+        "qwen-image",
+        "image-edit",
+        "flux",
+        "stable-diffusion",
+        "stable_diffusion",
+        "sdxl",
+        "diffusion",
+        "inpaint",
+        "unblur",
+        "upscale",
+        "turbo",
+        "glm-image",
+    ]) {
+        return Some(ModelType::Diffusion);
+    }
+
+    if contains_any(&["depthpro", "depth_pro", "depth-anything", "vision"]) {
+        return Some(ModelType::Vision);
+    }
+
+    if contains_any(&["embedding", "sentence-transformers", "bge", "e5", "gte"]) {
+        return Some(ModelType::Embedding);
+    }
+
+    if contains_any(&[
+        "gguf",
+        ".gguf.part",
+        "nemotron",
+        "llama",
+        "mistral",
+        "qwen",
+        "glm-",
+        "gpt",
+    ]) {
+        return Some(ModelType::Llm);
+    }
+
+    None
+}
+
 /// Verify the hash of a model file against stored metadata.
 ///
 /// Returns Ok(true) if hash matches or no hash stored, Ok(false) if mismatch,
@@ -2655,6 +3266,38 @@ fn verify_model_hash(
     Ok(true)
 }
 
+/// Compute download completeness projection fields for indexed metadata.
+///
+/// These fields are derived from on-disk state and added to indexed metadata so
+/// UI consumers can distinguish complete models from partial downloads.
+fn download_projection_status(model_dir: &Path, metadata: &ModelMetadata) -> (bool, bool, usize) {
+    let has_part_files = WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(6)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|entry| {
+            entry.file_type().is_file() && entry.file_name().to_string_lossy().ends_with(".part")
+        });
+
+    let missing_expected_files = metadata
+        .expected_files
+        .as_ref()
+        .map(|expected| {
+            expected
+                .iter()
+                .filter(|relative_path| !model_dir.join(relative_path).exists())
+                .count()
+        })
+        .unwrap_or(0);
+
+    (
+        has_part_files || missing_expected_files > 0,
+        has_part_files,
+        missing_expected_files,
+    )
+}
+
 /// Convert ModelMetadata to ModelRecord for indexing.
 fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata) -> ModelRecord {
     let inferred_type_from_id = model_id
@@ -2662,6 +3305,25 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
         .next()
         .map(str::to_string)
         .unwrap_or_else(|| "unknown".to_string());
+    let (download_incomplete, download_has_part_files, download_missing_expected_files) =
+        download_projection_status(model_dir, metadata);
+    let mut metadata_json = serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null);
+    if let Some(obj) = metadata_json.as_object_mut() {
+        obj.insert(
+            "download_incomplete".to_string(),
+            Value::Bool(download_incomplete),
+        );
+        obj.insert(
+            "download_has_part_files".to_string(),
+            Value::Bool(download_has_part_files),
+        );
+        obj.insert(
+            "download_missing_expected_files".to_string(),
+            Value::Number(serde_json::Number::from(
+                download_missing_expected_files as u64,
+            )),
+        );
+    }
 
     ModelRecord {
         id: model_id.to_string(),
@@ -2693,7 +3355,7 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
                 map
             })
             .unwrap_or_default(),
-        metadata: serde_json::to_value(metadata).unwrap_or(serde_json::Value::Null),
+        metadata: metadata_json,
         updated_at: metadata
             .updated_date
             .clone()
@@ -2767,6 +3429,81 @@ mod tests {
 
     fn normalize_path_separators(value: &str) -> String {
         value.replace('\\', "/")
+    }
+
+    #[tokio::test]
+    async fn test_indexed_metadata_marks_partial_download_when_part_exists() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "test", "partial-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.gguf.part"), b"partial").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/partial-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Partial Model".to_string()),
+            cleaned_name: Some("partial-model".to_string()),
+            expected_files: Some(vec!["weights.gguf".to_string()]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library
+            .get_model("llm/test/partial-model")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(record.metadata["download_incomplete"].as_bool(), Some(true));
+        assert_eq!(
+            record.metadata["download_has_part_files"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            record.metadata["download_missing_expected_files"].as_u64(),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_indexed_metadata_marks_complete_when_expected_files_exist() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "test", "complete-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.gguf"), b"complete").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/complete-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Complete Model".to_string()),
+            cleaned_name: Some("complete-model".to_string()),
+            expected_files: Some(vec!["weights.gguf".to_string()]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library
+            .get_model("llm/test/complete-model")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.metadata["download_incomplete"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            record.metadata["download_has_part_files"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            record.metadata["download_missing_expected_files"].as_u64(),
+            Some(0)
+        );
     }
 
     #[tokio::test]
@@ -2994,6 +3731,424 @@ mod tests {
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-resolver-arch-rules".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_falls_back_to_file_signature_when_unresolved() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "test", "resolver-fallback-embedding");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/resolver-fallback-embedding".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("Resolver Fallback Embedding".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/test/resolver-fallback-embedding")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("embedding".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("embedding".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-file-signature".to_string())
+        );
+        assert_eq!(updated.model_type_resolution_confidence, Some(0.65));
+        assert!(updated
+            .review_reasons
+            .unwrap_or_default()
+            .contains(&"model-type-fallback-file-signature".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_falls_back_to_file_signature_for_move() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("llm", "test", "resolver-fallback-embedding");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/resolver-fallback-embedding".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Resolver Fallback Embedding".to_string()),
+            cleaned_name: Some("resolver-fallback-embedding".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("llm/test/resolver-fallback-embedding")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("embedding/test/resolver-fallback-embedding".to_string())
+        );
+
+        let new_dir = library.build_model_path("embedding", "test", "resolver-fallback-embedding");
+        assert!(new_dir.exists());
+        assert!(!old_dir.exists());
+
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("embedding".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-file-signature".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_moves_when_path_is_stale_but_metadata_already_updated() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("unknown", "test", "stale-path-embedding");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+
+        // Metadata already updated by prior redetect pass, but model still sits under unknown/.
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/stale-path-embedding".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("embedding".to_string()),
+            official_name: Some("Stale Path".to_string()),
+            cleaned_name: Some("stale-path-embedding".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("unknown/test/stale-path-embedding")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("embedding/test/stale-path-embedding".to_string())
+        );
+
+        let new_dir = library.build_model_path("embedding", "test", "stale-path-embedding");
+        assert!(new_dir.exists());
+        assert!(!old_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_dedupes_identical_collision_and_updates_index() {
+        let (_, library) = setup_library().await;
+
+        let source_dir = library.build_model_path("unknown", "test", "collision-dedupe");
+        let target_dir = library.build_model_path("diffusion", "test", "collision-dedupe");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/collision-dedupe".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Collision Dedupe".to_string()),
+            cleaned_name: Some("collision-dedupe".to_string()),
+            ..Default::default()
+        };
+
+        let metadata_json = serde_json::to_string_pretty(&metadata).unwrap();
+        std::fs::write(source_dir.join("metadata.json"), &metadata_json).unwrap();
+        std::fs::write(target_dir.join("metadata.json"), &metadata_json).unwrap();
+        write_min_safetensors(&source_dir.join("model.safetensors"));
+        write_min_safetensors(&target_dir.join("model.safetensors"));
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            target_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        library.index_model_dir(&source_dir).await.unwrap();
+        library.index_model_dir(&target_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("unknown/test/collision-dedupe")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("diffusion/test/collision-dedupe".to_string())
+        );
+
+        assert!(!source_dir.exists());
+        assert!(target_dir.exists());
+
+        let target_metadata = library.load_metadata(&target_dir).unwrap().unwrap();
+        assert_eq!(
+            target_metadata.model_id.as_deref(),
+            Some("diffusion/test/collision-dedupe")
+        );
+        assert_eq!(target_metadata.model_type.as_deref(), Some("diffusion"));
+
+        let unknown_row = library
+            .index()
+            .get("unknown/test/collision-dedupe")
+            .unwrap();
+        assert!(unknown_row.is_none());
+
+        let target_row = library
+            .index()
+            .get("diffusion/test/collision-dedupe")
+            .unwrap();
+        assert!(target_row.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_collision_non_identical_still_errors() {
+        let (_, library) = setup_library().await;
+
+        let source_dir = library.build_model_path("unknown", "test", "collision-blocked");
+        let target_dir = library.build_model_path("diffusion", "test", "collision-blocked");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+
+        let source_metadata = ModelMetadata {
+            model_id: Some("unknown/test/collision-blocked".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("collision-blocked".to_string()),
+            ..Default::default()
+        };
+        let target_metadata = ModelMetadata {
+            model_id: Some("embedding/test/collision-blocked".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("embedding".to_string()),
+            cleaned_name: Some("collision-blocked".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&source_dir, &source_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&target_dir, &target_metadata)
+            .await
+            .unwrap();
+        std::fs::write(source_dir.join("model.safetensors"), b"left").unwrap();
+        std::fs::write(target_dir.join("model.safetensors"), b"right").unwrap();
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            target_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        library.index_model_dir(&source_dir).await.unwrap();
+        library.index_model_dir(&target_dir).await.unwrap();
+
+        let err = library
+            .reclassify_model("unknown/test/collision-blocked")
+            .await
+            .expect_err("non-identical collision should still fail");
+        assert!(err.to_string().contains("destination"));
+        assert!(source_dir.exists());
+        assert!(target_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_duplicate_repo_entries_removes_metadata_stub_duplicate() {
+        let (_, library) = setup_library().await;
+
+        let canonical_dir = library.build_model_path("llm", "dup-test", "repo-cleanup");
+        let unknown_dir = library.build_model_path("unknown", "dup-test", "repo-cleanup");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        write_min_safetensors(&canonical_dir.join("model.safetensors"));
+
+        let canonical_metadata = ModelMetadata {
+            model_id: Some("llm/dup-test/repo-cleanup".to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("repo-cleanup".to_string()),
+            repo_id: Some("example/repo-cleanup".to_string()),
+            ..Default::default()
+        };
+        let unknown_metadata = ModelMetadata {
+            model_id: Some("unknown/dup-test/repo-cleanup".to_string()),
+            model_type: Some("unknown".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("repo-cleanup".to_string()),
+            repo_id: Some("example/repo-cleanup".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&canonical_dir, &canonical_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&unknown_dir, &unknown_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&canonical_dir).await.unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let report = library.cleanup_duplicate_repo_entries().unwrap();
+        assert_eq!(report.duplicate_repo_groups, 1);
+        assert_eq!(report.removed_duplicate_dirs, 1);
+        assert!(report.unresolved_duplicate_groups == 0);
+        assert!(!unknown_dir.exists());
+        assert!(canonical_dir.exists());
+
+        let unknown_row = library
+            .index()
+            .get("unknown/dup-test/repo-cleanup")
+            .unwrap();
+        assert!(unknown_row.is_none());
+        let canonical_row = library.index().get("llm/dup-test/repo-cleanup").unwrap();
+        assert!(canonical_row.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_list_models_dedupes_duplicate_repo_ids_and_marks_integrity_issue() {
+        let (_, library) = setup_library().await;
+
+        let canonical_dir = library.build_model_path("llm", "dup-test", "repo-visibility");
+        let unknown_dir = library.build_model_path("unknown", "dup-test", "repo-visibility");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        write_min_safetensors(&canonical_dir.join("model.safetensors"));
+        write_min_safetensors(&unknown_dir.join("model.safetensors"));
+
+        let canonical_metadata = ModelMetadata {
+            model_id: Some("llm/dup-test/repo-visibility".to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("repo-visibility".to_string()),
+            repo_id: Some("example/repo-visibility".to_string()),
+            ..Default::default()
+        };
+        let unknown_metadata = ModelMetadata {
+            model_id: Some("unknown/dup-test/repo-visibility".to_string()),
+            model_type: Some("unknown".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("repo-visibility".to_string()),
+            repo_id: Some("example/repo-visibility".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&canonical_dir, &canonical_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&unknown_dir, &unknown_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&canonical_dir).await.unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let models = library.list_models().await.unwrap();
+        assert_eq!(models.len(), 1);
+        let only = &models[0];
+        assert_eq!(
+            normalize_path_separators(&only.id),
+            "llm/dup-test/repo-visibility"
+        );
+        assert_eq!(
+            only.metadata
+                .get(INTEGRITY_ISSUE_DUPLICATE_REPO_ID)
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            only.metadata
+                .get(INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT)
+                .and_then(Value::as_u64),
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_falls_back_to_directory_layout_for_diffusers() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "test", "layout-diffuser");
+        std::fs::create_dir_all(model_dir.join("transformer")).unwrap();
+        std::fs::create_dir_all(model_dir.join("vae")).unwrap();
+        std::fs::create_dir_all(model_dir.join("text_encoder")).unwrap();
+        std::fs::write(
+            model_dir.join("model_index.json"),
+            r#"{"_class_name":"FluxPipeline"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/layout-diffuser".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("Layout Diffuser".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/test/layout-diffuser")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("diffusion".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("diffusion".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-directory-layout".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_falls_back_to_name_tokens_for_vision() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "apple", "depthpro");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("depth_pro.pt"), b"not-a-real-pt").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/apple/depthpro".to_string()),
+            family: Some("apple".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("DepthPro".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/apple/depthpro")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("vision".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("vision".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-name-tokens".to_string())
         );
     }
 

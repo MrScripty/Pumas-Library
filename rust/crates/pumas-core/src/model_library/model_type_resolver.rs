@@ -23,6 +23,8 @@ pub struct ModelTypeResolution {
 struct ConfigSignals {
     architectures: Vec<String>,
     config_model_type: Option<String>,
+    has_sentence_transformers_config: bool,
+    has_sentence_transformers_modules: bool,
 }
 
 /// Resolve model type from rule tables using source metadata signals.
@@ -60,7 +62,7 @@ pub fn resolve_model_type_with_rules(
         });
     }
 
-    let Some(resolved) = hard_types.into_iter().next() else {
+    let Some(mut resolved_type) = hard_types.into_iter().next() else {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Unknown,
             source: "unresolved".to_string(),
@@ -76,14 +78,35 @@ pub fn resolve_model_type_with_rules(
     }
 
     let medium_hints = collect_medium_hints(index, pipeline_tag, spec_model_type)?;
-    for hint in medium_hints {
-        if hint == resolved {
+    for hint in &medium_hints {
+        if *hint == resolved_type {
             score += 0.10;
         } else {
             score -= 0.20;
         }
     }
     score = score.clamp(0.0, 1.0);
+
+    let mut source = if !arch_votes.is_empty() && config_vote.is_some() {
+        "model-type-resolver-arch-config-rules".to_string()
+    } else if !arch_votes.is_empty() {
+        "model-type-resolver-arch-rules".to_string()
+    } else {
+        "model-type-resolver-config-rules".to_string()
+    };
+
+    // Guardrail: some embedding models reuse causal-LM architecture/config hints.
+    // When strong local embedding evidence is present, prefer `embedding`.
+    if should_apply_embedding_disambiguation_guard(
+        resolved_type,
+        model_dir,
+        &signals,
+        &medium_hints,
+    ) {
+        resolved_type = ModelType::Embedding;
+        score = score.max(0.90);
+        source = "model-type-embedding-disambiguation-guard".to_string();
+    }
 
     if score < 0.60 {
         return Ok(ModelTypeResolution {
@@ -99,17 +122,9 @@ pub fn resolve_model_type_with_rules(
         review_reasons.push("model-type-low-confidence".to_string());
     }
 
-    let source = if !arch_votes.is_empty() && config_vote.is_some() {
-        "model-type-resolver-arch-config-rules"
-    } else if !arch_votes.is_empty() {
-        "model-type-resolver-arch-rules"
-    } else {
-        "model-type-resolver-config-rules"
-    };
-
     Ok(ModelTypeResolution {
-        model_type: resolved,
-        source: source.to_string(),
+        model_type: resolved_type,
+        source,
         confidence: score,
         review_reasons,
     })
@@ -141,10 +156,79 @@ fn load_config_signals(model_dir: &Path) -> ConfigSignals {
         .map(|s| s.trim().to_lowercase())
         .filter(|s| !s.is_empty());
 
+    let has_sentence_transformers_config = model_dir
+        .join("config_sentence_transformers.json")
+        .is_file();
+    let has_sentence_transformers_modules = detect_sentence_transformers_modules(model_dir);
+
     ConfigSignals {
         architectures,
         config_model_type,
+        has_sentence_transformers_config,
+        has_sentence_transformers_modules,
     }
+}
+
+fn detect_sentence_transformers_modules(model_dir: &Path) -> bool {
+    let modules_path = model_dir.join("modules.json");
+    let Ok(contents) = std::fs::read_to_string(modules_path) else {
+        return false;
+    };
+    let lower = contents.to_lowercase();
+    lower.contains("sentence_transformers.models.")
+        && (lower.contains("sentence_transformers.models.pooling")
+            || lower.contains("sentence_transformers.models.normalize")
+            || lower.contains("sentence_transformers.models.dense"))
+}
+
+fn name_looks_like_embedding(model_dir: &Path) -> bool {
+    model_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name.to_lowercase().contains("embedding"))
+        .unwrap_or(false)
+}
+
+fn should_apply_embedding_disambiguation_guard(
+    resolved_type: ModelType,
+    model_dir: &Path,
+    signals: &ConfigSignals,
+    medium_hints: &[ModelType],
+) -> bool {
+    if resolved_type != ModelType::Llm {
+        return false;
+    }
+
+    // Respect explicit non-embedding hints.
+    if medium_hints
+        .iter()
+        .any(|hint| *hint != ModelType::Embedding)
+    {
+        return false;
+    }
+
+    let mut evidence = 0u8;
+    if medium_hints.contains(&ModelType::Embedding) {
+        evidence += 2;
+    }
+    if signals.has_sentence_transformers_modules {
+        evidence += 2;
+    }
+    if signals.has_sentence_transformers_config {
+        evidence += 1;
+    }
+    if signals
+        .config_model_type
+        .as_deref()
+        .is_some_and(|value| value.contains("embedding") || value.contains("sentence"))
+    {
+        evidence += 1;
+    }
+    if name_looks_like_embedding(model_dir) {
+        evidence += 1;
+    }
+
+    evidence >= 2
 }
 
 fn resolve_architecture_votes(
@@ -351,6 +435,35 @@ mod tests {
     }
 
     #[test]
+    fn embedding_disambiguation_guard_overrides_qwen_causal_signals() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Qwen3ForCausalLM"],
+                "model_type": "qwen3"
+            }),
+        );
+        std::fs::write(
+            model_dir.path().join("config_sentence_transformers.json"),
+            "{}",
+        )
+        .unwrap();
+        std::fs::write(
+            model_dir.path().join("modules.json"),
+            r#"[{"type":"sentence_transformers.models.Pooling"},{"type":"sentence_transformers.models.Normalize"}]"#,
+        )
+        .unwrap();
+
+        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Embedding);
+        assert_eq!(resolved.source, "model-type-embedding-disambiguation-guard");
+        assert!(resolved.confidence >= 0.9);
+        assert!(resolved.review_reasons.is_empty());
+    }
+
+    #[test]
     fn unresolved_when_no_hard_signals() {
         let (_tmp, index) = create_test_index();
         let model_dir = TempDir::new().unwrap();
@@ -389,6 +502,24 @@ mod tests {
 
         let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Diffusion);
+    }
+
+    #[test]
+    fn moss_tts_delay_resolves_to_audio_with_seeded_rules() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["MossTTSDelayModel"],
+                "model_type": "moss_tts_delay"
+            }),
+        );
+
+        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Audio);
+        assert!(resolved.source.starts_with("model-type-resolver-"));
+        assert!(resolved.confidence >= 0.7);
     }
 
     #[test]

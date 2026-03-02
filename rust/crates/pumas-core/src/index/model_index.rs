@@ -480,6 +480,7 @@ impl ModelIndex {
               ('ForAudioClassification', 'suffix', 'audio', 100, 'active', 'system'),
               ('Whisper', 'prefix', 'audio', 100, 'active', 'system'),
               ('Encodec', 'prefix', 'audio', 100, 'active', 'system'),
+              ('MossTTSDelayModel', 'exact', 'audio', 100, 'active', 'system'),
               ('ForImageClassification', 'suffix', 'vision', 100, 'active', 'system'),
               ('ForObjectDetection', 'suffix', 'vision', 100, 'active', 'system'),
               ('ForSemanticSegmentation', 'suffix', 'vision', 100, 'active', 'system'),
@@ -579,6 +580,7 @@ impl ModelIndex {
               ('encodec', 'audio', 100, 'active', 'system'),
               ('speecht5', 'audio', 100, 'active', 'system'),
               ('mms', 'audio', 100, 'active', 'system'),
+              ('moss_tts_delay', 'audio', 100, 'active', 'system'),
               ('vit', 'vision', 100, 'active', 'system'),
               ('swin', 'vision', 100, 'active', 'system'),
               ('convnext', 'vision', 100, 'active', 'system'),
@@ -2511,7 +2513,11 @@ mod tests {
         assert!(!arch_rules.is_empty());
         assert!(!config_rules.is_empty());
         assert!(arch_rules.iter().any(|r| r.pattern == "ForCausalLM"));
+        assert!(arch_rules.iter().any(|r| r.pattern == "MossTTSDelayModel"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llama"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "moss_tts_delay"));
         assert!(config_rules
             .iter()
             .any(|r| r.config_model_type == "text-generation"));

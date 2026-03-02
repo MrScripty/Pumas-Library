@@ -11,7 +11,7 @@ use pumas_library::ModelLibrary;
 use std::env;
 use std::path::PathBuf;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get library path from args
     let args: Vec<String> = env::args().collect();

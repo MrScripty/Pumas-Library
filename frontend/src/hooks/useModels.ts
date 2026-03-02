@@ -63,6 +63,12 @@ export function useModels() {
           const category = modelData.modelType || 'uncategorized';
           const fileName = path.split('/').pop() || path;
           const displayName = modelData.officialName ?? modelData.cleanedName ?? fileName;
+          const downloadIncomplete = Boolean(modelData.metadata?.download_incomplete);
+          const duplicateRepoIssue = Boolean(modelData.metadata?.integrity_issue_duplicate_repo_id);
+          const duplicateRepoCount = modelData.metadata?.integrity_issue_duplicate_repo_id_count;
+          const integrityIssueMessage = duplicateRepoIssue
+            ? `Duplicate repo entries detected (${duplicateRepoCount ?? 2} paths). Run library reconciliation.`
+            : undefined;
 
           const conversionSource = modelData.metadata?.conversion_source;
           // Determine primary format from path/name heuristics or metadata
@@ -81,12 +87,16 @@ export function useModels() {
             name: displayName,
             category: category,
             path: path,
+            modelDir: modelData.path,
             size: modelData.size,
             date: modelData.addedDate,
             relatedAvailable: Boolean(modelData.relatedAvailable),
+            isPartialDownload: downloadIncomplete,
             wasDequantized: conversionSource?.was_dequantized ?? false,
             convertedFrom: conversionSource?.source_format,
             repoId: modelData.metadata?.repo_id,
+            hasIntegrityIssue: duplicateRepoIssue,
+            integrityIssueMessage,
             primaryFormat,
           };
 
@@ -171,6 +181,7 @@ export function useModels() {
           name: model.official_name,
           category: category,
           path: model.file_path,
+          isPartialDownload: false,
           size: model.size_bytes,
           date: model.added_date,
           relatedAvailable: Boolean(model.related_available),

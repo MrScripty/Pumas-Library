@@ -229,6 +229,12 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   const isCategoryFiltered = isDownloadMode ? selectedKind !== 'all' : selectedCategory !== 'all';
   const hasLocalFilters = Boolean(searchQuery.trim()) || selectedCategory !== 'all';
+  const integrityIssueCount = useMemo(() => {
+    return localModelGroups.reduce(
+      (count, group) => count + group.models.filter((model) => model.hasIntegrityIssue).length,
+      0
+    );
+  }, [localModelGroups]);
 
   // Filter local models
   const filteredGroups = useMemo(() => {
@@ -521,6 +527,59 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   }, [onModelsImported]);
 
+  const handleRecoverPartialDownload = useCallback(async (model: ModelInfo) => {
+    if (!isAPIAvailable()) {
+      logger.error('Recover download API not available');
+      return;
+    }
+
+    const repoId = model.repoId;
+    const destDir = model.modelDir;
+    if (!repoId || !destDir) {
+      logger.warn('Cannot recover partial download without repoId + modelDir', {
+        modelId: model.id,
+        repoId,
+        destDir,
+      });
+      return;
+    }
+
+    setDownloadErrors((prev) => {
+      if (!prev[repoId]) return prev;
+      const next = { ...prev };
+      delete next[repoId];
+      return next;
+    });
+
+    try {
+      const result = await modelsAPI.recoverDownload(repoId, destDir);
+      if (!result.success || !result.download_id) {
+        const errorMsg = result.error || 'Failed to resume partial download.';
+        logger.error('Recover download failed', { repoId, destDir, error: errorMsg });
+        setDownloadErrors((prev) => ({ ...prev, [repoId]: errorMsg }));
+        return;
+      }
+
+      logger.info('Recovered partial download', { repoId, downloadId: result.download_id });
+      startDownload(repoId, result.download_id, { modelName: model.name, modelType: model.category });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resume partial download.';
+      if (error instanceof APIError) {
+        logger.error('API error recovering partial download', {
+          error: error.message,
+          endpoint: error.endpoint,
+          repoId,
+          destDir,
+        });
+      } else if (error instanceof Error) {
+        logger.error('Failed to recover partial download', { error: error.message, repoId, destDir });
+      } else {
+        logger.error('Unknown error recovering partial download', { error, repoId, destDir });
+      }
+      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
+    }
+  }, [setDownloadErrors, startDownload]);
+
   // Handler for file picker import button
   const handleDeleteModel = useCallback(async (modelId: string) => {
     try {
@@ -641,6 +700,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
             />
           ) : (
             <>
+              {integrityIssueCount > 0 && (
+                <div className="rounded border border-[hsl(var(--accent-warning)/0.35)] bg-[hsl(var(--accent-warning)/0.12)] px-3 py-2 text-xs text-[hsl(var(--accent-warning))]">
+                  Library integrity warning: {integrityIssueCount} model entr{integrityIssueCount === 1 ? 'y' : 'ies'} have duplicate repo records. Reconciliation will keep one visible entry and mark the issue.
+                </div>
+              )}
               <LocalModelsList
                 modelGroups={filteredGroups}
                 starredModels={starredModels}
@@ -658,6 +722,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onPauseDownload={pauseDownload}
                 onResumeDownload={resumeDownload}
                 onCancelDownload={cancelDownload}
+                onRecoverPartialDownload={handleRecoverPartialDownload}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
               />

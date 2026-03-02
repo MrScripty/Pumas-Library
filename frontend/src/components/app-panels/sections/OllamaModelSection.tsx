@@ -47,6 +47,9 @@ export function OllamaModelSection({
   const ggufModels: GgufLibraryModel[] = [];
   for (const group of modelGroups) {
     for (const model of group.models) {
+      if (model.isPartialDownload) {
+        continue;
+      }
       const path = model.path || model.name || '';
       if (hasGgufFile(path)) {
         ggufModels.push({

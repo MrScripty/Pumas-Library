@@ -25,11 +25,13 @@ export interface ModelInfo {
   name: string;
   category: string;
   path?: string;
+  modelDir?: string;
   size?: number;
   date?: string;
   starred?: boolean;
   linkedApps?: string[]; // App IDs this model is linked to
   relatedAvailable?: boolean;
+  isPartialDownload?: boolean;
   isDownloading?: boolean;
   downloadProgress?: number;
   downloadStatus?: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'error';
@@ -38,6 +40,8 @@ export interface ModelInfo {
   wasDequantized?: boolean;
   convertedFrom?: string;
   repoId?: string;
+  hasIntegrityIssue?: boolean;
+  integrityIssueMessage?: string;
   /** Primary model format: 'gguf', 'safetensors', or undefined */
   primaryFormat?: 'gguf' | 'safetensors';
 }

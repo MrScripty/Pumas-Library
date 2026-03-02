@@ -337,10 +337,17 @@ export interface ModelDataMetadata {
   expected_files?: string[];
   files?: string[];
   repo_id?: string;
+  download_incomplete?: boolean;
+  download_has_part_files?: boolean;
+  download_missing_expected_files?: number;
+  integrity_issue_duplicate_repo_id?: boolean;
+  integrity_issue_duplicate_repo_id_count?: number;
+  integrity_issue_duplicate_repo_id_others?: string[];
   [key: string]: unknown;
 }
 
 export interface ModelData {
+  path?: string;
   modelType: string;
   officialName?: string;
   cleanedName?: string;

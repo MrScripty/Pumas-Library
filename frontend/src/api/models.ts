@@ -67,6 +67,16 @@ class ModelsAPI {
     return await api.cancel_model_download(downloadId);
   }
 
+  async listInterruptedDownloads() {
+    const api = this.getAPI();
+    return await api.list_interrupted_downloads();
+  }
+
+  async recoverDownload(repoId: string, destDir: string) {
+    const api = this.getAPI();
+    return await api.recover_download(repoId, destDir);
+  }
+
   async deleteModel(modelId: string) {
     const api = this.getAPI();
     return await api.delete_model_with_cascade(modelId);

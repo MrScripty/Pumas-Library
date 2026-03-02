@@ -48,6 +48,9 @@ export function TorchModelSlotsSection({
     const models: SafetensorsLibraryModel[] = [];
     for (const group of modelGroups) {
       for (const model of group.models) {
+        if (model.isPartialDownload) {
+          continue;
+        }
         const path = model.path || model.name || '';
         if (hasSafetensorsFile(path)) {
           models.push({

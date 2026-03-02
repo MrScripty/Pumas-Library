@@ -20,7 +20,7 @@ import {
   Pause,
   ArrowRightLeft,
 } from 'lucide-react';
-import type { ModelCategory, RelatedModelsState } from '../types/apps';
+import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
 import { formatSize, formatDate } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
 import { EmptyState, IconButton, HoldToDeleteButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
@@ -43,6 +43,7 @@ interface LocalModelsListProps {
   onPauseDownload?: (repoId: string) => void;
   onResumeDownload?: (repoId: string) => void;
   onCancelDownload?: (repoId: string) => void;
+  onRecoverPartialDownload?: (model: ModelInfo) => void;
   onDeleteModel?: (modelId: string) => void;
   onConvertModel?: (modelId: string) => void;
 }
@@ -64,6 +65,7 @@ export function LocalModelsList({
   onPauseDownload,
   onResumeDownload,
   onCancelDownload,
+  onRecoverPartialDownload,
   onDeleteModel,
   onConvertModel,
 }: LocalModelsListProps) {
@@ -117,14 +119,16 @@ export function LocalModelsList({
           <div className="space-y-1.5">
             {group.models.map((model) => {
               const isStarred = starredModels.has(model.id);
+              const isPartialDownload = Boolean(model.isPartialDownload);
+              const hasIntegrityIssue = Boolean(model.hasIntegrityIssue);
               const isLinked = !excludedModels.has(model.id);
               const isDownloading = Boolean(model.isDownloading);
-              const isConvertible = !isDownloading && Boolean(model.primaryFormat);
+              const isConvertible = !isDownloading && !isPartialDownload && Boolean(model.primaryFormat);
               const isExpanded = expandedRelated.has(model.id);
               const relatedState = relatedModelsById[model.id];
               const relatedModels = relatedState?.models ?? [];
               const relatedStatus = relatedState?.status ?? 'idle';
-              const canShowRelated = Boolean(model.relatedAvailable) && !isDownloading;
+              const canShowRelated = Boolean(model.relatedAvailable) && !isDownloading && !isPartialDownload;
               const isLoadingRelated = relatedStatus === 'loading' || relatedStatus === 'idle';
               const progressValue = Math.min(1, Math.max(0, model.downloadProgress ?? 0));
               const isQueued = model.downloadStatus === 'queued';
@@ -134,6 +138,11 @@ export function LocalModelsList({
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
               const canPause = isDownloading && (model.downloadStatus === 'downloading' || model.downloadStatus === 'queued') && Boolean(onPauseDownload) && Boolean(model.downloadRepoId);
               const canResume = isDownloading && (isPaused || model.downloadStatus === 'error') && Boolean(onResumeDownload) && Boolean(model.downloadRepoId);
+              const canRecoverPartial = !isDownloading
+                && isPartialDownload
+                && Boolean(onRecoverPartialDownload)
+                && Boolean(model.repoId)
+                && Boolean(model.modelDir);
               return (
                 <ListItem key={model.id} highlighted={isLinked}>
                   {/* Main row */}
@@ -151,6 +160,8 @@ export function LocalModelsList({
                           className={`text-sm font-medium block truncate cursor-pointer ${
                             isDownloading
                               ? 'text-[hsl(var(--text-muted))]'
+                              : isPartialDownload
+                              ? 'text-[hsl(var(--launcher-accent-warning))]'
                               : isLinked
                               ? 'text-[hsl(var(--text-primary))]'
                               : 'text-[hsl(var(--text-secondary))]'
@@ -170,6 +181,26 @@ export function LocalModelsList({
                               title="Dequantized from quantized GGUF - may have reduced precision"
                             >
                               DQ
+                            </span>
+                          )}
+                          {hasIntegrityIssue && (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
+                                bg-[hsl(var(--accent-warning)/0.2)]
+                                text-[hsl(var(--accent-warning))]"
+                              title={model.integrityIssueMessage ?? 'Library integrity issue detected for this model.'}
+                            >
+                              ISSUE
+                            </span>
+                          )}
+                          {isPartialDownload && (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
+                                bg-[hsl(var(--launcher-accent-warning)/0.15)]
+                                text-[hsl(var(--launcher-accent-warning))]"
+                              title="Partial download detected - some expected files are missing"
+                            >
+                              PARTIAL
                             </span>
                           )}
                         </span>
@@ -265,10 +296,19 @@ export function LocalModelsList({
                             }
                             tooltip={isLinked ? `Linked to ${selectedAppId || 'app'}` : `Excluded from ${selectedAppId || 'app'}`}
                             onClick={() => onToggleLink(model.id)}
+                            disabled={isPartialDownload}
                             size="sm"
                             active={isLinked}
                             className={isLinked ? 'text-[hsl(var(--accent-success))]' : 'opacity-40'}
                           />
+                          {canRecoverPartial && (
+                            <IconButton
+                              icon={<Download />}
+                              tooltip="Resume partial download"
+                              onClick={() => onRecoverPartialDownload!(model)}
+                              size="sm"
+                            />
+                          )}
                           {isConvertible && onConvertModel && (
                             <IconButton
                               icon={<ArrowRightLeft />}

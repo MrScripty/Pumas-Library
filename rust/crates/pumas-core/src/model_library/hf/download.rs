@@ -216,29 +216,6 @@ impl HuggingFaceClient {
         request: &DownloadRequest,
         dest_dir: &Path,
     ) -> Result<String> {
-        // Check for existing download to the same dest_dir (prevents duplicates
-        // from auto-recovery starting a download that's already tracked)
-        {
-            let downloads = self.downloads.read().await;
-            for (id, state) in downloads.iter() {
-                if state.dest_dir == dest_dir
-                    && !state.cancel_flag.load(Ordering::Relaxed)
-                    && matches!(
-                        state.status,
-                        DownloadStatus::Queued
-                            | DownloadStatus::Downloading
-                            | DownloadStatus::Paused
-                    )
-                {
-                    info!(
-                        "Skipping duplicate download for {}: already tracked as {}",
-                        request.repo_id, id
-                    );
-                    return Ok(id.clone());
-                }
-            }
-        }
-
         let download_id = uuid::Uuid::new_v4().to_string();
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
@@ -340,7 +317,61 @@ impl HuggingFaceClient {
             );
         }
         aux_files.extend(files);
-        let files = aux_files;
+        let mut files = aux_files;
+
+        // Allow additional downloads for the same repo directory by removing
+        // filenames already tracked by queued/running/paused downloads.
+        // If everything requested is already tracked, return that existing ID.
+        let (tracked_filenames, tracked_download_id) = {
+            let downloads = self.downloads.read().await;
+            let mut tracked = HashSet::new();
+            let mut tracked_id: Option<String> = None;
+
+            for (id, state) in downloads.iter() {
+                if state.dest_dir != dest_dir
+                    || state.cancel_flag.load(Ordering::Relaxed)
+                    || !matches!(
+                        state.status,
+                        DownloadStatus::Queued
+                            | DownloadStatus::Downloading
+                            | DownloadStatus::Pausing
+                            | DownloadStatus::Paused
+                            | DownloadStatus::Cancelling
+                    )
+                {
+                    continue;
+                }
+
+                if tracked_id.is_none() {
+                    tracked_id = Some(id.clone());
+                }
+
+                tracked.extend(state.files.iter().map(|f| f.filename.clone()));
+            }
+
+            (tracked, tracked_id)
+        };
+
+        if !tracked_filenames.is_empty() {
+            let before = files.len();
+            files.retain(|f| !tracked_filenames.contains(&f.filename));
+
+            if files.is_empty() {
+                if let Some(id) = tracked_download_id {
+                    info!(
+                        "Skipping duplicate download for {}: already tracked as {}",
+                        request.repo_id, id
+                    );
+                    return Ok(id);
+                }
+            } else if before != files.len() {
+                info!(
+                    "Skipping {} already-tracked file(s) for {}",
+                    before - files.len(),
+                    request.repo_id
+                );
+            }
+        }
 
         // Total bytes across all files (sum known sizes; auxiliary files
         // lack LFS size metadata but are small enough to not materially
@@ -448,8 +479,12 @@ impl HuggingFaceClient {
         let completion_callback = self.completion_callback.clone();
         let aux_complete_callback = self.aux_complete_callback.clone();
         let auth_header = self.auth_header_value().await;
+        let dest_lock = self.destination_lock(&dest_dir).await;
 
         tokio::spawn(async move {
+            // Serialize downloads targeting the same destination directory.
+            let _destination_guard = dest_lock.lock().await;
+
             let result = Self::run_download(
                 client,
                 downloads.clone(),
@@ -495,6 +530,14 @@ impl HuggingFaceClient {
         });
 
         Ok(download_id)
+    }
+
+    async fn destination_lock(&self, dest_dir: &Path) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.dest_locks.write().await;
+        locks
+            .entry(dest_dir.to_path_buf())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     /// Run the download in the background with retry and resume support.
@@ -1177,8 +1220,11 @@ impl HuggingFaceClient {
         let completion_callback = self.completion_callback.clone();
         let aux_complete_callback = self.aux_complete_callback.clone();
         let auth_header = self.auth_header_value().await;
+        let dest_lock = self.destination_lock(&dest_dir).await;
 
         tokio::spawn(async move {
+            let _destination_guard = dest_lock.lock().await;
+
             let result = Self::run_download(
                 client,
                 downloads.clone(),
@@ -1443,5 +1489,21 @@ mod tests {
             .expect("download progress should be present");
         assert_eq!(progress.model_type.as_deref(), Some("reranker"));
         assert_eq!(progress.model_name.as_deref(), Some("Model Display Name"));
+    }
+
+    #[tokio::test]
+    async fn test_destination_lock_reuses_same_mutex_for_same_path() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let a = tmp.path().join("llm/owner/model");
+        let b = tmp.path().join("llm/owner/model");
+        let c = tmp.path().join("llm/owner/other-model");
+
+        let lock_a = client.destination_lock(&a).await;
+        let lock_b = client.destination_lock(&b).await;
+        let lock_c = client.destination_lock(&c).await;
+
+        assert!(Arc::ptr_eq(&lock_a, &lock_b));
+        assert!(!Arc::ptr_eq(&lock_a, &lock_c));
     }
 }

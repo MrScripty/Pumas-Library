@@ -25,9 +25,98 @@ export interface DownloadStatus {
 }
 
 const ACTIVE_STATUSES = ['queued', 'downloading', 'cancelling', 'pausing'] as const;
+const TRACKED_STATUSES = ['queued', 'downloading', 'pausing', 'paused', 'cancelling', 'error'] as const;
+const STATUS_PRIORITY: Record<DownloadStatus['status'], number> = {
+  downloading: 0,
+  pausing: 1,
+  cancelling: 2,
+  queued: 3,
+  paused: 4,
+  error: 5,
+  completed: 99,
+  cancelled: 99,
+};
 
 function isActiveStatus(status: string): boolean {
   return (ACTIVE_STATUSES as readonly string[]).includes(status);
+}
+
+function isTrackedStatus(status: string): status is DownloadStatus['status'] {
+  return (TRACKED_STATUSES as readonly string[]).includes(status);
+}
+
+interface RepoDownloadSelection {
+  status: DownloadStatus;
+  error?: string;
+}
+
+function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStatus): boolean {
+  const currentPriority = STATUS_PRIORITY[current.status] ?? 999;
+  const candidatePriority = STATUS_PRIORITY[candidate.status] ?? 999;
+  if (candidatePriority !== currentPriority) return candidatePriority < currentPriority;
+
+  const currentBytes = current.downloadedBytes ?? 0;
+  const candidateBytes = candidate.downloadedBytes ?? 0;
+  if (candidateBytes !== currentBytes) return candidateBytes > currentBytes;
+
+  const currentProgress = current.progress ?? 0;
+  const candidateProgress = candidate.progress ?? 0;
+  return candidateProgress > currentProgress;
+}
+
+function selectDownloadsByRepo(downloads: Array<{
+  repoId?: string;
+  downloadId?: string;
+  status?: string;
+  progress?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  speed?: number;
+  etaSeconds?: number;
+  modelName?: string;
+  modelType?: string;
+  error?: string;
+}>): {
+  statuses: Record<string, DownloadStatus>;
+  errors: Record<string, string>;
+} {
+  const selected: Record<string, RepoDownloadSelection> = {};
+
+  for (const dl of downloads) {
+    const repoId = dl.repoId;
+    const status = dl.status;
+    if (!repoId || !status || !isTrackedStatus(status) || !dl.downloadId) continue;
+
+    const candidate: DownloadStatus = {
+      downloadId: dl.downloadId,
+      status,
+      progress: typeof dl.progress === 'number' ? dl.progress : 0,
+      downloadedBytes: typeof dl.downloadedBytes === 'number' ? dl.downloadedBytes : undefined,
+      totalBytes: typeof dl.totalBytes === 'number' ? dl.totalBytes : undefined,
+      speed: typeof dl.speed === 'number' ? dl.speed : undefined,
+      etaSeconds: typeof dl.etaSeconds === 'number' ? dl.etaSeconds : undefined,
+      modelName: dl.modelName,
+      modelType: dl.modelType,
+    };
+
+    const current = selected[repoId]?.status;
+    if (!current || shouldReplaceSelection(current, candidate)) {
+      selected[repoId] = {
+        status: candidate,
+        error: dl.error,
+      };
+    }
+  }
+
+  const statuses: Record<string, DownloadStatus> = {};
+  const errors: Record<string, string> = {};
+  for (const [repoId, selectedDownload] of Object.entries(selected)) {
+    statuses[repoId] = selectedDownload.status;
+    if (selectedDownload.status.status === 'error' && selectedDownload.error) {
+      errors[repoId] = selectedDownload.error;
+    }
+  }
+  return { statuses, errors };
 }
 
 export function useModelDownloads() {
@@ -50,28 +139,11 @@ export function useModelDownloads() {
       if (!isAPIAvailable()) return;
       try {
         const result = await api.list_model_downloads();
-        if (!result.success || !result.downloads?.length) return;
-        const restored: Record<string, DownloadStatus> = {};
-        for (const dl of result.downloads) {
-          const repoId = dl.repoId;
-          if (!repoId) continue;
-          // Restore any download that isn't terminal (completed/cancelled)
-          if (['paused', 'downloading', 'queued', 'error', 'pausing', 'cancelling'].includes(dl.status ?? '')) {
-            restored[repoId] = {
-              downloadId: dl.downloadId ?? '',
-              status: (dl.status ?? 'error') as DownloadStatus['status'],
-              progress: dl.progress ?? 0,
-              downloadedBytes: dl.downloadedBytes,
-              totalBytes: dl.totalBytes,
-              speed: dl.speed,
-              etaSeconds: dl.etaSeconds,
-              modelName: dl.modelName,
-              modelType: dl.modelType,
-            };
-          }
-        }
-        if (Object.keys(restored).length > 0) {
-          setDownloadStatusByRepo((prev) => ({ ...restored, ...prev }));
+        if (!result.success) return;
+        const { statuses, errors } = selectDownloadsByRepo(result.downloads || []);
+        setDownloadStatusByRepo((prev) => ({ ...statuses, ...prev }));
+        if (Object.keys(errors).length > 0) {
+          setDownloadErrors((prev) => ({ ...prev, ...errors }));
         }
       } catch (error) {
         logger.warn('Failed to restore downloads on startup', { error });
@@ -83,101 +155,30 @@ export function useModelDownloads() {
   // Stable polling interval -- created once, never torn down by state changes
   useEffect(() => {
     const intervalId = window.setInterval(async () => {
-      if (!hasActiveRef.current || !isAPIAvailable()) return;
+      if (!isAPIAvailable()) return;
+      if (!hasActiveRef.current && Object.keys(downloadStatusRef.current).length === 0) return;
 
-      const entries = Object.entries(downloadStatusRef.current).filter(([, status]) =>
-        isActiveStatus(status.status)
-      );
-      if (entries.length === 0) return;
+      try {
+        const result = await api.list_model_downloads();
+        if (!result.success) return;
 
-      const updates = await Promise.all(
-        entries.map(async ([repoId, status]) => {
-          if (!isAPIAvailable()) {
-            return { repoId, status: status.status, error: 'API not available', transient: true as const };
-          }
-          try {
-            const result = await api.get_model_download_status(status.downloadId);
-            if (!result.success) {
-              return { repoId, status: 'error' as const, error: result.error || 'Download failed.' };
+        const { statuses, errors } = selectDownloadsByRepo(result.downloads || []);
+        setDownloadStatusByRepo(statuses);
+
+        setDownloadErrors((prev) => {
+          const next = { ...prev };
+          for (const repoId of Object.keys(statuses)) {
+            if (errors[repoId]) {
+              next[repoId] = errors[repoId];
+            } else if (next[repoId]) {
+              delete next[repoId];
             }
-            return {
-              repoId,
-              status: (result.status || 'downloading') as DownloadStatus['status'],
-              progress: typeof result.progress === 'number' ? result.progress : 0,
-              downloadedBytes: typeof result.downloadedBytes === 'number' ? result.downloadedBytes : undefined,
-              totalBytes: typeof result.totalBytes === 'number' ? result.totalBytes : undefined,
-              speed: typeof result.speed === 'number' ? result.speed : undefined,
-              etaSeconds: typeof result.etaSeconds === 'number' ? result.etaSeconds : undefined,
-              modelName: result.modelName,
-              modelType: result.modelType,
-              error: result.error,
-            };
-          } catch (error) {
-            const message = error instanceof Error ? error.message : 'Unable to fetch download status.';
-            logger.warn('Transient error fetching download status', { error: message, repoId });
-            return {
-              repoId,
-              status: status.status,
-              progress: status.progress,
-              downloadedBytes: status.downloadedBytes,
-              totalBytes: status.totalBytes,
-              error: message,
-              transient: true as const,
-            };
           }
-        })
-      );
-
-      setDownloadStatusByRepo((prev) => {
-        const next = { ...prev };
-        updates.forEach((update) => {
-          if (!update) return;
-          const previous = prev[update.repoId];
-          if (!previous) return;
-          next[update.repoId] = {
-            ...previous,
-            status: update.status,
-            progress: update.progress ?? previous.progress,
-            downloadedBytes: update.downloadedBytes ?? previous.downloadedBytes,
-            totalBytes: update.totalBytes ?? previous.totalBytes,
-            speed: update.speed,
-            etaSeconds: update.etaSeconds,
-            modelName: update.modelName ?? previous.modelName,
-            modelType: update.modelType ?? previous.modelType,
-          };
+          return next;
         });
-        return next;
-      });
-
-      // Update per-download errors
-      setDownloadErrors((prev) => {
-        const next = { ...prev };
-        let changed = false;
-        updates.forEach((update) => {
-          if (!update) return;
-          const isTransient = 'transient' in update;
-          if (isTransient && update.error) {
-            if (next[update.repoId] !== update.error) {
-              next[update.repoId] = update.error;
-              changed = true;
-            }
-            return;
-          }
-          if (update.status === 'error' && update.error) {
-            if (next[update.repoId] !== update.error) {
-              next[update.repoId] = update.error;
-              changed = true;
-            }
-            return;
-          }
-          // Clear error when download is progressing or finished
-          if (next[update.repoId]) {
-            delete next[update.repoId];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
+      } catch (error) {
+        logger.warn('Transient error fetching download list', { error: error instanceof Error ? error.message : error });
+      }
     }, 800);
 
     return () => window.clearInterval(intervalId);
@@ -188,16 +189,22 @@ export function useModelDownloads() {
     downloadId: string,
     details?: { modelName?: string; modelType?: string }
   ) => {
-    setDownloadStatusByRepo((prev) => ({
-      ...prev,
-      [repoId]: {
-        downloadId,
-        status: 'queued',
-        progress: 0,
-        modelName: details?.modelName,
-        modelType: details?.modelType,
-      },
-    }));
+    setDownloadStatusByRepo((prev) => {
+      const existing = prev[repoId];
+      if (existing && isActiveStatus(existing.status)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [repoId]: {
+          downloadId,
+          status: 'queued',
+          progress: 0,
+          modelName: details?.modelName,
+          modelType: details?.modelType,
+        },
+      };
+    });
     setDownloadErrors((prev) => {
       if (!prev[repoId]) return prev;
       const next = { ...prev };

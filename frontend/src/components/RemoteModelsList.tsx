@@ -314,6 +314,19 @@ export function RemoteModelsList({
                     size="sm"
                   />
                 )}
+                {/* Queue additional quant/file-group while current download is active */}
+                {isDownloading && downloadOptions.length > 0 && (
+                  <IconButton
+                    icon={<Download />}
+                    tooltip="Queue another download"
+                    onClick={() => {
+                      setOpenQuantMenuRepoId((prev) =>
+                        prev === model.repoId ? null : model.repoId
+                      );
+                    }}
+                    size="sm"
+                  />
+                )}
                 <button
                   onClick={() => {
                     if (isDownloading) {
@@ -367,7 +380,7 @@ export function RemoteModelsList({
                     )}
                   </span>
                 </button>
-                {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && !isDownloading && (
+                {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && (
                   <div className="absolute right-0 top-full mt-2 min-w-[200px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
                     {hasFileGroups ? (
                       <>

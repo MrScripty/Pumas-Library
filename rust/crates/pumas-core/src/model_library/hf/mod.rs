@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tracing::{debug, info, warn};
 
 /// Client for HuggingFace Hub API operations.
@@ -52,6 +52,9 @@ pub struct HuggingFaceClient {
     pub(super) cache_dir: PathBuf,
     /// Active downloads
     pub(super) downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
+    /// Per-destination mutexes so downloads targeting the same model folder
+    /// execute sequentially instead of racing on shared files.
+    pub(super) dest_locks: Arc<RwLock<HashMap<PathBuf, Arc<Mutex<()>>>>>,
     /// SQLite search cache (optional)
     pub(super) search_cache: Option<Arc<HfSearchCache>>,
     /// Download persistence for crash recovery (optional)
@@ -116,6 +119,7 @@ impl HuggingFaceClient {
             download_client,
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
+            dest_locks: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,
             persistence: None,
             completion_callback: None,

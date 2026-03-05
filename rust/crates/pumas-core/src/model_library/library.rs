@@ -1745,6 +1745,17 @@ impl ModelLibrary {
         Ok(removed_count)
     }
 
+    /// Rewrite an existing execution report artifact pair at recorded paths.
+    ///
+    /// This is used when post-execution reconciliation updates action rows
+    /// (for example converting `skipped_partial_download` to `moved_partial`).
+    pub fn rewrite_migration_execution_report(
+        &self,
+        report: &MigrationExecutionReport,
+    ) -> Result<()> {
+        write_migration_execution_reports(&self.library_root, report)
+    }
+
     fn build_migration_dry_run_item(&self, model_id: &str) -> Result<MigrationDryRunItem> {
         let record = self
             .index

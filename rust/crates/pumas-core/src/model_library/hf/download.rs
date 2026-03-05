@@ -1035,6 +1035,66 @@ impl HuggingFaceClient {
             .collect()
     }
 
+    /// Find the download ID whose destination directory matches `dest_dir`.
+    pub async fn find_download_id_by_dest_dir(&self, dest_dir: &Path) -> Option<String> {
+        let downloads = self.downloads.read().await;
+        downloads
+            .values()
+            .find(|state| state.dest_dir == dest_dir)
+            .map(|state| state.download_id.clone())
+    }
+
+    /// Get the current in-memory status for a download ID.
+    pub async fn get_download_status(&self, download_id: &str) -> Option<DownloadStatus> {
+        let downloads = self.downloads.read().await;
+        downloads.get(download_id).map(|state| state.status)
+    }
+
+    /// Relocate a tracked download destination directory.
+    ///
+    /// Updates both in-memory state and persisted download metadata so resume
+    /// continues from the new path after migration/reclassification moves.
+    pub async fn relocate_download_destination(
+        &self,
+        download_id: &str,
+        new_dest_dir: &Path,
+        new_model_type: Option<&str>,
+        new_family: Option<&str>,
+    ) -> Result<bool> {
+        {
+            let mut downloads = self.downloads.write().await;
+            let Some(state) = downloads.get_mut(download_id) else {
+                return Ok(false);
+            };
+            state.dest_dir = new_dest_dir.to_path_buf();
+            if let Some(request) = state.download_request.as_mut() {
+                if let Some(model_type) = new_model_type {
+                    request.model_type = Some(model_type.to_string());
+                }
+                if let Some(family) = new_family {
+                    request.family = family.to_string();
+                }
+            }
+        }
+
+        if let Some(ref persistence) = self.persistence {
+            let mut persisted = persistence.load_all();
+            if let Some(entry) = persisted.iter_mut().find(|entry| entry.download_id == download_id)
+            {
+                entry.dest_dir = new_dest_dir.to_path_buf();
+                if let Some(model_type) = new_model_type {
+                    entry.download_request.model_type = Some(model_type.to_string());
+                }
+                if let Some(family) = new_family {
+                    entry.download_request.family = family.to_string();
+                }
+                persistence.save(entry)?;
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Pause an active download. Preserves the `.part` file for later resume.
     pub async fn pause_download(&self, download_id: &str) -> Result<bool> {
         let downloads = self.downloads.read().await;
@@ -1146,6 +1206,7 @@ impl HuggingFaceClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_select_auxiliary_files_filters_correctly() {
@@ -1214,5 +1275,100 @@ mod tests {
         assert_eq!(selected.len(), 2);
         assert!(selected.contains(&"subdir/config.json".to_string()));
         assert!(selected.contains(&"tokenizer.json".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_relocate_download_destination_updates_state_and_persistence() {
+        let tmp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let persistence = Arc::new(DownloadPersistence::new(tmp.path()));
+        client.set_persistence(persistence.clone());
+
+        let download_id = "dl-relocate".to_string();
+        let old_dest = tmp.path().join("old");
+        let new_dest = tmp.path().join("new");
+        std::fs::create_dir_all(&old_dest).unwrap();
+
+        let request = DownloadRequest {
+            repo_id: "owner/model".to_string(),
+            family: "oldfam".to_string(),
+            official_name: "Model".to_string(),
+            model_type: Some("llm".to_string()),
+            quant: None,
+            filename: None,
+            filenames: None,
+            pipeline_tag: Some("text-generation".to_string()),
+        };
+
+        persistence
+            .save(&PersistedDownload {
+                download_id: download_id.clone(),
+                repo_id: "owner/model".to_string(),
+                filename: "model.safetensors".to_string(),
+                filenames: vec!["model.safetensors".to_string()],
+                dest_dir: old_dest.clone(),
+                total_bytes: Some(1024),
+                status: DownloadStatus::Paused,
+                download_request: request.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                known_sha256: None,
+            })
+            .unwrap();
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/model".to_string(),
+                    status: DownloadStatus::Paused,
+                    progress: 0.5,
+                    downloaded_bytes: 512,
+                    total_bytes: Some(1024),
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    dest_dir: old_dest.clone(),
+                    filename: "model.safetensors".to_string(),
+                    files: vec![FileToDownload {
+                        filename: "model.safetensors".to_string(),
+                        size: Some(1024),
+                        sha256: None,
+                    }],
+                    files_completed: 0,
+                    download_request: Some(request.clone()),
+                    known_sha256: None,
+                },
+            );
+        }
+
+        assert!(client
+            .relocate_download_destination(
+                &download_id,
+                &new_dest,
+                Some("reranker"),
+                Some("forturne"),
+            )
+            .await
+            .unwrap());
+
+        let status = client.get_download_status(&download_id).await;
+        assert_eq!(status, Some(DownloadStatus::Paused));
+        let found = client.find_download_id_by_dest_dir(&new_dest).await;
+        assert_eq!(found.as_deref(), Some(download_id.as_str()));
+
+        let entry = persistence
+            .load_all()
+            .into_iter()
+            .find(|entry| entry.download_id == download_id)
+            .unwrap();
+        assert_eq!(entry.dest_dir, new_dest);
+        assert_eq!(
+            entry.download_request.model_type.as_deref(),
+            Some("reranker")
+        );
+        assert_eq!(entry.download_request.family, "forturne");
     }
 }

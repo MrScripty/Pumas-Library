@@ -11,7 +11,74 @@ use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
 use crate::models::{DownloadOption, FileGroup};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 use tracing::{debug, info, warn};
+
+const MIN_QUANT_COVERAGE_GAP_BYTES: u64 = 5 * 1024 * 1024 * 1024;
+const MIN_EXPECTED_QUANT_COVERAGE_PERCENT: u64 = 90;
+
+fn quant_token_regex() -> Option<&'static regex::Regex> {
+    static RE: OnceLock<Option<regex::Regex>> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)(?:^|[._/-])((?:UD-)?(?:IQ\d+_[A-Z0-9_]+|Q\d+_[A-Z0-9_]+)|fp16|fp32|bf16|int8|int4)(?:$|[._/-])",
+        )
+        .ok()
+    })
+    .as_ref()
+}
+
+fn quant_tag_regex() -> Option<&'static regex::Regex> {
+    static RE: OnceLock<Option<regex::Regex>> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(
+            r"(?i)^(?:(?:UD-)?(?:IQ\d+_[A-Z0-9_]+|Q\d+_[A-Z0-9_]+)|fp16|fp32|bf16|int8|int4)$",
+        )
+        .ok()
+    })
+    .as_ref()
+}
+
+fn quant_option_size_sum(download_options: &[DownloadOption]) -> u64 {
+    download_options.iter().filter_map(|o| o.size_bytes).sum()
+}
+
+fn likely_missing_quant_variants(
+    quants: &[String],
+    total_size_bytes: Option<u64>,
+    download_options: &[DownloadOption],
+) -> bool {
+    if quants.is_empty() || download_options.is_empty() {
+        return false;
+    }
+
+    // Quant-based GGUF options do not use file groups.
+    if download_options.iter().any(|o| o.file_group.is_some()) {
+        return false;
+    }
+    // If we already expose at least as many options as known quants,
+    // low size coverage is likely due to auxiliary LFS files, not missing quants.
+    if download_options.len() >= quants.len() {
+        return false;
+    }
+
+    let Some(total) = total_size_bytes else {
+        return false;
+    };
+    if total == 0 {
+        return false;
+    }
+
+    let covered = quant_option_size_sum(download_options);
+    if covered == 0 || covered >= total {
+        return false;
+    }
+
+    let gap = total - covered;
+    let coverage_percent = covered.saturating_mul(100) / total;
+
+    gap > MIN_QUANT_COVERAGE_GAP_BYTES && coverage_percent < MIN_EXPECTED_QUANT_COVERAGE_PERCENT
+}
 
 impl HuggingFaceClient {
     /// Search for models on HuggingFace with automatic caching.
@@ -196,8 +263,18 @@ impl HuggingFaceClient {
                                     o.file_group.is_none()
                                         && matches!(o.size_bytes, Some(size) if size > 0 && size < 128 * 1024 * 1024)
                                 });
+                            // Self-heal legacy quant extraction where IQ/UD variants
+                            // were not included in cached options.
+                            let missing_quant_variants = likely_missing_quant_variants(
+                                &model.quants,
+                                cached.total_size_bytes,
+                                &cached.download_options,
+                            );
 
-                            if !needs_regroup && !likely_truncated_quant_sizes {
+                            if !needs_regroup
+                                && !likely_truncated_quant_sizes
+                                && !missing_quant_variants
+                            {
                                 model.download_options = cached.download_options;
                                 model.total_size_bytes = cached.total_size_bytes;
                                 enriched.push(model);
@@ -255,9 +332,7 @@ impl HuggingFaceClient {
         // Aggregate all matching files per quant so sharded variants report
         // their total size instead of the first shard's size.
         let mut quant_sizes: BTreeMap<String, u64> = BTreeMap::new();
-
-        let quant_pattern =
-            regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?").ok();
+        let quant_pattern = quant_token_regex();
 
         for lfs_file in &tree.lfs_files {
             if !lfs_file.filename.ends_with(".gguf")
@@ -267,14 +342,12 @@ impl HuggingFaceClient {
                 continue;
             }
 
-            let quant = if let Some(ref pattern) = quant_pattern {
+            let quant = quant_pattern.and_then(|pattern| {
                 pattern
                     .captures(&lfs_file.filename)
                     .and_then(|cap| cap.get(1))
                     .map(|m| m.as_str().to_string())
-            } else {
-                None
-            };
+            });
 
             if let Some(q) = quant {
                 *quant_sizes.entry(q).or_insert(0) += lfs_file.size;
@@ -359,10 +432,7 @@ impl HuggingFaceClient {
         let mut quants: Vec<String> = result
             .tags
             .iter()
-            .filter(|t| {
-                t.starts_with("Q") && t.contains("_")
-                    || ["fp16", "fp32", "bf16", "int8", "int4"].contains(&t.as_str())
-            })
+            .filter(|t| quant_tag_regex().is_some_and(|pattern| pattern.is_match(t)))
             .cloned()
             .collect();
 
@@ -400,9 +470,9 @@ impl HuggingFaceClient {
     fn extract_quants_from_filenames(siblings: &[HfSibling]) -> Vec<String> {
         use std::collections::HashSet;
 
-        let quant_pattern =
-            regex::Regex::new(r"[._-](Q\d+_[A-Z0-9_]+|fp16|fp32|bf16|int8|int4)[._-]?")
-                .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap()); // fallback to never-match
+        let Some(quant_pattern) = quant_token_regex() else {
+            return Vec::new();
+        };
 
         let mut quants: HashSet<String> = HashSet::new();
 
@@ -477,8 +547,92 @@ mod tests {
         assert_eq!(options.len(), 2);
         assert_eq!(options[0].quant, "Q2_K");
         assert_eq!(options[0].size_bytes, Some(41_800_000_000));
-        assert_eq!(options[1].quant, "Q3_K_M");
+        assert_eq!(options[1].quant, "UD-Q3_K_M");
         assert_eq!(options[1].size_bytes, Some(87_210_900_000));
+    }
+
+    #[test]
+    fn test_extract_quants_from_filenames_includes_ud_and_iq_variants() {
+        let siblings = vec![
+            HfSibling {
+                rfilename: "UD-Q3_K_M/model-00001-of-00003.gguf".to_string(),
+            },
+            HfSibling {
+                rfilename: "Qwen3.5-35B-A3B-IQ4_XS.gguf".to_string(),
+            },
+            HfSibling {
+                rfilename: "Q2_K/model.gguf".to_string(),
+            },
+        ];
+
+        let quants = HuggingFaceClient::extract_quants_from_filenames(&siblings);
+
+        assert_eq!(quants, vec!["IQ4_XS", "Q2_K", "UD-Q3_K_M"]);
+    }
+
+    #[test]
+    fn test_likely_missing_quant_variants_detects_large_coverage_gap() {
+        let options = vec![
+            DownloadOption {
+                quant: "Q4_K_M".to_string(),
+                size_bytes: Some(22_016_023_168),
+                file_group: None,
+            },
+            DownloadOption {
+                quant: "Q6_K".to_string(),
+                size_bytes: Some(28_852_861_568),
+                file_group: None,
+            },
+        ];
+
+        let total = Some(369_031_399_680);
+        let quants = vec![
+            "Q4_K_M".to_string(),
+            "Q6_K".to_string(),
+            "UD-IQ4_XS".to_string(),
+        ];
+        assert!(likely_missing_quant_variants(&quants, total, &options));
+    }
+
+    #[test]
+    fn test_likely_missing_quant_variants_false_when_coverage_is_reasonable() {
+        let options = vec![
+            DownloadOption {
+                quant: "Q4_K_M".to_string(),
+                size_bytes: Some(22_016_023_168),
+                file_group: None,
+            },
+            DownloadOption {
+                quant: "Q6_K".to_string(),
+                size_bytes: Some(28_852_861_568),
+                file_group: None,
+            },
+        ];
+
+        let total = Some(52_000_000_000);
+        let quants = vec!["Q4_K_M".to_string(), "Q6_K".to_string()];
+        assert!(!likely_missing_quant_variants(&quants, total, &options));
+    }
+
+    #[test]
+    fn test_likely_missing_quant_variants_false_when_options_cover_known_quants() {
+        let options = vec![
+            DownloadOption {
+                quant: "Q4_K_M".to_string(),
+                size_bytes: Some(22_016_023_168),
+                file_group: None,
+            },
+            DownloadOption {
+                quant: "Q6_K".to_string(),
+                size_bytes: Some(28_852_861_568),
+                file_group: None,
+            },
+        ];
+
+        // Low coverage vs total could happen if aux LFS files are very large.
+        let total = Some(369_031_399_680);
+        let quants = vec!["Q4_K_M".to_string(), "Q6_K".to_string()];
+        assert!(!likely_missing_quant_variants(&quants, total, &options));
     }
 
     #[test]

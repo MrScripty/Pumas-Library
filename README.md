@@ -24,7 +24,7 @@ Pumas Library is an easy to use AI model library that downloads, organizes, and 
 - Library merging with hash-based deduplication
 - Torch inference server — Python backend for running models with GPU slot management
 
-**Supported Model Types**: LLM, Diffusion, Embedding, Audio, Vision
+**Supported Model Types**: LLM, Reranker, Diffusion, Embedding, Audio, Vision
 **Supported Subtypes**: Checkpoints, LoRAs, VAE, ControlNet, Embeddings, Upscale, CLIP, T5
 **Compatible Engines**: Ollama, llama.cpp, Candle, Transformers, Diffusers, ONNX Runtime, TensorRT
 

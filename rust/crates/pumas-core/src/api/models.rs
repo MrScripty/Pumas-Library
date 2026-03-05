@@ -1001,12 +1001,13 @@ async fn relocate_skipped_partial_downloads(
                 if let (Some(client), Some(download_id)) =
                     (primary.hf_client.as_ref(), relocated_download_id.as_ref())
                 {
+                    let rollback_source = split_model_id(&row.model_id);
                     let _ = client
                         .relocate_download_destination(
                             download_id,
                             &source_dir,
-                            Some("llm"),
-                            split_model_id(&row.model_id).map(|(_, family, _)| family),
+                            rollback_source.map(|(model_type, _, _)| model_type),
+                            rollback_source.map(|(_, family, _)| family),
                         )
                         .await;
                 }

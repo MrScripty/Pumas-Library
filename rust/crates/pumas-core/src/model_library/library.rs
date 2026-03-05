@@ -1609,24 +1609,22 @@ impl ModelLibrary {
     pub fn generate_migration_dry_run_report(&self) -> Result<MigrationDryRunReport> {
         tracing::info!("Generating model library migration dry-run report");
 
-        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let model_ids = self.index.get_all_ids()?;
         let mut report = MigrationDryRunReport {
             generated_at: chrono::Utc::now().to_rfc3339(),
-            total_models: model_dirs.len(),
+            total_models: model_ids.len(),
             ..Default::default()
         };
 
-        for model_dir in model_dirs {
-            let row = match self.build_migration_dry_run_item(&model_dir) {
+        for model_id in model_ids {
+            let row = match self.build_migration_dry_run_item(&model_id) {
                 Ok(item) => item,
                 Err(err) => {
                     report.error_count += 1;
                     MigrationDryRunItem {
-                        model_id: self
-                            .get_model_id(&model_dir)
-                            .unwrap_or_else(|| model_dir.display().to_string()),
+                        model_id: model_id.clone(),
                         target_model_id: None,
-                        current_path: model_dir.display().to_string(),
+                        current_path: String::new(),
                         target_path: None,
                         action: "error".to_string(),
                         current_model_type: None,
@@ -1649,7 +1647,8 @@ impl ModelLibrary {
                 "move" => report.move_candidates += 1,
                 "blocked_collision" => report.collision_count += 1,
                 "keep" => report.keep_candidates += 1,
-                "error" => { /* counted above */ }
+                "blocked_partial_download" => report.keep_candidates += 1,
+                "error" | "missing_source" => { /* counted above */ }
                 _ => {}
             }
             if !row.findings.is_empty() {
@@ -1743,42 +1742,71 @@ impl ModelLibrary {
         Ok(removed_count)
     }
 
-    fn build_migration_dry_run_item(&self, model_dir: &Path) -> Result<MigrationDryRunItem> {
-        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
-            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
-        })?;
-
-        let metadata = self
-            .load_metadata(model_dir)?
+    fn build_migration_dry_run_item(&self, model_id: &str) -> Result<MigrationDryRunItem> {
+        let record = self
+            .index
+            .get(model_id)?
             .ok_or_else(|| PumasError::ModelNotFound {
-                model_id: model_id.clone(),
+                model_id: model_id.to_string(),
             })?;
+        let model_dir = PathBuf::from(&record.path);
+        if !model_dir.exists() {
+            return Ok(MigrationDryRunItem {
+                model_id: model_id.to_string(),
+                target_model_id: None,
+                current_path: record.path,
+                target_path: None,
+                action: "missing_source".to_string(),
+                current_model_type: Some(record.model_type),
+                resolved_model_type: None,
+                resolver_source: None,
+                resolver_confidence: None,
+                resolver_review_reasons: vec![],
+                metadata_needs_review: false,
+                review_reasons: vec![],
+                license_status: None,
+                declared_dependency_binding_count: 0,
+                active_dependency_binding_count: 0,
+                findings: vec!["index_row_missing_source_path".to_string()],
+                error: Some("model path does not exist on disk".to_string()),
+            });
+        }
 
-        let current_type = metadata.model_type.clone();
+        let metadata = self.load_metadata(&model_dir)?;
+        let metadata_json = &record.metadata;
+        let current_type = Some(record.model_type.clone());
         let current_family = metadata
-            .family
-            .clone()
+            .as_ref()
+            .and_then(|value| value.family.clone())
+            .or_else(|| model_id.split('/').nth(1).map(str::to_string))
             .unwrap_or_else(|| "unknown".to_string());
-        let cleaned_name = metadata.cleaned_name.clone().unwrap_or_else(|| {
-            model_id
-                .rsplit('/')
-                .next()
-                .unwrap_or(model_id.as_str())
-                .to_string()
-        });
+        let cleaned_name = metadata
+            .as_ref()
+            .and_then(|value| value.cleaned_name.clone())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| record.cleaned_name.clone());
+        let pipeline_tag = metadata
+            .as_ref()
+            .and_then(|value| value.pipeline_tag.clone())
+            .or_else(|| {
+                metadata_json
+                    .get("pipeline_tag")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string())
+            });
 
-        let primary_file = find_primary_model_file(model_dir);
+        let primary_file = find_primary_model_file(&model_dir);
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
         let resolved = apply_unresolved_model_type_fallbacks(
             resolve_model_type_with_rules(
                 self.index(),
-                model_dir,
-                metadata.pipeline_tag.as_deref(),
+                &model_dir,
+                pipeline_tag.as_deref(),
                 None,
             )?,
-            model_dir,
+            &model_dir,
             file_type_info.as_ref(),
         );
         let resolved_type = resolved.model_type.as_str().to_string();
@@ -1796,24 +1824,52 @@ impl ModelLibrary {
             normalize_name(&resolved_family),
             normalize_name(&cleaned_name)
         );
+        let has_metadata = model_dir.join(METADATA_FILENAME).is_file();
+        let is_partial_download = metadata_json
+            .get("match_source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source == "download_partial")
+            || has_pending_download_artifacts(&model_dir)
+            || metadata_json
+                .get("download_incomplete")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
         let action = if target_dir == model_dir {
             "keep"
+        } else if !has_metadata && is_partial_download {
+            "blocked_partial_download"
         } else if target_dir.exists() {
             "blocked_collision"
         } else {
             "move"
         };
 
-        let metadata_needs_review = metadata.metadata_needs_review.unwrap_or(false);
-        let review_reasons = metadata.review_reasons.clone().unwrap_or_default();
-        let declared_dependency_binding_count = metadata
-            .dependency_bindings
+        let metadata_needs_review = metadata
             .as_ref()
-            .map(|bindings| bindings.len())
+            .and_then(|value| value.metadata_needs_review)
+            .unwrap_or_else(|| {
+                metadata_json
+                    .get("metadata_needs_review")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+            });
+        let review_reasons = metadata
+            .as_ref()
+            .and_then(|value| value.review_reasons.clone())
+            .unwrap_or_else(|| extract_string_array(metadata_json, "review_reasons"));
+        let declared_dependency_binding_count = metadata
+            .as_ref()
+            .and_then(|value| value.dependency_bindings.as_ref().map(|bindings| bindings.len()))
+            .or_else(|| {
+                metadata_json
+                    .get("dependency_bindings")
+                    .and_then(Value::as_array)
+                    .map(|bindings| bindings.len())
+            })
             .unwrap_or(0);
         let active_dependency_binding_count = self
             .index()
-            .list_active_model_dependency_bindings(&model_id, None)?
+            .list_active_model_dependency_bindings(model_id, None)?
             .len();
 
         let mut findings = Vec::new();
@@ -1823,7 +1879,16 @@ impl ModelLibrary {
         if !review_reasons.is_empty() {
             findings.push("review_reasons_present".to_string());
         }
-        if license_status_unresolved(metadata.license_status.as_deref()) {
+        let effective_license_status = metadata
+            .as_ref()
+            .and_then(|value| value.license_status.clone())
+            .or_else(|| {
+                metadata_json
+                    .get("license_status")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string())
+            });
+        if license_status_unresolved(effective_license_status.as_deref()) {
             findings.push("license_unresolved".to_string());
         }
         if declared_dependency_binding_count > 0 && active_dependency_binding_count == 0 {
@@ -1832,9 +1897,12 @@ impl ModelLibrary {
         if declared_dependency_binding_count == 0 && active_dependency_binding_count > 0 {
             findings.push("active_dependency_bindings_without_declared_refs".to_string());
         }
+        if action == "blocked_partial_download" {
+            findings.push("partial_download_blocked_migration_move".to_string());
+        }
 
         Ok(MigrationDryRunItem {
-            model_id,
+            model_id: model_id.to_string(),
             target_model_id: Some(target_model_id),
             current_path: model_dir.display().to_string(),
             target_path: Some(target_dir.display().to_string()),
@@ -1846,7 +1914,7 @@ impl ModelLibrary {
             resolver_review_reasons: resolved.review_reasons,
             metadata_needs_review,
             review_reasons,
-            license_status: metadata.license_status.clone(),
+            license_status: effective_license_status,
             declared_dependency_binding_count,
             active_dependency_binding_count,
             findings,
@@ -1873,15 +1941,27 @@ impl ModelLibrary {
             let dry_run = self.generate_migration_dry_run_report()?;
             let pending_moves = dry_run
                 .items
+                .iter()
                 .into_iter()
                 .filter(|item| item.action == "move")
                 .filter_map(|item| {
                     Some(MigrationPlannedMove {
-                        model_id: item.model_id,
-                        target_model_id: item.target_model_id?,
-                        current_path: item.current_path,
-                        target_path: item.target_path?,
+                        model_id: item.model_id.clone(),
+                        target_model_id: item.target_model_id.clone()?,
+                        current_path: item.current_path.clone(),
+                        target_path: item.target_path.clone()?,
                     })
+                })
+                .collect::<Vec<_>>();
+            let completed_results = dry_run
+                .items
+                .iter()
+                .filter(|item| item.action == "blocked_partial_download")
+                .map(|item| MigrationExecutionItem {
+                    model_id: item.model_id.clone(),
+                    target_model_id: item.target_model_id.clone().unwrap_or_default(),
+                    action: "skipped_partial_download".to_string(),
+                    error: Some("partial download has no metadata.json; migration move skipped".to_string()),
                 })
                 .collect::<Vec<_>>();
 
@@ -1889,7 +1969,7 @@ impl ModelLibrary {
                 created_at: chrono::Utc::now().to_rfc3339(),
                 updated_at: chrono::Utc::now().to_rfc3339(),
                 pending_moves,
-                completed_results: vec![],
+                completed_results,
             };
             save_migration_checkpoint(&checkpoint_path, &initialized)?;
             initialized
@@ -1917,7 +1997,9 @@ impl ModelLibrary {
         for item in &report.results {
             match item.action.as_str() {
                 "moved" | "already_migrated" => report.completed_move_count += 1,
-                "blocked_collision" | "missing_source" => report.skipped_move_count += 1,
+                "blocked_collision" | "missing_source" | "skipped_partial_download" => {
+                    report.skipped_move_count += 1
+                }
                 _ => report.error_count += 1,
             }
         }
@@ -2251,7 +2333,7 @@ pub struct MigrationDryRunItem {
     pub current_path: String,
     /// Proposed target directory path.
     pub target_path: Option<String>,
-    /// Planned action: `keep`, `move`, `blocked_collision`, or `error`.
+    /// Planned action: `keep`, `move`, `blocked_collision`, `blocked_partial_download`, `missing_source`, or `error`.
     pub action: String,
     /// Current metadata model type.
     pub current_model_type: Option<String>,
@@ -2299,7 +2381,7 @@ pub struct MigrationExecutionItem {
     pub model_id: String,
     /// Destination model ID.
     pub target_model_id: String,
-    /// Action outcome: `moved`, `already_migrated`, `blocked_collision`, `missing_source`, `error`.
+    /// Action outcome: `moved`, `already_migrated`, `blocked_collision`, `missing_source`, `skipped_partial_download`, `error`.
     pub action: String,
     /// Optional error or detail string for non-success outcomes.
     pub error: Option<String>,
@@ -3363,14 +3445,7 @@ fn verify_model_hash(
 /// These fields are derived from on-disk state and added to indexed metadata so
 /// UI consumers can distinguish complete models from partial downloads.
 fn download_projection_status(model_dir: &Path, metadata: &ModelMetadata) -> (bool, bool, usize) {
-    let has_part_files = WalkDir::new(model_dir)
-        .min_depth(1)
-        .max_depth(6)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .any(|entry| {
-            entry.file_type().is_file() && entry.file_name().to_string_lossy().ends_with(".part")
-        });
+    let has_part_files = has_pending_download_artifacts(model_dir);
 
     let missing_expected_files = metadata
         .expected_files
@@ -3388,6 +3463,35 @@ fn download_projection_status(model_dir: &Path, metadata: &ModelMetadata) -> (bo
         has_part_files,
         missing_expected_files,
     )
+}
+
+fn has_pending_download_artifacts(model_dir: &Path) -> bool {
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(6)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .any(|entry| {
+            if !entry.file_type().is_file() {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy();
+            name.ends_with(".part") || name == ".pumas_download"
+        })
+}
+
+fn extract_string_array(metadata: &Value, key: &str) -> Vec<String> {
+    metadata
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Convert ModelMetadata to ModelRecord for indexing.
@@ -4906,6 +5010,89 @@ mod tests {
             .iter()
             .any(|error| error.contains("metadata validation failed")));
         assert!(report.error_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_uses_sqlite_row_for_partial_download() {
+        let (_, library) = setup_library().await;
+        let partial_dir = library.build_model_path("llm", "forturne", "qwen3-reranker-4b-nvfp4");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        std::fs::write(
+            partial_dir.join("config.json"),
+            r#"{"architectures":["Qwen3ForRewardModel"],"model_type":"qwen3"}"#,
+        )
+        .unwrap();
+        std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
+        std::fs::write(
+            partial_dir.join(".pumas_download"),
+            r#"{"repo_id":"Forturne/Qwen3-Reranker-4B-NVFP4"}"#,
+        )
+        .unwrap();
+
+        let partial_metadata = ModelMetadata {
+            model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
+            family: Some("forturne".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            match_source: Some("download_partial".to_string()),
+            pipeline_tag: Some("text-ranking".to_string()),
+            ..Default::default()
+        };
+        library
+            .upsert_index_from_metadata(&partial_dir, &partial_metadata)
+            .unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "llm/forturne/qwen3-reranker-4b-nvfp4")
+            .unwrap();
+        assert_eq!(row.action, "blocked_partial_download");
+        assert_eq!(row.current_model_type.as_deref(), Some("llm"));
+        assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "partial_download_blocked_migration_move"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_reports_skipped_partial_downloads() {
+        let (_, library) = setup_library().await;
+        let partial_dir = library.build_model_path("llm", "forturne", "qwen3-reranker-4b-nvfp4");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        std::fs::write(
+            partial_dir.join("config.json"),
+            r#"{"architectures":["Qwen3ForRewardModel"],"model_type":"qwen3"}"#,
+        )
+        .unwrap();
+        std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
+
+        let partial_metadata = ModelMetadata {
+            model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
+            family: Some("forturne".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            match_source: Some("download_partial".to_string()),
+            pipeline_tag: Some("text-ranking".to_string()),
+            ..Default::default()
+        };
+        library
+            .upsert_index_from_metadata(&partial_dir, &partial_metadata)
+            .unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.skipped_move_count, 1);
+        assert_eq!(report.error_count, 0);
+        assert!(report
+            .results
+            .iter()
+            .any(|row| row.action == "skipped_partial_download"));
     }
 
     #[tokio::test]

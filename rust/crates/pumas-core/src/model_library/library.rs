@@ -1798,20 +1798,50 @@ impl ModelLibrary {
                     .map(|value| value.to_string())
             });
 
+        let has_metadata = model_dir.join(METADATA_FILENAME).is_file();
+        let is_partial_download = metadata_json
+            .get("match_source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source == "download_partial")
+            || has_pending_download_artifacts(&model_dir)
+            || metadata_json
+                .get("download_incomplete")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+
         let primary_file = find_primary_model_file(&model_dir);
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
-        let resolved = apply_unresolved_model_type_fallbacks(
-            resolve_model_type_with_rules(
-                self.index(),
+        let resolved = if !has_metadata && is_partial_download {
+            ModelTypeResolution {
+                model_type: record
+                    .model_type
+                    .parse::<ModelType>()
+                    .unwrap_or(ModelType::Unknown),
+                source: metadata_json
+                    .get("model_type_resolution_source")
+                    .and_then(Value::as_str)
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "sqlite-partial-row".to_string()),
+                confidence: metadata_json
+                    .get("model_type_resolution_confidence")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.0),
+                review_reasons: extract_string_array(metadata_json, "review_reasons"),
+            }
+        } else {
+            apply_unresolved_model_type_fallbacks(
+                resolve_model_type_with_rules(
+                    self.index(),
+                    &model_dir,
+                    pipeline_tag.as_deref(),
+                    None,
+                )?,
                 &model_dir,
-                pipeline_tag.as_deref(),
-                None,
-            )?,
-            &model_dir,
-            file_type_info.as_ref(),
-        );
+                file_type_info.as_ref(),
+            )
+        };
         let resolved_type = resolved.model_type.as_str().to_string();
 
         let resolved_family = file_type_info
@@ -1827,16 +1857,6 @@ impl ModelLibrary {
             normalize_name(&resolved_family),
             normalize_name(&cleaned_name)
         );
-        let has_metadata = model_dir.join(METADATA_FILENAME).is_file();
-        let is_partial_download = metadata_json
-            .get("match_source")
-            .and_then(Value::as_str)
-            .is_some_and(|source| source == "download_partial")
-            || has_pending_download_artifacts(&model_dir)
-            || metadata_json
-                .get("download_incomplete")
-                .and_then(Value::as_bool)
-                .unwrap_or(false);
         let action = if target_dir == model_dir {
             "keep"
         } else if !has_metadata && is_partial_download {
@@ -5041,11 +5061,11 @@ mod tests {
         let partial_metadata = ModelMetadata {
             model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
             family: Some("forturne".to_string()),
-            model_type: Some("llm".to_string()),
+            model_type: Some("reranker".to_string()),
             cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
             official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
             match_source: Some("download_partial".to_string()),
-            pipeline_tag: Some("text-ranking".to_string()),
+            pipeline_tag: Some("text-generation".to_string()),
             ..Default::default()
         };
         library
@@ -5059,7 +5079,7 @@ mod tests {
             .find(|item| item.model_id == "llm/forturne/qwen3-reranker-4b-nvfp4")
             .unwrap();
         assert_eq!(row.action, "blocked_partial_download");
-        assert_eq!(row.current_model_type.as_deref(), Some("llm"));
+        assert_eq!(row.current_model_type.as_deref(), Some("reranker"));
         assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
         assert!(row
             .findings
@@ -5082,11 +5102,11 @@ mod tests {
         let partial_metadata = ModelMetadata {
             model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
             family: Some("forturne".to_string()),
-            model_type: Some("llm".to_string()),
+            model_type: Some("reranker".to_string()),
             cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
             official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
             match_source: Some("download_partial".to_string()),
-            pipeline_tag: Some("text-ranking".to_string()),
+            pipeline_tag: Some("text-generation".to_string()),
             ..Default::default()
         };
         library

@@ -106,7 +106,7 @@ export const MigrationReportsPanel: React.FC = () => {
       setLastDryRunReport(report);
       setMessage({
         type: 'success',
-        text: `Dry-run generated: ${report.move_candidates} moves, ${report.collision_count} collisions, ${report.error_count} errors.`,
+        text: `Dry-run generated: ${report.move_candidates} moves (${report.blocked_partial_count} blocked partial), ${report.collision_count} collisions, ${report.error_count} errors.`,
       });
       await fetchReports();
     } catch (error) {
@@ -346,7 +346,8 @@ export const MigrationReportsPanel: React.FC = () => {
               </div>
               <div className="mt-1 text-xs text-[hsl(var(--launcher-text-secondary))]">
                 {lastDryRunReport.move_candidates} moves, {lastDryRunReport.keep_candidates} keep,{' '}
-                {lastDryRunReport.collision_count} collisions, {lastDryRunReport.error_count} errors
+                {lastDryRunReport.collision_count} collisions, {lastDryRunReport.blocked_partial_count} blocked partial,{' '}
+                {lastDryRunReport.error_count} errors
               </div>
             </div>
           )}

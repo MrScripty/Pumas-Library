@@ -1647,7 +1647,10 @@ impl ModelLibrary {
                 "move" => report.move_candidates += 1,
                 "blocked_collision" => report.collision_count += 1,
                 "keep" => report.keep_candidates += 1,
-                "blocked_partial_download" => report.keep_candidates += 1,
+                "blocked_partial_download" => {
+                    report.move_candidates += 1;
+                    report.blocked_partial_count += 1;
+                }
                 "error" | "missing_source" => { /* counted above */ }
                 _ => {}
             }
@@ -2310,6 +2313,8 @@ pub struct MigrationDryRunReport {
     pub keep_candidates: usize,
     /// Number of models blocked by destination collisions.
     pub collision_count: usize,
+    /// Number of models blocked because they are partial downloads.
+    pub blocked_partial_count: usize,
     /// Number of models that failed dry-run evaluation.
     pub error_count: usize,
     /// Number of models with non-empty findings.
@@ -3007,6 +3012,10 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
         report.keep_candidates
     ));
     output.push_str(&format!("- Collisions: `{}`\n", report.collision_count));
+    output.push_str(&format!(
+        "- Blocked Partial Downloads: `{}`\n",
+        report.blocked_partial_count
+    ));
     output.push_str(&format!("- Errors: `{}`\n", report.error_count));
     output.push_str(&format!(
         "- Models With Findings: `{}`\n",

@@ -947,6 +947,7 @@ export interface MigrationDryRunReport {
   move_candidates: number;
   keep_candidates: number;
   collision_count: number;
+  blocked_partial_count: number;
   error_count: number;
   models_with_findings: number;
   machine_readable_report_path?: string | null;

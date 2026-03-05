@@ -363,6 +363,8 @@ impl From<pumas_library::models::ModelImportResult> for FfiModelImportResult {
 pub struct FfiModelDownloadProgress {
     pub download_id: String,
     pub repo_id: Option<String>,
+    pub model_name: Option<String>,
+    pub model_type: Option<String>,
     pub status: FfiDownloadStatus,
     pub progress: Option<f32>,
     pub downloaded_bytes: Option<u64>,
@@ -377,6 +379,8 @@ impl From<pumas_library::models::ModelDownloadProgress> for FfiModelDownloadProg
         Self {
             download_id: p.download_id,
             repo_id: p.repo_id,
+            model_name: p.model_name,
+            model_type: p.model_type,
             status: FfiDownloadStatus::from(p.status),
             progress: p.progress,
             downloaded_bytes: p.downloaded_bytes,

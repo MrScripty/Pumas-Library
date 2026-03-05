@@ -521,6 +521,10 @@ pub struct ModelDownloadProgress {
     pub download_id: String,
     #[serde(default)]
     pub repo_id: Option<String>,
+    #[serde(default)]
+    pub model_name: Option<String>,
+    #[serde(default)]
+    pub model_type: Option<String>,
     pub status: DownloadStatus,
     #[serde(default)]
     pub progress: Option<f32>,

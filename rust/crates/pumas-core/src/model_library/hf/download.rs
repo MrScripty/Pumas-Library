@@ -978,6 +978,14 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
+                model_name: state
+                    .download_request
+                    .as_ref()
+                    .map(|request| request.official_name.clone()),
+                model_type: state
+                    .download_request
+                    .as_ref()
+                    .and_then(|request| request.model_type.clone()),
                 status: state.status,
                 progress: Some(state.progress),
                 downloaded_bytes: Some(state.downloaded_bytes),
@@ -1016,6 +1024,14 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
+                model_name: state
+                    .download_request
+                    .as_ref()
+                    .map(|request| request.official_name.clone()),
+                model_type: state
+                    .download_request
+                    .as_ref()
+                    .and_then(|request| request.model_type.clone()),
                 status: state.status,
                 progress: Some(state.progress),
                 downloaded_bytes: Some(state.downloaded_bytes),
@@ -1370,5 +1386,60 @@ mod tests {
             Some("reranker")
         );
         assert_eq!(entry.download_request.family, "forturne");
+    }
+
+    #[tokio::test]
+    async fn test_list_downloads_includes_model_type_and_name() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let download_id = "dl-progress".to_string();
+
+        let request = DownloadRequest {
+            repo_id: "owner/model".to_string(),
+            family: "owner".to_string(),
+            official_name: "Model Display Name".to_string(),
+            model_type: Some("reranker".to_string()),
+            quant: None,
+            filename: None,
+            filenames: None,
+            pipeline_tag: Some("text-ranking".to_string()),
+        };
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/model".to_string(),
+                    status: DownloadStatus::Paused,
+                    progress: 0.25,
+                    downloaded_bytes: 256,
+                    total_bytes: Some(1024),
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    dest_dir: tmp.path().join("owner-model"),
+                    filename: "model.safetensors".to_string(),
+                    files: vec![FileToDownload {
+                        filename: "model.safetensors".to_string(),
+                        size: Some(1024),
+                        sha256: None,
+                    }],
+                    files_completed: 0,
+                    download_request: Some(request),
+                    known_sha256: None,
+                },
+            );
+        }
+
+        let list = client.list_downloads().await;
+        let progress = list
+            .into_iter()
+            .find(|item| item.download_id == download_id)
+            .expect("download progress should be present");
+        assert_eq!(progress.model_type.as_deref(), Some("reranker"));
+        assert_eq!(progress.model_name.as_deref(), Some("Model Display Name"));
     }
 }

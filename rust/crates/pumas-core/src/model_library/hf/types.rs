@@ -238,6 +238,15 @@ pub(crate) struct HfLfsInfo {
 pub(crate) fn infer_pipeline_tag_from_config(config: Option<&HfModelConfig>) -> Option<String> {
     let config = config?;
 
+    // Reranker families frequently expose reward-model architectures.
+    if config
+        .architectures
+        .iter()
+        .any(|arch| arch.trim().ends_with("ForRewardModel"))
+    {
+        return Some("text-ranking".to_string());
+    }
+
     // 1. Check architecture suffix (longest suffixes first to avoid partial matches)
     if let Some(arch) = config.architectures.first() {
         let suffix_map: &[(&str, &str)] = &[

@@ -37,6 +37,7 @@ pub fn resolve_model_type_with_rules(
     let arch_rules = index.list_active_model_type_arch_rules()?;
     let config_rules = index.list_active_model_type_config_rules()?;
     let signals = load_config_signals(model_dir);
+    let medium_hints = collect_medium_hints(index, pipeline_tag, spec_model_type)?;
 
     let arch_votes = resolve_architecture_votes(&signals.architectures, &arch_rules);
     let config_vote = resolve_config_vote(signals.config_model_type.as_deref(), &config_rules);
@@ -53,6 +54,16 @@ pub fn resolve_model_type_with_rules(
         }
     }
 
+    if should_apply_reranker_disambiguation_guard(&hard_types, model_dir, &signals, &medium_hints)
+    {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Reranker,
+            source: "model-type-reranker-disambiguation-guard".to_string(),
+            confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
     if hard_types.len() > 1 {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Unknown,
@@ -63,6 +74,15 @@ pub fn resolve_model_type_with_rules(
     }
 
     let Some(mut resolved_type) = hard_types.into_iter().next() else {
+        if let Some(hint_resolved) = resolve_hint_only_model_type(&medium_hints) {
+            return Ok(ModelTypeResolution {
+                model_type: hint_resolved,
+                source: "model-type-resolver-medium-hints".to_string(),
+                confidence: 0.65,
+                review_reasons: vec!["model-type-low-confidence".to_string()],
+            });
+        }
+
         return Ok(ModelTypeResolution {
             model_type: ModelType::Unknown,
             source: "unresolved".to_string(),
@@ -77,7 +97,6 @@ pub fn resolve_model_type_with_rules(
         score += 0.20;
     }
 
-    let medium_hints = collect_medium_hints(index, pipeline_tag, spec_model_type)?;
     for hint in &medium_hints {
         if *hint == resolved_type {
             score += 0.10;
@@ -128,6 +147,15 @@ pub fn resolve_model_type_with_rules(
         confidence: score,
         review_reasons,
     })
+}
+
+fn resolve_hint_only_model_type(medium_hints: &[ModelType]) -> Option<ModelType> {
+    // Preserve strict hard-signal-first behavior by default.
+    // Only allow hint-only classification for explicit reranker hints.
+    if medium_hints.len() == 1 && medium_hints.contains(&ModelType::Reranker) {
+        return Some(ModelType::Reranker);
+    }
+    None
 }
 
 fn load_config_signals(model_dir: &Path) -> ConfigSignals {
@@ -187,6 +215,56 @@ fn name_looks_like_embedding(model_dir: &Path) -> bool {
         .and_then(|name| name.to_str())
         .map(|name| name.to_lowercase().contains("embedding"))
         .unwrap_or(false)
+}
+
+fn name_looks_like_reranker(model_dir: &Path) -> bool {
+    model_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("reranker")
+                || lower.contains("re-ranker")
+                || lower.contains("text-ranking")
+        })
+        .unwrap_or(false)
+}
+
+fn has_reward_model_architecture(signals: &ConfigSignals) -> bool {
+    signals.architectures.iter().any(|arch| {
+        let lower = arch.to_lowercase();
+        lower.contains("forrewardmodel") || lower.contains("rewardmodel")
+    })
+}
+
+fn should_apply_reranker_disambiguation_guard(
+    hard_types: &HashSet<ModelType>,
+    model_dir: &Path,
+    signals: &ConfigSignals,
+    medium_hints: &[ModelType],
+) -> bool {
+    // Respect explicit non-reranker hints.
+    if medium_hints.iter().any(|hint| *hint != ModelType::Reranker) {
+        return false;
+    }
+
+    let has_reward_arch = has_reward_model_architecture(signals);
+    let has_reranker_name = name_looks_like_reranker(model_dir);
+    let has_reranker_config = signals
+        .config_model_type
+        .as_deref()
+        .is_some_and(|value| value.contains("rerank"));
+
+    if has_reward_arch
+        && (hard_types.contains(&ModelType::Llm)
+            || medium_hints.contains(&ModelType::Reranker)
+            || has_reranker_name
+            || has_reranker_config)
+    {
+        return true;
+    }
+
+    medium_hints.contains(&ModelType::Reranker) && (has_reranker_name || has_reranker_config)
 }
 
 fn should_apply_embedding_disambiguation_guard(
@@ -487,6 +565,49 @@ mod tests {
         assert!(resolved
             .review_reasons
             .contains(&"model-type-unresolved".to_string()));
+    }
+
+    #[test]
+    fn reranker_medium_hint_resolves_without_hard_signals() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["UnmappedArchitecture"]
+            }),
+        );
+
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-ranking"), None)
+                .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-resolver-medium-hints");
+        assert_eq!(resolved.confidence, 0.65);
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
+    }
+
+    #[test]
+    fn reranker_disambiguation_guard_overrides_qwen_llm_config() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Qwen3ForRewardModel"],
+                "model_type": "qwen3"
+            }),
+        );
+
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-ranking"), None)
+                .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-reranker-disambiguation-guard");
+        assert!(resolved.confidence >= 0.9);
+        assert!(resolved.review_reasons.is_empty());
     }
 
     #[test]

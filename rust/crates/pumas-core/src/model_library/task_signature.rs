@@ -232,6 +232,7 @@ fn hf_task_to_signature(input: &str) -> Option<String> {
         | "table-question-answering"
         | "conversational"
         | "sentence-similarity" => "text->text",
+        "text-ranking" => "text+document->text",
         "text-to-image" | "unconditional-image-generation" | "image-generation" => "text->image",
         "image-to-image" | "image-inpainting" => "image->image",
         "text-image-to-image" => "text+image->image",
@@ -315,6 +316,10 @@ mod tests {
         assert_eq!(
             normalize_task_signature("doc -> labels").signature_key,
             "document->text"
+        );
+        assert_eq!(
+            normalize_task_signature("text-ranking").signature_key,
+            "text+document->text"
         );
     }
 

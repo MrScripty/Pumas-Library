@@ -118,6 +118,7 @@ impl HuggingFaceClient {
         if let Some(ref kind) = params.kind {
             let pipeline_tag = match kind.as_str() {
                 "text-generation" | "llm" => "text-generation",
+                "text-ranking" | "reranker" => "text-ranking",
                 "text-to-image" | "diffusion" => "text-to-image",
                 "image-to-image" => "image-to-image",
                 "automatic-speech-recognition" | "audio" => "automatic-speech-recognition",
@@ -342,6 +343,7 @@ impl HuggingFaceClient {
         // Determine kind: prefer pipeline_tag, fall back to config-based inference
         let kind = result
             .pipeline_tag
+            .or_else(|| Self::infer_pipeline_tag_from_tags(&result.tags))
             .or_else(|| infer_pipeline_tag_from_config(result.config.as_ref()))
             .unwrap_or_else(|| "unknown".to_string());
 
@@ -423,6 +425,19 @@ impl HuggingFaceClient {
         sorted.sort();
         sorted
     }
+
+    fn infer_pipeline_tag_from_tags(tags: &[String]) -> Option<String> {
+        for tag in tags {
+            let normalized = tag.trim().to_lowercase().replace(' ', "-");
+            if normalized == "text-ranking"
+                || normalized == "text-reranking"
+                || normalized == "reranking"
+            {
+                return Some("text-ranking".to_string());
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
@@ -464,5 +479,29 @@ mod tests {
         assert_eq!(options[0].size_bytes, Some(41_800_000_000));
         assert_eq!(options[1].quant, "Q3_K_M");
         assert_eq!(options[1].size_bytes, Some(87_210_900_000));
+    }
+
+    #[test]
+    fn test_infer_pipeline_tag_from_tags_detects_text_ranking() {
+        let tags = vec!["GGUF".to_string(), "Text Ranking".to_string()];
+        assert_eq!(
+            HuggingFaceClient::infer_pipeline_tag_from_tags(&tags).as_deref(),
+            Some("text-ranking")
+        );
+    }
+
+    #[test]
+    fn test_convert_search_result_prefers_text_ranking_tags_when_pipeline_missing() {
+        let result = HfSearchResult {
+            model_id: "QuantFactory/Qwen3-Reranker-4B-GGUF".to_string(),
+            tags: vec!["gguf".to_string(), "text-ranking".to_string()],
+            pipeline_tag: None,
+            last_modified: None,
+            downloads: None,
+            siblings: vec![],
+            config: None,
+        };
+        let converted = HuggingFaceClient::convert_search_result(result);
+        assert_eq!(converted.kind, "text-ranking");
     }
 }

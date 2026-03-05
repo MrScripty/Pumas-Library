@@ -3185,6 +3185,10 @@ fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
         return Some(ModelType::Vision);
     }
 
+    if contains_any(&["reranker", "re-ranker", "text-ranking", "text_ranking"]) {
+        return Some(ModelType::Reranker);
+    }
+
     if contains_any(&["embedding", "sentence-transformers", "bge", "e5", "gte"]) {
         return Some(ModelType::Embedding);
     }
@@ -4146,6 +4150,38 @@ mod tests {
 
         let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("vision".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-name-tokens".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_falls_back_to_name_tokens_for_reranker() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "qwen3", "qwen3-reranker-4b");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("qwen3-reranker-4b.pt"), b"not-a-real-model").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/qwen3/qwen3-reranker-4b".to_string()),
+            family: Some("qwen3".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("Qwen3-Reranker-4B".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/qwen3/qwen3-reranker-4b")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("reranker".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("reranker".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-name-tokens".to_string())

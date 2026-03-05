@@ -596,6 +596,7 @@ impl ModelIndex {
               ('audio->embedding', 1, '[\"audio\"]', '[\"embedding\"]', 'audio-embedding', 100, 'active', 'system'),
               ('image->text', 1, '[\"image\"]', '[\"text\"]', 'image-to-text', 100, 'active', 'system'),
               ('video->text', 1, '[\"video\"]', '[\"text\"]', 'video-to-text', 100, 'active', 'system'),
+              ('text+document->text', 1, '[\"text\",\"document\"]', '[\"text\"]', 'text-ranking', 100, 'active', 'system'),
               ('text+image->text', 1, '[\"text\",\"image\"]', '[\"text\"]', 'visual-question-answering', 100, 'active', 'system'),
               ('text+video->text', 1, '[\"text\",\"video\"]', '[\"text\"]', 'video-question-answering', 100, 'active', 'system'),
               ('text->video', 1, '[\"text\"]', '[\"video\"]', 'text-to-video', 100, 'active', 'system'),

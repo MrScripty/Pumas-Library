@@ -279,9 +279,21 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         }
     }
 
-    // 2. Check name and basename for type keywords
+    // 2. Check explicit GGUF model type field.
+    if let Some(ref model_type) = metadata.model_type {
+        let model_type = model_type.to_lowercase();
+        if model_type.contains("rerank") || model_type.contains("ranker") {
+            return ModelType::Reranker;
+        }
+    }
+
+    // 3. Check name and basename for type keywords
     let check_text = |s: &str| -> Option<ModelType> {
         let lower = s.to_lowercase();
+        // Reranker
+        if lower.contains("reranker") || lower.contains("re-ranker") || lower.contains("ranker") {
+            return Some(ModelType::Reranker);
+        }
         // Embedding
         if lower.contains("embedding") || lower.contains("embed-") {
             return Some(ModelType::Embedding);
@@ -329,7 +341,7 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         }
     }
 
-    // 3. Default to LLM for GGUF files (most common use case)
+    // 4. Default to LLM for GGUF files (most common use case)
     ModelType::Llm
 }
 
@@ -973,5 +985,19 @@ mod tests {
         assert_eq!(info.format, FileFormat::Unknown);
         assert_eq!(info.model_type, ModelType::Unknown);
         assert!(info.family.is_none());
+    }
+
+    #[test]
+    fn test_detect_gguf_reranker_from_name() {
+        let metadata = GgufMetadata {
+            architecture: Some("qwen3".to_string()),
+            name: Some("Qwen3-Reranker-4B".to_string()),
+            basename: Some("qwen3-reranker-4b".to_string()),
+            model_type: Some("model".to_string()),
+        };
+        assert_eq!(
+            detect_model_type_from_gguf_metadata(&metadata),
+            ModelType::Reranker
+        );
     }
 }

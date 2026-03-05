@@ -44,6 +44,8 @@ interface LocalModelsListProps {
   onResumeDownload?: (repoId: string) => void;
   onCancelDownload?: (repoId: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
+  recoveringPartialRepoIds?: Set<string>;
+  downloadErrors?: Record<string, string>;
   onDeleteModel?: (modelId: string) => void;
   onConvertModel?: (modelId: string) => void;
 }
@@ -66,6 +68,8 @@ export function LocalModelsList({
   onResumeDownload,
   onCancelDownload,
   onRecoverPartialDownload,
+  recoveringPartialRepoIds,
+  downloadErrors,
   onDeleteModel,
   onConvertModel,
 }: LocalModelsListProps) {
@@ -136,6 +140,9 @@ export function LocalModelsList({
               const isActiveDownload = ['queued', 'downloading', 'pausing', 'cancelling'].includes(model.downloadStatus ?? '');
               const progressDegrees = Math.round(progressValue * 360);
               const ringDegrees = isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
+              const partialRepoId = model.repoId ?? model.downloadRepoId;
+              const partialError = partialRepoId ? downloadErrors?.[partialRepoId] : undefined;
+              const isRecoveringPartial = Boolean(partialRepoId && recoveringPartialRepoIds?.has(partialRepoId));
               const canPause = isDownloading && (model.downloadStatus === 'downloading' || model.downloadStatus === 'queued') && Boolean(onPauseDownload) && Boolean(model.downloadRepoId);
               const canResume = isDownloading && (isPaused || model.downloadStatus === 'error') && Boolean(onResumeDownload) && Boolean(model.downloadRepoId);
               const canRecoverPartial = !isDownloading
@@ -217,6 +224,11 @@ export function LocalModelsList({
                             </MetadataItem>
                           )}
                         </MetadataRow>
+                        {partialError && (
+                          <div className="mt-1 text-xs text-[hsl(var(--accent-error))]">
+                            {partialError}
+                          </div>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-1">
@@ -304,8 +316,9 @@ export function LocalModelsList({
                           {canRecoverPartial && (
                             <IconButton
                               icon={<Download />}
-                              tooltip="Resume partial download"
-                              onClick={() => onRecoverPartialDownload!(model)}
+                              tooltip={isRecoveringPartial ? 'Resuming partial download...' : 'Resume partial download'}
+                              onClick={isRecoveringPartial ? undefined : () => onRecoverPartialDownload!(model)}
+                              disabled={isRecoveringPartial}
                               size="sm"
                             />
                           )}

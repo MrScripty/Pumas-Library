@@ -31,6 +31,33 @@ function isAuthRequiredError(errorMessage: string): boolean {
   return /\b401\b/.test(errorMessage);
 }
 
+function formatPartialResumeError(reasonCode?: string, fallback?: string): string {
+  switch (reasonCode) {
+    case 'dest_dir_missing':
+      return 'Partial files directory is missing.';
+    case 'invalid_repo_id':
+      return 'Cannot recover: invalid repository ID.';
+    case 'repo_not_found':
+      return 'Cannot recover: repository was not found on HuggingFace.';
+    case 'rate_limited':
+      return 'HuggingFace rate-limited the request. Try again shortly.';
+    case 'network_error':
+      return 'Network error while resuming partial download.';
+    case 'permission_denied':
+      return 'Permission denied for partial files directory.';
+    case 'hf_client_unavailable':
+      return 'HuggingFace client is not available.';
+    case 'resume_rejected':
+      return 'Tracked partial download is not resumable from its current state.';
+    case 'already_completed':
+      return 'Download is already completed.';
+    case 'already_cancelled':
+      return 'Download was cancelled; start a new download.';
+    default:
+      return fallback || 'Failed to resume partial download.';
+  }
+}
+
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
   starredModels: Set<string>;
@@ -65,6 +92,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [showCategoryMenu, setShowCategoryMenu] = useState(false);
   const [isDownloadMode, setIsDownloadMode] = useState(false);
   const [expandedRelated, setExpandedRelated] = useState<Set<string>>(new Set());
+  const [recoveringPartialRepoIds, setRecoveringPartialRepoIds] = useState<Set<string>>(new Set());
   const [relatedModelsById, setRelatedModelsById] = useState<
     Record<string, RelatedModelsState>
   >({});
@@ -552,17 +580,33 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       delete next[repoId];
       return next;
     });
+    setRecoveringPartialRepoIds((prev) => {
+      const next = new Set(prev);
+      next.add(repoId);
+      return next;
+    });
 
     try {
-      const result = await modelsAPI.recoverDownload(repoId, destDir);
-      if (!result.success || !result.download_id) {
-        const errorMsg = result.error || 'Failed to resume partial download.';
-        logger.error('Recover download failed', { repoId, destDir, error: errorMsg });
+      const result = await modelsAPI.resumePartialDownload(repoId, destDir);
+      const action = result.action ?? 'none';
+      if (!result.success || action === 'none' || !result.download_id) {
+        const errorMsg = formatPartialResumeError(result.reason_code, result.error);
+        logger.error('Resume partial download failed', {
+          repoId,
+          destDir,
+          action,
+          reasonCode: result.reason_code,
+          error: errorMsg,
+        });
         setDownloadErrors((prev) => ({ ...prev, [repoId]: errorMsg }));
         return;
       }
 
-      logger.info('Recovered partial download', { repoId, downloadId: result.download_id });
+      logger.info('Partial download action completed', {
+        repoId,
+        action,
+        downloadId: result.download_id,
+      });
       startDownload(repoId, result.download_id, { modelName: model.name, modelType: model.category });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to resume partial download.';
@@ -579,6 +623,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         logger.error('Unknown error recovering partial download', { error, repoId, destDir });
       }
       setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
+    } finally {
+      setRecoveringPartialRepoIds((prev) => {
+        if (!prev.has(repoId)) return prev;
+        const next = new Set(prev);
+        next.delete(repoId);
+        return next;
+      });
     }
   }, [setDownloadErrors, startDownload]);
 
@@ -725,6 +776,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 onResumeDownload={resumeDownload}
                 onCancelDownload={cancelDownload}
                 onRecoverPartialDownload={handleRecoverPartialDownload}
+                recoveringPartialRepoIds={recoveringPartialRepoIds}
+                downloadErrors={downloadErrors}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
               />

@@ -270,10 +270,20 @@ export function useModelDownloads() {
     });
 
     try {
-      await api.resume_model_download(status.downloadId);
+      const result = await api.resume_model_download(status.downloadId);
+      if (!result.success) {
+        throw new APIError(result.error || 'Failed to resume download.', 'resume_model_download');
+      }
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to resume download.';
+      setDownloadStatusByRepo((prev) => {
+        const existing = prev[repoId];
+        if (!existing) return prev;
+        return { ...prev, [repoId]: { ...existing, status: 'error' as const } };
+      });
+      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
       logger.error('Failed to resume download', {
-        error: error instanceof Error ? error.message : error,
+        error: message,
         repoId,
       });
     }

@@ -297,6 +297,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       'translation': 'llm',
       'summarization': 'llm',
       'conversational': 'llm',
+      // Reranker
+      'text-ranking': 'reranker',
       // Diffusion / image & video generation
       'text-to-image': 'diffusion',
       'image-to-image': 'diffusion',

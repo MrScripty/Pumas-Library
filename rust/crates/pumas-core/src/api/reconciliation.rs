@@ -453,6 +453,48 @@ struct PartialModelTypeSelection {
     review_reasons: Vec<String>,
 }
 
+fn looks_like_reranker_label(value: &str) -> bool {
+    let lower = value.to_lowercase();
+    lower.contains("reranker") || lower.contains("re-ranker") || lower.contains("text-ranking")
+}
+
+fn candidate_looks_like_reranker(candidate: &PartialDownloadCandidate) -> bool {
+    looks_like_reranker_label(&candidate.model_id)
+        || candidate
+            .official_name
+            .as_deref()
+            .is_some_and(looks_like_reranker_label)
+        || candidate
+            .repo_id
+            .as_deref()
+            .is_some_and(looks_like_reranker_label)
+}
+
+fn apply_partial_reranker_name_override(
+    mut selected: PartialModelTypeSelection,
+    candidate: &PartialDownloadCandidate,
+) -> PartialModelTypeSelection {
+    if selected.model_type.as_deref() != Some("llm") {
+        return selected;
+    }
+    if !candidate_looks_like_reranker(candidate) {
+        return selected;
+    }
+
+    selected.model_type = Some("reranker".to_string());
+    selected.source = Some("download-partial-reranker-name-override".to_string());
+    selected.confidence = Some(selected.confidence.unwrap_or(0.0).max(0.55));
+    selected
+        .review_reasons
+        .push("model-type-overridden-by-name-hint".to_string());
+    selected
+        .review_reasons
+        .push("model-type-low-confidence".to_string());
+    selected.review_reasons.sort();
+    selected.review_reasons.dedup();
+    selected
+}
+
 fn split_model_id(model_id: &str) -> (Option<String>, Option<String>, Option<String>) {
     let parts: Vec<&str> = model_id.split('/').collect();
     let model_type = parts.first().map(|s| s.to_string());
@@ -707,6 +749,7 @@ async fn stage_partial_candidate(
         candidate.pipeline_tag_hint.as_deref(),
         candidate.model_type_hint.as_deref(),
     )?;
+    let selected_type = apply_partial_reranker_name_override(selected_type, &candidate);
     let family = candidate
         .family
         .clone()
@@ -1199,5 +1242,40 @@ mod tests {
             selected.source.as_deref(),
             Some("download-partial-path-fallback")
         );
+    }
+
+    #[test]
+    fn test_apply_partial_reranker_name_override_for_llm_partial() {
+        let candidate = PartialDownloadCandidate {
+            model_id: "llm/forturne/qwen3-reranker-4b-nvfp4".to_string(),
+            model_dir: PathBuf::from(
+                "/tmp/llm/forturne/qwen3-reranker-4b-nvfp4",
+            ),
+            repo_id: Some("Forturne/Qwen3-Reranker-4B-NVFP4".to_string()),
+            model_type_hint: Some("llm".to_string()),
+            pipeline_tag_hint: Some("text-generation".to_string()),
+            family: Some("forturne".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            expected_files: vec![],
+            created_at: None,
+        };
+
+        let selected = PartialModelTypeSelection {
+            model_type: Some("llm".to_string()),
+            source: Some("model-type-resolver-arch-config-rules".to_string()),
+            confidence: Some(1.0),
+            review_reasons: vec![],
+        };
+
+        let overridden = apply_partial_reranker_name_override(selected, &candidate);
+        assert_eq!(overridden.model_type.as_deref(), Some("reranker"));
+        assert_eq!(
+            overridden.source.as_deref(),
+            Some("download-partial-reranker-name-override")
+        );
+        assert!(overridden
+            .review_reasons
+            .iter()
+            .any(|reason| reason == "model-type-overridden-by-name-hint"));
     }
 }

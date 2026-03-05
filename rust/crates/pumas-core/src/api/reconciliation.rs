@@ -22,7 +22,11 @@ use walkdir::WalkDir;
 use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
 use crate::model_library::download_store::PersistedDownload;
-use crate::model_library::{InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata, RepoFileTree};
+use crate::index::ModelIndex;
+use crate::model_library::{
+    resolve_model_type_with_rules, InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata,
+    ModelType, RepoFileTree,
+};
 
 use super::state::PrimaryState;
 
@@ -433,11 +437,20 @@ struct PartialDownloadCandidate {
     model_id: String,
     model_dir: PathBuf,
     repo_id: Option<String>,
-    model_type: Option<String>,
+    model_type_hint: Option<String>,
+    pipeline_tag_hint: Option<String>,
     family: Option<String>,
     official_name: Option<String>,
     expected_files: Vec<String>,
     created_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct PartialModelTypeSelection {
+    model_type: Option<String>,
+    source: Option<String>,
+    confidence: Option<f64>,
+    review_reasons: Vec<String>,
 }
 
 fn split_model_id(model_id: &str) -> (Option<String>, Option<String>, Option<String>) {
@@ -477,6 +490,91 @@ async fn fetch_expected_files_from_hf(primary: &PrimaryState, repo_id: &str) -> 
     }
 }
 
+async fn fetch_model_kind_from_hf(primary: &PrimaryState, repo_id: &str) -> Option<String> {
+    let Some(ref client) = primary.hf_client else {
+        return None;
+    };
+
+    match client.get_model_info(repo_id).await {
+        Ok(model) => {
+            let kind = model.kind.trim();
+            if kind.is_empty() || kind.eq_ignore_ascii_case("unknown") {
+                None
+            } else {
+                Some(kind.to_string())
+            }
+        }
+        Err(err) => {
+            tracing::debug!(
+                "Reconcile(partial-index): failed HF model info lookup for {}: {}",
+                repo_id,
+                err
+            );
+            None
+        }
+    }
+}
+
+fn non_empty_hint(value: Option<String>) -> Option<String> {
+    value.and_then(|hint| {
+        let trimmed = hint.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn normalize_model_type_hint(index: &ModelIndex, hint: Option<&str>) -> Result<Option<String>> {
+    let Some(hint) = hint else {
+        return Ok(None);
+    };
+    index.resolve_model_type_hint(hint)
+}
+
+fn select_partial_model_type(
+    index: &ModelIndex,
+    model_dir: &Path,
+    path_model_type: Option<&str>,
+    pipeline_tag_hint: Option<&str>,
+    model_type_hint: Option<&str>,
+) -> Result<PartialModelTypeSelection> {
+    let normalized_path_hint = normalize_model_type_hint(index, path_model_type)?;
+    let normalized_model_type_hint = normalize_model_type_hint(index, model_type_hint)?;
+
+    // Use hard signals + pipeline hints first; avoid forcing a stale request type hint.
+    let resolved = resolve_model_type_with_rules(index, model_dir, pipeline_tag_hint, None)?;
+    if resolved.model_type != ModelType::Unknown {
+        return Ok(PartialModelTypeSelection {
+            model_type: Some(resolved.model_type.as_str().to_string()),
+            source: Some(resolved.source),
+            confidence: Some(resolved.confidence),
+            review_reasons: resolved.review_reasons,
+        });
+    }
+
+    if let Some(hint) = normalized_model_type_hint {
+        return Ok(PartialModelTypeSelection {
+            model_type: Some(hint),
+            source: Some("download-partial-model-type-hint".to_string()),
+            confidence: Some(0.40),
+            review_reasons: vec!["model-type-low-confidence".to_string()],
+        });
+    }
+
+    if let Some(path_hint) = normalized_path_hint {
+        return Ok(PartialModelTypeSelection {
+            model_type: Some(path_hint),
+            source: Some("download-partial-path-fallback".to_string()),
+            confidence: Some(0.30),
+            review_reasons: vec!["model-type-low-confidence".to_string()],
+        });
+    }
+
+    Ok(PartialModelTypeSelection::default())
+}
+
 fn load_persisted_downloads(primary: &PrimaryState) -> Vec<PersistedDownload> {
     let Some(ref client) = primary.hf_client else {
         return Vec::new();
@@ -495,7 +593,7 @@ fn candidate_from_persisted(
         return None;
     }
     let model_id = model_id_from_path(library_root, &persisted.dest_dir)?;
-    let (path_model_type, path_family, _cleaned_name) = split_model_id(&model_id);
+    let (_path_model_type, path_family, _cleaned_name) = split_model_id(&model_id);
     let request = &persisted.download_request;
     let mut expected_files = if !persisted.filenames.is_empty() {
         persisted.filenames.clone()
@@ -510,7 +608,8 @@ fn candidate_from_persisted(
         model_id,
         model_dir: persisted.dest_dir.clone(),
         repo_id: Some(persisted.repo_id.clone()),
-        model_type: request.model_type.clone().or(path_model_type),
+        model_type_hint: non_empty_hint(request.model_type.clone()),
+        pipeline_tag_hint: non_empty_hint(request.pipeline_tag.clone()),
         family: if request.family.trim().is_empty() {
             path_family
         } else {
@@ -545,7 +644,8 @@ fn candidate_from_interrupted(
         model_id,
         model_dir: interrupted.model_dir,
         repo_id: inferred_repo,
-        model_type: interrupted.model_type,
+        model_type_hint: non_empty_hint(interrupted.model_type),
+        pipeline_tag_hint: None,
         family: Some(interrupted.family),
         official_name: Some(interrupted.inferred_name),
         expected_files: Vec::new(),
@@ -561,7 +661,8 @@ fn merge_partial_candidates(
         model_id: preferred.model_id,
         model_dir: preferred.model_dir,
         repo_id: preferred.repo_id.or(existing.repo_id),
-        model_type: preferred.model_type.or(existing.model_type),
+        model_type_hint: preferred.model_type_hint.or(existing.model_type_hint),
+        pipeline_tag_hint: preferred.pipeline_tag_hint.or(existing.pipeline_tag_hint),
         family: preferred.family.or(existing.family),
         official_name: preferred.official_name.or(existing.official_name),
         expected_files: if preferred.expected_files.is_empty() {
@@ -590,10 +691,22 @@ async fn stage_partial_candidate(
             candidate.expected_files = fetch_expected_files_from_hf(primary, repo_id).await;
         }
     }
+    if candidate.pipeline_tag_hint.is_none() {
+        if let Some(ref repo_id) = candidate.repo_id {
+            candidate.pipeline_tag_hint = fetch_model_kind_from_hf(primary, repo_id).await;
+        }
+    }
     candidate.expected_files = dedupe_sort(candidate.expected_files);
 
     let now = chrono::Utc::now().to_rfc3339();
     let (path_model_type, path_family, path_cleaned_name) = split_model_id(&candidate.model_id);
+    let selected_type = select_partial_model_type(
+        primary.model_library.index(),
+        &candidate.model_dir,
+        path_model_type.as_deref(),
+        candidate.pipeline_tag_hint.as_deref(),
+        candidate.model_type_hint.as_deref(),
+    )?;
     let family = candidate
         .family
         .clone()
@@ -614,10 +727,11 @@ async fn stage_partial_candidate(
     let mut metadata = ModelMetadata {
         model_id: Some(candidate.model_id.clone()),
         family: Some(family),
-        model_type: candidate.model_type.clone().or(path_model_type),
+        model_type: selected_type.model_type.clone(),
         official_name: Some(official_name),
         cleaned_name: Some(cleaned_name),
         repo_id: candidate.repo_id.clone(),
+        pipeline_tag: candidate.pipeline_tag_hint.clone(),
         expected_files: if candidate.expected_files.is_empty() {
             None
         } else {
@@ -627,6 +741,14 @@ async fn stage_partial_candidate(
         added_date: Some(candidate.created_at.unwrap_or_else(|| now.clone())),
         updated_date: Some(now.clone()),
         pending_online_lookup: Some(candidate.repo_id.is_none()),
+        model_type_resolution_source: selected_type.source.clone(),
+        model_type_resolution_confidence: selected_type.confidence,
+        review_reasons: if selected_type.review_reasons.is_empty() {
+            None
+        } else {
+            Some(selected_type.review_reasons.clone())
+        },
+        metadata_needs_review: Some(!selected_type.review_reasons.is_empty()),
         ..Default::default()
     };
 
@@ -698,7 +820,7 @@ fn parse_download_marker(model_dir: &Path) -> Option<Value> {
 
 fn candidate_from_marker(model_dir: &Path, model_id: &str) -> Option<PartialDownloadCandidate> {
     let marker = parse_download_marker(model_dir)?;
-    let (path_model_type, path_family, _cleaned_name) = split_model_id(model_id);
+    let (_path_model_type, path_family, _cleaned_name) = split_model_id(model_id);
 
     let repo_id = marker
         .get("repo_id")
@@ -716,14 +838,18 @@ fn candidate_from_marker(model_dir: &Path, model_id: &str) -> Option<PartialDown
     let model_type = marker
         .get("model_type")
         .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
-        .or(path_model_type);
+        .map(|s| s.to_string());
+    let pipeline_tag = marker
+        .get("pipeline_tag")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
 
     Some(PartialDownloadCandidate {
         model_id: model_id.to_string(),
         model_dir: model_dir.to_path_buf(),
         repo_id,
-        model_type,
+        model_type_hint: non_empty_hint(model_type),
+        pipeline_tag_hint: non_empty_hint(pipeline_tag),
         family,
         official_name,
         expected_files: Vec::new(),
@@ -748,12 +874,13 @@ async fn stage_partial_download_row_for_model(
         })
         .or_else(|| candidate_from_marker(model_dir, model_id))
         .unwrap_or_else(|| {
-            let (model_type, family, cleaned_name) = split_model_id(model_id);
+            let (_model_type, family, cleaned_name) = split_model_id(model_id);
             PartialDownloadCandidate {
                 model_id: model_id.to_string(),
                 model_dir: model_dir.to_path_buf(),
                 repo_id: None,
-                model_type,
+                model_type_hint: None,
+                pipeline_tag_hint: None,
                 family,
                 official_name: cleaned_name,
                 expected_files: Vec::new(),
@@ -1011,5 +1138,66 @@ mod tests {
         assert!(!is_non_fatal_reclassify_error(
             "Cannot reclassify: permission denied"
         ));
+    }
+
+    #[test]
+    fn test_select_partial_model_type_prefers_reranker_resolution() {
+        let temp = TempDir::new().unwrap();
+        let index = crate::index::ModelIndex::new(temp.path().join("models.db")).unwrap();
+        let model_dir = temp
+            .path()
+            .join("llm")
+            .join("qwen3")
+            .join("qwen3-reranker-4b");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["Qwen3ForRewardModel"],"model_type":"qwen3"}"#,
+        )
+        .unwrap();
+
+        let selected = select_partial_model_type(
+            &index,
+            &model_dir,
+            Some("llm"),
+            Some("text-ranking"),
+            Some("llm"),
+        )
+        .unwrap();
+        assert_eq!(selected.model_type.as_deref(), Some("reranker"));
+        assert_eq!(
+            selected.source.as_deref(),
+            Some("model-type-reranker-disambiguation-guard")
+        );
+    }
+
+    #[test]
+    fn test_select_partial_model_type_uses_model_type_hint_fallback() {
+        let temp = TempDir::new().unwrap();
+        let index = crate::index::ModelIndex::new(temp.path().join("models.db")).unwrap();
+        let model_dir = temp.path().join("unknown").join("family").join("partial");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let selected = select_partial_model_type(&index, &model_dir, Some("llm"), None, Some("audio")).unwrap();
+        assert_eq!(selected.model_type.as_deref(), Some("audio"));
+        assert_eq!(
+            selected.source.as_deref(),
+            Some("download-partial-model-type-hint")
+        );
+    }
+
+    #[test]
+    fn test_select_partial_model_type_uses_path_fallback() {
+        let temp = TempDir::new().unwrap();
+        let index = crate::index::ModelIndex::new(temp.path().join("models.db")).unwrap();
+        let model_dir = temp.path().join("embedding").join("family").join("partial");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let selected = select_partial_model_type(&index, &model_dir, Some("embedding"), None, None).unwrap();
+        assert_eq!(selected.model_type.as_deref(), Some("embedding"));
+        assert_eq!(
+            selected.source.as_deref(),
+            Some("download-partial-path-fallback")
+        );
     }
 }

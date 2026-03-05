@@ -120,6 +120,7 @@ Migration reports now distinguish:
 - stale index rows
 
 Partial downloads (`.part` files) remain resumable and are tracked as partial rows until completed.
+Migration execution can now safely relocate partial-download directories to canonical paths by pausing tracked downloads, moving the directory, updating persistence/index paths, and resuming when appropriate.
 
 ## Supported Platforms
 

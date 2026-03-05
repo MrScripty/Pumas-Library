@@ -104,6 +104,23 @@ async fn main() -> pumas_library::Result<()> {
 }
 ```
 
+## Library Refresh and Partial Downloads
+
+Use full reconciliation when the on-disk library and SQLite index drift (for example after interrupted downloads):
+
+```bash
+cd rust
+cargo run --package pumas-library --example repair_library_integrity -- /path/to/shared-resources/models
+```
+
+This maintenance flow performs duplicate cleanup, reclassification, and index rebuild in one pass.
+Migration reports now distinguish:
+- metadata-backed index rows
+- partial-download index rows
+- stale index rows
+
+Partial downloads (`.part` files) remain resumable and are tracked as partial rows until completed.
+
 ## Supported Platforms
 
 | Platform      | Status       | Notes                                                 |

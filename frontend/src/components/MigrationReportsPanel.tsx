@@ -353,6 +353,14 @@ export const MigrationReportsPanel: React.FC = () => {
 
           {lastExecutionReport && (
             <div className="p-3 rounded border border-[hsl(var(--launcher-border)/0.7)] bg-[hsl(var(--launcher-bg-secondary)/0.45)] space-y-2">
+              {(() => {
+                const metadataDirCount = lastExecutionReport.metadata_dir_count ?? 0;
+                const metadataIndexCount =
+                  lastExecutionReport.index_metadata_model_count ?? lastExecutionReport.index_model_count;
+                const partialIndexCount = lastExecutionReport.index_partial_download_count ?? 0;
+                const staleIndexCount = lastExecutionReport.index_stale_model_count ?? 0;
+                return (
+                  <>
               <div className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--launcher-text-primary))]">
                 <span>Last Execution</span>
                 {statusIcon}
@@ -362,7 +370,10 @@ export const MigrationReportsPanel: React.FC = () => {
                 {lastExecutionReport.error_count} errors
               </div>
               <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
-                Reindexed {lastExecutionReport.reindexed_model_count} models, index count {lastExecutionReport.index_model_count}
+                Reindexed {lastExecutionReport.reindexed_model_count} models, metadata dirs {metadataDirCount}, metadata index {metadataIndexCount}
+              </div>
+              <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
+                Partial index rows {partialIndexCount}, stale index rows {staleIndexCount}
               </div>
               <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
                 Referential integrity: {lastExecutionReport.referential_integrity_ok ? 'OK' : 'FAILED'}
@@ -382,6 +393,9 @@ export const MigrationReportsPanel: React.FC = () => {
                   </div>
                 </div>
               )}
+                  </>
+                );
+              })()}
             </div>
           )}
 

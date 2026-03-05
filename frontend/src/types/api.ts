@@ -977,7 +977,11 @@ export interface MigrationExecutionReport {
   skipped_move_count: number;
   error_count: number;
   reindexed_model_count: number;
+  metadata_dir_count: number;
   index_model_count: number;
+  index_metadata_model_count: number;
+  index_partial_download_count: number;
+  index_stale_model_count: number;
   referential_integrity_ok: boolean;
   referential_integrity_errors: string[];
   machine_readable_report_path?: string | null;

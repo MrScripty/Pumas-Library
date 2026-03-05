@@ -1923,8 +1923,13 @@ impl ModelLibrary {
         }
 
         report.reindexed_model_count = self.rebuild_index().await?;
-        report.index_model_count = self.index.count()?;
-        report.referential_integrity_errors = self.validate_post_migration_integrity()?;
+        let integrity = self.validate_post_migration_integrity()?;
+        report.metadata_dir_count = integrity.metadata_dir_count;
+        report.index_model_count = integrity.index_model_count;
+        report.index_metadata_model_count = integrity.index_metadata_model_count;
+        report.index_partial_download_count = integrity.index_partial_download_count;
+        report.index_stale_model_count = integrity.index_stale_model_count;
+        report.referential_integrity_errors = integrity.errors;
         report.referential_integrity_ok = report.referential_integrity_errors.is_empty();
         if !report.referential_integrity_ok {
             report.error_count += report.referential_integrity_errors.len();
@@ -2087,7 +2092,7 @@ impl ModelLibrary {
         }
     }
 
-    fn validate_post_migration_integrity(&self) -> Result<Vec<String>> {
+    fn validate_post_migration_integrity(&self) -> Result<PostMigrationIntegritySummary> {
         let mut errors = Vec::new();
 
         for violation in self.index.list_foreign_key_violations()? {
@@ -2104,11 +2109,53 @@ impl ModelLibrary {
         }
 
         let metadata_dir_count = self.model_dirs().count();
-        let index_count = self.index.count()?;
-        if index_count != metadata_dir_count {
+        let mut index_metadata_model_count = 0usize;
+        let mut index_partial_download_count = 0usize;
+        let mut index_stale_model_count = 0usize;
+        let mut stale_ids = Vec::new();
+        let index_model_ids = self.index.get_all_ids()?;
+
+        for model_id in index_model_ids {
+            if let Some(record) = self.index.get(&model_id)? {
+                if record
+                    .metadata
+                    .get("match_source")
+                    .and_then(Value::as_str)
+                    .is_some_and(|source| source == "download_partial")
+                {
+                    index_partial_download_count += 1;
+                    continue;
+                }
+
+                let metadata_path = self.library_root.join(&model_id).join(METADATA_FILENAME);
+                if metadata_path.is_file() {
+                    index_metadata_model_count += 1;
+                } else {
+                    index_stale_model_count += 1;
+                    stale_ids.push(model_id);
+                }
+            }
+        }
+
+        let index_model_count =
+            index_metadata_model_count + index_partial_download_count + index_stale_model_count;
+        if index_metadata_model_count != metadata_dir_count {
             errors.push(format!(
-                "index/model directory count mismatch: index_count={} metadata_dirs={}",
-                index_count, metadata_dir_count
+                "index/model directory metadata mismatch: index_metadata_count={} metadata_dirs={} (partial_index_rows={} stale_index_rows={})",
+                index_metadata_model_count,
+                metadata_dir_count,
+                index_partial_download_count,
+                index_stale_model_count
+            ));
+        }
+        if index_stale_model_count > 0 {
+            let preview = stale_ids.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            let suffix = if stale_ids.len() > 5 { ", ..." } else { "" };
+            errors.push(format!(
+                "stale index rows detected: count={} ids=[{}{}]",
+                stale_ids.len(),
+                preview,
+                suffix
             ));
         }
 
@@ -2134,8 +2181,25 @@ impl ModelLibrary {
             }
         }
 
-        Ok(errors)
+        Ok(PostMigrationIntegritySummary {
+            metadata_dir_count,
+            index_model_count,
+            index_metadata_model_count,
+            index_partial_download_count,
+            index_stale_model_count,
+            errors,
+        })
     }
+}
+
+#[derive(Debug, Clone, Default)]
+struct PostMigrationIntegritySummary {
+    metadata_dir_count: usize,
+    index_model_count: usize,
+    index_metadata_model_count: usize,
+    index_partial_download_count: usize,
+    index_stale_model_count: usize,
+    errors: Vec<String>,
 }
 
 /// Result of a library-wide reclassification operation.
@@ -2262,8 +2326,16 @@ pub struct MigrationExecutionReport {
     pub error_count: usize,
     /// Number of models indexed after post-migration rebuild.
     pub reindexed_model_count: usize,
+    /// Number of model directories with metadata.json discovered on disk.
+    pub metadata_dir_count: usize,
     /// Model count currently stored in SQLite index after rebuild.
     pub index_model_count: usize,
+    /// SQLite row count that maps to metadata-backed model directories.
+    pub index_metadata_model_count: usize,
+    /// SQLite row count staged as metadata-less partial downloads.
+    pub index_partial_download_count: usize,
+    /// SQLite row count that does not map to a metadata-backed model directory.
+    pub index_stale_model_count: usize,
     /// Whether post-migration referential integrity checks passed.
     pub referential_integrity_ok: bool,
     /// Post-migration integrity and metadata validation errors.
@@ -2915,8 +2987,24 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
         report.reindexed_model_count
     ));
     output.push_str(&format!(
+        "- Metadata Directory Count: `{}`\n",
+        report.metadata_dir_count
+    ));
+    output.push_str(&format!(
         "- Index Model Count: `{}`\n",
         report.index_model_count
+    ));
+    output.push_str(&format!(
+        "- Index Metadata Model Count: `{}`\n",
+        report.index_metadata_model_count
+    ));
+    output.push_str(&format!(
+        "- Index Partial Download Count: `{}`\n",
+        report.index_partial_download_count
+    ));
+    output.push_str(&format!(
+        "- Index Stale Model Count: `{}`\n",
+        report.index_stale_model_count
     ));
     output.push_str(&format!(
         "- Referential Integrity OK: `{}`\n",
@@ -4818,6 +4906,93 @@ mod tests {
             .iter()
             .any(|error| error.contains("metadata validation failed")));
         assert!(report.error_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_validate_post_migration_integrity_ignores_partial_download_rows() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "test", "full-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/full-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("full-model".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let partial_dir = library.build_model_path("llm", "test", "partial-model");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        std::fs::write(partial_dir.join("weights.gguf.part"), b"partial").unwrap();
+        let partial_metadata = ModelMetadata {
+            model_id: Some("llm/test/partial-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("partial-model".to_string()),
+            match_source: Some("download_partial".to_string()),
+            ..Default::default()
+        };
+        library
+            .upsert_index_from_metadata(&partial_dir, &partial_metadata)
+            .unwrap();
+
+        let integrity = library.validate_post_migration_integrity().unwrap();
+        assert_eq!(integrity.metadata_dir_count, 1);
+        assert_eq!(integrity.index_model_count, 2);
+        assert_eq!(integrity.index_metadata_model_count, 1);
+        assert_eq!(integrity.index_partial_download_count, 1);
+        assert_eq!(integrity.index_stale_model_count, 0);
+        assert!(!integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("metadata mismatch")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_post_migration_integrity_flags_stale_index_rows() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "test", "good-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/good-model".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("good-model".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let stale_dir = library.build_model_path("llm", "test", "stale-row");
+        std::fs::create_dir_all(&stale_dir).unwrap();
+        let stale_metadata = ModelMetadata {
+            model_id: Some("llm/test/stale-row".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("stale-row".to_string()),
+            match_source: Some("download".to_string()),
+            ..Default::default()
+        };
+        library
+            .upsert_index_from_metadata(&stale_dir, &stale_metadata)
+            .unwrap();
+
+        let integrity = library.validate_post_migration_integrity().unwrap();
+        assert_eq!(integrity.metadata_dir_count, 1);
+        assert_eq!(integrity.index_model_count, 2);
+        assert_eq!(integrity.index_metadata_model_count, 1);
+        assert_eq!(integrity.index_partial_download_count, 0);
+        assert_eq!(integrity.index_stale_model_count, 1);
+        assert!(integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("stale index rows detected")));
     }
 
     #[tokio::test]

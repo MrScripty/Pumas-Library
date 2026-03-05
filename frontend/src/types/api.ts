@@ -445,6 +445,8 @@ export interface ModelDownloadResponse extends BaseResponse {
 export interface ModelDownloadStatusResponse extends BaseResponse {
   downloadId?: string;
   repoId?: string;
+  modelName?: string;
+  modelType?: string;
   status?: string;
   progress?: number;
   downloadedBytes?: number;

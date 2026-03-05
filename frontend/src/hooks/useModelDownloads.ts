@@ -65,6 +65,8 @@ export function useModelDownloads() {
               totalBytes: dl.totalBytes,
               speed: dl.speed,
               etaSeconds: dl.etaSeconds,
+              modelName: dl.modelName,
+              modelType: dl.modelType,
             };
           }
         }
@@ -106,6 +108,8 @@ export function useModelDownloads() {
               totalBytes: typeof result.totalBytes === 'number' ? result.totalBytes : undefined,
               speed: typeof result.speed === 'number' ? result.speed : undefined,
               etaSeconds: typeof result.etaSeconds === 'number' ? result.etaSeconds : undefined,
+              modelName: result.modelName,
+              modelType: result.modelType,
               error: result.error,
             };
           } catch (error) {
@@ -138,6 +142,8 @@ export function useModelDownloads() {
             totalBytes: update.totalBytes ?? previous.totalBytes,
             speed: update.speed,
             etaSeconds: update.etaSeconds,
+            modelName: update.modelName ?? previous.modelName,
+            modelType: update.modelType ?? previous.modelType,
           };
         });
         return next;

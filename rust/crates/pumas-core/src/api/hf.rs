@@ -5,6 +5,7 @@ use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use std::collections::HashSet;
+use std::path::Path;
 use tracing::warn;
 
 impl PumasApi {
@@ -223,6 +224,139 @@ impl PumasApi {
         client.start_download(&request, dest).await
     }
 
+    /// Resume a partial download by choosing the correct action:
+    /// - Resume an existing tracked paused/error download
+    /// - Attach to an already active tracked download
+    /// - Recover an orphan partial download
+    ///
+    /// Returns an action descriptor instead of failing hard so UI callers can
+    /// surface precise next steps to users.
+    pub async fn resume_partial_download(
+        &self,
+        repo_id: &str,
+        dest_dir: &str,
+    ) -> Result<models::PartialDownloadAction> {
+        let dest = Path::new(dest_dir);
+        if !dest.is_dir() {
+            return Ok(models::PartialDownloadAction {
+                action: "none".to_string(),
+                download_id: None,
+                status: None,
+                reason_code: Some("dest_dir_missing".to_string()),
+                message: Some(format!("directory not found: {}", dest_dir)),
+            });
+        }
+
+        let primary = self.primary();
+        let client = match primary.hf_client.as_ref() {
+            Some(client) => client,
+            None => {
+                return Ok(models::PartialDownloadAction {
+                    action: "none".to_string(),
+                    download_id: None,
+                    status: None,
+                    reason_code: Some("hf_client_unavailable".to_string()),
+                    message: Some("HuggingFace client not initialized".to_string()),
+                });
+            }
+        };
+
+        if let Some(download_id) = client.find_download_id_by_dest_dir(dest).await {
+            let status = client.get_download_status(&download_id).await;
+            if let Some(status) = status {
+                match status {
+                    models::DownloadStatus::Paused | models::DownloadStatus::Error => {
+                        match client.resume_download(&download_id).await {
+                            Ok(true) => {
+                                return Ok(models::PartialDownloadAction {
+                                    action: "resume".to_string(),
+                                    download_id: Some(download_id),
+                                    status: Some(models::DownloadStatus::Queued),
+                                    reason_code: None,
+                                    message: None,
+                                });
+                            }
+                            Ok(false) => {
+                                return Ok(models::PartialDownloadAction {
+                                    action: "none".to_string(),
+                                    download_id: Some(download_id),
+                                    status: Some(status),
+                                    reason_code: Some("resume_rejected".to_string()),
+                                    message: Some(format!(
+                                        "tracked download cannot be resumed from status {:?}",
+                                        status
+                                    )),
+                                });
+                            }
+                            Err(err) => {
+                                let reason_code = partial_download_reason_code(&err).to_string();
+                                return Ok(models::PartialDownloadAction {
+                                    action: "none".to_string(),
+                                    download_id: Some(download_id),
+                                    status: Some(status),
+                                    reason_code: Some(reason_code),
+                                    message: Some(err.to_string()),
+                                });
+                            }
+                        }
+                    }
+                    models::DownloadStatus::Queued
+                    | models::DownloadStatus::Downloading
+                    | models::DownloadStatus::Pausing
+                    | models::DownloadStatus::Cancelling => {
+                        return Ok(models::PartialDownloadAction {
+                            action: "attach".to_string(),
+                            download_id: Some(download_id),
+                            status: Some(status),
+                            reason_code: None,
+                            message: None,
+                        });
+                    }
+                    models::DownloadStatus::Completed => {
+                        return Ok(models::PartialDownloadAction {
+                            action: "none".to_string(),
+                            download_id: Some(download_id),
+                            status: Some(status),
+                            reason_code: Some("already_completed".to_string()),
+                            message: Some("tracked download is already completed".to_string()),
+                        });
+                    }
+                    models::DownloadStatus::Cancelled => {
+                        return Ok(models::PartialDownloadAction {
+                            action: "none".to_string(),
+                            download_id: Some(download_id),
+                            status: Some(status),
+                            reason_code: Some("already_cancelled".to_string()),
+                            message: Some(
+                                "tracked download was cancelled; start a new download".to_string(),
+                            ),
+                        });
+                    }
+                }
+            }
+        }
+
+        match self.recover_download(repo_id, dest_dir).await {
+            Ok(download_id) => Ok(models::PartialDownloadAction {
+                action: "recover".to_string(),
+                download_id: Some(download_id),
+                status: Some(models::DownloadStatus::Queued),
+                reason_code: None,
+                message: None,
+            }),
+            Err(err) => {
+                let reason_code = partial_download_reason_code(&err).to_string();
+                Ok(models::PartialDownloadAction {
+                    action: "none".to_string(),
+                    download_id: None,
+                    status: None,
+                    reason_code: Some(reason_code),
+                    message: Some(err.to_string()),
+                })
+            }
+        }
+    }
+
     /// Refetch metadata for a library model from HuggingFace.
     ///
     /// Uses the stored `repo_id` if available, otherwise falls back to
@@ -417,4 +551,43 @@ fn resolve_model_type_from_hints<const N: usize>(
         }
     }
     Ok(None)
+}
+
+fn partial_download_reason_code(err: &PumasError) -> &'static str {
+    match err {
+        PumasError::NotFound { .. } => "dest_dir_missing",
+        PumasError::ModelNotFound { .. } => "repo_not_found",
+        PumasError::RateLimited { .. } => "rate_limited",
+        PumasError::PermissionDenied(_) => "permission_denied",
+        PumasError::Timeout(_)
+        | PumasError::Network { .. }
+        | PumasError::CircuitBreakerOpen { .. } => "network_error",
+        PumasError::Config { message } if message.contains("Invalid repo_id format") => {
+            "invalid_repo_id"
+        }
+        PumasError::Config { .. } => "hf_client_unavailable",
+        _ => "recover_failed",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_partial_download_reason_code_maps_invalid_repo_id() {
+        let err = PumasError::Config {
+            message: "Invalid repo_id format (expected 'owner/name'): bad".to_string(),
+        };
+        assert_eq!(partial_download_reason_code(&err), "invalid_repo_id");
+    }
+
+    #[test]
+    fn test_partial_download_reason_code_maps_network_errors() {
+        let err = PumasError::Network {
+            message: "connection dropped".to_string(),
+            cause: None,
+        };
+        assert_eq!(partial_download_reason_code(&err), "network_error");
+    }
 }

@@ -102,6 +102,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "cancel_model_download"
         | "pause_model_download"
         | "resume_model_download"
+        | "resume_partial_download"
         | "list_model_downloads"
         | "search_hf_models"
         | "get_related_models"

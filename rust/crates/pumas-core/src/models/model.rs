@@ -540,6 +540,27 @@ pub struct ModelDownloadProgress {
     pub error: Option<String>,
 }
 
+/// Action selected when resuming a partial download.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct PartialDownloadAction {
+    /// Chosen action: `resume`, `recover`, `attach`, or `none`.
+    pub action: String,
+    /// Download ID when an existing/new tracked download is available.
+    #[serde(default)]
+    pub download_id: Option<String>,
+    /// Current status for tracked downloads.
+    #[serde(default)]
+    pub status: Option<DownloadStatus>,
+    /// Machine-readable reason code for failures/non-action outcomes.
+    #[serde(default)]
+    pub reason_code: Option<String>,
+    /// Optional human-readable detail.
+    #[serde(default)]
+    pub message: Option<String>,
+}
+
 /// Security tier for pickle scanning.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]

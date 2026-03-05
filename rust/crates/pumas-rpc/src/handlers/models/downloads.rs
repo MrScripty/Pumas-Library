@@ -185,3 +185,25 @@ pub async fn recover_download(state: &AppState, params: &Value) -> pumas_library
         })),
     }
 }
+
+pub async fn resume_partial_download(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let repo_id = require_str_param(params, "repo_id", "repoId")?;
+    let dest_dir = require_str_param(params, "dest_dir", "destDir")?;
+
+    let action = state
+        .api
+        .resume_partial_download(&repo_id, &dest_dir)
+        .await?;
+    let success = action.action != "none";
+    Ok(json!({
+        "success": success,
+        "action": action.action,
+        "download_id": action.download_id,
+        "status": action.status,
+        "reason_code": action.reason_code,
+        "error": if success { Value::Null } else { serde_json::to_value(action.message)? }
+    }))
+}

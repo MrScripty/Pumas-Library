@@ -1893,7 +1893,12 @@ impl ModelLibrary {
             .unwrap_or_else(|| extract_string_array(metadata_json, "review_reasons"));
         let declared_dependency_binding_count = metadata
             .as_ref()
-            .and_then(|value| value.dependency_bindings.as_ref().map(|bindings| bindings.len()))
+            .and_then(|value| {
+                value
+                    .dependency_bindings
+                    .as_ref()
+                    .map(|bindings| bindings.len())
+            })
             .or_else(|| {
                 metadata_json
                     .get("dependency_bindings")
@@ -1995,7 +2000,9 @@ impl ModelLibrary {
                     model_id: item.model_id.clone(),
                     target_model_id: item.target_model_id.clone().unwrap_or_default(),
                     action: "skipped_partial_download".to_string(),
-                    error: Some("partial download has no metadata.json; migration move skipped".to_string()),
+                    error: Some(
+                        "partial download has no metadata.json; migration move skipped".to_string(),
+                    ),
                 })
                 .collect::<Vec<_>>();
 
@@ -2265,7 +2272,12 @@ impl ModelLibrary {
             ));
         }
         if index_stale_model_count > 0 {
-            let preview = stale_ids.iter().take(5).cloned().collect::<Vec<_>>().join(", ");
+            let preview = stale_ids
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
             let suffix = if stale_ids.len() > 5 { ", ..." } else { "" };
             errors.push(format!(
                 "stale index rows detected: count={} ids=[{}{}]",

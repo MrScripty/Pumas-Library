@@ -801,16 +801,21 @@ fn split_model_id(model_id: &str) -> Option<(&str, &str, &str)> {
     Some((model_type, family, cleaned_name))
 }
 
-fn update_download_marker(target_dir: &Path, target_model_type: &str, target_family: &str) -> Result<()> {
+fn update_download_marker(
+    target_dir: &Path,
+    target_model_type: &str,
+    target_family: &str,
+) -> Result<()> {
     let marker_path = target_dir.join(".pumas_download");
     if !marker_path.exists() {
         return Ok(());
     }
     let marker_text = std::fs::read_to_string(&marker_path)?;
-    let mut marker_json: Value = serde_json::from_str(&marker_text).map_err(|err| PumasError::Json {
-        message: format!("Failed to parse download marker JSON: {}", err),
-        source: None,
-    })?;
+    let mut marker_json: Value =
+        serde_json::from_str(&marker_text).map_err(|err| PumasError::Json {
+            message: format!("Failed to parse download marker JSON: {}", err),
+            source: None,
+        })?;
     let Some(marker_obj) = marker_json.as_object_mut() else {
         return Err(PumasError::Validation {
             field: "download_marker".to_string(),
@@ -821,7 +826,10 @@ fn update_download_marker(target_dir: &Path, target_model_type: &str, target_fam
         "model_type".to_string(),
         Value::String(target_model_type.to_string()),
     );
-    marker_obj.insert("family".to_string(), Value::String(target_family.to_string()));
+    marker_obj.insert(
+        "family".to_string(),
+        Value::String(target_family.to_string()),
+    );
     std::fs::write(&marker_path, serde_json::to_string_pretty(&marker_json)?)?;
     Ok(())
 }
@@ -889,12 +897,17 @@ async fn relocate_skipped_partial_downloads(
         };
 
         let source_dir = primary.model_library.library_root().join(&row.model_id);
-        let target_dir = primary
-            .model_library
-            .build_model_path(target_model_type, target_family, target_cleaned_name);
+        let target_dir = primary.model_library.build_model_path(
+            target_model_type,
+            target_family,
+            target_cleaned_name,
+        );
         if !source_dir.exists() {
             row.action = "missing_source".to_string();
-            row.error = Some(format!("Source directory not found: {}", source_dir.display()));
+            row.error = Some(format!(
+                "Source directory not found: {}",
+                source_dir.display()
+            ));
             mutated = true;
             continue;
         }

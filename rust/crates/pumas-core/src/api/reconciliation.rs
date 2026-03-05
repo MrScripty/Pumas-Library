@@ -21,8 +21,8 @@ use walkdir::WalkDir;
 
 use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
-use crate::model_library::download_store::PersistedDownload;
 use crate::index::ModelIndex;
+use crate::model_library::download_store::PersistedDownload;
 use crate::model_library::{
     resolve_model_type_with_rules, InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata,
     ModelType, RepoFileTree,
@@ -1221,7 +1221,9 @@ mod tests {
         let model_dir = temp.path().join("unknown").join("family").join("partial");
         std::fs::create_dir_all(&model_dir).unwrap();
 
-        let selected = select_partial_model_type(&index, &model_dir, Some("llm"), None, Some("audio")).unwrap();
+        let selected =
+            select_partial_model_type(&index, &model_dir, Some("llm"), None, Some("audio"))
+                .unwrap();
         assert_eq!(selected.model_type.as_deref(), Some("audio"));
         assert_eq!(
             selected.source.as_deref(),
@@ -1236,7 +1238,8 @@ mod tests {
         let model_dir = temp.path().join("embedding").join("family").join("partial");
         std::fs::create_dir_all(&model_dir).unwrap();
 
-        let selected = select_partial_model_type(&index, &model_dir, Some("embedding"), None, None).unwrap();
+        let selected =
+            select_partial_model_type(&index, &model_dir, Some("embedding"), None, None).unwrap();
         assert_eq!(selected.model_type.as_deref(), Some("embedding"));
         assert_eq!(
             selected.source.as_deref(),
@@ -1248,9 +1251,7 @@ mod tests {
     fn test_apply_partial_reranker_name_override_for_llm_partial() {
         let candidate = PartialDownloadCandidate {
             model_id: "llm/forturne/qwen3-reranker-4b-nvfp4".to_string(),
-            model_dir: PathBuf::from(
-                "/tmp/llm/forturne/qwen3-reranker-4b-nvfp4",
-            ),
+            model_dir: PathBuf::from("/tmp/llm/forturne/qwen3-reranker-4b-nvfp4"),
             repo_id: Some("Forturne/Qwen3-Reranker-4B-NVFP4".to_string()),
             model_type_hint: Some("llm".to_string()),
             pipeline_tag_hint: Some("text-generation".to_string()),

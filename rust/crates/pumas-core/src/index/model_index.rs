@@ -2689,11 +2689,17 @@ mod tests {
             Some("llm")
         );
         assert_eq!(
-            index.resolve_model_type_hint("text-ranking").unwrap().as_deref(),
+            index
+                .resolve_model_type_hint("text-ranking")
+                .unwrap()
+                .as_deref(),
             Some("reranker")
         );
         assert_eq!(
-            index.resolve_model_type_hint("reranker").unwrap().as_deref(),
+            index
+                .resolve_model_type_hint("reranker")
+                .unwrap()
+                .as_deref(),
             Some("reranker")
         );
         assert_eq!(

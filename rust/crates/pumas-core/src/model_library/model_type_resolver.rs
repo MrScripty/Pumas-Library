@@ -54,8 +54,7 @@ pub fn resolve_model_type_with_rules(
         }
     }
 
-    if should_apply_reranker_disambiguation_guard(&hard_types, model_dir, &signals, &medium_hints)
-    {
+    if should_apply_reranker_disambiguation_guard(&hard_types, model_dir, &signals, &medium_hints) {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Reranker,
             source: "model-type-reranker-disambiguation-guard".to_string(),

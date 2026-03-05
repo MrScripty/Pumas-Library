@@ -1095,7 +1095,9 @@ impl HuggingFaceClient {
 
         if let Some(ref persistence) = self.persistence {
             let mut persisted = persistence.load_all();
-            if let Some(entry) = persisted.iter_mut().find(|entry| entry.download_id == download_id)
+            if let Some(entry) = persisted
+                .iter_mut()
+                .find(|entry| entry.download_id == download_id)
             {
                 entry.dest_dir = new_dest_dir.to_path_buf();
                 if let Some(model_type) = new_model_type {

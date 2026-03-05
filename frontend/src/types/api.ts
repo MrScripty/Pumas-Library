@@ -476,6 +476,13 @@ export interface RecoverDownloadResponse extends BaseResponse {
   download_id?: string;
 }
 
+export interface ResumePartialDownloadResponse extends BaseResponse {
+  action?: 'resume' | 'recover' | 'attach' | 'none';
+  download_id?: string;
+  status?: string;
+  reason_code?: string;
+}
+
 export interface ScanSharedStorageResponse extends BaseResponse {
   result: {
     modelsFound?: number;
@@ -1586,6 +1593,7 @@ export interface PyWebViewAPI {
   list_model_downloads(): Promise<ListModelDownloadsResponse>;
   list_interrupted_downloads(): Promise<ListInterruptedDownloadsResponse>;
   recover_download(repoId: string, destDir: string): Promise<RecoverDownloadResponse>;
+  resume_partial_download(repoId: string, destDir: string): Promise<ResumePartialDownloadResponse>;
 
   // HuggingFace Authentication
   set_hf_token(token: string): Promise<BaseResponse>;

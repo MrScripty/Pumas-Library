@@ -206,6 +206,8 @@ const electronAPI = {
     apiCall('list_interrupted_downloads'),
   recover_download: (repoId: string, destDir: string) =>
     apiCall('recover_download', { repo_id: repoId, dest_dir: destDir }),
+  resume_partial_download: (repoId: string, destDir: string) =>
+    apiCall('resume_partial_download', { repo_id: repoId, dest_dir: destDir }),
   get_library_model_metadata: (modelId: string) =>
     apiCall('get_library_model_metadata', { model_id: modelId }),
   refetch_model_metadata_from_hf: (modelId: string) =>

@@ -77,6 +77,11 @@ class ModelsAPI {
     return await api.recover_download(repoId, destDir);
   }
 
+  async resumePartialDownload(repoId: string, destDir: string) {
+    const api = this.getAPI();
+    return await api.resume_partial_download(repoId, destDir);
+  }
+
   async deleteModel(modelId: string) {
     const api = this.getAPI();
     return await api.delete_model_with_cascade(modelId);

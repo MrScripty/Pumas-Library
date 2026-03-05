@@ -66,7 +66,8 @@ fn validate_metadata_v2_internal(
     if !is_canonical_model_type(model_type) {
         return Err(PumasError::Validation {
             field: "model_type".to_string(),
-            message: "must be one of llm, diffusion, embedding, audio, vision, unknown".to_string(),
+            message: "must be one of llm, reranker, diffusion, embedding, audio, vision, unknown"
+                .to_string(),
         });
     }
 
@@ -147,7 +148,7 @@ fn require_non_empty_str<'a>(field: &str, value: Option<&'a str>) -> Result<&'a 
 fn is_canonical_model_type(value: &str) -> bool {
     matches!(
         value,
-        "llm" | "diffusion" | "embedding" | "audio" | "vision" | "unknown"
+        "llm" | "reranker" | "diffusion" | "embedding" | "audio" | "vision" | "unknown"
     )
 }
 

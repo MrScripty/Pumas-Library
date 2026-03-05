@@ -25,6 +25,7 @@ use rustler::{NifResult, NifStruct, NifUnitEnum};
 #[derive(NifUnitEnum)]
 pub enum ElixirModelType {
     Llm,
+    Reranker,
     Diffusion,
     Embedding,
     Audio,
@@ -269,6 +270,7 @@ fn version_impl() -> String {
 fn parse_model_type_impl(type_str: &str) -> ElixirModelType {
     match type_str.to_lowercase().as_str() {
         "llm" => ElixirModelType::Llm,
+        "reranker" => ElixirModelType::Reranker,
         "diffusion" => ElixirModelType::Diffusion,
         "embedding" => ElixirModelType::Embedding,
         "audio" => ElixirModelType::Audio,
@@ -449,6 +451,10 @@ mod tests {
     fn test_parse_model_type() {
         assert!(matches!(parse_model_type_impl("llm"), ElixirModelType::Llm));
         assert!(matches!(parse_model_type_impl("LLM"), ElixirModelType::Llm));
+        assert!(matches!(
+            parse_model_type_impl("reranker"),
+            ElixirModelType::Reranker
+        ));
         assert!(matches!(
             parse_model_type_impl("unknown_type"),
             ElixirModelType::Unknown

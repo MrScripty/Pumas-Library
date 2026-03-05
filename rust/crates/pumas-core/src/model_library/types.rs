@@ -20,6 +20,8 @@ pub use crate::models::{
 pub enum ModelType {
     /// Large Language Model (text generation)
     Llm,
+    /// Reranker model (text ranking / relevance scoring)
+    Reranker,
     /// Diffusion model (image generation)
     Diffusion,
     /// Embedding model (text/image embeddings for similarity, retrieval, etc.)
@@ -37,6 +39,7 @@ impl ModelType {
     pub fn as_str(&self) -> &'static str {
         match self {
             ModelType::Llm => "llm",
+            ModelType::Reranker => "reranker",
             ModelType::Diffusion => "diffusion",
             ModelType::Embedding => "embedding",
             ModelType::Audio => "audio",
@@ -61,6 +64,9 @@ impl ModelType {
             | "translation"
             | "summarization"
             | "conversational" => ModelType::Llm,
+
+            // Reranker / ranking
+            "text-ranking" => ModelType::Reranker,
 
             // Diffusion / image & video generation
             "text-to-image"
@@ -107,6 +113,7 @@ impl std::str::FromStr for ModelType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "llm" => Ok(ModelType::Llm),
+            "reranker" => Ok(ModelType::Reranker),
             "diffusion" => Ok(ModelType::Diffusion),
             "embedding" => Ok(ModelType::Embedding),
             "audio" => Ok(ModelType::Audio),
@@ -711,6 +718,10 @@ mod tests {
     fn test_model_type_parsing() {
         assert_eq!("llm".parse::<ModelType>().unwrap(), ModelType::Llm);
         assert_eq!(
+            "reranker".parse::<ModelType>().unwrap(),
+            ModelType::Reranker
+        );
+        assert_eq!(
             "diffusion".parse::<ModelType>().unwrap(),
             ModelType::Diffusion
         );
@@ -732,6 +743,10 @@ mod tests {
             ModelType::Llm
         );
         assert_eq!(ModelType::from_pipeline_tag("fill-mask"), ModelType::Llm);
+        assert_eq!(
+            ModelType::from_pipeline_tag("text-ranking"),
+            ModelType::Reranker
+        );
         assert_eq!(
             ModelType::from_pipeline_tag("text-to-image"),
             ModelType::Diffusion
@@ -798,6 +813,10 @@ mod tests {
             ModelType::Llm
         );
         assert_eq!(
+            "text-ranking".parse::<ModelType>().unwrap(),
+            ModelType::Reranker
+        );
+        assert_eq!(
             "feature-extraction".parse::<ModelType>().unwrap(),
             ModelType::Embedding
         );
@@ -810,6 +829,7 @@ mod tests {
     #[test]
     fn test_model_type_as_str() {
         assert_eq!(ModelType::Llm.as_str(), "llm");
+        assert_eq!(ModelType::Reranker.as_str(), "reranker");
         assert_eq!(ModelType::Diffusion.as_str(), "diffusion");
         assert_eq!(ModelType::Embedding.as_str(), "embedding");
         assert_eq!(ModelType::Audio.as_str(), "audio");

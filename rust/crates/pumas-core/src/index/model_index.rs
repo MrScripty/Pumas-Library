@@ -261,6 +261,8 @@ impl ModelIndex {
 
     /// Create metadata v2/additional governance tables.
     fn ensure_metadata_v2_schema(conn: &Connection) -> Result<()> {
+        Self::migrate_model_type_rule_constraints(conn)?;
+
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS task_signature_mappings (
@@ -297,7 +299,7 @@ impl ModelIndex {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               pattern TEXT NOT NULL,
               match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -316,7 +318,7 @@ impl ModelIndex {
             CREATE TABLE IF NOT EXISTS model_type_config_rules (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -444,6 +446,137 @@ impl ModelIndex {
         Ok(())
     }
 
+    fn migrate_model_type_rule_constraints(conn: &Connection) -> Result<()> {
+        let arch_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'table' AND name = 'model_type_arch_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if arch_sql
+            .as_deref()
+            .is_some_and(|sql| !sql.to_lowercase().contains("'reranker'"))
+        {
+            Self::rebuild_model_type_arch_rules_table(conn)?;
+        }
+
+        let config_sql: Option<String> = conn
+            .query_row(
+                "SELECT sql FROM sqlite_master
+                 WHERE type = 'table' AND name = 'model_type_config_rules'",
+                [],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if config_sql
+            .as_deref()
+            .is_some_and(|sql| !sql.to_lowercase().contains("'reranker'"))
+        {
+            Self::rebuild_model_type_config_rules_table(conn)?;
+        }
+
+        Ok(())
+    }
+
+    fn rebuild_model_type_arch_rules_table(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            ALTER TABLE model_type_arch_rules RENAME TO model_type_arch_rules_legacy;
+
+            CREATE TABLE model_type_arch_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              pattern TEXT NOT NULL,
+              match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            INSERT INTO model_type_arch_rules (
+              id,
+              pattern,
+              match_style,
+              model_type,
+              priority,
+              status,
+              source,
+              notes,
+              created_at,
+              updated_at
+            )
+            SELECT
+              id,
+              pattern,
+              match_style,
+              model_type,
+              priority,
+              status,
+              source,
+              notes,
+              created_at,
+              updated_at
+            FROM model_type_arch_rules_legacy;
+
+            DROP TABLE model_type_arch_rules_legacy;
+            ",
+        )?;
+
+        Ok(())
+    }
+
+    fn rebuild_model_type_config_rules_table(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            ALTER TABLE model_type_config_rules RENAME TO model_type_config_rules_legacy;
+
+            CREATE TABLE model_type_config_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              config_model_type TEXT NOT NULL,
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              priority INTEGER NOT NULL DEFAULT 100,
+              status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
+              source TEXT NOT NULL DEFAULT 'system',
+              notes TEXT,
+              created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+            );
+
+            INSERT INTO model_type_config_rules (
+              id,
+              config_model_type,
+              model_type,
+              priority,
+              status,
+              source,
+              notes,
+              created_at,
+              updated_at
+            )
+            SELECT
+              id,
+              config_model_type,
+              model_type,
+              priority,
+              status,
+              source,
+              notes,
+              created_at,
+              updated_at
+            FROM model_type_config_rules_legacy;
+
+            DROP TABLE model_type_config_rules_legacy;
+            ",
+        )?;
+
+        Ok(())
+    }
+
     /// Seed idempotent baseline rows for mapping/rule tables.
     fn seed_metadata_v2_rows(conn: &Connection) -> Result<()> {
         conn.execute_batch(
@@ -495,6 +628,7 @@ impl ModelIndex {
 
             INSERT OR IGNORE INTO model_type_config_rules (config_model_type, model_type, priority, status, source) VALUES
               ('llm', 'llm', 50, 'active', 'system'),
+              ('reranker', 'reranker', 50, 'active', 'system'),
               ('diffusion', 'diffusion', 50, 'active', 'system'),
               ('embedding', 'embedding', 50, 'active', 'system'),
               ('audio', 'audio', 50, 'active', 'system'),
@@ -509,6 +643,7 @@ impl ModelIndex {
               ('translation', 'llm', 60, 'active', 'system'),
               ('summarization', 'llm', 60, 'active', 'system'),
               ('conversational', 'llm', 60, 'active', 'system'),
+              ('text-ranking', 'reranker', 60, 'active', 'system'),
               ('text-to-image', 'diffusion', 60, 'active', 'system'),
               ('image-to-image', 'diffusion', 60, 'active', 'system'),
               ('unconditional-image-generation', 'diffusion', 60, 'active', 'system'),
@@ -2521,7 +2656,13 @@ mod tests {
         assert!(config_rules
             .iter()
             .any(|r| r.config_model_type == "text-generation"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "text-ranking"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llm"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "reranker"));
     }
 
     #[test]
@@ -2545,6 +2686,14 @@ mod tests {
         assert_eq!(
             index.resolve_model_type_hint("llm").unwrap().as_deref(),
             Some("llm")
+        );
+        assert_eq!(
+            index.resolve_model_type_hint("text-ranking").unwrap().as_deref(),
+            Some("reranker")
+        );
+        assert_eq!(
+            index.resolve_model_type_hint("reranker").unwrap().as_deref(),
+            Some("reranker")
         );
         assert_eq!(
             index.resolve_model_type_hint("not-a-known-type").unwrap(),

@@ -13,6 +13,9 @@ from device_manager import DeviceManager
 
 logger = logging.getLogger(__name__)
 
+EXPECTED_LOAD_ERRORS = (OSError, RuntimeError, ValueError, KeyError)
+EXPECTED_UNLOAD_ERRORS = (OSError, RuntimeError, AttributeError)
+
 
 class SlotState(str, Enum):
     UNLOADED = "unloaded"
@@ -123,9 +126,13 @@ class ModelManager:
                 slot.ram_memory_bytes = _estimate_model_ram(loaded.model)
 
             logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
-        except Exception as e:
+        except EXPECTED_LOAD_ERRORS:
             slot.state = SlotState.ERROR
-            logger.error("Failed to load model %s: %s", model_name, e)
+            logger.exception("Failed to load model %s", model_name)
+            raise
+        except Exception:
+            slot.state = SlotState.ERROR
+            logger.exception("Unexpected failure while loading model %s", model_name)
             raise
 
         return slot
@@ -165,9 +172,13 @@ class ModelManager:
 
             del self.slots[slot_id]
             logger.info("Model unloaded: %s (slot %s)", slot.model_name, slot_id)
-        except Exception as e:
+        except EXPECTED_UNLOAD_ERRORS:
             slot.state = SlotState.ERROR
-            logger.error("Failed to unload slot %s: %s", slot_id, e)
+            logger.exception("Failed to unload slot %s", slot_id)
+            raise
+        except Exception:
+            slot.state = SlotState.ERROR
+            logger.exception("Unexpected failure while unloading slot %s", slot_id)
             raise
 
     def get_model_for_inference(self, model_name: str) -> Optional[LoadedModel]:
@@ -191,5 +202,9 @@ def _estimate_model_ram(model: Any) -> Optional[int]:
     try:
         total = sum(p.nelement() * p.element_size() for p in model.parameters())
         return total
+    except (AttributeError, TypeError, RuntimeError):
+        logger.debug("Failed to estimate model RAM usage", exc_info=True)
+        return None
     except Exception:
+        logger.exception("Unexpected error while estimating model RAM usage")
         return None

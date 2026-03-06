@@ -15,6 +15,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _log_and_raise_internal_error(action: str, error: Exception) -> None:
+    logger.exception("Failed to %s", action)
+    raise HTTPException(status_code=500, detail=str(error))
+
+
 # --- Request Models ---
 
 class LoadModelRequest(BaseModel):
@@ -59,9 +64,10 @@ async def load_model(req: LoadModelRequest, request: Request):
         return {"success": True, "slot": slot.to_dict()}
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error("Failed to load model: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        _log_and_raise_internal_error("load model", e)
 
 
 @router.post("/unload")
@@ -75,8 +81,7 @@ async def unload_model(req: UnloadModelRequest, request: Request):
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
-        logger.error("Failed to unload model: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        _log_and_raise_internal_error("unload model", e)
 
 
 @router.get("/status")

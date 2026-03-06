@@ -89,6 +89,14 @@ pub(crate) struct DownloadState {
     pub pause_flag: Arc<AtomicBool>,
     /// Error message if failed
     pub error: Option<String>,
+    /// Current retry attempt for the active file (1-based while retrying).
+    pub retry_attempt: u32,
+    /// Retry limit for the active file (`None` means unlimited).
+    pub retry_limit: Option<u32>,
+    /// Whether the downloader is currently waiting before the next retry.
+    pub retrying: bool,
+    /// Delay (seconds) until the next retry, when `retrying` is true.
+    pub next_retry_delay_seconds: Option<f64>,
     /// Destination directory (needed for resume after restart)
     pub dest_dir: PathBuf,
     /// Current filename being downloaded
@@ -163,6 +171,10 @@ impl DownloadState {
             cancel_flag: Arc::new(AtomicBool::new(false)),
             pause_flag: Arc::new(AtomicBool::new(false)),
             error: None,
+            retry_attempt: 0,
+            retry_limit: None,
+            retrying: false,
+            next_retry_delay_seconds: None,
             dest_dir: entry.dest_dir.clone(),
             filename: entry.filename.clone(),
             files,

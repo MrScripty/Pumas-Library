@@ -537,6 +537,14 @@ pub struct ModelDownloadProgress {
     #[serde(default)]
     pub eta_seconds: Option<f64>,
     #[serde(default)]
+    pub retry_attempt: Option<u32>,
+    #[serde(default)]
+    pub retry_limit: Option<u32>,
+    #[serde(default)]
+    pub retrying: Option<bool>,
+    #[serde(default)]
+    pub next_retry_delay_seconds: Option<f64>,
+    #[serde(default)]
     pub error: Option<String>,
 }
 

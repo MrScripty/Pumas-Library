@@ -67,9 +67,15 @@ impl NetworkConfig {
     pub const GITHUB_RELEASES_MAX_PAGES: u32 = 10;
     pub const GITHUB_RELEASES_TTL: Duration = Duration::from_secs(3600);
     /// Maximum retry attempts for HuggingFace model downloads.
-    pub const HF_DOWNLOAD_MAX_RETRIES: u32 = 3;
+    ///
+    /// `0` means unlimited attempts (bounded by `HF_DOWNLOAD_MAX_RETRY_ELAPSED`).
+    pub const HF_DOWNLOAD_MAX_RETRIES: u32 = 0;
     /// Base delay between download retries (longer to let network recover).
     pub const HF_DOWNLOAD_RETRY_BASE_DELAY: Duration = Duration::from_secs(5);
+    /// Maximum elapsed retry budget for a single file download.
+    ///
+    /// `0` disables elapsed-time capping.
+    pub const HF_DOWNLOAD_MAX_RETRY_ELAPSED: Duration = Duration::from_secs(12 * 60 * 60);
     /// Timeout for HuggingFace API metadata requests.
     pub const HF_API_TIMEOUT: Duration = Duration::from_secs(30);
     /// Connect timeout for HuggingFace download client.
@@ -82,6 +88,29 @@ impl NetworkConfig {
     pub const LAUNCHER_UPDATE_TIMEOUT: Duration = Duration::from_secs(10);
     /// Debounce interval for model library file watcher events.
     pub const FILE_WATCHER_DEBOUNCE: Duration = Duration::from_millis(100);
+
+    /// Resolve HF download max retries from environment, falling back to defaults.
+    ///
+    /// Environment override:
+    /// - `PUMAS_HF_DOWNLOAD_MAX_RETRIES` (`0` = unlimited)
+    pub fn hf_download_max_retries() -> u32 {
+        std::env::var("PUMAS_HF_DOWNLOAD_MAX_RETRIES")
+            .ok()
+            .and_then(|value| value.parse::<u32>().ok())
+            .unwrap_or(Self::HF_DOWNLOAD_MAX_RETRIES)
+    }
+
+    /// Resolve max retry elapsed budget for a single file download.
+    ///
+    /// Environment override:
+    /// - `PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS` (`0` = disabled)
+    pub fn hf_download_max_retry_elapsed() -> Duration {
+        std::env::var("PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_secs)
+            .unwrap_or(Self::HF_DOWNLOAD_MAX_RETRY_ELAPSED)
+    }
 }
 
 /// Shared directory and path configurations.

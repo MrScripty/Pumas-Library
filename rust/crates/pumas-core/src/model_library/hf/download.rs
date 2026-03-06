@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
@@ -115,6 +116,50 @@ fn select_auxiliary_files_for_download(
     }
 
     aux
+}
+
+fn retry_limit(max_attempts: u32) -> Option<u32> {
+    if max_attempts == 0 {
+        None
+    } else {
+        Some(max_attempts)
+    }
+}
+
+fn retry_limit_display(limit: Option<u32>) -> String {
+    match limit {
+        Some(limit) => limit.to_string(),
+        None => "unlimited".to_string(),
+    }
+}
+
+fn retry_exhausted(
+    attempt: u32,
+    limit: Option<u32>,
+    elapsed: Duration,
+    max_elapsed: Duration,
+) -> bool {
+    let attempts_exhausted = limit.is_some_and(|max_attempts| attempt >= max_attempts);
+    let elapsed_exhausted = max_elapsed > Duration::ZERO && elapsed >= max_elapsed;
+    attempts_exhausted || elapsed_exhausted
+}
+
+fn retry_exhausted_message(
+    attempt: u32,
+    limit: Option<u32>,
+    elapsed: Duration,
+    last_error: &str,
+) -> String {
+    let limit_text = limit
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "unlimited".to_string());
+    format!(
+        "Retry budget exhausted after {} attempt(s) (limit {}, elapsed {:.1}s). Last error: {}",
+        attempt,
+        limit_text,
+        elapsed.as_secs_f64(),
+        last_error
+    )
 }
 
 impl HuggingFaceClient {
@@ -400,6 +445,10 @@ impl HuggingFaceClient {
             cancel_flag: cancel_flag.clone(),
             pause_flag: pause_flag.clone(),
             error: None,
+            retry_attempt: 0,
+            retry_limit: None,
+            retrying: false,
+            next_retry_delay_seconds: None,
             dest_dir: dest_dir.to_path_buf(),
             filename: first_filename.clone(),
             files: files.clone(),
@@ -572,8 +621,11 @@ impl HuggingFaceClient {
 
         std::fs::create_dir_all(dest_dir)?;
 
+        let max_attempts = NetworkConfig::hf_download_max_retries();
+        let retry_limit = retry_limit(max_attempts);
+        let max_retry_elapsed = NetworkConfig::hf_download_max_retry_elapsed();
         let retry_config = RetryConfig::new()
-            .with_max_attempts(NetworkConfig::HF_DOWNLOAD_MAX_RETRIES)
+            .with_max_attempts(max_attempts.max(1))
             .with_base_delay(NetworkConfig::HF_DOWNLOAD_RETRY_BASE_DELAY);
 
         // Download each file sequentially
@@ -652,6 +704,10 @@ impl HuggingFaceClient {
                 let mut downloads = downloads.write().await;
                 if let Some(state) = downloads.get_mut(download_id) {
                     state.filename = filename.clone();
+                    state.retry_attempt = 0;
+                    state.retry_limit = retry_limit;
+                    state.retrying = false;
+                    state.next_retry_delay_seconds = None;
                 }
             }
 
@@ -660,7 +716,20 @@ impl HuggingFaceClient {
             let mut last_error: Option<PumasError> = None;
 
             let mut file_completed = false;
-            for attempt in 0..retry_config.max_attempts {
+            let mut attempt: u32 = 0;
+            let retry_started = Instant::now();
+            loop {
+                attempt += 1;
+                {
+                    let mut downloads = downloads.write().await;
+                    if let Some(state) = downloads.get_mut(download_id) {
+                        state.retry_attempt = attempt;
+                        state.retry_limit = retry_limit;
+                        state.retrying = false;
+                        state.next_retry_delay_seconds = None;
+                    }
+                }
+
                 // Check cancellation before each attempt
                 if cancel_flag.load(Ordering::Relaxed) {
                     let _ = tokio::fs::remove_file(&part_path).await;
@@ -696,11 +765,11 @@ impl HuggingFaceClient {
                     .map(|m| m.len())
                     .unwrap_or(0);
 
-                if attempt > 0 {
+                if attempt > 1 {
                     warn!(
                         "Retry {}/{} for {}/{} (resuming from byte {})",
-                        attempt + 1,
-                        retry_config.max_attempts,
+                        attempt,
+                        retry_limit_display(retry_limit),
                         repo_id,
                         filename,
                         resume_from_byte
@@ -711,6 +780,10 @@ impl HuggingFaceClient {
                     if let Some(state) = downloads.get_mut(download_id) {
                         state.status = DownloadStatus::Downloading;
                         state.error = None;
+                        state.retry_attempt = attempt;
+                        state.retry_limit = retry_limit;
+                        state.retrying = false;
+                        state.next_retry_delay_seconds = None;
                     }
                 }
 
@@ -766,28 +839,63 @@ impl HuggingFaceClient {
 
                         warn!(
                             "Download attempt {}/{} failed for {}/{}: {}",
-                            attempt + 1,
-                            retry_config.max_attempts,
+                            attempt,
+                            retry_limit_display(retry_limit),
                             repo_id,
                             filename,
                             e
                         );
+                        let error_text = e.to_string();
                         last_error = Some(e);
 
-                        if attempt + 1 < retry_config.max_attempts {
-                            let delay = retry_config.calculate_delay(attempt);
-                            debug!("Waiting {:?} before retry", delay);
-                            tokio::time::sleep(delay).await;
+                        let elapsed = retry_started.elapsed();
+                        if retry_exhausted(attempt, retry_limit, elapsed, max_retry_elapsed) {
+                            break;
                         }
+
+                        let delay = retry_config.calculate_delay(attempt.saturating_sub(1));
+                        let limit_text = retry_limit_display(retry_limit);
+                        let next_attempt = attempt + 1;
+                        {
+                            let mut downloads = downloads.write().await;
+                            if let Some(state) = downloads.get_mut(download_id) {
+                                state.retry_attempt = attempt;
+                                state.retry_limit = retry_limit;
+                                state.retrying = true;
+                                state.next_retry_delay_seconds = Some(delay.as_secs_f64());
+                                state.error = Some(format!(
+                                    "Transient network error, retrying attempt {}/{} in {:.1}s: {}",
+                                    next_attempt,
+                                    limit_text,
+                                    delay.as_secs_f64(),
+                                    error_text
+                                ));
+                            }
+                        }
+                        debug!("Waiting {:?} before retry", delay);
+                        tokio::time::sleep(delay).await;
                     }
                 }
             }
 
             if !file_completed {
-                return Err(last_error.unwrap_or_else(|| PumasError::DownloadFailed {
+                let elapsed = retry_started.elapsed();
+                if let Some(last_error) = last_error {
+                    let detail = retry_exhausted_message(
+                        attempt,
+                        retry_limit,
+                        elapsed,
+                        &last_error.to_string(),
+                    );
+                    return Err(PumasError::DownloadFailed {
+                        url,
+                        message: detail,
+                    });
+                }
+                return Err(PumasError::DownloadFailed {
                     url,
-                    message: "All retry attempts exhausted".to_string(),
-                }));
+                    message: "Download stopped before completion".to_string(),
+                });
             }
 
             // File completed -- use actual file size for accurate offset
@@ -801,6 +909,10 @@ impl HuggingFaceClient {
                 if let Some(state) = downloads.get_mut(download_id) {
                     state.files_completed = file_idx + 1;
                     state.downloaded_bytes = bytes_offset;
+                    state.retry_attempt = 0;
+                    state.retrying = false;
+                    state.next_retry_delay_seconds = None;
+                    state.error = None;
                 }
             }
 
@@ -1040,6 +1152,10 @@ impl HuggingFaceClient {
                 } else {
                     None
                 },
+                retry_attempt: Some(state.retry_attempt),
+                retry_limit: state.retry_limit,
+                retrying: Some(state.retrying),
+                next_retry_delay_seconds: state.next_retry_delay_seconds,
                 error: state.error.clone(),
             })
     }
@@ -1089,6 +1205,10 @@ impl HuggingFaceClient {
                 } else {
                     None
                 },
+                retry_attempt: Some(state.retry_attempt),
+                retry_limit: state.retry_limit,
+                retrying: Some(state.retrying),
+                next_retry_delay_seconds: state.next_retry_delay_seconds,
                 error: state.error.clone(),
             })
             .collect()
@@ -1341,6 +1461,30 @@ mod tests {
         assert!(selected.contains(&"tokenizer.json".to_string()));
     }
 
+    #[test]
+    fn test_retry_limit_zero_means_unlimited() {
+        assert_eq!(retry_limit(0), None);
+        assert_eq!(retry_limit(4), Some(4));
+    }
+
+    #[test]
+    fn test_retry_exhausted_by_attempt_limit() {
+        let exhausted = retry_exhausted(
+            3,
+            Some(3),
+            Duration::from_secs(10),
+            Duration::from_secs(120),
+        );
+        assert!(exhausted);
+    }
+
+    #[test]
+    fn test_retry_exhausted_by_elapsed_budget() {
+        let exhausted =
+            retry_exhausted(2, None, Duration::from_secs(121), Duration::from_secs(120));
+        assert!(exhausted);
+    }
+
     #[tokio::test]
     async fn test_relocate_download_destination_updates_state_and_persistence() {
         let tmp = TempDir::new().unwrap();
@@ -1394,6 +1538,10 @@ mod tests {
                     cancel_flag: Arc::new(AtomicBool::new(false)),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
+                    retry_attempt: 0,
+                    retry_limit: None,
+                    retrying: false,
+                    next_retry_delay_seconds: None,
                     dest_dir: old_dest.clone(),
                     filename: "model.safetensors".to_string(),
                     files: vec![FileToDownload {
@@ -1468,6 +1616,10 @@ mod tests {
                     cancel_flag: Arc::new(AtomicBool::new(false)),
                     pause_flag: Arc::new(AtomicBool::new(false)),
                     error: None,
+                    retry_attempt: 2,
+                    retry_limit: Some(5),
+                    retrying: true,
+                    next_retry_delay_seconds: Some(4.0),
                     dest_dir: tmp.path().join("owner-model"),
                     filename: "model.safetensors".to_string(),
                     files: vec![FileToDownload {
@@ -1489,6 +1641,10 @@ mod tests {
             .expect("download progress should be present");
         assert_eq!(progress.model_type.as_deref(), Some("reranker"));
         assert_eq!(progress.model_name.as_deref(), Some("Model Display Name"));
+        assert_eq!(progress.retry_attempt, Some(2));
+        assert_eq!(progress.retry_limit, Some(5));
+        assert_eq!(progress.retrying, Some(true));
+        assert_eq!(progress.next_retry_delay_seconds, Some(4.0));
     }
 
     #[tokio::test]

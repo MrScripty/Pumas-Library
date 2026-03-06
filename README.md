@@ -122,6 +122,16 @@ Migration reports now distinguish:
 Partial downloads (`.part` files) remain resumable and are tracked as partial rows until completed.
 Migration execution can now safely relocate partial-download directories to canonical paths by pausing tracked downloads, moving the directory, updating persistence/index paths, and resuming when appropriate.
 
+### HuggingFace Download Retry Tuning
+
+HuggingFace file downloads automatically retry transient network failures with resume support.
+
+- Default max attempts: unlimited (`0`)
+- Default max retry elapsed budget per file: `43200` seconds (12 hours)
+- Override with environment variables:
+  - `PUMAS_HF_DOWNLOAD_MAX_RETRIES` (`0` = unlimited)
+  - `PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS` (`0` = disable elapsed cap)
+
 ## Supported Platforms
 
 | Platform      | Status       | Notes                                                 |

@@ -228,6 +228,13 @@ impl ModelLibrary {
             .unwrap_or_default();
         apply_recommended_backend_hint(&mut normalized, &active_bindings);
         let path = model_dir.join(METADATA_FILENAME);
+        if let Some(existing) = atomic_read_json::<ModelMetadata>(&path)? {
+            let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);
+            let next_json = serde_json::to_value(&normalized).unwrap_or(Value::Null);
+            if existing_json == next_json {
+                return Ok(());
+            }
+        }
         atomic_write_json(&path, &normalized, true)
     }
 

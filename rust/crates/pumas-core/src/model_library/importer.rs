@@ -918,6 +918,19 @@ impl ModelImporter {
 
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
+        // Concurrent import paths (download completion callback + reconciliation)
+        // can race after the initial idempotency guard. Skip redundant rewrites.
+        if model_dir.join("metadata.json").exists() {
+            let model_id = self.library.get_model_id(model_dir);
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: true,
+                model_path: model_id,
+                error: None,
+                security_tier: None,
+            });
+        }
+
         // Save metadata.json
         self.library.save_metadata(model_dir, &metadata).await?;
 

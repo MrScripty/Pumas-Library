@@ -687,6 +687,7 @@ impl ModelImporter {
             task_classification_confidence: Some(0.0),
             model_type_resolution_source: Some("import-resolver".to_string()),
             model_type_resolution_confidence: Some(model_type_resolution_confidence),
+            recommended_backend: None,
             runtime_engine_hints: None,
             dependency_bindings: None,
             requires_custom_code: Some(false),

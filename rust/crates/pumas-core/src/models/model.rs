@@ -323,6 +323,8 @@ pub struct ModelMetadata {
     #[serde(default)]
     pub model_type_resolution_confidence: Option<f64>,
     #[serde(default)]
+    pub recommended_backend: Option<String>,
+    #[serde(default)]
     pub runtime_engine_hints: Option<Vec<String>>,
     #[serde(default)]
     pub dependency_bindings: Option<Vec<DependencyBindingRef>>,

@@ -6,6 +6,18 @@ use crate::model_library::dependencies::evaluate_binding_pin_requirements;
 use crate::model_library::task_signature::CANONICAL_MODALITY_TOKENS;
 use crate::models::{DependencyBindingRef, ModelMetadata};
 
+/// Canonical tokens accepted for `recommended_backend`.
+const CANONICAL_RECOMMENDED_BACKENDS: &[&str] = &[
+    "candle",
+    "diffusers",
+    "llama.cpp",
+    "ollama",
+    "onnx-runtime",
+    "pytorch",
+    "tensorrt",
+    "transformers",
+];
+
 /// Add a review reason and keep canonical lowercase + sorted + deduplicated storage.
 pub fn push_review_reason(metadata: &mut ModelMetadata, reason: &str) {
     let mut reasons = metadata.review_reasons.take().unwrap_or_default();
@@ -24,6 +36,29 @@ pub fn normalize_review_reasons(reasons: &mut Vec<String>) {
     reasons.dedup();
 }
 
+/// Normalize a recommended backend token to canonical lowercase form.
+///
+/// Returns `None` when token is empty or unsupported.
+pub fn normalize_recommended_backend(value: Option<&str>) -> Option<String> {
+    let token = value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_lowercase)?;
+
+    let canonical = match token.as_str() {
+        "llama-cpp" | "llamacpp" => "llama.cpp",
+        "onnxruntime" | "onnx_runtime" => "onnx-runtime",
+        "torch" => "pytorch",
+        other => other,
+    };
+
+    if CANONICAL_RECOMMENDED_BACKENDS.contains(&canonical) {
+        Some(canonical.to_string())
+    } else {
+        None
+    }
+}
+
 /// Validate core metadata v2 constraints used by importer path.
 pub fn validate_metadata_v2(metadata: &ModelMetadata) -> Result<()> {
     validate_metadata_v2_internal(metadata, None)
@@ -38,6 +73,7 @@ fn validate_metadata_v2_internal(
     metadata: &ModelMetadata,
     index: Option<&ModelIndex>,
 ) -> Result<()> {
+    validate_recommended_backend(metadata)?;
     validate_confidence(
         "task_classification_confidence",
         metadata.task_classification_confidence,
@@ -114,6 +150,31 @@ fn validate_metadata_v2_internal(
             "model_type_resolution_confidence",
             metadata.model_type_resolution_confidence,
         )?;
+    }
+
+    Ok(())
+}
+
+fn validate_recommended_backend(metadata: &ModelMetadata) -> Result<()> {
+    let Some(value) = metadata.recommended_backend.as_deref() else {
+        return Ok(());
+    };
+
+    let normalized =
+        normalize_recommended_backend(Some(value)).ok_or_else(|| PumasError::Validation {
+            field: "recommended_backend".to_string(),
+            message: format!(
+                "contains unsupported backend token '{}'; expected one of: {}",
+                value,
+                CANONICAL_RECOMMENDED_BACKENDS.join(", ")
+            ),
+        })?;
+
+    if value.trim() != normalized {
+        return Err(PumasError::Validation {
+            field: "recommended_backend".to_string(),
+            message: format!("must use canonical backend token: {}", normalized),
+        });
     }
 
     Ok(())
@@ -420,6 +481,55 @@ mod tests {
                 "unknown-task-signature".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn normalize_recommended_backend_canonicalizes_aliases() {
+        assert_eq!(
+            normalize_recommended_backend(Some(" ONNXRUNTIME ")).as_deref(),
+            Some("onnx-runtime")
+        );
+        assert_eq!(
+            normalize_recommended_backend(Some("llama-cpp")).as_deref(),
+            Some("llama.cpp")
+        );
+        assert_eq!(
+            normalize_recommended_backend(Some("torch")).as_deref(),
+            Some("pytorch")
+        );
+        assert_eq!(normalize_recommended_backend(Some("unknown")), None);
+    }
+
+    #[test]
+    fn validation_accepts_canonical_recommended_backend() {
+        let mut metadata = metadata_v2_base();
+        metadata.recommended_backend = Some("transformers".to_string());
+
+        validate_metadata_v2(&metadata).unwrap();
+    }
+
+    #[test]
+    fn validation_rejects_non_canonical_recommended_backend() {
+        let mut metadata = metadata_v2_base();
+        metadata.recommended_backend = Some("PyTorch".to_string());
+
+        let err = validate_metadata_v2(&metadata).unwrap_err();
+        match err {
+            PumasError::Validation { field, .. } => assert_eq!(field, "recommended_backend"),
+            _ => panic!("expected validation error"),
+        }
+    }
+
+    #[test]
+    fn validation_rejects_unsupported_recommended_backend() {
+        let mut metadata = metadata_v2_base();
+        metadata.recommended_backend = Some("vllm".to_string());
+
+        let err = validate_metadata_v2(&metadata).unwrap_err();
+        match err {
+            PumasError::Validation { field, .. } => assert_eq!(field, "recommended_backend"),
+            _ => panic!("expected validation error"),
+        }
     }
 
     #[test]

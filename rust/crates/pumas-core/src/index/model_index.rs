@@ -6,6 +6,7 @@ mod metadata_overlays;
 use crate::{PumasError, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
+#[cfg(test)]
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

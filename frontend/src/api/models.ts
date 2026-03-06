@@ -41,7 +41,7 @@ class ModelsAPI {
     family: string,
     officialName: string,
     modelType?: string | null,
-    subtype?: string | null,
+    pipelineTag?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) {
@@ -51,7 +51,7 @@ class ModelsAPI {
       family,
       officialName,
       modelType,
-      subtype,
+      pipelineTag,
       quant,
       filenames
     );

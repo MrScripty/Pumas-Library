@@ -143,10 +143,17 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   useEffect(() => {
     const prev = prevDownloadStatusRef.current;
     let anyNewlyCompleted = false;
+    const refreshOnDisappearStatuses = new Set(['queued', 'downloading', 'pausing']);
     for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
       if (status.status === 'completed' && prev[repoId] && prev[repoId] !== 'completed') {
         anyNewlyCompleted = true;
         logger.info('Download completed, will refresh model list', { repoId });
+      }
+    }
+    for (const [repoId, prevStatus] of Object.entries(prev)) {
+      if (!downloadStatusByRepo[repoId] && refreshOnDisappearStatuses.has(prevStatus)) {
+        anyNewlyCompleted = true;
+        logger.info('Download left tracked state, will refresh model list', { repoId, prevStatus });
       }
     }
     prevDownloadStatusRef.current = Object.fromEntries(
@@ -372,6 +379,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     const developer = model.developer || repoId.split('/')[0] || 'huggingface';
     const officialName = model.name || repoId;
     const modelType = resolveDownloadModelType(model.kind || '');
+    const pipelineTag = model.kind || '';
 
     logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant, filenames: filenames?.length });
     // Clear any previous error for this download
@@ -388,7 +396,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         developer,
         officialName,
         modelType,
-        model.kind || '',
+        pipelineTag,
         quant || null,
         filenames || null
       );

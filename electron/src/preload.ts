@@ -161,7 +161,7 @@ const electronAPI = {
     family: string,
     officialName: string,
     modelType?: string | null,
-    subtype?: string | null,
+    pipelineTag?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) =>
@@ -170,7 +170,7 @@ const electronAPI = {
       family,
       official_name: officialName,
       model_type: modelType,
-      subtype,
+      pipeline_tag: pipelineTag,
       quant,
       filenames,
     }),
@@ -179,7 +179,7 @@ const electronAPI = {
     family: string,
     officialName: string,
     modelType?: string | null,
-    subtype?: string | null,
+    pipelineTag?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) =>
@@ -188,7 +188,7 @@ const electronAPI = {
       family,
       official_name: officialName,
       model_type: modelType,
-      subtype,
+      pipeline_tag: pipelineTag,
       quant,
       filenames,
     }),

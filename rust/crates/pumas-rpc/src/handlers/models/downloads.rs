@@ -17,7 +17,9 @@ pub async fn download_model_from_hf(
     let filenames: Option<Vec<String>> = params
         .get("filenames")
         .and_then(|v| serde_json::from_value(v.clone()).ok());
-    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
+    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
+        .or_else(|| get_str_param(params, "subtype", "subtype"))
+        .map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,
@@ -55,7 +57,9 @@ pub async fn start_model_download_from_hf(
     let filenames: Option<Vec<String>> = params
         .get("filenames")
         .and_then(|v| serde_json::from_value(v.clone()).ok());
-    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag").map(String::from);
+    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
+        .or_else(|| get_str_param(params, "subtype", "subtype"))
+        .map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,

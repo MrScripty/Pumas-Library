@@ -1578,7 +1578,7 @@ export interface PyWebViewAPI {
     family: string,
     officialName: string,
     modelType?: string | null,
-    subtype?: string | null,
+    pipelineTag?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;
@@ -1587,7 +1587,7 @@ export interface PyWebViewAPI {
     family: string,
     officialName: string,
     modelType?: string | null,
-    subtype?: string | null,
+    pipelineTag?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;

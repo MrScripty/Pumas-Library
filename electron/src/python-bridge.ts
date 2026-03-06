@@ -40,10 +40,11 @@ interface RPCResponse {
 export class PythonBridge {
   private options: Required<PythonBridgeOptions>;
   private process: ChildProcess | null = null;
-  private port: number = 0;
-  private restartCount: number = 0;
-  private isShuttingDown: boolean = false;
-  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private port = 0;
+  private restartCount = 0;
+  private isShuttingDown = false;
+  private healthCheckTimer: NodeJS.Timeout | null = null;
+  private restartTimer: NodeJS.Timeout | null = null;
 
   constructor(options: PythonBridgeOptions) {
     this.options = {
@@ -102,6 +103,10 @@ export class PythonBridge {
       return;
     }
 
+    this.isShuttingDown = false;
+    this.clearRestartTimer();
+    this.clearHealthCheckTimer();
+
     // Find available port
     this.port = this.options.port || await this.findAvailablePort();
     log.info(`Starting backend bridge on port ${this.port}`);
@@ -148,6 +153,7 @@ export class PythonBridge {
     this.process.on('exit', (code, signal) => {
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.process = null;
+      this.clearHealthCheckTimer();
 
       // Auto-restart if enabled and not shutting down
       if (
@@ -155,9 +161,7 @@ export class PythonBridge {
         this.options.autoRestart &&
         this.restartCount < this.options.maxRestarts
       ) {
-        this.restartCount++;
-        log.info(`Restarting ${backendLabel} process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
-        setTimeout(() => this.start(), 1000 * this.restartCount); // Exponential backoff
+        this.scheduleRestart(backendLabel);
       }
     });
 
@@ -215,14 +219,22 @@ export class PythonBridge {
    */
   private startHealthCheck(): void {
     const backendLabel = 'Rust';
-    this.healthCheckInterval = setInterval(async () => {
-      if (this.isShuttingDown) return;
+    this.clearHealthCheckTimer();
+    this.healthCheckTimer = setTimeout(async () => {
+      this.healthCheckTimer = null;
+      if (this.isShuttingDown) {
+        return;
+      }
 
       const healthy = await this.healthCheck();
       if (!healthy && !this.isShuttingDown) {
         log.warn(`${backendLabel} health check failed`);
       }
-    }, 30000); // Check every 30 seconds
+
+      if (!this.isShuttingDown && this.process) {
+        this.startHealthCheck();
+      }
+    }, 30000);
   }
 
   /**
@@ -232,10 +244,8 @@ export class PythonBridge {
     this.isShuttingDown = true;
 
     // Stop health check interval
-    if (this.healthCheckInterval) {
-      clearInterval(this.healthCheckInterval);
-      this.healthCheckInterval = null;
-    }
+    this.clearHealthCheckTimer();
+    this.clearRestartTimer();
 
     if (!this.process) {
       return;
@@ -279,7 +289,34 @@ export class PythonBridge {
     }
 
     this.process = null;
+    this.restartCount = 0;
     log.info(`${backendLabel} backend bridge stopped`);
+  }
+
+  private clearHealthCheckTimer(): void {
+    if (this.healthCheckTimer) {
+      clearTimeout(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+  }
+
+  private clearRestartTimer(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer);
+      this.restartTimer = null;
+    }
+  }
+
+  private scheduleRestart(backendLabel: string): void {
+    this.clearRestartTimer();
+    this.restartCount++;
+    log.info(`Restarting ${backendLabel} process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null;
+      void this.start().catch((error: unknown) => {
+        log.error(`Failed to restart ${backendLabel} process:`, error);
+      });
+    }, 1000 * this.restartCount);
   }
 
   /**

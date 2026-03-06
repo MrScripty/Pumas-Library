@@ -20,7 +20,7 @@ interface UseStatusOptions {
 }
 
 export function useStatus(options: UseStatusOptions = {}) {
-  const { pollInterval = 500, initialLoad = true } = options;
+  const { pollInterval = 1000, initialLoad = true } = options;
 
   const [statusData, setStatusData] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -28,27 +28,30 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [systemResources, setSystemResources] = useState<SystemResources | undefined>(undefined);
   const [networkAvailable, setNetworkAvailable] = useState<boolean | null>(null);
   const [modelLibraryLoaded, setModelLibraryLoaded] = useState<boolean | null>(null);
-  const isPolling = useRef(false);
+  const inFlightRequest = useRef<Promise<void> | null>(null);
+  const pendingRefresh = useRef<{ isInitialLoad: boolean; force: boolean } | null>(null);
   const lastResourcesFetch = useRef(0);
   const lastNetworkFetch = useRef(0);
   const lastLibraryFetch = useRef(0);
+  const loadingDelayTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
-    // Allow force=true to bypass the polling guard for manual refreshes
-    if (isPolling.current && !force) {
-      return;
+  const clearLoadingDelay = useCallback(() => {
+    if (loadingDelayTimeout.current) {
+      clearTimeout(loadingDelayTimeout.current);
+      loadingDelayTimeout.current = null;
     }
+  }, []);
 
+  const runStatusFetch = useCallback(async (isInitialLoad = false) => {
     const startTime = Date.now();
 
     if (isInitialLoad) {
       setIsCheckingDeps(true);
     }
 
-    isPolling.current = true;
-
     try {
       if (!isAPIAvailable()) {
+        clearLoadingDelay();
         setIsLoading(false);
         setIsCheckingDeps(false);
         return;
@@ -98,7 +101,9 @@ export function useStatus(options: UseStatusOptions = {}) {
       if (isInitialLoad) {
         const elapsedTime = Date.now() - startTime;
         const remainingTime = Math.max(0, 800 - elapsedTime);
-        setTimeout(() => {
+        clearLoadingDelay();
+        loadingDelayTimeout.current = setTimeout(() => {
+          loadingDelayTimeout.current = null;
           setIsLoading(false);
           setIsCheckingDeps(false);
         }, remainingTime);
@@ -115,10 +120,31 @@ export function useStatus(options: UseStatusOptions = {}) {
       }
       setIsLoading(false);
       setIsCheckingDeps(false);
-    } finally {
-      isPolling.current = false;
     }
-  }, []);
+  }, [clearLoadingDelay]);
+
+  const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
+    if (inFlightRequest.current) {
+      const existingPending = pendingRefresh.current;
+      pendingRefresh.current = {
+        isInitialLoad: existingPending?.isInitialLoad || isInitialLoad,
+        force: existingPending?.force || force,
+      };
+      await inFlightRequest.current;
+      return;
+    }
+
+    const request = runStatusFetch(isInitialLoad).finally(() => {
+      inFlightRequest.current = null;
+      const nextRefresh = pendingRefresh.current;
+      pendingRefresh.current = null;
+      if (nextRefresh) {
+        void fetchStatus(nextRefresh.isInitialLoad, nextRefresh.force);
+      }
+    });
+    inFlightRequest.current = request;
+    await request;
+  }, [runStatusFetch]);
 
   useEffect(() => {
     let interval: NodeJS.Timeout | null = null;
@@ -157,8 +183,9 @@ export function useStatus(options: UseStatusOptions = {}) {
     return () => {
       if (interval) clearInterval(interval);
       if (waitTimeout) clearTimeout(waitTimeout);
+      clearLoadingDelay();
     };
-  }, [pollInterval, initialLoad, fetchStatus]);
+  }, [pollInterval, initialLoad, fetchStatus, clearLoadingDelay]);
 
   return {
     status: statusData,

@@ -8,7 +8,7 @@
 //! - Model enumeration and querying
 
 use crate::error::{PumasError, Result};
-use crate::index::{ModelIndex, ModelRecord, SearchResult};
+use crate::index::{ModelDependencyBindingRecord, ModelIndex, ModelRecord, SearchResult};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
@@ -19,8 +19,9 @@ use crate::model_library::types::{
     SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_review_reasons, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution,
+    normalize_recommended_backend, normalize_review_reasons, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
+    ModelTypeResolution,
 };
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
@@ -216,6 +217,16 @@ impl ModelLibrary {
         if let Some(model_id) = self.get_model_id(model_dir) {
             normalized.model_id = Some(model_id);
         }
+        let active_bindings = normalized
+            .model_id
+            .as_deref()
+            .map(|model_id| {
+                self.index
+                    .list_active_model_dependency_bindings(model_id, None)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        apply_recommended_backend_hint(&mut normalized, &active_bindings);
         let path = model_dir.join(METADATA_FILENAME);
         atomic_write_json(&path, &normalized, true)
     }
@@ -818,23 +829,23 @@ impl ModelLibrary {
         let active_bindings = self
             .index()
             .list_active_model_dependency_bindings(model_id, None)?;
-        if active_bindings.is_empty() {
-            return Ok(());
+        if !active_bindings.is_empty() {
+            metadata.dependency_bindings = Some(
+                active_bindings
+                    .iter()
+                    .cloned()
+                    .map(|binding| crate::models::DependencyBindingRef {
+                        binding_id: Some(binding.binding_id),
+                        profile_id: Some(binding.profile_id),
+                        profile_version: Some(binding.profile_version),
+                        binding_kind: Some(binding.binding_kind),
+                        backend_key: binding.backend_key,
+                        platform_selector: binding.platform_selector,
+                    })
+                    .collect(),
+            );
         }
-
-        metadata.dependency_bindings = Some(
-            active_bindings
-                .into_iter()
-                .map(|binding| crate::models::DependencyBindingRef {
-                    binding_id: Some(binding.binding_id),
-                    profile_id: Some(binding.profile_id),
-                    profile_version: Some(binding.profile_version),
-                    binding_kind: Some(binding.binding_kind),
-                    backend_key: binding.backend_key,
-                    platform_selector: binding.platform_selector,
-                })
-                .collect(),
-        );
+        apply_recommended_backend_hint(metadata, &active_bindings);
 
         Ok(())
     }
@@ -854,50 +865,62 @@ impl ModelLibrary {
         let active_bindings = self
             .index()
             .list_active_model_dependency_bindings(model_id, None)?;
-        if active_bindings.is_empty() {
-            return Ok(());
-        }
-
         if !metadata.is_object() {
             *metadata = Value::Object(Default::default());
         }
 
-        let refs = active_bindings
-            .into_iter()
-            .map(|binding| {
-                let mut value = serde_json::Map::new();
-                value.insert("binding_id".to_string(), Value::String(binding.binding_id));
-                value.insert("profile_id".to_string(), Value::String(binding.profile_id));
-                value.insert(
-                    "profile_version".to_string(),
-                    Value::Number(binding.profile_version.into()),
-                );
-                value.insert(
-                    "binding_kind".to_string(),
-                    Value::String(binding.binding_kind),
-                );
-                value.insert(
-                    "backend_key".to_string(),
-                    binding
-                        .backend_key
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
-                );
-                value.insert(
-                    "platform_selector".to_string(),
-                    binding
-                        .platform_selector
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
-                );
-                Value::Object(value)
-            })
-            .collect::<Vec<_>>();
+        if !active_bindings.is_empty() {
+            let refs = active_bindings
+                .iter()
+                .cloned()
+                .map(|binding| {
+                    let mut value = serde_json::Map::new();
+                    value.insert("binding_id".to_string(), Value::String(binding.binding_id));
+                    value.insert("profile_id".to_string(), Value::String(binding.profile_id));
+                    value.insert(
+                        "profile_version".to_string(),
+                        Value::Number(binding.profile_version.into()),
+                    );
+                    value.insert(
+                        "binding_kind".to_string(),
+                        Value::String(binding.binding_kind),
+                    );
+                    value.insert(
+                        "backend_key".to_string(),
+                        binding
+                            .backend_key
+                            .map(Value::String)
+                            .unwrap_or(Value::Null),
+                    );
+                    value.insert(
+                        "platform_selector".to_string(),
+                        binding
+                            .platform_selector
+                            .map(Value::String)
+                            .unwrap_or(Value::Null),
+                    );
+                    Value::Object(value)
+                })
+                .collect::<Vec<_>>();
 
+            let obj = metadata
+                .as_object_mut()
+                .ok_or_else(|| PumasError::Other("metadata must be a JSON object".to_string()))?;
+            obj.insert("dependency_bindings".to_string(), Value::Array(refs));
+        }
+
+        let mut metadata_typed = serde_json::from_value::<ModelMetadata>(metadata.clone())?;
+        apply_recommended_backend_hint(&mut metadata_typed, &active_bindings);
         let obj = metadata
             .as_object_mut()
             .ok_or_else(|| PumasError::Other("metadata must be a JSON object".to_string()))?;
-        obj.insert("dependency_bindings".to_string(), Value::Array(refs));
+        obj.insert(
+            "recommended_backend".to_string(),
+            metadata_typed
+                .recommended_backend
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+        );
         Ok(())
     }
 
@@ -3546,6 +3569,128 @@ fn extract_string_array(metadata: &Value, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum BackendSignal {
+    None,
+    Single(String),
+    Ambiguous,
+}
+
+fn apply_recommended_backend_hint(
+    metadata: &mut ModelMetadata,
+    active_bindings: &[ModelDependencyBindingRecord],
+) {
+    if let Some(explicit) = metadata.recommended_backend.as_deref() {
+        metadata.recommended_backend =
+            normalize_recommended_backend(Some(explicit)).or_else(|| {
+                let trimmed = explicit.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_string())
+                }
+            });
+        return;
+    }
+
+    metadata.recommended_backend = derive_recommended_backend(metadata, active_bindings);
+}
+
+fn derive_recommended_backend(
+    metadata: &ModelMetadata,
+    active_bindings: &[ModelDependencyBindingRecord],
+) -> Option<String> {
+    match resolve_backend_signal(
+        active_bindings
+            .iter()
+            .filter_map(|binding| normalize_recommended_backend(binding.backend_key.as_deref())),
+    ) {
+        BackendSignal::Single(backend) => return Some(backend),
+        BackendSignal::Ambiguous => return None,
+        BackendSignal::None => {}
+    }
+
+    match resolve_backend_signal(
+        metadata
+            .runtime_engine_hints
+            .iter()
+            .flatten()
+            .filter_map(|engine| normalize_recommended_backend(Some(engine.as_str()))),
+    ) {
+        BackendSignal::Single(backend) => return Some(backend),
+        BackendSignal::Ambiguous => return None,
+        BackendSignal::None => {}
+    }
+
+    let formats = collect_format_hints(metadata);
+    if formats.is_empty() {
+        return None;
+    }
+    match resolve_backend_signal(
+        crate::models::detect_compatible_engines(&formats)
+            .into_iter()
+            .filter_map(|engine| normalize_recommended_backend(Some(engine.as_str()))),
+    ) {
+        BackendSignal::Single(backend) => Some(backend),
+        BackendSignal::Ambiguous | BackendSignal::None => None,
+    }
+}
+
+fn resolve_backend_signal<I>(candidates: I) -> BackendSignal
+where
+    I: IntoIterator<Item = String>,
+{
+    let unique = candidates.into_iter().collect::<BTreeSet<_>>();
+    match unique.len() {
+        0 => BackendSignal::None,
+        1 => BackendSignal::Single(unique.into_iter().next().unwrap_or_default()),
+        _ => BackendSignal::Ambiguous,
+    }
+}
+
+fn collect_format_hints(metadata: &ModelMetadata) -> Vec<String> {
+    let mut formats = BTreeSet::new();
+
+    for tag in metadata.tags.iter().flatten() {
+        match tag.trim().to_lowercase().as_str() {
+            "gguf" | "ggml" | "safetensors" | "pytorch" | "onnx" | "tensorrt" | "bin" => {
+                formats.insert(tag.trim().to_lowercase());
+            }
+            _ => {}
+        }
+    }
+
+    for file in metadata.files.iter().flatten() {
+        let ext = Path::new(&file.name)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .map(str::to_lowercase);
+        match ext.as_deref() {
+            Some("gguf") => {
+                formats.insert("gguf".to_string());
+            }
+            Some("ggml") => {
+                formats.insert("ggml".to_string());
+            }
+            Some("safetensors") => {
+                formats.insert("safetensors".to_string());
+            }
+            Some("onnx") => {
+                formats.insert("onnx".to_string());
+            }
+            Some("bin") | Some("pt") | Some("pth") => {
+                formats.insert("pytorch".to_string());
+            }
+            Some("trt") | Some("engine") => {
+                formats.insert("tensorrt".to_string());
+            }
+            _ => {}
+        }
+    }
+
+    formats.into_iter().collect()
+}
+
 /// Convert ModelMetadata to ModelRecord for indexing.
 fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata) -> ModelRecord {
     let inferred_type_from_id = model_id
@@ -5301,6 +5446,13 @@ mod tests {
             .unwrap_or_default();
         assert_eq!(listed_bindings.len(), 1);
         assert_eq!(
+            listed_model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            Some("pytorch")
+        );
+        assert_eq!(
             listed_bindings[0]
                 .get("binding_id")
                 .and_then(Value::as_str)
@@ -5321,5 +5473,151 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert_eq!(searched_bindings.len(), 1);
+        assert_eq!(
+            searched_model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            Some("pytorch")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_save_and_projection_derive_recommended_backend_from_format_hints() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "vision/onnx/format-derived";
+        let model_dir = library.build_model_path("vision", "onnx", "format-derived");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.onnx"), b"onnx").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("vision".to_string()),
+            family: Some("onnx".to_string()),
+            cleaned_name: Some("format-derived".to_string()),
+            official_name: Some("Format Derived".to_string()),
+            tags: Some(vec!["onnx".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(loaded.recommended_backend.as_deref(), Some("onnx-runtime"));
+
+        let listed = library.list_models().await.unwrap();
+        let listed_model = listed.iter().find(|model| model.id == model_id).unwrap();
+        assert_eq!(
+            listed_model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            Some("onnx-runtime")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_projection_leaves_recommended_backend_unset_when_bindings_conflict() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/backend-conflict";
+        let model_dir = library.build_model_path("llm", "llama", "backend-conflict");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("llama".to_string()),
+            cleaned_name: Some("backend-conflict".to_string()),
+            official_name: Some("Backend Conflict".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&crate::index::DependencyProfileRecord {
+                profile_id: "conflict-a".to_string(),
+                profile_version: 1,
+                profile_hash: Some("hash-a".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1"}
+                    ]
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_dependency_profile(&crate::index::DependencyProfileRecord {
+                profile_id: "conflict-b".to_string(),
+                profile_version: 1,
+                profile_hash: Some("hash-b".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.2"}
+                    ]
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+
+        library
+            .index()
+            .upsert_model_dependency_binding(&crate::index::ModelDependencyBindingRecord {
+                binding_id: "conflict-binding-a".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "conflict-a".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now.clone(),
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&crate::index::ModelDependencyBindingRecord {
+                binding_id: "conflict-binding-b".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "conflict-b".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("candle".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let listed = library.list_models().await.unwrap();
+        let listed_model = listed.iter().find(|model| model.id == model_id).unwrap();
+        assert_eq!(
+            listed_model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            None
+        );
     }
 }

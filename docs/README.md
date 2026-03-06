@@ -14,6 +14,7 @@ This directory contains project documentation for the current Rust/Electron impl
 - [REACT_ARIA_ENFORCEMENT.md](REACT_ARIA_ENFORCEMENT.md) - Frontend interaction/accessibility guardrails
 - [TESTING.md](TESTING.md) - Test/build validation workflows
 - [SECURITY.md](SECURITY.md) - Security process and scanning guidance
+- [MODEL_RUNTIME_RESEARCH_AGENT.md](MODEL_RUNTIME_RESEARCH_AGENT.md) - Agent workflow for model runtime dependency and inference-settings research/persistence
 
 ## Architecture
 

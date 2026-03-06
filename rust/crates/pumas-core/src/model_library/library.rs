@@ -482,7 +482,12 @@ impl ModelLibrary {
     ///
     /// * `model_id` - Relative path from library root (e.g., "llm/llama/llama-2-7b")
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
-        self.index.get(model_id)
+        let mut record = match self.index.get(model_id)? {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+        self.project_active_dependency_refs_value(model_id, &mut record.metadata)?;
+        Ok(Some(record))
     }
 
     /// Search models using FTS5 full-text search.
@@ -5475,6 +5480,22 @@ mod tests {
         assert_eq!(searched_bindings.len(), 1);
         assert_eq!(
             searched_model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            Some("pytorch")
+        );
+
+        let fetched = library.get_model(model_id).await.unwrap().unwrap();
+        let fetched_bindings = fetched
+            .metadata
+            .get("dependency_bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(fetched_bindings.len(), 1);
+        assert_eq!(
+            fetched
                 .metadata
                 .get("recommended_backend")
                 .and_then(Value::as_str),

@@ -56,7 +56,10 @@ export default function App() {
     refetch: refetchStatus
   } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
-  const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, clearStartingState, clearStoppingState, openLogPath } = useComfyUIProcess();
+  const comfyUIRunning = status?.comfyui_running || false;
+  const ollamaRunning = status?.ollama_running || false;
+  const torchRunning = status?.torch_running || false;
+  const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess(comfyUIRunning);
   const {
     launchError: ollamaLaunchError,
     launchLogPath: ollamaLaunchLogPath,
@@ -64,10 +67,8 @@ export default function App() {
     isStopping: ollamaIsStopping,
     launchOllama,
     stopOllama,
-    clearStartingState: clearOllamaStartingState,
-    clearStoppingState: clearOllamaStoppingState,
     openLogPath: openOllamaLogPath
-  } = useOllamaProcess();
+  } = useOllamaProcess(ollamaRunning);
   const {
     launchError: torchLaunchError,
     launchLogPath: torchLaunchLogPath,
@@ -75,10 +76,8 @@ export default function App() {
     isStopping: torchIsStopping,
     launchTorch,
     stopTorch,
-    clearStartingState: clearTorchStartingState,
-    clearStoppingState: clearTorchStoppingState,
     openLogPath: openTorchLogPath
-  } = useTorchProcess();
+  } = useTorchProcess(torchRunning);
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
 
@@ -104,9 +103,6 @@ export default function App() {
   const { installedVersions: torchInstalledVersions } = torchVersions;
   const installationProgress = appVersions.installationProgress;
 
-  const comfyUIRunning = status?.comfyui_running || false;
-  const ollamaRunning = status?.ollama_running || false;
-  const torchRunning = status?.torch_running || false;
   const depsInstalled = status?.deps_ready ?? null;
   const isPatched = status?.patched ?? false;
   const menuShortcut = status?.menu_shortcut ?? false;
@@ -352,61 +348,33 @@ export default function App() {
 
   const handleLaunchComfyUI = async () => {
     if (comfyUIRunning) {
-      try {
-        await stopComfyUI();
-        await refetchStatus(false, true);  // Force bypass polling guard
-      } finally {
-        // Clear transition state AFTER status is updated to avoid flash of 'running'
-        clearStoppingState();
-      }
+      await stopComfyUI();
+      await refetchStatus(false, true);
     } else {
-      try {
-        await launchComfyUI();
-        await refetchStatus(false, true);  // Force bypass polling guard
-      } finally {
-        // Clear transition state AFTER status is updated to avoid flash of 'offline'
-        clearStartingState();
-      }
+      await launchComfyUI();
+      await refetchStatus(false, true);
     }
     setTimeout(() => void refetchStatus(false, true), 1200);
   };
 
   const handleLaunchOllama = async () => {
     if (ollamaRunning) {
-      try {
-        await stopOllama();
-        await refetchStatus(false, true);  // Force bypass polling guard
-      } finally {
-        // Clear transition state AFTER status is updated to avoid flash of 'running'
-        clearOllamaStoppingState();
-      }
+      await stopOllama();
+      await refetchStatus(false, true);
     } else {
-      try {
-        await launchOllama();
-        await refetchStatus(false, true);  // Force bypass polling guard
-      } finally {
-        // Clear transition state AFTER status is updated to avoid flash of 'offline'
-        clearOllamaStartingState();
-      }
+      await launchOllama();
+      await refetchStatus(false, true);
     }
     setTimeout(() => void refetchStatus(false, true), 1200);
   };
 
   const handleLaunchTorch = async () => {
     if (torchRunning) {
-      try {
-        await stopTorch();
-        await refetchStatus(false, true);
-      } finally {
-        clearTorchStoppingState();
-      }
+      await stopTorch();
+      await refetchStatus(false, true);
     } else {
-      try {
-        await launchTorch();
-        await refetchStatus(false, true);
-      } finally {
-        clearTorchStartingState();
-      }
+      await launchTorch();
+      await refetchStatus(false, true);
     }
     setTimeout(() => void refetchStatus(false, true), 1200);
   };

@@ -3413,6 +3413,16 @@ fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
         "soundeffect",
         "sound_effect",
         "musicgen",
+        "text-to-speech",
+        "text_to_speech",
+        "speech-synthesis",
+        "speech_synthesis",
+        "kitten-tts",
+        "kitten_tts",
+        "-tts-",
+        "_tts_",
+        "tts-",
+        "tts_",
         "whisper",
         "audio",
         "speech",
@@ -4633,6 +4643,38 @@ mod tests {
 
         let updated = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(updated.model_type, Some("reranker".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-name-tokens".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_falls_back_to_name_tokens_for_audio_tts() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "kittenml", "kitten-tts-mini-0_8");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("kitten_tts_mini_v0_8.onnx"), b"not-a-real-model").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/kittenml/kitten-tts-mini-0_8".to_string()),
+            family: Some("kittenml".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("kitten-tts-mini-0.8".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("unknown/kittenml/kitten-tts-mini-0_8")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("audio".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("audio".to_string()));
         assert_eq!(
             updated.model_type_resolution_source,
             Some("model-type-name-tokens".to_string())

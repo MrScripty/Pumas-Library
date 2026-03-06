@@ -940,6 +940,19 @@ impl ModelImporter {
         }
 
         let model_id = self.library.get_model_id(model_dir);
+        if resolved_model_type.model_type == ModelType::Unknown
+            && resolved_model_type.source == "unresolved"
+        {
+            if let Some(ref id) = model_id {
+                if let Err(e) = self.library.redetect_model_type(id).await {
+                    tracing::warn!(
+                        "Failed to redetect model type after in-place import for {}: {}",
+                        id,
+                        e
+                    );
+                }
+            }
+        }
         let security_tier = type_info.format.security_tier();
 
         Ok(ModelImportResult {
@@ -1609,5 +1622,47 @@ mod tests {
 
         let success_count = results.iter().filter(|r| r.success).count();
         assert_eq!(success_count, 3);
+    }
+
+    #[tokio::test]
+    async fn test_import_in_place_redetects_unknown_tts_model_to_audio() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("unknown", "kittenml", "kitten-tts-mini-0_8");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"name":"Kitten TTS Mini","model_file":"kitten_tts_mini_v0_8.onnx"}"#,
+        )
+        .unwrap();
+        std::fs::write(model_dir.join("kitten_tts_mini_v0_8.onnx"), b"not-a-real-model").unwrap();
+        std::fs::write(model_dir.join("voices.npz"), b"voices").unwrap();
+
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "kitten-tts-mini-0.8".to_string(),
+            family: "kittenml".to_string(),
+            model_type: Some("unknown".to_string()),
+            repo_id: Some("KittenML/kitten-tts-mini-0.8".to_string()),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec![
+                "config.json".to_string(),
+                "kitten_tts_mini_v0_8.onnx".to_string(),
+                "voices.npz".to_string(),
+            ]),
+            pipeline_tag: None,
+        };
+
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(result.success);
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(metadata.model_type.as_deref(), Some("audio"));
+        assert_eq!(
+            metadata.model_type_resolution_source.as_deref(),
+            Some("model-type-name-tokens")
+        );
     }
 }

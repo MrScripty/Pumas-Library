@@ -150,9 +150,14 @@ pub fn resolve_model_type_with_rules(
 
 fn resolve_hint_only_model_type(medium_hints: &[ModelType]) -> Option<ModelType> {
     // Preserve strict hard-signal-first behavior by default.
-    // Only allow hint-only classification for explicit reranker hints.
-    if medium_hints.len() == 1 && medium_hints.contains(&ModelType::Reranker) {
-        return Some(ModelType::Reranker);
+    // Only allow hint-only classification for high-signal task hints.
+    if medium_hints.len() == 1 {
+        if medium_hints.contains(&ModelType::Reranker) {
+            return Some(ModelType::Reranker);
+        }
+        if medium_hints.contains(&ModelType::Audio) {
+            return Some(ModelType::Audio);
+        }
     }
     None
 }
@@ -581,6 +586,32 @@ mod tests {
             resolve_model_type_with_rules(&index, model_dir.path(), Some("text-ranking"), None)
                 .unwrap();
         assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-resolver-medium-hints");
+        assert_eq!(resolved.confidence, 0.65);
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
+    }
+
+    #[test]
+    fn audio_medium_hint_resolves_without_hard_signals() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["UnmappedArchitecture"]
+            }),
+        );
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-to-speech"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Audio);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
         assert!(resolved

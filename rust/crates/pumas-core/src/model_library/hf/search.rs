@@ -498,12 +498,28 @@ impl HuggingFaceClient {
 
     fn infer_pipeline_tag_from_tags(tags: &[String]) -> Option<String> {
         for tag in tags {
-            let normalized = tag.trim().to_lowercase().replace(' ', "-");
-            if normalized == "text-ranking"
-                || normalized == "text-reranking"
-                || normalized == "reranking"
-            {
-                return Some("text-ranking".to_string());
+            let normalized = tag
+                .trim()
+                .to_lowercase()
+                .replace(' ', "-")
+                .replace('_', "-");
+            match normalized.as_str() {
+                "text-ranking" | "text-reranking" | "reranking" => {
+                    return Some("text-ranking".to_string());
+                }
+                "text-to-speech" | "speech-synthesis" => {
+                    return Some("text-to-speech".to_string());
+                }
+                "text-to-audio" => {
+                    return Some("text-to-audio".to_string());
+                }
+                "automatic-speech-recognition" | "speech-recognition" | "asr" => {
+                    return Some("automatic-speech-recognition".to_string());
+                }
+                "audio-classification" => {
+                    return Some("audio-classification".to_string());
+                }
+                _ => {}
             }
         }
         None
@@ -657,5 +673,29 @@ mod tests {
         };
         let converted = HuggingFaceClient::convert_search_result(result);
         assert_eq!(converted.kind, "text-ranking");
+    }
+
+    #[test]
+    fn test_infer_pipeline_tag_from_tags_detects_text_to_speech() {
+        let tags = vec!["onnx".to_string(), "Text To Speech".to_string()];
+        assert_eq!(
+            HuggingFaceClient::infer_pipeline_tag_from_tags(&tags).as_deref(),
+            Some("text-to-speech")
+        );
+    }
+
+    #[test]
+    fn test_convert_search_result_prefers_audio_tags_when_pipeline_missing() {
+        let result = HfSearchResult {
+            model_id: "KittenML/kitten-tts-mini-0.8".to_string(),
+            tags: vec!["onnx".to_string(), "speech_synthesis".to_string()],
+            pipeline_tag: None,
+            last_modified: None,
+            downloads: None,
+            siblings: vec![],
+            config: None,
+        };
+        let converted = HuggingFaceClient::convert_search_result(result);
+        assert_eq!(converted.kind, "text-to-speech");
     }
 }

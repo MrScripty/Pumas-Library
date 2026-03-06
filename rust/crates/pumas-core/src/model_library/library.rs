@@ -3563,7 +3563,7 @@ fn has_pending_download_artifacts(model_dir: &Path) -> bool {
                 return false;
             }
             let name = entry.file_name().to_string_lossy();
-            name.ends_with(".part") || name == ".pumas_download"
+            name.ends_with(".part")
         })
 }
 
@@ -3894,6 +3894,56 @@ mod tests {
 
         let record = library
             .get_model("llm/test/complete-model")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.metadata["download_incomplete"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            record.metadata["download_has_part_files"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            record.metadata["download_missing_expected_files"].as_u64(),
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_indexed_metadata_treats_download_marker_as_complete_when_files_exist() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("audio", "kittenml", "kitten-tts-mini-0_8");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(model_dir.join("kitten_tts_mini_v0_8.onnx"), b"onnx").unwrap();
+        std::fs::write(model_dir.join("voices.npz"), b"voices").unwrap();
+        std::fs::write(
+            model_dir.join(".pumas_download"),
+            r#"{"repo_id":"KittenML/kitten-tts-mini-0.8"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("audio/kittenml/kitten-tts-mini-0_8".to_string()),
+            family: Some("kittenml".to_string()),
+            model_type: Some("audio".to_string()),
+            official_name: Some("kitten-tts-mini-0.8".to_string()),
+            cleaned_name: Some("kitten-tts-mini-0_8".to_string()),
+            expected_files: Some(vec![
+                "config.json".to_string(),
+                "kitten_tts_mini_v0_8.onnx".to_string(),
+                "voices.npz".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library
+            .get_model("audio/kittenml/kitten-tts-mini-0_8")
             .await
             .unwrap()
             .unwrap();

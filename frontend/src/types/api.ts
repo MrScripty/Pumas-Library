@@ -453,6 +453,11 @@ export interface ModelDownloadStatusResponse extends BaseResponse {
   totalBytes?: number;
   speed?: number;
   etaSeconds?: number;
+  retryAttempt?: number;
+  retryLimit?: number;
+  retrying?: boolean;
+  nextRetryDelaySeconds?: number;
+  error?: string;
 }
 
 export interface ListModelDownloadsResponse extends BaseResponse {

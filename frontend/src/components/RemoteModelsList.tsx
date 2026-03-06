@@ -158,6 +158,11 @@ export function RemoteModelsList({
         const isPausing = downloadStatus?.status === 'pausing';
         const showActiveDownloadRing = isDownloading;
         const modelError = downloadErrors[model.repoId];
+        const retryHint = downloadStatus?.retrying
+          ? `Retrying ${
+              downloadStatus.retryLimit ? `${downloadStatus.retryAttempt ?? 0}/${downloadStatus.retryLimit}` : `attempt ${downloadStatus.retryAttempt ?? 0}/unlimited`
+            }${downloadStatus.nextRetryDelaySeconds ? ` in ${downloadStatus.nextRetryDelaySeconds.toFixed(1)}s` : ''}`
+          : null;
         const progressValue = downloadStatus?.progress ?? 0;
         const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
         const ringDegrees = isQueued ? 60 : progressDegrees;
@@ -286,6 +291,11 @@ export function RemoteModelsList({
                         Sign in to HuggingFace
                       </button>
                     )}
+                  </div>
+                )}
+                {retryHint && (
+                  <div className="mt-1 text-xs text-[hsl(var(--launcher-accent-warning))]">
+                    {retryHint}
                   </div>
                 )}
               </div>

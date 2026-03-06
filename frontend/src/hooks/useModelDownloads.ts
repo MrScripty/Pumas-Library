@@ -22,6 +22,10 @@ export interface DownloadStatus {
   etaSeconds?: number;
   modelName?: string;
   modelType?: string;
+  retryAttempt?: number;
+  retryLimit?: number;
+  retrying?: boolean;
+  nextRetryDelaySeconds?: number;
 }
 
 const ACTIVE_STATUSES = ['queued', 'downloading', 'cancelling', 'pausing'] as const;
@@ -75,6 +79,10 @@ function selectDownloadsByRepo(downloads: Array<{
   etaSeconds?: number;
   modelName?: string;
   modelType?: string;
+  retryAttempt?: number;
+  retryLimit?: number;
+  retrying?: boolean;
+  nextRetryDelaySeconds?: number;
   error?: string;
 }>): {
   statuses: Record<string, DownloadStatus>;
@@ -97,6 +105,11 @@ function selectDownloadsByRepo(downloads: Array<{
       etaSeconds: typeof dl.etaSeconds === 'number' ? dl.etaSeconds : undefined,
       modelName: dl.modelName,
       modelType: dl.modelType,
+      retryAttempt: typeof dl.retryAttempt === 'number' ? dl.retryAttempt : undefined,
+      retryLimit: typeof dl.retryLimit === 'number' ? dl.retryLimit : undefined,
+      retrying: typeof dl.retrying === 'boolean' ? dl.retrying : undefined,
+      nextRetryDelaySeconds:
+        typeof dl.nextRetryDelaySeconds === 'number' ? dl.nextRetryDelaySeconds : undefined,
     };
 
     const current = selected[repoId]?.status;

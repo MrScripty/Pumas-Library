@@ -58,6 +58,11 @@ const KITTENTTS_PROFILE_ID: &str = "kittentts-runtime";
 const KITTENTTS_PROFILE_VERSION: i64 = 1;
 const KITTENTTS_BACKEND_KEY: &str = "onnx-runtime";
 
+struct CustomRuntimeProjection {
+    binding_id: String,
+    metadata_changed: bool,
+}
+
 /// The core model library registry.
 ///
 /// Manages a canonical storage location for AI models with:
@@ -278,12 +283,21 @@ impl ModelLibrary {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
         })?;
 
-        let binding_id =
+        let projection =
             self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
+        if projection
+            .as_ref()
+            .is_some_and(|projection| projection.metadata_changed)
+        {
+            self.save_metadata(model_dir, &metadata).await?;
+            if let Some(updated) = self.load_metadata(model_dir)? {
+                metadata = updated;
+            }
+        }
         let record = metadata_to_record(&model_id, model_dir, &metadata);
         self.index.upsert(&record)?;
-        if let Some(binding_id) = binding_id {
-            self.ensure_kittentts_runtime_binding(&model_id, &binding_id)?;
+        if let Some(projection) = projection {
+            self.ensure_kittentts_runtime_binding(&model_id, &projection.binding_id)?;
         }
 
         Ok(())
@@ -311,15 +325,22 @@ impl ModelLibrary {
         model_id: &str,
         model_dir: &Path,
         metadata: &mut ModelMetadata,
-    ) -> Option<String> {
+    ) -> Option<CustomRuntimeProjection> {
         if !is_kittentts_runtime_candidate(model_dir, metadata) {
             return None;
         }
 
         let binding_id = kittentts_runtime_binding_id(model_id);
+        let mut metadata_changed = false;
 
-        metadata.requires_custom_code = Some(true);
-        metadata.recommended_backend = Some(KITTENTTS_BACKEND_KEY.to_string());
+        if metadata.requires_custom_code != Some(true) {
+            metadata.requires_custom_code = Some(true);
+            metadata_changed = true;
+        }
+        if metadata.recommended_backend.as_deref() != Some(KITTENTTS_BACKEND_KEY) {
+            metadata.recommended_backend = Some(KITTENTTS_BACKEND_KEY.to_string());
+            metadata_changed = true;
+        }
 
         let mut engine_hints = metadata.runtime_engine_hints.clone().unwrap_or_default();
         if !engine_hints
@@ -330,11 +351,15 @@ impl ModelLibrary {
         }
         engine_hints.sort();
         engine_hints.dedup();
-        metadata.runtime_engine_hints = if engine_hints.is_empty() {
+        let next_engine_hints = if engine_hints.is_empty() {
             None
         } else {
             Some(engine_hints)
         };
+        if metadata.runtime_engine_hints != next_engine_hints {
+            metadata.runtime_engine_hints = next_engine_hints;
+            metadata_changed = true;
+        }
 
         let mut code_sources = metadata.custom_code_sources.clone().unwrap_or_default();
         for source in [
@@ -347,11 +372,20 @@ impl ModelLibrary {
         }
         code_sources.sort();
         code_sources.dedup();
-        metadata.custom_code_sources = if code_sources.is_empty() {
+        let next_code_sources = if code_sources.is_empty() {
             None
         } else {
             Some(code_sources)
         };
+        if metadata.custom_code_sources != next_code_sources {
+            metadata.custom_code_sources = next_code_sources;
+            metadata_changed = true;
+        }
+
+        if metadata.inference_settings.is_none() {
+            metadata.inference_settings = Some(kittentts_inference_settings(model_dir));
+            metadata_changed = true;
+        }
 
         let mut binding_refs = metadata.dependency_bindings.clone().unwrap_or_default();
         let has_kittentts_ref = binding_refs.iter().any(|binding| {
@@ -367,14 +401,16 @@ impl ModelLibrary {
                 backend_key: Some(KITTENTTS_BACKEND_KEY.to_string()),
                 platform_selector: None,
             });
+            metadata_changed = true;
         }
-        metadata.dependency_bindings = if binding_refs.is_empty() {
-            None
-        } else {
-            Some(binding_refs)
-        };
+        if !binding_refs.is_empty() {
+            metadata.dependency_bindings = Some(binding_refs);
+        }
 
-        Some(binding_id)
+        Some(CustomRuntimeProjection {
+            binding_id,
+            metadata_changed,
+        })
     }
 
     fn ensure_kittentts_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
@@ -456,12 +492,25 @@ impl ModelLibrary {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
 
-                    if let Some(binding_id) = self.apply_custom_runtime_metadata_projection(
+                    if let Some(projection) = self.apply_custom_runtime_metadata_projection(
                         &model_id,
                         &model_dir,
                         &mut metadata,
                     ) {
-                        custom_runtime_bindings.push((model_id.clone(), binding_id));
+                        custom_runtime_bindings
+                            .push((model_id.clone(), projection.binding_id.clone()));
+                        if projection.metadata_changed {
+                            if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
+                                tracing::warn!(
+                                    "Failed to persist custom runtime metadata projection for {}: {}",
+                                    model_id,
+                                    err
+                                );
+                            }
+                            if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                                metadata = updated;
+                            }
+                        }
                     }
 
                     let mut record = metadata_to_record(&model_id, &model_dir, &metadata);
@@ -2910,6 +2959,98 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
         }
         _ => false,
     }
+}
+
+fn kittentts_voice_choices(model_dir: &Path) -> Vec<String> {
+    let config_path = model_dir.join("config.json");
+    let Ok(contents) = std::fs::read_to_string(config_path) else {
+        return vec![
+            "Bella".to_string(),
+            "Jasper".to_string(),
+            "Luna".to_string(),
+            "Bruno".to_string(),
+            "Rosie".to_string(),
+            "Hugo".to_string(),
+            "Kiki".to_string(),
+            "Leo".to_string(),
+        ];
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&contents) else {
+        return Vec::new();
+    };
+    let mut voices = config
+        .get("voice_aliases")
+        .and_then(Value::as_object)
+        .map(|voice_map| voice_map.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+
+    voices.sort();
+    voices.dedup();
+    voices
+}
+
+fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::InferenceParamSchema> {
+    let mut allowed_voices = kittentts_voice_choices(model_dir);
+    if allowed_voices.is_empty() {
+        allowed_voices.push("Leo".to_string());
+    }
+    let default_voice = if allowed_voices.iter().any(|voice| voice == "Leo") {
+        "Leo".to_string()
+    } else {
+        allowed_voices[0].clone()
+    };
+
+    vec![
+        crate::models::InferenceParamSchema {
+            key: "voice".to_string(),
+            label: "Voice".to_string(),
+            param_type: crate::models::ParamType::String,
+            default: serde_json::Value::String(default_voice),
+            description: Some("Voice preset name from KittenTTS voice aliases".to_string()),
+            constraints: Some(crate::models::ParamConstraints {
+                min: None,
+                max: None,
+                allowed_values: Some(
+                    allowed_voices
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                ),
+            }),
+        },
+        crate::models::InferenceParamSchema {
+            key: "speed".to_string(),
+            label: "Speed".to_string(),
+            param_type: crate::models::ParamType::Number,
+            default: serde_json::json!(1.0),
+            description: Some("Speech rate multiplier (1.0 is default speed)".to_string()),
+            constraints: Some(crate::models::ParamConstraints {
+                min: Some(0.5),
+                max: Some(2.0),
+                allowed_values: None,
+            }),
+        },
+        crate::models::InferenceParamSchema {
+            key: "clean_text".to_string(),
+            label: "Clean Text".to_string(),
+            param_type: crate::models::ParamType::Boolean,
+            default: serde_json::json!(true),
+            description: Some("Apply KittenTTS text normalization before synthesis".to_string()),
+            constraints: None,
+        },
+        crate::models::InferenceParamSchema {
+            key: "sample_rate".to_string(),
+            label: "Sample Rate".to_string(),
+            param_type: crate::models::ParamType::Integer,
+            default: serde_json::json!(24000),
+            description: Some("Output WAV sample rate used by KittenTTS".to_string()),
+            constraints: Some(crate::models::ParamConstraints {
+                min: Some(8000.0),
+                max: Some(96000.0),
+                allowed_values: None,
+            }),
+        },
+    ]
 }
 
 fn is_metadata_artifact_filename(name: &str) -> bool {
@@ -5879,6 +6020,20 @@ mod tests {
                 .and_then(Value::as_str),
             Some("onnx-runtime")
         );
+        let settings = model
+            .metadata
+            .get("inference_settings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let setting_keys = settings
+            .iter()
+            .filter_map(|entry| entry.get("key").and_then(Value::as_str))
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(setting_keys.contains("voice"));
+        assert!(setting_keys.contains("speed"));
+        assert!(setting_keys.contains("clean_text"));
+        assert!(setting_keys.contains("sample_rate"));
 
         let bindings = model
             .metadata
@@ -5911,6 +6066,18 @@ mod tests {
             .collect::<std::collections::BTreeSet<_>>();
         assert!(requirement_names.contains("kittentts"));
         assert!(requirement_names.contains("misaki"));
+
+        let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
+        let persisted_keys = persisted
+            .inference_settings
+            .unwrap_or_default()
+            .into_iter()
+            .map(|setting| setting.key)
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(persisted_keys.contains("voice"));
+        assert!(persisted_keys.contains("speed"));
+        assert!(persisted_keys.contains("clean_text"));
+        assert!(persisted_keys.contains("sample_rate"));
     }
 
     #[tokio::test]

@@ -8,7 +8,9 @@
 //! - Model enumeration and querying
 
 use crate::error::{PumasError, Result};
-use crate::index::{ModelDependencyBindingRecord, ModelIndex, ModelRecord, SearchResult};
+use crate::index::{
+    DependencyProfileRecord, ModelDependencyBindingRecord, ModelIndex, ModelRecord, SearchResult,
+};
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
@@ -52,6 +54,9 @@ const INTEGRITY_ISSUE_DUPLICATE_REPO_ID: &str = "integrity_issue_duplicate_repo_
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT: &str = "integrity_issue_duplicate_repo_id_count";
 /// Indexed metadata key listing alternate model IDs with the same repo_id.
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_OTHERS: &str = "integrity_issue_duplicate_repo_id_others";
+const KITTENTTS_PROFILE_ID: &str = "kittentts-runtime";
+const KITTENTTS_PROFILE_VERSION: i64 = 1;
+const KITTENTTS_BACKEND_KEY: &str = "onnx-runtime";
 
 /// The core model library registry.
 ///
@@ -263,7 +268,7 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub async fn index_model_dir(&self, model_dir: &Path) -> Result<()> {
-        let metadata = self
+        let mut metadata = self
             .load_metadata(model_dir)?
             .ok_or_else(|| PumasError::ModelNotFound {
                 model_id: model_dir.display().to_string(),
@@ -273,8 +278,13 @@ impl ModelLibrary {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
         })?;
 
+        let binding_id =
+            self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
         let record = metadata_to_record(&model_id, model_dir, &metadata);
         self.index.upsert(&record)?;
+        if let Some(binding_id) = binding_id {
+            self.ensure_kittentts_runtime_binding(&model_id, &binding_id)?;
+        }
 
         Ok(())
     }
@@ -296,6 +306,132 @@ impl ModelLibrary {
         Ok(())
     }
 
+    fn apply_custom_runtime_metadata_projection(
+        &self,
+        model_id: &str,
+        model_dir: &Path,
+        metadata: &mut ModelMetadata,
+    ) -> Option<String> {
+        if !is_kittentts_runtime_candidate(model_dir, metadata) {
+            return None;
+        }
+
+        let binding_id = kittentts_runtime_binding_id(model_id);
+
+        metadata.requires_custom_code = Some(true);
+        metadata.recommended_backend = Some(KITTENTTS_BACKEND_KEY.to_string());
+
+        let mut engine_hints = metadata.runtime_engine_hints.clone().unwrap_or_default();
+        if !engine_hints
+            .iter()
+            .any(|hint| hint.eq_ignore_ascii_case(KITTENTTS_BACKEND_KEY))
+        {
+            engine_hints.push(KITTENTTS_BACKEND_KEY.to_string());
+        }
+        engine_hints.sort();
+        engine_hints.dedup();
+        metadata.runtime_engine_hints = if engine_hints.is_empty() {
+            None
+        } else {
+            Some(engine_hints)
+        };
+
+        let mut code_sources = metadata.custom_code_sources.clone().unwrap_or_default();
+        for source in [
+            "https://github.com/KittenML/KittenTTS",
+            "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl",
+        ] {
+            if !code_sources.iter().any(|existing| existing == source) {
+                code_sources.push(source.to_string());
+            }
+        }
+        code_sources.sort();
+        code_sources.dedup();
+        metadata.custom_code_sources = if code_sources.is_empty() {
+            None
+        } else {
+            Some(code_sources)
+        };
+
+        let mut binding_refs = metadata.dependency_bindings.clone().unwrap_or_default();
+        let has_kittentts_ref = binding_refs.iter().any(|binding| {
+            binding.profile_id.as_deref() == Some(KITTENTTS_PROFILE_ID)
+                && binding.profile_version == Some(KITTENTTS_PROFILE_VERSION)
+        });
+        if !has_kittentts_ref {
+            binding_refs.push(crate::models::DependencyBindingRef {
+                binding_id: Some(binding_id.clone()),
+                profile_id: Some(KITTENTTS_PROFILE_ID.to_string()),
+                profile_version: Some(KITTENTTS_PROFILE_VERSION),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some(KITTENTTS_BACKEND_KEY.to_string()),
+                platform_selector: None,
+            });
+        }
+        metadata.dependency_bindings = if binding_refs.is_empty() {
+            None
+        } else {
+            Some(binding_refs)
+        };
+
+        Some(binding_id)
+    }
+
+    fn ensure_kittentts_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let profile_spec = serde_json::json!({
+            "python_packages": [
+                {
+                    "name": "kittentts",
+                    "version": "==0.8.1",
+                    "python_requires": ">=3.12,<3.13",
+                    "source": "https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl"
+                },
+                {
+                    "name": "misaki",
+                    "version": "==0.9.4",
+                    "source": "https://github.com/hexgrad/misaki"
+                }
+            ],
+            "pin_policy": {
+                "required_packages": [
+                    { "name": "kittentts" },
+                    { "name": "misaki" }
+                ]
+            }
+        })
+        .to_string();
+
+        self.index.upsert_dependency_profile(&DependencyProfileRecord {
+            profile_id: KITTENTTS_PROFILE_ID.to_string(),
+            profile_version: KITTENTTS_PROFILE_VERSION,
+            profile_hash: None,
+            environment_kind: "python-venv".to_string(),
+            spec_json: profile_spec,
+            created_at: created_at.clone(),
+        })?;
+
+        self.index
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: binding_id.to_string(),
+                model_id: model_id.to_string(),
+                profile_id: KITTENTTS_PROFILE_ID.to_string(),
+                profile_version: KITTENTTS_PROFILE_VERSION,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some(KITTENTTS_BACKEND_KEY.to_string()),
+                platform_selector: None,
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("model-runtime-autobind".to_string()),
+                attached_at: created_at,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })?;
+
+        Ok(())
+    }
+
     /// Rebuild the entire index from metadata files.
     ///
     /// This is a fast operation that reads metadata.json files without
@@ -305,6 +441,7 @@ impl ModelLibrary {
 
         let mut discovered_model_ids: HashSet<String> = HashSet::new();
         let mut discovered_records = Vec::new();
+        let mut custom_runtime_bindings: Vec<(String, String)> = Vec::new();
         let mut count = 0;
         let existing_ids = self.index.get_all_ids()?;
         let mut existing_model_types: HashMap<String, String> = HashMap::new();
@@ -315,9 +452,17 @@ impl ModelLibrary {
         }
 
         for model_dir in self.model_dirs() {
-            if let Ok(Some(metadata)) = self.load_metadata(&model_dir) {
+            if let Ok(Some(mut metadata)) = self.load_metadata(&model_dir) {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
+
+                    if let Some(binding_id) = self.apply_custom_runtime_metadata_projection(
+                        &model_id,
+                        &model_dir,
+                        &mut metadata,
+                    ) {
+                        custom_runtime_bindings.push((model_id.clone(), binding_id));
+                    }
 
                     let mut record = metadata_to_record(&model_id, &model_dir, &metadata);
                     let metadata_type_missing = metadata
@@ -351,6 +496,16 @@ impl ModelLibrary {
         for record in discovered_records {
             if self.index.upsert(&record).is_ok() {
                 count += 1;
+            }
+        }
+
+        for (model_id, binding_id) in custom_runtime_bindings {
+            if let Err(err) = self.ensure_kittentts_runtime_binding(&model_id, &binding_id) {
+                tracing::warn!(
+                    "Failed to ensure KittenTTS runtime binding for {}: {}",
+                    model_id,
+                    err
+                );
             }
         }
 
@@ -2679,6 +2834,82 @@ fn normalized_repo_key_from_value(metadata: &Value) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_lowercase())
+}
+
+fn kittentts_runtime_binding_id(model_id: &str) -> String {
+    format!(
+        "kittentts-runtime-{}",
+        model_id
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect::<String>()
+    )
+}
+
+fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
+    let looks_like_kittentts = |value: &str| {
+        let token = value.trim().to_lowercase();
+        token.contains("kitten-tts")
+            || token.contains("kitten_tts")
+            || token.contains("kittentts")
+    };
+
+    if metadata
+        .repo_id
+        .as_deref()
+        .is_some_and(looks_like_kittentts)
+    {
+        return true;
+    }
+    if metadata
+        .official_name
+        .as_deref()
+        .is_some_and(looks_like_kittentts)
+    {
+        return true;
+    }
+    if metadata
+        .cleaned_name
+        .as_deref()
+        .is_some_and(looks_like_kittentts)
+    {
+        return true;
+    }
+    if metadata
+        .model_id
+        .as_deref()
+        .is_some_and(looks_like_kittentts)
+    {
+        return true;
+    }
+
+    let config_path = model_dir.join("config.json");
+    let Ok(contents) = std::fs::read_to_string(config_path) else {
+        return false;
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&contents) else {
+        return false;
+    };
+
+    let model_file = config
+        .get("model_file")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| value.to_lowercase().ends_with(".onnx"));
+    let voices_file = config
+        .get("voices")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .filter(|value| value.to_lowercase().ends_with(".npz"));
+
+    match (model_file, voices_file) {
+        (Some(model_file), Some(voices_file)) => {
+            model_dir.join(model_file).is_file() && model_dir.join(voices_file).is_file()
+        }
+        _ => false,
+    }
 }
 
 fn is_metadata_artifact_filename(name: &str) -> bool {
@@ -5600,6 +5831,86 @@ mod tests {
                 .and_then(Value::as_str),
             Some("pytorch")
         );
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_autobinds_kittentts_runtime_dependencies() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "audio/kittenml/kitten-tts-mini-0_8";
+        let model_dir = library.build_model_path("audio", "kittenml", "kitten-tts-mini-0_8");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{
+                "name": "Kitten TTS Mini",
+                "model_file": "kitten_tts_mini_v0_8.onnx",
+                "voices": "voices.npz"
+            }"#,
+        )
+        .unwrap();
+        std::fs::write(model_dir.join("kitten_tts_mini_v0_8.onnx"), b"onnx").unwrap();
+        std::fs::write(model_dir.join("voices.npz"), b"voices").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("audio".to_string()),
+            family: Some("kittenml".to_string()),
+            cleaned_name: Some("kitten-tts-mini-0_8".to_string()),
+            official_name: Some("kitten-tts-mini-0.8".to_string()),
+            repo_id: Some("KittenML/kitten-tts-mini-0.8".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let model = library.get_model(model_id).await.unwrap().unwrap();
+        assert_eq!(
+            model
+                .metadata
+                .get("requires_custom_code")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            model
+                .metadata
+                .get("recommended_backend")
+                .and_then(Value::as_str),
+            Some("onnx-runtime")
+        );
+
+        let bindings = model
+            .metadata
+            .get("dependency_bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings[0]
+                .get("profile_id")
+                .and_then(Value::as_str)
+                .unwrap_or(""),
+            "kittentts-runtime"
+        );
+
+        let resolved = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("onnx-runtime"))
+            .await
+            .unwrap();
+        assert_eq!(
+            resolved.validation_state,
+            crate::model_library::DependencyValidationState::Resolved
+        );
+        assert_eq!(resolved.bindings.len(), 1);
+        let requirement_names = resolved.bindings[0]
+            .requirements
+            .iter()
+            .map(|item| item.name.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(requirement_names.contains("kittentts"));
+        assert!(requirement_names.contains("misaki"));
     }
 
     #[tokio::test]

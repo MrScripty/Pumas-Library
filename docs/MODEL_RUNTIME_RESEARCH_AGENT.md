@@ -98,6 +98,7 @@ Map upstream parameters into `InferenceParamSchema` entries:
 - `constraints`:
   - numeric range via `min`/`max`
   - enum options via `allowed_values`
+  - when UI label differs from runtime token, use objects shaped as `{ "label": "...", "value": "..." }`
 
 Rules:
 - Include only runtime-tunable parameters clients should set.

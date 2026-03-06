@@ -2961,44 +2961,135 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
     }
 }
 
-fn kittentts_voice_choices(model_dir: &Path) -> Vec<String> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct KittenTtsVoiceOption {
+    label: String,
+    value: String,
+}
+
+fn default_kittentts_voice_options() -> Vec<KittenTtsVoiceOption> {
+    vec![
+        KittenTtsVoiceOption {
+            label: "Bella".to_string(),
+            value: "Bella".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Jasper".to_string(),
+            value: "Jasper".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Luna".to_string(),
+            value: "Luna".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Bruno".to_string(),
+            value: "Bruno".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Rosie".to_string(),
+            value: "Rosie".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Hugo".to_string(),
+            value: "Hugo".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Kiki".to_string(),
+            value: "Kiki".to_string(),
+        },
+        KittenTtsVoiceOption {
+            label: "Leo".to_string(),
+            value: "Leo".to_string(),
+        },
+    ]
+}
+
+fn parse_kittentts_voice_value(raw: &Value, fallback_label: &str) -> String {
+    match raw {
+        Value::String(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                fallback_label.to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        Value::Object(obj) => {
+            for key in ["value", "id", "voice"] {
+                if let Some(parsed) = obj
+                    .get(key)
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                {
+                    return parsed.to_string();
+                }
+            }
+            fallback_label.to_string()
+        }
+        _ => fallback_label.to_string(),
+    }
+}
+
+fn kittentts_voice_choices(model_dir: &Path) -> Vec<KittenTtsVoiceOption> {
     let config_path = model_dir.join("config.json");
     let Ok(contents) = std::fs::read_to_string(config_path) else {
-        return vec![
-            "Bella".to_string(),
-            "Jasper".to_string(),
-            "Luna".to_string(),
-            "Bruno".to_string(),
-            "Rosie".to_string(),
-            "Hugo".to_string(),
-            "Kiki".to_string(),
-            "Leo".to_string(),
-        ];
+        return default_kittentts_voice_options();
     };
     let Ok(config) = serde_json::from_str::<Value>(&contents) else {
-        return Vec::new();
+        return default_kittentts_voice_options();
     };
+
     let mut voices = config
         .get("voice_aliases")
         .and_then(Value::as_object)
-        .map(|voice_map| voice_map.keys().cloned().collect::<Vec<_>>())
+        .map(|voice_map| {
+            voice_map
+                .iter()
+                .filter_map(|(label_raw, value_raw)| {
+                    let label = label_raw.trim();
+                    if label.is_empty() {
+                        return None;
+                    }
+                    Some(KittenTtsVoiceOption {
+                        label: label.to_string(),
+                        value: parse_kittentts_voice_value(value_raw, label),
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
 
-    voices.sort();
-    voices.dedup();
+    voices.sort_by(|a, b| {
+        a.label
+            .to_lowercase()
+            .cmp(&b.label.to_lowercase())
+            .then_with(|| a.value.cmp(&b.value))
+    });
+    voices.dedup_by(|a, b| {
+        a.label.eq_ignore_ascii_case(&b.label) && a.value.eq_ignore_ascii_case(&b.value)
+    });
+    if voices.is_empty() {
+        return default_kittentts_voice_options();
+    }
+
     voices
 }
 
 fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::InferenceParamSchema> {
     let mut allowed_voices = kittentts_voice_choices(model_dir);
     if allowed_voices.is_empty() {
-        allowed_voices.push("Leo".to_string());
+        allowed_voices.push(KittenTtsVoiceOption {
+            label: "Leo".to_string(),
+            value: "Leo".to_string(),
+        });
     }
-    let default_voice = if allowed_voices.iter().any(|voice| voice == "Leo") {
-        "Leo".to_string()
-    } else {
-        allowed_voices[0].clone()
-    };
+    let default_voice = allowed_voices
+        .iter()
+        .find(|voice| voice.label.eq_ignore_ascii_case("Leo"))
+        .or_else(|| allowed_voices.first())
+        .map(|voice| voice.value.clone())
+        .unwrap_or_else(|| "Leo".to_string());
 
     vec![
         crate::models::InferenceParamSchema {
@@ -3006,14 +3097,22 @@ fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::Inferenc
             label: "Voice".to_string(),
             param_type: crate::models::ParamType::String,
             default: serde_json::Value::String(default_voice),
-            description: Some("Voice preset name from KittenTTS voice aliases".to_string()),
+            description: Some(
+                "Voice alias label and runtime value mapping from KittenTTS voice aliases"
+                    .to_string(),
+            ),
             constraints: Some(crate::models::ParamConstraints {
                 min: None,
                 max: None,
                 allowed_values: Some(
                     allowed_voices
                         .into_iter()
-                        .map(serde_json::Value::String)
+                        .map(|voice| {
+                            serde_json::json!({
+                                "label": voice.label,
+                                "value": voice.value
+                            })
+                        })
                         .collect(),
                 ),
             }),
@@ -5985,7 +6084,11 @@ mod tests {
             r#"{
                 "name": "Kitten TTS Mini",
                 "model_file": "kitten_tts_mini_v0_8.onnx",
-                "voices": "voices.npz"
+                "voices": "voices.npz",
+                "voice_aliases": {
+                    "Bella": "expr-voice-2-f",
+                    "Leo": "expr-voice-5-m"
+                }
             }"#,
         )
         .unwrap();
@@ -6034,6 +6137,31 @@ mod tests {
         assert!(setting_keys.contains("speed"));
         assert!(setting_keys.contains("clean_text"));
         assert!(setting_keys.contains("sample_rate"));
+        let voice_setting = settings
+            .iter()
+            .find(|entry| entry.get("key").and_then(Value::as_str) == Some("voice"))
+            .expect("voice setting should exist");
+        assert_eq!(
+            voice_setting.get("default").and_then(Value::as_str),
+            Some("expr-voice-5-m")
+        );
+        let voice_allowed_values = voice_setting
+            .get("constraints")
+            .and_then(Value::as_object)
+            .and_then(|obj| obj.get("allowed_values"))
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert!(voice_allowed_values.iter().any(|entry| {
+            entry
+                .get("label")
+                .and_then(Value::as_str)
+                .is_some_and(|label| label == "Leo")
+                && entry
+                    .get("value")
+                    .and_then(Value::as_str)
+                    .is_some_and(|value| value == "expr-voice-5-m")
+        }));
 
         let bindings = model
             .metadata
@@ -6068,16 +6196,20 @@ mod tests {
         assert!(requirement_names.contains("misaki"));
 
         let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
-        let persisted_keys = persisted
-            .inference_settings
-            .unwrap_or_default()
-            .into_iter()
-            .map(|setting| setting.key)
+        let persisted_settings = persisted.inference_settings.unwrap_or_default();
+        let persisted_keys = persisted_settings
+            .iter()
+            .map(|setting| setting.key.clone())
             .collect::<std::collections::BTreeSet<_>>();
         assert!(persisted_keys.contains("voice"));
         assert!(persisted_keys.contains("speed"));
         assert!(persisted_keys.contains("clean_text"));
         assert!(persisted_keys.contains("sample_rate"));
+        let persisted_voice = persisted_settings
+            .into_iter()
+            .find(|setting| setting.key == "voice")
+            .expect("persisted voice setting should exist");
+        assert_eq!(persisted_voice.default.as_str(), Some("expr-voice-5-m"));
     }
 
     #[tokio::test]

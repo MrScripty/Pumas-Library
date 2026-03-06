@@ -77,6 +77,40 @@ function isRecordValue(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+interface SelectAllowedOption {
+  label: string;
+  value: string;
+}
+
+function normalizeAllowedOption(raw: unknown): SelectAllowedOption | null {
+  if (typeof raw === 'string') {
+    return { label: raw, value: raw };
+  }
+  if (!isRecordValue(raw)) {
+    return null;
+  }
+
+  const value = typeof raw.value === 'string' ? raw.value : null;
+  if (!value) {
+    return null;
+  }
+
+  const label = typeof raw.label === 'string' && raw.label.trim() !== ''
+    ? raw.label
+    : value;
+  return { label, value };
+}
+
+function normalizeStringDefault(raw: unknown): string {
+  if (typeof raw === 'string') {
+    return raw;
+  }
+  if (isRecordValue(raw) && typeof raw.value === 'string') {
+    return raw.value;
+  }
+  return raw == null ? '' : String(raw);
+}
+
 /** Check whether value is a structured type requiring summary/expand controls */
 function isStructuredValue(value: unknown): boolean {
   return Array.isArray(value) || isRecordValue(value);
@@ -481,57 +515,64 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
       ) : (
         <div className="space-y-2">
           {inferenceSettings.map((param, index) => (
-            <div key={param.key} className="flex items-center gap-2">
-              <div className="flex-1 min-w-0">
-                <label
-                  className="block text-xs text-[hsl(var(--text-muted))] truncate"
-                  title={param.description || param.key}
-                >
-                  {param.label}
-                  <span className="ml-1 opacity-50">({param.param_type})</span>
-                </label>
-                {param.param_type === 'Boolean' ? (
-                  <select
-                    value={String(param.default)}
-                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+            (() => {
+              const allowedOptions = (param.constraints?.allowed_values ?? [])
+                .map(normalizeAllowedOption)
+                .filter((option): option is SelectAllowedOption => option !== null);
+              return (
+                <div key={param.key} className="flex items-center gap-2">
+                  <div className="flex-1 min-w-0">
+                    <label
+                      className="block text-xs text-[hsl(var(--text-muted))] truncate"
+                      title={param.description || param.key}
+                    >
+                      {param.label}
+                      <span className="ml-1 opacity-50">({param.param_type})</span>
+                    </label>
+                    {param.param_type === 'Boolean' ? (
+                      <select
+                        value={String(param.default)}
+                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                      >
+                        <option value="true">true</option>
+                        <option value="false">false</option>
+                      </select>
+                    ) : param.param_type === 'String' && allowedOptions.length > 0 ? (
+                      <select
+                        value={normalizeStringDefault(param.default)}
+                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                      >
+                        {allowedOptions.map((option) => (
+                          <option key={`${option.label}:${option.value}`} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type={param.param_type === 'String' ? 'text' : 'number'}
+                        value={param.default == null ? '' : String(param.default)}
+                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
+                        placeholder={param.description || param.key}
+                        min={param.constraints?.min ?? undefined}
+                        max={param.constraints?.max ?? undefined}
+                        step={param.param_type === 'Integer' ? 1 : 'any'}
+                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
+                      />
+                    )}
+                  </div>
+                  <button
+                    onClick={() => handleRemoveParam(index)}
+                    className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
+                    title="Remove parameter"
                   >
-                    <option value="true">true</option>
-                    <option value="false">false</option>
-                  </select>
-                ) : param.param_type === 'String' && param.constraints?.allowed_values ? (
-                  <select
-                    value={String(param.default ?? '')}
-                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-                  >
-                    {param.constraints.allowed_values.map((v) => (
-                      <option key={String(v)} value={String(v)}>
-                        {String(v)}
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type={param.param_type === 'String' ? 'text' : 'number'}
-                    value={param.default == null ? '' : String(param.default)}
-                    onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                    placeholder={param.description || param.key}
-                    min={param.constraints?.min ?? undefined}
-                    max={param.constraints?.max ?? undefined}
-                    step={param.param_type === 'Integer' ? 1 : 'any'}
-                    className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-                  />
-                )}
-              </div>
-              <button
-                onClick={() => handleRemoveParam(index)}
-                className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
-                title="Remove parameter"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              );
+            })()
           ))}
         </div>
       )}

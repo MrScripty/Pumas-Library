@@ -69,6 +69,13 @@ Consumers are expected to:
 
 Library list/search responses may project active dependency binding references into model metadata views so consumers can reason about current dependency linkage without separate calls.
 
+`recommended_backend` is an optional canonical metadata hint intended for downstream runtime selection:
+
+- Canonical tokens: `candle`, `diffusers`, `llama.cpp`, `ollama`, `onnx-runtime`, `pytorch`, `tensorrt`, `transformers`
+- Deterministic precedence: active binding `backend_key` (single unique value) -> `runtime_engine_hints` (single unique value) -> format-derived engine compatibility (single unique value)
+- Ambiguous signals resolve to `null` (never guessed)
+- Explicit curated metadata value is preserved (and normalized when recognized)
+
 ## App-Level Interaction
 
 `pumas-rpc` and `pumas-app-manager` consume model library outputs for:

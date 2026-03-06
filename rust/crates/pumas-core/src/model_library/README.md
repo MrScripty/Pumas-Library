@@ -55,3 +55,10 @@ full-text search via SQLite FTS5.
 - `walkdir` - Recursive directory traversal
 - `blake3` / `sha2` - Hash computation
 - `regex` - Shard pattern detection
+
+## API Consumer Contract
+
+- Metadata payloads may include `recommended_backend` as an optional runtime hint.
+- `recommended_backend` is deterministic-only and remains `null` when signals are ambiguous.
+- Canonical values are lowercase backend tokens (`llama.cpp`, `onnx-runtime`, etc.).
+- Consumers must treat missing/`null` as "fallback heuristics required."

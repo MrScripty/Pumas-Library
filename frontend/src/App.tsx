@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box } from 'lucide-react';
 import { Header } from './components/Header';
 import { AppSidebar } from './components/AppSidebar';
 import { ModelImportDropZone } from './components/ModelImportDropZone';
 import { ModelImportDialog } from './components/ModelImportDialog';
 import { AppPanelRenderer } from './components/app-panels/AppPanelRenderer';
 import type { ModelManagerProps } from './components/ModelManager';
+import type { AppConfig } from './types/apps';
 import { useVersions } from './hooks/useVersions';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
@@ -15,9 +15,8 @@ import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
 import { useActiveModelDownload } from './hooks/useActiveModelDownload';
 import { useAppPanelState } from './hooks/useAppPanelState';
+import { useManagedApps } from './hooks/useManagedApps';
 import { api, isAPIAvailable, windowAPI } from './api/adapter';
-import { DEFAULT_APPS } from './config/apps';
-import type { AppConfig } from './types/apps';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
 import { getAppVersionState } from './utils/appVersionState';
@@ -26,13 +25,9 @@ const logger = getLogger('App');
 
 
 export default function App() {
-  // --- Multi-App State ---
-  const [apps, setApps] = useState<AppConfig[]>(DEFAULT_APPS);
   const [selectedAppId, setSelectedAppId] = useState<string | null>(
     __FEATURE_MULTI_APP__ ? null : 'comfyui'
   );
-  const appIds = useMemo(() => apps.map(app => app.id), [apps]);
-  const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
 
   // --- UI State ---
   const [isInstalling, setIsInstalling] = useState(false);
@@ -103,11 +98,68 @@ export default function App() {
   const { installedVersions: torchInstalledVersions } = torchVersions;
   const installationProgress = appVersions.installationProgress;
 
+  const managedAppsState = useMemo(() => ({
+    systemResources,
+    comfyui: {
+      isRunning: comfyUIRunning,
+      isStarting,
+      isStopping,
+      launchError,
+      installedVersions: comfyInstalledVersions,
+      ramMemory: status?.app_resources?.comfyui?.ram_memory,
+      gpuMemory: status?.app_resources?.comfyui?.gpu_memory,
+    },
+    ollama: {
+      isRunning: ollamaRunning,
+      isStarting: ollamaIsStarting,
+      isStopping: ollamaIsStopping,
+      launchError: ollamaLaunchError,
+      installedVersions: ollamaInstalledVersions,
+      ramMemory: status?.app_resources?.ollama?.ram_memory,
+      gpuMemory: status?.app_resources?.ollama?.gpu_memory,
+    },
+    torch: {
+      isRunning: torchRunning,
+      isStarting: torchIsStarting,
+      isStopping: torchIsStopping,
+      launchError: torchLaunchError,
+      installedVersions: torchInstalledVersions,
+    },
+  }), [
+    comfyInstalledVersions,
+    comfyUIRunning,
+    isStarting,
+    isStopping,
+    launchError,
+    ollamaInstalledVersions,
+    ollamaIsStarting,
+    ollamaIsStopping,
+    ollamaLaunchError,
+    ollamaRunning,
+    status?.app_resources?.comfyui?.gpu_memory,
+    status?.app_resources?.comfyui?.ram_memory,
+    status?.app_resources?.ollama?.gpu_memory,
+    status?.app_resources?.ollama?.ram_memory,
+    systemResources,
+    torchInstalledVersions,
+    torchIsStarting,
+    torchIsStopping,
+    torchLaunchError,
+    torchRunning,
+  ]);
+  const {
+    apps,
+    deleteApp,
+    reorderApps,
+    addApp,
+  } = useManagedApps(managedAppsState);
+  const appIds = useMemo(() => apps.map((app) => app.id), [apps]);
+  const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
   const depsInstalled = status?.deps_ready ?? null;
   const isPatched = status?.patched ?? false;
   const menuShortcut = status?.menu_shortcut ?? false;
   const desktopShortcut = status?.desktop_shortcut ?? false;
-  const selectedApp = apps.find(app => app.id === selectedAppId) ?? null;
+  const selectedApp = apps.find((app) => app.id === selectedAppId) ?? null;
   const appDisplayName = selectedApp?.displayName ?? 'App';
   const panelState = getPanelState(selectedAppId);
   const activeShortcutState =
@@ -179,140 +231,6 @@ export default function App() {
       if (waitTimeout) clearTimeout(waitTimeout);
     };
   }, []);
-
-  // Update ComfyUI app status and iconState based on backend data
-  // Separate effect to avoid coupling with other apps
-  useEffect(() => {
-    setApps(prevApps => prevApps.map(app => {
-      if (app.id !== 'comfyui') return app;
-
-      // Calculate resource usage percentages
-      let gpuUsagePercent: number | undefined = undefined;
-      let ramUsagePercent: number | undefined = undefined;
-
-      if (status) {
-        const resources = status.app_resources?.comfyui;
-        const gpuTotal = systemResources?.gpu?.memory_total;
-        if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
-          gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
-        }
-        const ramTotal = systemResources?.ram?.total;
-        if (resources?.ram_memory && ramTotal && ramTotal > 0) {
-          ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
-        }
-      }
-
-      // Determine iconState - transition states have highest priority
-      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
-      if (isStopping) {
-        newIconState = 'stopping';
-      } else if (isStarting) {
-        newIconState = 'starting';
-      } else if (comfyUIRunning) {
-        newIconState = 'running';
-      } else if (launchError) {
-        newIconState = 'error';
-      } else if (comfyInstalledVersions.length > 0) {
-        newIconState = 'offline';
-      } else {
-        newIconState = 'uninstalled';
-      }
-
-      return {
-        ...app,
-        status: comfyUIRunning ? 'running' : 'idle',
-        ramUsage: ramUsagePercent,
-        gpuUsage: gpuUsagePercent,
-        iconState: newIconState,
-      };
-    }));
-  }, [status, systemResources, comfyUIRunning, depsInstalled, launchError, isStarting, isStopping, comfyInstalledVersions]);
-
-  // Update Ollama app iconState based on running status and installed versions
-  // Separate effect to avoid coupling with other apps
-  useEffect(() => {
-    // Debug: log Ollama resources data
-    logger.debug('Ollama effect - app_resources:', status?.app_resources);
-    logger.debug('Ollama effect - ollama:', status?.app_resources?.ollama);
-    logger.debug('Ollama effect - systemResources.ram.total:', systemResources?.ram?.total);
-    logger.debug('Ollama effect - systemResources.gpu.memory_total:', systemResources?.gpu?.memory_total);
-
-    setApps(prevApps => prevApps.map(app => {
-      if (app.id !== 'ollama') return app;
-
-      // Calculate resource usage percentages for Ollama
-      let gpuUsagePercent: number | undefined = undefined;
-      let ramUsagePercent: number | undefined = undefined;
-
-      if (status) {
-        const resources = status.app_resources?.ollama;
-        const gpuTotal = systemResources?.gpu?.memory_total;
-        if (resources?.gpu_memory && gpuTotal && gpuTotal > 0) {
-          gpuUsagePercent = Math.round((resources.gpu_memory / gpuTotal) * 100);
-        }
-        const ramTotal = systemResources?.ram?.total;
-        if (resources?.ram_memory && ramTotal && ramTotal > 0) {
-          ramUsagePercent = Math.round((resources.ram_memory / ramTotal) * 100);
-        }
-        // Debug: log calculated percentages
-        logger.debug('Ollama effect - calculated ram%:', ramUsagePercent, 'gpu%:', gpuUsagePercent,
-          'resources:', resources, 'ramTotal:', ramTotal, 'gpuTotal:', gpuTotal);
-      }
-
-      // Determine iconState - transition states have highest priority
-      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
-      if (ollamaIsStopping) {
-        newIconState = 'stopping';
-      } else if (ollamaIsStarting) {
-        newIconState = 'starting';
-      } else if (ollamaRunning) {
-        newIconState = 'running';
-      } else if (ollamaLaunchError) {
-        newIconState = 'error';
-      } else if (ollamaInstalledVersions.length > 0) {
-        newIconState = 'offline';
-      } else {
-        newIconState = 'uninstalled';
-      }
-
-      return {
-        ...app,
-        status: ollamaRunning ? 'running' : 'idle',
-        ramUsage: ramUsagePercent,
-        gpuUsage: gpuUsagePercent,
-        iconState: newIconState,
-      };
-    }));
-  }, [status, systemResources, ollamaInstalledVersions, ollamaRunning, ollamaLaunchError, ollamaIsStarting, ollamaIsStopping]);
-
-  // Update Torch app iconState based on running status and installed versions
-  useEffect(() => {
-    setApps(prevApps => prevApps.map(app => {
-      if (app.id !== 'torch') return app;
-
-      // Determine iconState - transition states have highest priority
-      let newIconState: 'running' | 'offline' | 'uninstalled' | 'error' | 'starting' | 'stopping';
-      if (torchIsStopping) {
-        newIconState = 'stopping';
-      } else if (torchIsStarting) {
-        newIconState = 'starting';
-      } else if (torchRunning) {
-        newIconState = 'running';
-      } else if (torchLaunchError) {
-        newIconState = 'error';
-      } else if (torchInstalledVersions.length > 0) {
-        newIconState = 'offline';
-      } else {
-        newIconState = 'uninstalled';
-      }
-
-      return {
-        ...app,
-        status: torchRunning ? 'running' : 'idle',
-        iconState: newIconState,
-      };
-    }));
-  }, [torchInstalledVersions, torchRunning, torchLaunchError, torchIsStarting, torchIsStopping]);
 
   // Launch error flash effect is handled by AppIndicator component
 
@@ -415,34 +333,15 @@ export default function App() {
       return;
     }
     logger.info('Deleting app', { appId });
-    setApps(prevApps => prevApps.filter(app => app.id !== appId));
-    if (selectedAppId === appId) {
-      setSelectedAppId(null);
-    }
+    deleteApp(appId);
   };
 
   const handleReorderApps = (reorderedApps: AppConfig[]) => {
-    setApps(reorderedApps);
+    reorderApps(reorderedApps);
   };
 
   const handleAddApp = (insertAtIndex: number) => {
-    const newAppNumber = apps.length + 1;
-    const newApp: AppConfig = {
-      id: `app-${Date.now()}`,
-      name: `new-app-${newAppNumber}`,
-      displayName: `New App ${newAppNumber}`,
-      icon: Box,
-      status: 'idle',
-      iconState: 'uninstalled',
-      ramUsage: 0,
-      gpuUsage: 0,
-    };
-
-    setApps(prevApps => {
-      const newApps = [...prevApps];
-      newApps.splice(insertAtIndex, 0, newApp);
-      return newApps;
-    });
+    addApp(insertAtIndex);
   };
 
   const handleToggleStar = (modelId: string) => {

@@ -218,32 +218,17 @@ export function LocalModelsList({
                             </span>
                           )}
                         </span>
-                        <div className="mt-1.5 grid grid-cols-3 gap-x-3 gap-y-1 text-[11px] text-[hsl(var(--text-muted))] sm:grid-cols-[minmax(0,90px)_minmax(0,110px)_minmax(0,120px)_auto]">
-                          <div className="min-w-0">
-                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
-                              Format
-                            </div>
-                            <div className="truncate text-[hsl(var(--text-secondary))]">
-                              {formatModelFormat(model.format)}
-                            </div>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
-                              Quant
-                            </div>
-                            <div className="truncate text-[hsl(var(--text-secondary))]">
-                              {formatQuantLabel(model.quant)}
-                            </div>
-                          </div>
-                          <div className="min-w-0">
-                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
-                              Size
-                            </div>
-                            <div className="truncate text-[hsl(var(--text-secondary))]">
-                              {formatSize(model.size)}
-                            </div>
-                          </div>
-                          <div className="flex items-end sm:justify-end">
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[hsl(var(--text-secondary))]">
+                          <span className="min-w-0 truncate">
+                            {formatModelFormat(model.format)}
+                          </span>
+                          <span className="min-w-0 truncate">
+                            {formatQuantLabel(model.quant)}
+                          </span>
+                          <span className="min-w-0 truncate">
+                            {formatSize(model.size)}
+                          </span>
+                          <div className="flex items-center">
                             {model.hasDependencies && (
                               <span
                                 className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[hsl(var(--accent-success)/0.14)] text-[hsl(var(--accent-success))]"

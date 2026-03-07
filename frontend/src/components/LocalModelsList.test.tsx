@@ -42,12 +42,12 @@ describe('LocalModelsList', () => {
       />
     );
 
-    expect(screen.getByText('Format')).toBeInTheDocument();
-    expect(screen.getByText('Quant')).toBeInTheDocument();
-    expect(screen.getByText('Size')).toBeInTheDocument();
     expect(screen.getByText('GGUF')).toBeInTheDocument();
     expect(screen.getByText('Q4_K_M')).toBeInTheDocument();
     expect(screen.getByText('1.00 GB')).toBeInTheDocument();
     expect(screen.getByText('Deps')).toBeInTheDocument();
+    expect(screen.queryByText('Format')).not.toBeInTheDocument();
+    expect(screen.queryByText('Quant')).not.toBeInTheDocument();
+    expect(screen.queryByText('Size')).not.toBeInTheDocument();
   });
 });

@@ -332,10 +332,26 @@ export interface SystemResourcesResponse extends BaseResponse {
 // Model Types
 // ============================================================================
 
-export interface ModelDataMetadata {
+export interface ModelRecordMetadata {
   conversion_source?: ConversionSource;
+  model_id?: string;
+  family?: string;
+  model_type?: string;
+  subtype?: string;
+  official_name?: string;
+  cleaned_name?: string;
+  tags?: string[];
+  added_date?: string;
+  updated_date?: string;
+  size_bytes?: number;
   expected_files?: string[];
-  files?: string[];
+  files?: Array<{
+    name: string;
+    original_name?: string | null;
+    size?: number | null;
+    sha256?: string | null;
+    blake3?: string | null;
+  }>;
   repo_id?: string;
   download_incomplete?: boolean;
   download_has_part_files?: boolean;
@@ -343,22 +359,29 @@ export interface ModelDataMetadata {
   integrity_issue_duplicate_repo_id?: boolean;
   integrity_issue_duplicate_repo_id_count?: number;
   integrity_issue_duplicate_repo_id_others?: string[];
+  dependency_bindings?: Array<Record<string, unknown>>;
+  requires_custom_code?: boolean;
+  recommended_backend?: string | null;
+  primary_format?: string | null;
+  quantization?: string | null;
+  related_available?: boolean;
   [key: string]: unknown;
 }
 
-export interface ModelData {
-  path?: string;
+export interface ModelRecord {
+  id: string;
+  path: string;
   modelType: string;
   officialName?: string;
   cleanedName?: string;
-  size?: number;
-  addedDate?: string;
-  relatedAvailable?: boolean;
-  metadata?: ModelDataMetadata;
+  tags: string[];
+  hashes: Record<string, string>;
+  metadata: ModelRecordMetadata;
+  updatedAt: string;
 }
 
 export interface ModelsResponse extends BaseResponse {
-  models: Record<string, ModelData>;
+  models: Record<string, ModelRecord>;
 }
 
 export interface HuggingFaceModel {
@@ -606,22 +629,7 @@ export interface NetworkStatusResponse extends BaseResponse {
  * FTS5 search response for local model library
  */
 export interface FTSSearchResponse extends BaseResponse {
-  models: Array<{
-    model_id: string;
-    repo_id?: string;
-    official_name: string;
-    family: string;
-    model_type?: string;
-    subtype?: string;
-    tags?: string[];
-    description?: string;
-    file_path: string;
-    size_bytes?: number;
-    security_tier?: SecurityTier;
-    added_date?: string;
-    last_used?: string;
-    related_available?: boolean;
-  }>;
+  models: ModelRecord[];
   total_count: number;
   query_time_ms: number;
   query: string;

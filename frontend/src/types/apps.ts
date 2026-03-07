@@ -26,6 +26,8 @@ export interface ModelInfo {
   category: string;
   path?: string;
   modelDir?: string;
+  format?: string;
+  quant?: string;
   size?: number;
   date?: string;
   starred?: boolean;
@@ -40,9 +42,11 @@ export interface ModelInfo {
   wasDequantized?: boolean;
   convertedFrom?: string;
   repoId?: string;
+  hasDependencies?: boolean;
+  dependencyCount?: number;
   hasIntegrityIssue?: boolean;
   integrityIssueMessage?: string;
-  /** Primary model format: 'gguf', 'safetensors', or undefined */
+  /** Format used for conversion actions when supported. */
   primaryFormat?: 'gguf' | 'safetensors';
 }
 

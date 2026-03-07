@@ -9,10 +9,11 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { isAPIAvailable } from '../api/adapter';
 import { modelsAPI } from '../api/models';
 import { importAPI } from '../api/import';
-import type { ModelCategory, ModelInfo } from '../types/apps';
-import type { ModelData } from '../types/api';
+import type { ModelCategory } from '../types/apps';
+import type { ModelRecord } from '../types/api';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
+import { groupModelRecords } from '../utils/libraryModels';
 
 const logger = getLogger('useModels');
 
@@ -53,65 +54,7 @@ export function useModels() {
     try {
       const result = await modelsAPI.getModels();
       if (result.success && result.models) {
-        // Transform backend models to frontend ModelCategory structure
-        const categorizedModels: ModelCategory[] = [];
-        const categoryMap = new Map<string, ModelInfo[]>();
-
-        // Group models by category
-        const modelEntries = Object.entries(result.models);
-        modelEntries.forEach(([path, modelData]: [string, ModelData]) => {
-          const category = modelData.modelType || 'uncategorized';
-          const fileName = path.split('/').pop() || path;
-          const displayName = modelData.officialName ?? modelData.cleanedName ?? fileName;
-          const downloadIncomplete = Boolean(modelData.metadata?.download_incomplete);
-          const duplicateRepoIssue = Boolean(modelData.metadata?.integrity_issue_duplicate_repo_id);
-          const duplicateRepoCount = modelData.metadata?.integrity_issue_duplicate_repo_id_count;
-          const integrityIssueMessage = duplicateRepoIssue
-            ? `Duplicate repo entries detected (${duplicateRepoCount ?? 2} paths). Run library reconciliation.`
-            : undefined;
-
-          const conversionSource = modelData.metadata?.conversion_source;
-          // Determine primary format from path/name heuristics or metadata
-          const pathLower = path.toLowerCase();
-          const nameLower = fileName.toLowerCase();
-          const targetFmt = conversionSource?.target_format;
-          let primaryFormat: 'gguf' | 'safetensors' | undefined;
-          if (targetFmt === 'gguf' || pathLower.includes('gguf') || nameLower.endsWith('.gguf')) {
-            primaryFormat = 'gguf';
-          } else if (targetFmt === 'safetensors' || pathLower.includes('safetensors') || nameLower.includes('safetensors')) {
-            primaryFormat = 'safetensors';
-          }
-
-          const modelInfo: ModelInfo = {
-            id: path,
-            name: displayName,
-            category: category,
-            path: path,
-            modelDir: modelData.path,
-            size: modelData.size,
-            date: modelData.addedDate,
-            relatedAvailable: Boolean(modelData.relatedAvailable),
-            isPartialDownload: downloadIncomplete,
-            wasDequantized: conversionSource?.was_dequantized ?? false,
-            convertedFrom: conversionSource?.source_format,
-            repoId: modelData.metadata?.repo_id,
-            hasIntegrityIssue: duplicateRepoIssue,
-            integrityIssueMessage,
-            primaryFormat,
-          };
-
-          if (!categoryMap.has(category)) {
-            categoryMap.set(category, []);
-          }
-          categoryMap.get(category)!.push(modelInfo);
-        });
-
-        // Convert map to array format
-        categoryMap.forEach((models, category) => {
-          categorizedModels.push({ category, models });
-        });
-
-        setModelGroups(categorizedModels);
+        setModelGroups(groupModelRecords(Object.values(result.models)));
       }
     } catch (error) {
       if (error instanceof APIError) {
@@ -163,42 +106,8 @@ export function useModels() {
    * Transform FTS results to ModelCategory format
    */
   const transformFTSResults = useCallback(
-    (models: Array<{
-      model_id: string;
-      official_name: string;
-      model_type?: string;
-      file_path: string;
-      size_bytes?: number;
-      added_date?: string;
-      related_available?: boolean;
-    }>): ModelCategory[] => {
-      const categoryMap = new Map<string, ModelInfo[]>();
-
-      for (const model of models) {
-        const category = model.model_type || 'uncategorized';
-        const modelInfo: ModelInfo = {
-          id: model.model_id,
-          name: model.official_name,
-          category: category,
-          path: model.file_path,
-          isPartialDownload: false,
-          size: model.size_bytes,
-          date: model.added_date,
-          relatedAvailable: Boolean(model.related_available),
-        };
-
-        if (!categoryMap.has(category)) {
-          categoryMap.set(category, []);
-        }
-        categoryMap.get(category)!.push(modelInfo);
-      }
-
-      const categorizedModels: ModelCategory[] = [];
-      categoryMap.forEach((models, category) => {
-        categorizedModels.push({ category, models });
-      });
-
-      return categorizedModels;
+    (models: ModelRecord[]): ModelCategory[] => {
+      return groupModelRecords(models);
     },
     []
   );

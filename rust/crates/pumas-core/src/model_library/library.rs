@@ -3490,6 +3490,9 @@ fn detect_quant_from_file_entries(files_value: Option<&Value>) -> Option<String>
         let size = file.get("size").and_then(Value::as_u64).unwrap_or(0);
         for field in ["name", "original_name"] {
             if let Some(name) = file.get(field).and_then(Value::as_str) {
+                if detect_format_from_name(name).is_none() {
+                    continue;
+                }
                 if let Some(quant) = extract_quant_token(name) {
                     weighted.push((size, quant));
                     break;
@@ -3551,7 +3554,7 @@ fn extract_quant_token(value: &str) -> Option<String> {
     let regex = QUANT_PATTERN
         .get_or_init(|| {
             regex::Regex::new(
-                r"(?i)(?:^|[._/\- ()])((?:UD-)?(?:IQ\d+_[A-Z0-9_]+|Q\d+_[A-Z0-9_]+)|fp16|fp32|bf16|f16|f32|int8|int4)(?:$|[._/\- )])",
+                r"(?i)(?:^|[._/\- ()])((?:UD-)?(?:IQ\d+_[A-Z0-9_]+|Q\d+_[A-Z0-9_]+)|fp16|fp32|fp8|bf16|f16|f32|int8|int4|nf4|nvfp4|mxfp4)(?:$|[._/\- )])",
             )
             .ok()
         })
@@ -3735,6 +3738,44 @@ mod tests {
         assert_ne!(
             record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
             Some("json")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partial_download_quant_projection_detects_nvfp4() {
+        let (_, library) = setup_library().await;
+        let partial_dir = library.build_model_path("llm", "forturne", "qwen3-reranker-4b-nvfp4");
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        std::fs::write(
+            partial_dir.join("config.json"),
+            r#"{"architectures":["Qwen3ForRewardModel"],"model_type":"qwen3"}"#,
+        )
+        .unwrap();
+        std::fs::write(partial_dir.join("model.safetensors.part"), b"partial").unwrap();
+
+        let partial_metadata = ModelMetadata {
+            model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
+            family: Some("forturne".to_string()),
+            model_type: Some("reranker".to_string()),
+            cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            match_source: Some("download_partial".to_string()),
+            pipeline_tag: Some("text-generation".to_string()),
+            ..Default::default()
+        };
+
+        library
+            .upsert_index_from_metadata(&partial_dir, &partial_metadata)
+            .unwrap();
+
+        let record = library
+            .get_model("llm/forturne/qwen3-reranker-4b-nvfp4")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.metadata[QUANTIZATION_METADATA_KEY].as_str(),
+            Some("NVFP4")
         );
     }
 

@@ -3511,19 +3511,31 @@ fn detect_format_from_string_list(values: Option<&Value>) -> Option<String> {
 }
 
 fn detect_format_from_name(name: &str) -> Option<String> {
-    let ext = Path::new(name)
+    let normalized_name = strip_download_suffix(name);
+    let ext = Path::new(normalized_name)
         .extension()
         .and_then(|value| value.to_str())
         .map(normalize_format_token)?;
-    if ext == "unknown" {
-        None
-    } else {
-        Some(ext)
-    }
+    canonical_weight_format(&ext).map(str::to_string)
 }
 
 fn normalize_format_token(value: &str) -> String {
     value.trim().trim_start_matches('.').to_ascii_lowercase()
+}
+
+fn canonical_weight_format(value: &str) -> Option<&'static str> {
+    match value {
+        "gguf" => Some("gguf"),
+        "ggml" => Some("ggml"),
+        "safetensors" => Some("safetensors"),
+        "onnx" => Some("onnx"),
+        "pt" | "pth" | "ckpt" | "bin" | "pickle" | "pkl" => Some("pickle"),
+        _ => None,
+    }
+}
+
+fn strip_download_suffix(name: &str) -> &str {
+    name.strip_suffix(".part").unwrap_or(name)
 }
 
 fn detect_quant_from_string_list(values: Option<&Value>) -> Option<String> {
@@ -3663,6 +3675,66 @@ mod tests {
         assert_eq!(
             record.metadata["download_missing_expected_files"].as_u64(),
             Some(1)
+        );
+        assert_eq!(
+            record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
+            Some("gguf")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partial_download_format_projection_ignores_json_sidecars() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "test", "json-sidecar-partial");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(model_dir.join("tokenizer.json"), b"{}").unwrap();
+        std::fs::write(model_dir.join("weights-Q4_K_M.gguf.part"), b"partial").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/json-sidecar-partial".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("JSON Sidecar Partial".to_string()),
+            cleaned_name: Some("json-sidecar-partial".to_string()),
+            files: Some(vec![
+                crate::models::ModelFileInfo {
+                    name: "config.json".to_string(),
+                    original_name: None,
+                    size: Some(10_000),
+                    sha256: None,
+                    blake3: None,
+                },
+                crate::models::ModelFileInfo {
+                    name: "weights-Q4_K_M.gguf.part".to_string(),
+                    original_name: None,
+                    size: Some(2_000),
+                    sha256: None,
+                    blake3: None,
+                },
+            ]),
+            expected_files: Some(vec![
+                "config.json".to_string(),
+                "weights-Q4_K_M.gguf".to_string(),
+            ]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library
+            .get_model("llm/test/json-sidecar-partial")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
+            Some("gguf")
+        );
+        assert_ne!(
+            record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
+            Some("json")
         );
     }
 

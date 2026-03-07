@@ -557,7 +557,10 @@ impl HuggingFaceClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model_library::hf_cache::HfSearchCache;
     use crate::model_library::types::LfsFileInfo;
+    use std::sync::Arc;
+    use tempfile::TempDir;
 
     fn lfs(filename: &str, size: u64) -> LfsFileInfo {
         LfsFileInfo {
@@ -725,5 +728,47 @@ mod tests {
         };
         let converted = HuggingFaceClient::convert_search_result(result);
         assert_eq!(converted.kind, "text-to-speech");
+    }
+
+    #[tokio::test]
+    async fn test_enrich_models_with_zero_hydrate_limit_preserves_cached_details() {
+        let temp = TempDir::new().unwrap();
+        let cache_path = temp.path().join("search.sqlite");
+        let cache = Arc::new(HfSearchCache::new(&cache_path).unwrap());
+        let client = HuggingFaceClient::with_cache(temp.path(), cache.clone()).unwrap();
+
+        let model = HuggingFaceModel {
+            repo_id: "test/model".to_string(),
+            name: "model".to_string(),
+            developer: "test".to_string(),
+            kind: "text-generation".to_string(),
+            formats: vec!["gguf".to_string()],
+            quants: vec!["Q4_K_M".to_string()],
+            download_options: vec![],
+            url: "https://huggingface.co/test/model".to_string(),
+            release_date: Some("2026-01-01T00:00:00Z".to_string()),
+            downloads: Some(1),
+            total_size_bytes: None,
+            quant_sizes: None,
+            compatible_engines: vec!["ollama".to_string()],
+        };
+
+        let mut cached = model.clone();
+        cached.download_options = vec![DownloadOption {
+            quant: "Q4_K_M".to_string(),
+            size_bytes: Some(42),
+            file_group: None,
+        }];
+        cached.total_size_bytes = Some(42);
+        cache.cache_repo_details(&cached).unwrap();
+
+        let enriched = client
+            .enrich_models_with_download_options(&[model], 0)
+            .await;
+        assert_eq!(enriched.len(), 1);
+        assert_eq!(enriched[0].download_options.len(), 1);
+        assert_eq!(enriched[0].download_options[0].quant, "Q4_K_M");
+        assert_eq!(enriched[0].download_options[0].size_bytes, Some(42));
+        assert_eq!(enriched[0].total_size_bytes, Some(42));
     }
 }

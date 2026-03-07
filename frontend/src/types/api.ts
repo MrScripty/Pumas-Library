@@ -459,6 +459,16 @@ export interface RelatedModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }
 
+export interface HFDownloadDetails {
+  repoId: string;
+  downloadOptions: HuggingFaceModel['downloadOptions'];
+  totalSizeBytes?: number | null;
+}
+
+export interface GetHFDownloadDetailsResponse extends BaseResponse {
+  details?: HFDownloadDetails;
+}
+
 export interface ModelDownloadResponse extends BaseResponse {
   download_id?: string;
   total_bytes?: number;
@@ -1578,8 +1588,13 @@ export interface PyWebViewAPI {
   search_hf_models(
     query: string,
     kind?: string | null,
-    limit?: number
+    limit?: number,
+    hydrateLimit?: number
   ): Promise<SearchHFModelsResponse>;
+  get_hf_download_details(
+    repoId: string,
+    quants?: string[] | null
+  ): Promise<GetHFDownloadDetailsResponse>;
   get_related_models(modelId: string, limit?: number): Promise<RelatedModelsResponse>;
   start_model_download_from_hf(
     repoId: string,

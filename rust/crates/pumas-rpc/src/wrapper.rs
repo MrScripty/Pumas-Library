@@ -105,6 +105,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "resume_partial_download"
         | "list_model_downloads"
         | "search_hf_models"
+        | "get_hf_download_details"
         | "get_related_models"
         | "search_models_fts"
         | "import_batch"

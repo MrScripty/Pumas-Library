@@ -26,9 +26,19 @@ class ModelsAPI {
     return await api.scan_shared_storage();
   }
 
-  async searchHuggingFace(query: string, kind?: string | null, limit?: number) {
+  async searchHuggingFace(
+    query: string,
+    kind?: string | null,
+    limit?: number,
+    hydrateLimit?: number
+  ) {
     const api = this.getAPI();
-    return await api.search_hf_models(query, kind, limit);
+    return await api.search_hf_models(query, kind, limit, hydrateLimit);
+  }
+
+  async getHFDownloadDetails(repoId: string, quants?: string[] | null) {
+    const api = this.getAPI();
+    return await api.get_hf_download_details(repoId, quants);
   }
 
   async getRelatedModels(modelId: string, limit?: number) {

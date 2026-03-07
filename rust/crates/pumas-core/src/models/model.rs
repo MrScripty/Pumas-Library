@@ -421,6 +421,17 @@ pub struct HuggingFaceModel {
     pub compatible_engines: Vec<String>,
 }
 
+/// Exact download details derived from a repository file tree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfDownloadDetails {
+    pub repo_id: String,
+    #[serde(default)]
+    pub download_options: Vec<DownloadOption>,
+    #[serde(default)]
+    pub total_size_bytes: Option<u64>,
+}
+
 fn default_kind() -> String {
     "unknown".to_string()
 }

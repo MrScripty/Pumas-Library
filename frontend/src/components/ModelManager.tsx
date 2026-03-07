@@ -105,11 +105,17 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [showHfAuth, setShowHfAuth] = useState(false);
 
   // Custom Hooks
-  const { results: remoteResults, kinds: remoteKinds, error: remoteError, isLoading: isRemoteLoading } =
-    useRemoteModelSearch({
-      enabled: isDownloadMode,
-      searchQuery,
-    });
+  const {
+    results: remoteResults,
+    kinds: remoteKinds,
+    error: remoteError,
+    isLoading: isRemoteLoading,
+    hydratingRepoIds,
+    hydrateModelDetails,
+  } = useRemoteModelSearch({
+    enabled: isDownloadMode,
+    searchQuery,
+  });
 
   const {
     downloadStatusByRepo,
@@ -749,6 +755,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               searchQuery={searchQuery}
               downloadStatusByRepo={downloadStatusByRepo}
               downloadErrors={downloadErrors}
+              hydratingRepoIds={hydratingRepoIds}
+              onHydrateModelDetails={hydrateModelDetails}
               onStartDownload={handleStartRemoteDownload}
               onCancelDownload={cancelDownload}
               onPauseDownload={pauseDownload}

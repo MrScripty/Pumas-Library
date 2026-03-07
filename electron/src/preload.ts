@@ -152,8 +152,15 @@ const electronAPI = {
   refresh_model_index: () => apiCall('refresh_model_index'),
   refresh_model_mappings: (appId?: string) => apiCall('refresh_model_mappings', { app_id: appId }),
   scan_shared_storage: () => apiCall('scan_shared_storage'),
-  search_hf_models: (query: string, kind?: string | null, limit?: number) =>
-    apiCall('search_hf_models', { query, kind, limit }),
+  search_hf_models: (
+    query: string,
+    kind?: string | null,
+    limit?: number,
+    hydrateLimit?: number
+  ) =>
+    apiCall('search_hf_models', { query, kind, limit, hydrate_limit: hydrateLimit }),
+  get_hf_download_details: (repoId: string, quants?: string[] | null) =>
+    apiCall('get_hf_download_details', { repo_id: repoId, quants }),
   get_related_models: (modelId: string, limit?: number) =>
     apiCall('get_related_models', { model_id: modelId, limit }),
   start_model_download_from_hf: (

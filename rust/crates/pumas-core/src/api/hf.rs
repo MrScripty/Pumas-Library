@@ -25,17 +25,45 @@ impl PumasApi {
         kind: Option<&str>,
         limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
+        self.search_hf_models_with_hydration(query, kind, limit, limit)
+            .await
+    }
+
+    /// Search for models on HuggingFace with a bounded network hydration budget.
+    pub async fn search_hf_models_with_hydration(
+        &self,
+        query: &str,
+        kind: Option<&str>,
+        limit: usize,
+        hydrate_limit: usize,
+    ) -> Result<Vec<models::HuggingFaceModel>> {
         if let Some(ref client) = self.primary().hf_client {
             let params = model_library::HfSearchParams {
                 query: query.to_string(),
                 kind: kind.map(String::from),
                 limit: Some(limit),
+                hydrate_limit: Some(hydrate_limit.min(limit)),
                 ..Default::default()
             };
             // search() handles caching transparently
             client.search(&params).await
         } else {
             Ok(vec![])
+        }
+    }
+
+    /// Get exact download details for a single HuggingFace repository.
+    pub async fn get_hf_download_details(
+        &self,
+        repo_id: &str,
+        quants: &[String],
+    ) -> Result<models::HfDownloadDetails> {
+        if let Some(ref client) = self.primary().hf_client {
+            client.get_download_details(repo_id, quants).await
+        } else {
+            Err(PumasError::Config {
+                message: "HuggingFace client not initialized".to_string(),
+            })
         }
     }
 

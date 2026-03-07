@@ -217,6 +217,7 @@ async fn dispatch_method(
         "recover_download" => models::recover_download(state, params).await,
         "resume_partial_download" => models::resume_partial_download(state, params).await,
         "search_hf_models" => models::search_hf_models(state, params).await,
+        "get_hf_download_details" => models::get_hf_download_details(state, params).await,
         "get_related_models" => models::get_related_models(state, params).await,
         "search_models_fts" => models::search_models_fts(state, params).await,
         "import_batch" => models::import_batch(state, params).await,

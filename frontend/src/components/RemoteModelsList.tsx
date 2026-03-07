@@ -18,6 +18,7 @@ import {
   ChartPie,
   Cpu,
   Key,
+  Loader2,
 } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/useModelDownloads';
@@ -37,6 +38,8 @@ interface RemoteModelsListProps {
   searchQuery: string;
   downloadStatusByRepo: Record<string, DownloadStatus>;
   downloadErrors: Record<string, string>;
+  hydratingRepoIds: Set<string>;
+  onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
   onCancelDownload: (repoId: string) => Promise<void>;
   onPauseDownload: (repoId: string) => Promise<void>;
@@ -55,6 +58,8 @@ export function RemoteModelsList({
   searchQuery,
   downloadStatusByRepo,
   downloadErrors,
+  hydratingRepoIds,
+  onHydrateModelDetails,
   onStartDownload,
   onCancelDownload,
   onPauseDownload,
@@ -68,6 +73,19 @@ export function RemoteModelsList({
   const [openQuantMenuRepoId, setOpenQuantMenuRepoId] = useState<string | null>(null);
   // Track selected file groups per repo for multi-select checkbox mode
   const [selectedGroups, setSelectedGroups] = useState<Record<string, Set<string>>>({});
+
+  const hasExactDownloadDetails = (model: RemoteModelInfo): boolean => {
+    if (typeof model.totalSizeBytes === 'number' && model.totalSizeBytes > 0) {
+      return true;
+    }
+
+    return (
+      model.downloadOptions?.some(
+        (option) =>
+          (typeof option.sizeBytes === 'number' && option.sizeBytes > 0) || Boolean(option.fileGroup)
+      ) ?? false
+    );
+  };
 
   if (isLoading) {
     return (
@@ -97,7 +115,7 @@ export function RemoteModelsList({
     );
   }
 
-  const formatDownloadSizeRange = (model: RemoteModelInfo): string => {
+  const formatDownloadSizeRange = (model: RemoteModelInfo, isHydrating: boolean): string => {
     const optionSizes = model.downloadOptions?.map((option) => option.sizeBytes) ?? [];
     const validSizes = optionSizes.filter((size): size is number => typeof size === 'number' && size > 0);
     if (validSizes.length > 1) {
@@ -112,7 +130,10 @@ export function RemoteModelsList({
     if (validSizes.length === 1) {
       return formatDownloadSize(validSizes[0]);
     }
-    return formatDownloadSize(model.totalSizeBytes ?? null);
+    if (typeof model.totalSizeBytes === 'number' && model.totalSizeBytes > 0) {
+      return formatDownloadSize(model.totalSizeBytes);
+    }
+    return isHydrating ? 'Loading details...' : 'Load details';
   };
 
   /**
@@ -166,6 +187,8 @@ export function RemoteModelsList({
         const progressValue = downloadStatus?.progress ?? 0;
         const progressDegrees = Math.min(360, Math.max(0, Math.round(progressValue * 360)));
         const ringDegrees = isQueued ? 60 : progressDegrees;
+        const isHydratingDetails = hydratingRepoIds.has(model.repoId);
+        const hasExactDetails = hasExactDownloadDetails(model);
         const downloadOptions = model.downloadOptions?.length
           ? model.downloadOptions
           : model.quants.map((quant) => ({
@@ -261,7 +284,7 @@ export function RemoteModelsList({
                     {quantLabels.length ? quantLabels.join(', ') : 'Unknown'}
                   </MetadataItem>
                   <MetadataItem icon={<Download />}>
-                    {formatDownloadSizeRange(model)}
+                    {formatDownloadSizeRange(model, isHydratingDetails)}
                   </MetadataItem>
                 </div>
                 {model.compatibleEngines && model.compatibleEngines.length > 0 && (
@@ -349,10 +372,17 @@ export function RemoteModelsList({
                       void onCancelDownload(model.repoId);
                       return;
                     }
+                    const nextOpenRepoId =
+                      openQuantMenuRepoId === model.repoId ? null : model.repoId;
+                    if (!hasExactDetails && onHydrateModelDetails) {
+                      setOpenQuantMenuRepoId(nextOpenRepoId);
+                      if (nextOpenRepoId) {
+                        void onHydrateModelDetails(model);
+                      }
+                      return;
+                    }
                     if (downloadOptions.length > 0) {
-                      setOpenQuantMenuRepoId((prev) =>
-                        prev === model.repoId ? null : model.repoId
-                      );
+                      setOpenQuantMenuRepoId(nextOpenRepoId);
                     } else {
                       void onStartDownload(model, null);
                     }
@@ -390,9 +420,14 @@ export function RemoteModelsList({
                     )}
                   </span>
                 </button>
-                {downloadOptions.length > 0 && openQuantMenuRepoId === model.repoId && (
+                {openQuantMenuRepoId === model.repoId && (
                   <div className="absolute right-0 top-full mt-2 min-w-[200px] rounded border border-[hsl(var(--launcher-border))] bg-[hsl(var(--launcher-bg-overlay))] shadow-[0_12px_24px_hsl(var(--launcher-bg-primary)/0.6)] z-10">
-                    {hasFileGroups ? (
+                    {isHydratingDetails && !hasExactDetails ? (
+                      <div className="flex items-center gap-2 px-3 py-3 text-xs text-[hsl(var(--text-muted))]">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading exact download details...
+                      </div>
+                    ) : hasFileGroups ? (
                       <>
                         {/* Multi-select checkbox panel for file-group repos */}
                         {downloadOptions.map((option) => {

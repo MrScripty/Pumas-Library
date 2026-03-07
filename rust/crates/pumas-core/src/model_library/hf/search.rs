@@ -116,7 +116,12 @@ impl HuggingFaceClient {
                 );
                 // Re-enrich cached search hits so extraction fixes and cache
                 // migration heuristics can self-heal stale repo entries.
-                let enriched = self.enrich_models_with_download_options(&models).await;
+                let enriched = self
+                    .enrich_models_with_download_options(
+                        &models,
+                        params.hydrate_limit.unwrap_or(limit),
+                    )
+                    .await;
 
                 for model in &enriched {
                     if let Err(e) = cache.cache_repo_details(model) {
@@ -141,7 +146,9 @@ impl HuggingFaceClient {
         let models = self.search_api(params).await?;
 
         // Enrich models with download options from cache or API
-        let enriched = self.enrich_models_with_download_options(&models).await;
+        let enriched = self
+            .enrich_models_with_download_options(&models, params.hydrate_limit.unwrap_or(limit))
+            .await;
 
         // Cache the search results
         let repo_ids: Vec<String> = enriched.iter().map(|m| m.repo_id.clone()).collect();
@@ -230,10 +237,11 @@ impl HuggingFaceClient {
     async fn enrich_models_with_download_options(
         &self,
         models: &[HuggingFaceModel],
+        hydrate_limit: usize,
     ) -> Vec<HuggingFaceModel> {
         let mut enriched = Vec::with_capacity(models.len());
 
-        for model in models {
+        for (index, model) in models.iter().enumerate() {
             let mut model = model.clone();
 
             // Try to get download options from cache first
@@ -285,15 +293,19 @@ impl HuggingFaceClient {
                 }
             }
 
-            // Fetch from API
-            match self.get_repo_files(&model.repo_id).await {
-                Ok(tree) => {
-                    let download_options =
-                        Self::extract_download_options_from_tree(&tree, &model.quants);
-                    let total_size = tree.lfs_files.iter().map(|f| f.size).sum();
+            if index >= hydrate_limit {
+                enriched.push(model);
+                continue;
+            }
 
-                    model.download_options = download_options;
-                    model.total_size_bytes = Some(total_size);
+            // Fetch from API
+            match self
+                .get_download_details(&model.repo_id, &model.quants)
+                .await
+            {
+                Ok(details) => {
+                    model.download_options = details.download_options;
+                    model.total_size_bytes = details.total_size_bytes;
                 }
                 Err(e) => {
                     debug!("Failed to fetch repo files for {}: {}", model.repo_id, e);
@@ -523,6 +535,22 @@ impl HuggingFaceClient {
             }
         }
         None
+    }
+
+    pub async fn get_download_details(
+        &self,
+        repo_id: &str,
+        quants: &[String],
+    ) -> Result<crate::models::HfDownloadDetails> {
+        let tree = self.get_repo_files(repo_id).await?;
+        let download_options = Self::extract_download_options_from_tree(&tree, quants);
+        let total_size_bytes = Some(tree.lfs_files.iter().map(|f| f.size).sum());
+
+        Ok(crate::models::HfDownloadDetails {
+            repo_id: repo_id.to_string(),
+            download_options,
+            total_size_bytes,
+        })
     }
 }
 

@@ -623,6 +623,10 @@ pub struct HfSearchParams {
     /// Maximum results
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Maximum number of search results to hydrate with repo-tree metadata
+    /// via network calls when cache data is unavailable.
+    #[serde(default)]
+    pub hydrate_limit: Option<usize>,
     /// Offset for pagination
     #[serde(default)]
     pub offset: Option<usize>,

@@ -1636,7 +1636,11 @@ mod tests {
             r#"{"name":"Kitten TTS Mini","model_file":"kitten_tts_mini_v0_8.onnx"}"#,
         )
         .unwrap();
-        std::fs::write(model_dir.join("kitten_tts_mini_v0_8.onnx"), b"not-a-real-model").unwrap();
+        std::fs::write(
+            model_dir.join("kitten_tts_mini_v0_8.onnx"),
+            b"not-a-real-model",
+        )
+        .unwrap();
         std::fs::write(model_dir.join("voices.npz"), b"voices").unwrap();
 
         let spec = InPlaceImportSpec {

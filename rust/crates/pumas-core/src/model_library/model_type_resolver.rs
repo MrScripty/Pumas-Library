@@ -604,13 +604,9 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(
-            &index,
-            model_dir.path(),
-            Some("text-to-speech"),
-            None,
-        )
-        .unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-to-speech"), None)
+                .unwrap();
         assert_eq!(resolved.model_type, ModelType::Audio);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);

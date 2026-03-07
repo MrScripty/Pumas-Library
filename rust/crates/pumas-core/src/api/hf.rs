@@ -74,25 +74,41 @@ impl PumasApi {
     ) -> Result<String> {
         let primary = self.primary();
         if let Some(ref client) = primary.hf_client {
-            // Fetch HF metadata before creating the download destination so placement
-            // always uses authoritative remote metadata.
-            let model_info = client.get_model_info(&request.repo_id).await?;
-
             let mut resolved_request = request.clone();
-            if !model_info.kind.trim().is_empty()
-                && !model_info.kind.eq_ignore_ascii_case("unknown")
-            {
-                resolved_request.pipeline_tag = Some(model_info.kind.clone());
-            }
+            let mut resolved_pipeline_tag =
+                normalized_download_hint(resolved_request.pipeline_tag.as_deref())
+                    .map(ToOwned::to_owned);
 
-            let resolved_model_type = resolve_model_type_from_hints(
+            let mut resolved_model_type = resolve_model_type_from_hints(
                 primary.model_library.index(),
                 [
-                    resolved_request.pipeline_tag.as_deref(),
-                    request.model_type.as_deref(),
-                    request.pipeline_tag.as_deref(),
+                    normalized_download_hint(request.model_type.as_deref()),
+                    resolved_pipeline_tag.as_deref(),
                 ],
             )?;
+
+            if resolved_model_type.is_none() || resolved_pipeline_tag.is_none() {
+                // Fall back to repo metadata only when the request does not already
+                // carry enough information to place the download safely.
+                let model_info = client.get_model_info(&request.repo_id).await?;
+                if resolved_pipeline_tag.is_none() {
+                    resolved_pipeline_tag =
+                        normalized_download_hint(Some(model_info.kind.as_str()))
+                            .map(ToOwned::to_owned);
+                }
+                if resolved_model_type.is_none() {
+                    resolved_model_type = resolve_model_type_from_hints(
+                        primary.model_library.index(),
+                        [
+                            normalized_download_hint(request.model_type.as_deref()),
+                            resolved_pipeline_tag.as_deref(),
+                            normalized_download_hint(Some(model_info.kind.as_str())),
+                        ],
+                    )?;
+                }
+            }
+
+            resolved_request.pipeline_tag = resolved_pipeline_tag;
 
             // Determine destination directory.
             let model_type = resolved_model_type.unwrap_or_else(|| "unknown".to_string());
@@ -581,6 +597,17 @@ fn resolve_model_type_from_hints<const N: usize>(
     Ok(None)
 }
 
+fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
+    hint.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+}
+
 fn partial_download_reason_code(err: &PumasError) -> &'static str {
     match err {
         PumasError::NotFound { .. } => "dest_dir_missing",
@@ -617,5 +644,15 @@ mod tests {
             cause: None,
         };
         assert_eq!(partial_download_reason_code(&err), "network_error");
+    }
+
+    #[test]
+    fn test_normalized_download_hint_rejects_unknown_values() {
+        assert_eq!(normalized_download_hint(Some("unknown")), None);
+        assert_eq!(normalized_download_hint(Some("  ")), None);
+        assert_eq!(
+            normalized_download_hint(Some("text-generation")),
+            Some("text-generation")
+        );
     }
 }

@@ -32,6 +32,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
@@ -62,6 +63,8 @@ const INTEGRITY_ISSUE_DUPLICATE_REPO_ID: &str = "integrity_issue_duplicate_repo_
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT: &str = "integrity_issue_duplicate_repo_id_count";
 /// Indexed metadata key listing alternate model IDs with the same repo_id.
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_OTHERS: &str = "integrity_issue_duplicate_repo_id_others";
+const PRIMARY_FORMAT_METADATA_KEY: &str = "primary_format";
+const QUANTIZATION_METADATA_KEY: &str = "quantization";
 const KITTENTTS_PROFILE_ID: &str = "kittentts-runtime";
 const KITTENTTS_PROFILE_VERSION: i64 = 1;
 const KITTENTTS_BACKEND_KEY: &str = "onnx-runtime";
@@ -692,6 +695,7 @@ impl ModelLibrary {
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
         let mut result = self.index.search("", None, None, 10000, 0)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        self.project_display_fields_for_records(&mut result.models);
         annotate_and_dedupe_records_by_repo_id(&mut result.models);
         Ok(result.models)
     }
@@ -707,6 +711,7 @@ impl ModelLibrary {
             None => return Ok(None),
         };
         self.project_active_dependency_refs_value(model_id, &mut record.metadata)?;
+        project_display_fields_for_record(&mut record);
         Ok(Some(record))
     }
 
@@ -725,6 +730,7 @@ impl ModelLibrary {
     ) -> Result<SearchResult> {
         let mut result = self.index.search(query, None, None, limit, offset)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        self.project_display_fields_for_records(&mut result.models);
         annotate_and_dedupe_records_by_repo_id(&mut result.models);
         result.total_count = result.models.len();
         Ok(result)
@@ -758,6 +764,7 @@ impl ModelLibrary {
             offset,
         )?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
+        self.project_display_fields_for_records(&mut result.models);
         annotate_and_dedupe_records_by_repo_id(&mut result.models);
         result.total_count = result.models.len();
         Ok(result)
@@ -1080,6 +1087,12 @@ impl ModelLibrary {
             self.project_active_dependency_refs_value(&record.id, &mut record.metadata)?;
         }
         Ok(())
+    }
+
+    fn project_display_fields_for_records(&self, records: &mut [ModelRecord]) {
+        for record in records {
+            project_display_fields_for_record(record);
+        }
     }
 
     fn project_active_dependency_refs_value(
@@ -3320,6 +3333,14 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
                 download_missing_expected_files as u64,
             )),
         );
+        obj.insert(
+            PRIMARY_FORMAT_METADATA_KEY.to_string(),
+            derive_primary_format_value(obj),
+        );
+        obj.insert(
+            QUANTIZATION_METADATA_KEY.to_string(),
+            derive_quantization_value(obj),
+        );
     }
 
     ModelRecord {
@@ -3357,6 +3378,187 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
             .updated_date
             .clone()
             .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+    }
+}
+
+fn project_display_fields_for_record(record: &mut ModelRecord) {
+    if !record.metadata.is_object() {
+        record.metadata = Value::Object(Default::default());
+    }
+
+    let Some(obj) = record.metadata.as_object_mut() else {
+        return;
+    };
+
+    obj.insert(
+        PRIMARY_FORMAT_METADATA_KEY.to_string(),
+        derive_primary_format_value(obj),
+    );
+    obj.insert(
+        QUANTIZATION_METADATA_KEY.to_string(),
+        derive_quantization_value(obj),
+    );
+}
+
+fn derive_primary_format_value(metadata: &serde_json::Map<String, Value>) -> Value {
+    derive_primary_format(metadata)
+        .map(Value::String)
+        .unwrap_or(Value::Null)
+}
+
+fn derive_quantization_value(metadata: &serde_json::Map<String, Value>) -> Value {
+    derive_quantization(metadata)
+        .map(Value::String)
+        .unwrap_or(Value::Null)
+}
+
+fn derive_primary_format(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    conversion_source_format(metadata)
+        .or_else(|| detect_format_from_file_entries(metadata.get("files")))
+        .or_else(|| detect_format_from_string_list(metadata.get("expected_files")))
+        .or_else(|| detect_format_from_string_list(metadata.get("tags")))
+}
+
+fn derive_quantization(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    conversion_source_quant(metadata)
+        .or_else(|| detect_quant_from_file_entries(metadata.get("files")))
+        .or_else(|| detect_quant_from_string_list(metadata.get("expected_files")))
+        .or_else(|| {
+            metadata
+                .get("official_name")
+                .and_then(Value::as_str)
+                .and_then(extract_quant_token)
+        })
+        .or_else(|| {
+            metadata
+                .get("cleaned_name")
+                .and_then(Value::as_str)
+                .and_then(extract_quant_token)
+        })
+}
+
+fn conversion_source_format(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    let conversion = metadata.get("conversion_source")?.as_object()?;
+    conversion
+        .get("target_format")
+        .and_then(Value::as_str)
+        .or_else(|| conversion.get("source_format").and_then(Value::as_str))
+        .map(normalize_format_token)
+        .filter(|value| value != "unknown")
+}
+
+fn conversion_source_quant(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    let conversion = metadata.get("conversion_source")?.as_object()?;
+    conversion
+        .get("target_quant")
+        .and_then(Value::as_str)
+        .or_else(|| conversion.get("source_quant").and_then(Value::as_str))
+        .and_then(extract_quant_token)
+}
+
+fn detect_format_from_file_entries(files_value: Option<&Value>) -> Option<String> {
+    let files = files_value?.as_array()?;
+    let mut weighted = Vec::new();
+
+    for entry in files {
+        let Some(file) = entry.as_object() else {
+            continue;
+        };
+        let size = file.get("size").and_then(Value::as_u64).unwrap_or(0);
+        for field in ["name", "original_name"] {
+            if let Some(name) = file.get(field).and_then(Value::as_str) {
+                if let Some(format) = detect_format_from_name(name) {
+                    weighted.push((size, format));
+                    break;
+                }
+            }
+        }
+    }
+
+    weighted.sort_by(|left, right| right.0.cmp(&left.0));
+    weighted.into_iter().next().map(|(_, format)| format)
+}
+
+fn detect_quant_from_file_entries(files_value: Option<&Value>) -> Option<String> {
+    let files = files_value?.as_array()?;
+    let mut weighted = Vec::new();
+
+    for entry in files {
+        let Some(file) = entry.as_object() else {
+            continue;
+        };
+        let size = file.get("size").and_then(Value::as_u64).unwrap_or(0);
+        for field in ["name", "original_name"] {
+            if let Some(name) = file.get(field).and_then(Value::as_str) {
+                if let Some(quant) = extract_quant_token(name) {
+                    weighted.push((size, quant));
+                    break;
+                }
+            }
+        }
+    }
+
+    weighted.sort_by(|left, right| right.0.cmp(&left.0));
+    weighted.into_iter().next().map(|(_, quant)| quant)
+}
+
+fn detect_format_from_string_list(values: Option<&Value>) -> Option<String> {
+    values?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find_map(detect_format_from_name)
+}
+
+fn detect_format_from_name(name: &str) -> Option<String> {
+    let ext = Path::new(name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(normalize_format_token)?;
+    if ext == "unknown" {
+        None
+    } else {
+        Some(ext)
+    }
+}
+
+fn normalize_format_token(value: &str) -> String {
+    value.trim().trim_start_matches('.').to_ascii_lowercase()
+}
+
+fn detect_quant_from_string_list(values: Option<&Value>) -> Option<String> {
+    values?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .find_map(extract_quant_token)
+}
+
+fn extract_quant_token(value: &str) -> Option<String> {
+    static QUANT_PATTERN: OnceLock<Option<regex::Regex>> = OnceLock::new();
+    let regex = QUANT_PATTERN
+        .get_or_init(|| {
+            regex::Regex::new(
+                r"(?i)(?:^|[._/\- ()])((?:UD-)?(?:IQ\d+_[A-Z0-9_]+|Q\d+_[A-Z0-9_]+)|fp16|fp32|bf16|f16|f32|int8|int4)(?:$|[._/\- )])",
+            )
+            .ok()
+        })
+        .as_ref()?;
+
+    let captures = regex.captures(value)?;
+    let token = captures.get(1)?.as_str();
+    Some(normalize_quant_token(token))
+}
+
+fn normalize_quant_token(value: &str) -> String {
+    let normalized = value.trim().to_ascii_uppercase();
+    match normalized.as_str() {
+        "FP16" | "F16" => "F16".to_string(),
+        "FP32" | "F32" => "F32".to_string(),
+        "BF16" => "BF16".to_string(),
+        "INT8" => "INT8".to_string(),
+        "INT4" => "INT4".to_string(),
+        _ => normalized,
     }
 }
 
@@ -5359,6 +5561,128 @@ mod tests {
                 .get("recommended_backend")
                 .and_then(Value::as_str),
             Some("onnx-runtime")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_projects_primary_format_and_quant_from_indexed_metadata() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/quantized-projection";
+        let model_dir = library.build_model_path("llm", "llama", "quantized-projection");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model-Q4_K_M.gguf"), b"gguf").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("llama".to_string()),
+            official_name: Some("Quantized Projection".to_string()),
+            cleaned_name: Some("quantized-projection".to_string()),
+            size_bytes: Some(4),
+            files: Some(vec![crate::models::ModelFileInfo {
+                name: "model-Q4_K_M.gguf".to_string(),
+                original_name: None,
+                size: Some(4),
+                sha256: None,
+                blake3: None,
+            }]),
+            conversion_source: Some(crate::conversion::ConversionSource {
+                source_model_id: "llm/llama/source-model".to_string(),
+                source_format: "safetensors".to_string(),
+                source_quant: None,
+                target_format: "gguf".to_string(),
+                target_quant: Some("Q4_K_M".to_string()),
+                was_dequantized: false,
+                conversion_date: chrono::Utc::now().to_rfc3339(),
+            }),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let model = library.get_model(model_id).await.unwrap().unwrap();
+        assert_eq!(
+            model
+                .metadata
+                .get(PRIMARY_FORMAT_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("gguf")
+        );
+        assert_eq!(
+            model
+                .metadata
+                .get(QUANTIZATION_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("Q4_K_M")
+        );
+
+        let listed = library.list_models().await.unwrap();
+        let listed_model = listed.iter().find(|model| model.id == model_id).unwrap();
+        assert_eq!(
+            listed_model
+                .metadata
+                .get(PRIMARY_FORMAT_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("gguf")
+        );
+        assert_eq!(
+            listed_model
+                .metadata
+                .get(QUANTIZATION_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("Q4_K_M")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_projects_primary_format_and_quant_for_legacy_index_rows() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/legacy-quantized";
+        let model_dir = library.build_model_path("llm", "llama", "legacy-quantized");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let record = ModelRecord {
+            id: model_id.to_string(),
+            path: model_dir.display().to_string(),
+            cleaned_name: "legacy-quantized".to_string(),
+            official_name: "Legacy Quantized".to_string(),
+            model_type: "llm".to_string(),
+            tags: vec![],
+            hashes: HashMap::new(),
+            metadata: serde_json::json!({
+                "schema_version": 2,
+                "model_id": model_id,
+                "family": "llama",
+                "model_type": "llm",
+                "official_name": "Legacy Quantized",
+                "cleaned_name": "legacy-quantized",
+                "files": [
+                    {
+                        "name": "model-Q5_K_M.gguf",
+                        "size": 1234
+                    }
+                ]
+            }),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        library.index().upsert(&record).unwrap();
+
+        let listed = library.list_models().await.unwrap();
+        let listed_model = listed.iter().find(|model| model.id == model_id).unwrap();
+        assert_eq!(
+            listed_model
+                .metadata
+                .get(PRIMARY_FORMAT_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("gguf")
+        );
+        assert_eq!(
+            listed_model
+                .metadata
+                .get(QUANTIZATION_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("Q5_K_M")
         );
     }
 

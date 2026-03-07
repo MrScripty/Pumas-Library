@@ -11,7 +11,6 @@ import { useState, type CSSProperties } from 'react';
 import {
   Star,
   HardDrive,
-  Calendar,
   Tag,
   ChevronDown,
   ChevronRight,
@@ -21,9 +20,9 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
-import { formatSize, formatDate } from '../utils/modelFormatters';
+import { formatSize } from '../utils/modelFormatters';
 import { ModelKindIcon } from './ModelKindIcon';
-import { EmptyState, IconButton, HoldToDeleteButton, ListItem, ListItemContent, MetadataRow, MetadataItem } from './ui';
+import { EmptyState, IconButton, HoldToDeleteButton, ListItem, ListItemContent } from './ui';
 import { ModelMetadataModal } from './ModelMetadataModal';
 
 interface LocalModelsListProps {
@@ -48,6 +47,14 @@ interface LocalModelsListProps {
   downloadErrors?: Record<string, string>;
   onDeleteModel?: (modelId: string) => void;
   onConvertModel?: (modelId: string) => void;
+}
+
+function formatModelFormat(format?: string): string {
+  return format ? format.toUpperCase() : 'N/A';
+}
+
+function formatQuantLabel(quant?: string): string {
+  return quant ?? 'N/A';
 }
 
 export function LocalModelsList({
@@ -211,19 +218,44 @@ export function LocalModelsList({
                             </span>
                           )}
                         </span>
-                        {/* Metadata row */}
-                        <MetadataRow>
-                          {model.size && (
-                            <MetadataItem icon={<HardDrive />}>
+                        <div className="mt-1.5 grid grid-cols-3 gap-x-3 gap-y-1 text-[11px] text-[hsl(var(--text-muted))] sm:grid-cols-[minmax(0,90px)_minmax(0,110px)_minmax(0,120px)_auto]">
+                          <div className="min-w-0">
+                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
+                              Format
+                            </div>
+                            <div className="truncate text-[hsl(var(--text-secondary))]">
+                              {formatModelFormat(model.format)}
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
+                              Quant
+                            </div>
+                            <div className="truncate text-[hsl(var(--text-secondary))]">
+                              {formatQuantLabel(model.quant)}
+                            </div>
+                          </div>
+                          <div className="min-w-0">
+                            <div className="uppercase tracking-wider text-[9px] text-[hsl(var(--text-muted))]">
+                              Size
+                            </div>
+                            <div className="truncate text-[hsl(var(--text-secondary))]">
                               {formatSize(model.size)}
-                            </MetadataItem>
-                          )}
-                          {model.date && (
-                            <MetadataItem icon={<Calendar />}>
-                              {formatDate(model.date)}
-                            </MetadataItem>
-                          )}
-                        </MetadataRow>
+                            </div>
+                          </div>
+                          <div className="flex items-end sm:justify-end">
+                            {model.hasDependencies && (
+                              <span
+                                className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[hsl(var(--accent-success)/0.14)] text-[hsl(var(--accent-success))]"
+                                title={model.dependencyCount
+                                  ? `${model.dependencyCount} dependency binding${model.dependencyCount === 1 ? '' : 's'}`
+                                  : 'Dependency bindings projected from the library index'}
+                              >
+                                Deps
+                              </span>
+                            )}
+                          </div>
+                        </div>
                         {partialError && (
                           <div className="mt-1 text-xs text-[hsl(var(--accent-error))]">
                             {partialError}

@@ -92,8 +92,8 @@ pub fn default_inference_settings(
         }
         "diffusion" => Some(vec![
             InferenceParamSchema {
-                key: "steps".into(),
-                label: "Steps".into(),
+                key: "num_inference_steps".into(),
+                label: "Inference Steps".into(),
                 param_type: ParamType::Integer,
                 default: json!(20),
                 description: Some("Number of diffusion steps".into()),
@@ -104,14 +104,38 @@ pub fn default_inference_settings(
                 }),
             },
             InferenceParamSchema {
-                key: "cfg_scale".into(),
-                label: "CFG Scale".into(),
+                key: "guidance_scale".into(),
+                label: "Guidance Scale".into(),
                 param_type: ParamType::Number,
                 default: json!(7.0),
                 description: Some("Classifier-free guidance scale".into()),
                 constraints: Some(ParamConstraints {
                     min: Some(1.0),
                     max: Some(30.0),
+                    allowed_values: None,
+                }),
+            },
+            InferenceParamSchema {
+                key: "width".into(),
+                label: "Width".into(),
+                param_type: ParamType::Integer,
+                default: json!(1024),
+                description: Some("Output image width in pixels".into()),
+                constraints: Some(ParamConstraints {
+                    min: Some(64.0),
+                    max: Some(4096.0),
+                    allowed_values: None,
+                }),
+            },
+            InferenceParamSchema {
+                key: "height".into(),
+                label: "Height".into(),
+                param_type: ParamType::Integer,
+                default: json!(1024),
+                description: Some("Output image height in pixels".into()),
+                constraints: Some(ParamConstraints {
+                    min: Some(64.0),
+                    max: Some(4096.0),
                     allowed_values: None,
                 }),
             },
@@ -235,8 +259,10 @@ mod tests {
     fn test_diffusion_defaults() {
         let settings = default_inference_settings("diffusion", "safetensors", None).unwrap();
         let keys: Vec<&str> = settings.iter().map(|s| s.key.as_str()).collect();
-        assert!(keys.contains(&"steps"));
-        assert!(keys.contains(&"cfg_scale"));
+        assert!(keys.contains(&"num_inference_steps"));
+        assert!(keys.contains(&"guidance_scale"));
+        assert!(keys.contains(&"width"));
+        assert!(keys.contains(&"height"));
         assert!(keys.contains(&"seed"));
     }
 

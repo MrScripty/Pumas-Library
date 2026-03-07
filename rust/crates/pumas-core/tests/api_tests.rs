@@ -226,3 +226,43 @@ async fn test_get_model_nonexistent() {
     assert!(model.is_ok());
     assert!(model.unwrap().is_none());
 }
+
+#[tokio::test]
+async fn test_get_inference_settings_applies_qwen_diffusion_overrides() {
+    let temp_dir = create_test_env();
+    let model_id = "diffusion/qwen/qwen-image-2512";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "Qwen",
+            "model_type": "diffusion",
+            "official_name": "Qwen-Image-2512",
+            "cleaned_name": "qwen-image-2512",
+            "repo_id": "Qwen/Qwen-Image-2512",
+            "inference_settings": null
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+    let settings = api.get_inference_settings(model_id).await.unwrap();
+    let keys: Vec<&str> = settings
+        .iter()
+        .map(|setting| setting.key.as_str())
+        .collect();
+
+    assert!(keys.contains(&"num_inference_steps"));
+    assert!(keys.contains(&"true_cfg_scale"));
+    assert!(keys.contains(&"width"));
+    assert!(keys.contains(&"height"));
+    assert!(keys.contains(&"seed"));
+    assert!(!keys.contains(&"guidance_scale"));
+}

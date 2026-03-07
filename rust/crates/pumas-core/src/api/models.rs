@@ -202,12 +202,7 @@ impl PumasApi {
             })
             .unwrap_or_default();
 
-        Ok(models::default_inference_settings(
-            metadata.model_type.as_deref().unwrap_or(""),
-            &file_format,
-            metadata.subtype.as_deref(),
-        )
-        .unwrap_or_default())
+        Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
     }
 
     /// Replace the inference settings schema for a model.

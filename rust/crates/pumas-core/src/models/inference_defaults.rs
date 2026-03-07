@@ -6,7 +6,7 @@
 
 use serde_json::json;
 
-use super::model::{InferenceParamSchema, ParamConstraints, ParamType};
+use super::model::{InferenceParamSchema, ModelMetadata, ParamConstraints, ParamType};
 
 /// Return default inference parameter schemas for a model.
 ///
@@ -156,6 +156,76 @@ pub fn default_inference_settings(
     }
 }
 
+/// Resolve inference settings with metadata-aware overrides.
+pub fn resolve_inference_settings(
+    metadata: &ModelMetadata,
+    file_format: &str,
+) -> Option<Vec<InferenceParamSchema>> {
+    let model_type = metadata.model_type.as_deref().unwrap_or("");
+    let subtype = metadata.subtype.as_deref();
+    let mut params = default_inference_settings(model_type, file_format, subtype)?;
+
+    if model_type == "diffusion" && is_qwen_image_text_to_image(metadata) {
+        replace_param(
+            &mut params,
+            &["guidance_scale", "cfg_scale"],
+            InferenceParamSchema {
+                key: "true_cfg_scale".into(),
+                label: "True CFG Scale".into(),
+                param_type: ParamType::Number,
+                default: json!(4.0),
+                description: Some(
+                    "QwenImage true CFG scale. guidance_scale is ineffective for CFG.".into(),
+                ),
+                constraints: Some(ParamConstraints {
+                    min: Some(1.0),
+                    max: Some(30.0),
+                    allowed_values: None,
+                }),
+            },
+        );
+    }
+
+    Some(params)
+}
+
+fn replace_param(
+    params: &mut Vec<InferenceParamSchema>,
+    replaced_keys: &[&str],
+    replacement: InferenceParamSchema,
+) {
+    if let Some(index) = params
+        .iter()
+        .position(|param| replaced_keys.contains(&param.key.as_str()))
+    {
+        params[index] = replacement;
+    } else {
+        params.push(replacement);
+    }
+}
+
+fn is_qwen_image_text_to_image(metadata: &ModelMetadata) -> bool {
+    let family_is_qwen = metadata
+        .family
+        .as_deref()
+        .is_some_and(|family| family.eq_ignore_ascii_case("qwen"));
+
+    if !family_is_qwen {
+        return false;
+    }
+
+    let names = [
+        metadata.official_name.as_deref(),
+        metadata.cleaned_name.as_deref(),
+        metadata.repo_id.as_deref(),
+    ];
+
+    names.iter().flatten().any(|value| {
+        let lower = value.to_ascii_lowercase();
+        lower.contains("qwen-image") && !lower.contains("edit")
+    })
+}
+
 /// Common LLM sampling parameters shared across all LLM formats.
 fn common_llm_params() -> Vec<InferenceParamSchema> {
     vec![
@@ -264,6 +334,27 @@ mod tests {
         assert!(keys.contains(&"width"));
         assert!(keys.contains(&"height"));
         assert!(keys.contains(&"seed"));
+    }
+
+    #[test]
+    fn test_resolve_inference_settings_for_qwen_image_replaces_guidance_scale() {
+        let metadata = ModelMetadata {
+            model_type: Some("diffusion".into()),
+            family: Some("Qwen".into()),
+            official_name: Some("Qwen-Image-2512".into()),
+            cleaned_name: Some("qwen-image-2512".into()),
+            repo_id: Some("Qwen/Qwen-Image-2512".into()),
+            ..Default::default()
+        };
+
+        let settings = resolve_inference_settings(&metadata, "safetensors").unwrap();
+        let keys: Vec<&str> = settings.iter().map(|s| s.key.as_str()).collect();
+
+        assert!(keys.contains(&"num_inference_steps"));
+        assert!(keys.contains(&"true_cfg_scale"));
+        assert!(keys.contains(&"width"));
+        assert!(keys.contains(&"height"));
+        assert!(!keys.contains(&"guidance_scale"));
     }
 
     #[test]

@@ -17,7 +17,7 @@ use crate::model_library::{
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
     validate_metadata_v2_with_index, TaskNormalizationStatus,
 };
-use crate::models::default_inference_settings;
+use crate::models::resolve_inference_settings;
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -640,14 +640,7 @@ impl ModelImporter {
             blake3: Some(h.blake3),
         });
 
-        // Populate default inference settings based on model type and format
-        let inference_settings = default_inference_settings(
-            &model_type,
-            type_info.format.as_str(),
-            spec.subtype.as_deref(),
-        );
-
-        Ok(ModelMetadata {
+        let mut metadata = ModelMetadata {
             schema_version: Some(2),
             model_id: Some(model_id),
             family: Some(family),
@@ -661,7 +654,7 @@ impl ModelImporter {
             release_date: None,
             download_url: None,
             model_card: None,
-            inference_settings,
+            inference_settings: None,
             compatible_apps: None,
             hashes: hashes_struct,
             notes: None,
@@ -700,7 +693,12 @@ impl ModelImporter {
             model_card_artifact: None,
             license_artifact: None,
             license_status: Some("license_unknown".to_string()),
-        })
+        };
+
+        metadata.inference_settings =
+            resolve_inference_settings(&metadata, type_info.format.as_str());
+
+        Ok(metadata)
     }
 
     // ========================================
@@ -1668,5 +1666,47 @@ mod tests {
             metadata.model_type_resolution_source.as_deref(),
             Some("model-type-name-tokens")
         );
+    }
+
+    #[tokio::test]
+    async fn test_import_qwen_image_uses_true_cfg_scale_defaults() {
+        let (temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let source_dir = temp_dir.path().join("source");
+        std::fs::create_dir_all(&source_dir).unwrap();
+
+        let header = b"{}";
+        let header_size: u64 = header.len() as u64;
+        let mut content = header_size.to_le_bytes().to_vec();
+        content.extend_from_slice(header);
+        content.extend_from_slice(&[0u8; 1000]);
+
+        let source_file = create_test_file(&source_dir, "model.safetensors", &content);
+
+        let spec = ModelImportSpec {
+            path: source_file.display().to_string(),
+            family: "Qwen".to_string(),
+            official_name: "Qwen-Image-2512".to_string(),
+            repo_id: Some("Qwen/Qwen-Image-2512".to_string()),
+            model_type: Some("diffusion".to_string()),
+            subtype: None,
+            tags: None,
+            security_acknowledged: Some(true),
+        };
+
+        let result = importer.import(&spec).await.unwrap();
+        assert!(result.success);
+
+        let model_id = result.model_path.unwrap();
+        let metadata = library
+            .load_metadata(&library.library_root().join(model_id))
+            .unwrap()
+            .unwrap();
+        let settings = metadata.inference_settings.unwrap();
+        let keys: Vec<&str> = settings.iter().map(|param| param.key.as_str()).collect();
+
+        assert!(keys.contains(&"true_cfg_scale"));
+        assert!(!keys.contains(&"guidance_scale"));
     }
 }

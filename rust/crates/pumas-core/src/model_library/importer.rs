@@ -15,13 +15,12 @@ use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
-    BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
-    ExternalDiffusersImportSpec, ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
+    BatchImportProgress, ExternalDiffusersImportSpec, ImportStage, ModelFileInfo, ModelHashes,
+    ModelImportResult, ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
 use crate::model_library::{
-    DownloadCompletionInfo,
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, TaskNormalizationStatus,
+    validate_metadata_v2_with_index, DownloadCompletionInfo, TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -1665,11 +1664,14 @@ fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()
         .into_iter()
         .filter_map(|entry| entry.ok())
     {
-        let relative = entry.path().strip_prefix(source).map_err(|err| PumasError::Io {
-            message: format!("failed to determine relative path during import: {}", err),
-            path: Some(entry.path().to_path_buf()),
-            source: None,
-        })?;
+        let relative = entry
+            .path()
+            .strip_prefix(source)
+            .map_err(|err| PumasError::Io {
+                message: format!("failed to determine relative path during import: {}", err),
+                path: Some(entry.path().to_path_buf()),
+                source: None,
+            })?;
         let dest_path = dest_dir.join(relative);
 
         if entry.file_type().is_dir() {
@@ -1696,11 +1698,14 @@ fn collect_relative_file_paths(root: &Path) -> Result<Vec<String>> {
         if !entry.file_type().is_file() {
             continue;
         }
-        let relative = entry.path().strip_prefix(root).map_err(|err| PumasError::Io {
-            message: format!("failed to determine relative path during import: {}", err),
-            path: Some(entry.path().to_path_buf()),
-            source: None,
-        })?;
+        let relative = entry
+            .path()
+            .strip_prefix(root)
+            .map_err(|err| PumasError::Io {
+                message: format!("failed to determine relative path during import: {}", err),
+                path: Some(entry.path().to_path_buf()),
+                source: None,
+            })?;
         files.push(relative.to_string_lossy().replace('\\', "/"));
     }
     files.sort();
@@ -1839,8 +1844,16 @@ mod tests {
         std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
         std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
         std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
-        write_min_safetensors(&bundle_root.join("unet").join("diffusion_pytorch_model.safetensors"));
-        write_min_safetensors(&bundle_root.join("vae").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(
+            &bundle_root
+                .join("unet")
+                .join("diffusion_pytorch_model.safetensors"),
+        );
+        write_min_safetensors(
+            &bundle_root
+                .join("vae")
+                .join("diffusion_pytorch_model.safetensors"),
+        );
         write_min_safetensors(&bundle_root.join("text_encoder").join("model.safetensors"));
         std::fs::write(
             bundle_root.join("tokenizer").join("tokenizer.json"),
@@ -2096,7 +2109,13 @@ mod tests {
         );
         assert_eq!(
             metadata.entry_path.as_deref(),
-            Some(bundle_root.canonicalize().unwrap().to_string_lossy().as_ref())
+            Some(
+                bundle_root
+                    .canonicalize()
+                    .unwrap()
+                    .to_string_lossy()
+                    .as_ref()
+            )
         );
     }
 
@@ -2189,7 +2208,10 @@ mod tests {
         let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
         assert!(model_dir.exists());
         assert!(model_dir.join("model_index.json").exists());
-        assert!(model_dir.join("unet").join("diffusion_pytorch_model.safetensors").exists());
+        assert!(model_dir
+            .join("unet")
+            .join("diffusion_pytorch_model.safetensors")
+            .exists());
         assert!(bundle_root.join("model_index.json").exists());
 
         let metadata = library.load_metadata(&model_dir).unwrap().unwrap();

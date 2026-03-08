@@ -584,22 +584,24 @@ impl PumasApi {
             hints.name_or_path.as_deref(),
             &search_results,
         ) {
-            if client.classify_repo_bundle(&candidate.repo_id).await?.is_none() {
+            if client
+                .classify_repo_bundle(&candidate.repo_id)
+                .await?
+                .is_none()
+            {
                 continue;
             }
 
             let candidate_repo_id = candidate.repo_id.clone();
-            let match_confidence =
-                if is_exact_bundle_lookup_match(
-                    &hints.bundle_name,
-                    &candidate_repo_id,
-                    &candidate.name,
-                )
-                {
-                    0.95
-                } else {
-                    0.72
-                };
+            let match_confidence = if is_exact_bundle_lookup_match(
+                &hints.bundle_name,
+                &candidate_repo_id,
+                &candidate.name,
+            ) {
+                0.95
+            } else {
+                0.72
+            };
 
             return Ok(Some(build_lookup_metadata_from_model(
                 primary.model_library.index(),
@@ -790,7 +792,12 @@ fn rank_bundle_lookup_candidates(
         let right_score = bundle_lookup_score(bundle_name, hinted_repo_id, right);
         right_score
             .cmp(&left_score)
-            .then_with(|| right.downloads.unwrap_or(0).cmp(&left.downloads.unwrap_or(0)))
+            .then_with(|| {
+                right
+                    .downloads
+                    .unwrap_or(0)
+                    .cmp(&left.downloads.unwrap_or(0))
+            })
             .then_with(|| left.repo_id.cmp(&right.repo_id))
     });
     ranked
@@ -877,7 +884,11 @@ fn fallback_bundle_lookup_candidate(
     let exact = is_exact_bundle_lookup_match(bundle_name, &candidate.repo_id, &candidate.name);
     Some((
         candidate,
-        if exact { "filename_exact" } else { "filename_fuzzy" },
+        if exact {
+            "filename_exact"
+        } else {
+            "filename_fuzzy"
+        },
         if exact { 0.84 } else { 0.62 },
     ))
 }
@@ -1035,7 +1046,10 @@ mod tests {
         let fallback = fallback_bundle_lookup_candidate(
             "Juggernaut-X-v10",
             None,
-            &[hf_model("foo/bar", "bar", 100), hf_model("baz/qux", "qux", 50)],
+            &[
+                hf_model("foo/bar", "bar", 100),
+                hf_model("baz/qux", "qux", 50),
+            ],
         );
 
         assert!(fallback.is_none());

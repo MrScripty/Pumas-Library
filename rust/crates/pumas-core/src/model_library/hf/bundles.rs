@@ -2,8 +2,8 @@ use super::types::HF_HUB_BASE;
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
-    is_diffusers_component_entry, is_optional_component_marker, is_supported_text_to_image_pipeline,
-    normalized_component_relative_path,
+    is_diffusers_component_entry, is_optional_component_marker,
+    is_supported_text_to_image_pipeline, normalized_component_relative_path,
 };
 use crate::model_library::types::RepoFileTree;
 use crate::models::BundleFormat;
@@ -22,11 +22,17 @@ impl HuggingFaceClient {
         repo_id: &str,
     ) -> Result<Option<HfRepoBundleClassification>> {
         let tree = self.get_repo_files(repo_id).await?;
-        if !tree.regular_files.iter().any(|path| path == "model_index.json") {
+        if !tree
+            .regular_files
+            .iter()
+            .any(|path| path == "model_index.json")
+        {
             return Ok(None);
         }
 
-        let model_index = self.fetch_repo_text_file(repo_id, "model_index.json").await?;
+        let model_index = self
+            .fetch_repo_text_file(repo_id, "model_index.json")
+            .await?;
         Ok(classify_repo_bundle_from_parts(&tree, &model_index))
     }
 
@@ -126,7 +132,10 @@ mod tests {
                     sha256: "sha256".to_string(),
                 })
                 .collect(),
-            regular_files: regular_files.iter().map(|path| (*path).to_string()).collect(),
+            regular_files: regular_files
+                .iter()
+                .map(|path| (*path).to_string())
+                .collect(),
             cached_at: chrono::Utc::now().to_rfc3339(),
             last_modified: None,
             cache_version: REPO_FILE_TREE_VERSION,
@@ -160,13 +169,19 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(classification.bundle_format, BundleFormat::DiffusersDirectory);
+        assert_eq!(
+            classification.bundle_format,
+            BundleFormat::DiffusersDirectory
+        );
         assert_eq!(classification.pipeline_class, "StableDiffusionPipeline");
     }
 
     #[test]
     fn does_not_classify_repo_with_missing_component() {
-        let tree = repo_tree(&["model_index.json"], &["unet/diffusion_pytorch_model.safetensors"]);
+        let tree = repo_tree(
+            &["model_index.json"],
+            &["unet/diffusion_pytorch_model.safetensors"],
+        );
 
         let classification = classify_repo_bundle_from_parts(
             &tree,

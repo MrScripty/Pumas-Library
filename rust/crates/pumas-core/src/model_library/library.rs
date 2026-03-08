@@ -16,8 +16,7 @@ use crate::index::{
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
     get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
-    refresh_external_metadata_validation,
-    MODEL_EXECUTION_CONTRACT_VERSION,
+    refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
@@ -1781,20 +1780,20 @@ impl ModelLibrary {
             });
         }
 
-        let metadata = self
-            .get_effective_metadata(model_id)?
-            .ok_or_else(|| PumasError::ModelNotFound {
-                model_id: model_id.to_string(),
-            })?;
+        let metadata =
+            self.get_effective_metadata(model_id)?
+                .ok_or_else(|| PumasError::ModelNotFound {
+                    model_id: model_id.to_string(),
+                })?;
 
         let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
-        let validation_state = metadata.validation_state.unwrap_or(if is_diffusers_bundle(&metadata)
-            || storage_kind == StorageKind::ExternalReference
-        {
-            AssetValidationState::Invalid
-        } else {
-            AssetValidationState::Valid
-        });
+        let validation_state = metadata.validation_state.unwrap_or(
+            if is_diffusers_bundle(&metadata) || storage_kind == StorageKind::ExternalReference {
+                AssetValidationState::Invalid
+            } else {
+                AssetValidationState::Valid
+            },
+        );
 
         if is_diffusers_bundle(&metadata) && validation_state != AssetValidationState::Valid {
             return Err(PumasError::Validation {
@@ -2374,7 +2373,8 @@ fn sd_turbo_runtime_binding_id(model_id: &str) -> String {
 }
 
 fn sanitize_binding_id_fragment(value: &str) -> String {
-    value.chars()
+    value
+        .chars()
         .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
         .collect::<String>()
 }
@@ -3860,7 +3860,9 @@ fn detect_format_from_file_entries(files_value: Option<&Value>) -> Option<String
     weighted.into_iter().next().map(|(_, format)| format)
 }
 
-fn detect_format_from_bundle_entry_path(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+fn detect_format_from_bundle_entry_path(
+    metadata: &serde_json::Map<String, Value>,
+) -> Option<String> {
     let bundle_format = metadata.get("bundle_format")?.as_str()?;
     if bundle_format != "diffusers_directory" {
         return None;
@@ -3880,7 +3882,10 @@ fn detect_format_from_directory_walk(root: &Path) -> Option<String> {
     }
 
     let mut weighted = Vec::new();
-    for entry in WalkDir::new(root).into_iter().filter_map(|entry| entry.ok()) {
+    for entry in WalkDir::new(root)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -3890,7 +3895,11 @@ fn detect_format_from_directory_walk(root: &Path) -> Option<String> {
         let Some(format) = detect_format_from_name(file_name) else {
             continue;
         };
-        let size = entry.metadata().ok().map(|metadata| metadata.len()).unwrap_or(0);
+        let size = entry
+            .metadata()
+            .ok()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
         weighted.push((size, format));
     }
 
@@ -4066,8 +4075,16 @@ mod tests {
         std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
         std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
         std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
-        write_min_safetensors(&bundle_root.join("unet").join("diffusion_pytorch_model.safetensors"));
-        write_min_safetensors(&bundle_root.join("vae").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(
+            &bundle_root
+                .join("unet")
+                .join("diffusion_pytorch_model.safetensors"),
+        );
+        write_min_safetensors(
+            &bundle_root
+                .join("vae")
+                .join("diffusion_pytorch_model.safetensors"),
+        );
         write_min_safetensors(&bundle_root.join("text_encoder").join("model.safetensors"));
         std::fs::write(
             bundle_root.join("tokenizer").join("tokenizer.json"),

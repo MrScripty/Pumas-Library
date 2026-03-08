@@ -269,38 +269,38 @@ pub async fn get_library_model_metadata(
     let primary_file = library.get_primary_model_file(&model_id);
     let embedded_metadata: Option<pumas_library::EmbeddedMetadataResponse> =
         if let Some(ref file_path) = primary_file {
-        let extension = file_path
-            .extension()
-            .and_then(|e: &std::ffi::OsStr| e.to_str())
-            .map(|s: &str| s.to_lowercase())
-            .unwrap_or_default();
+            let extension = file_path
+                .extension()
+                .and_then(|e: &std::ffi::OsStr| e.to_str())
+                .map(|s: &str| s.to_lowercase())
+                .unwrap_or_default();
 
-        match extension.as_str() {
-            "gguf" => match pumas_library::model_library::extract_gguf_metadata(file_path) {
-                Ok(metadata) => {
-                    let metadata_value: serde_json::Map<String, Value> = metadata
-                        .into_iter()
-                        .map(|(k, v)| (k, Value::String(v)))
-                        .collect();
-                    Some(pumas_library::EmbeddedMetadataResponse {
-                        file_type: "gguf".to_string(),
-                        metadata: Value::Object(metadata_value),
-                    })
-                }
-                Err(_) => None,
-            },
-            "safetensors" => match extract_safetensors_header(&file_path.to_string_lossy()) {
-                Ok(header) => Some(pumas_library::EmbeddedMetadataResponse {
-                    file_type: "safetensors".to_string(),
-                    metadata: header,
-                }),
-                Err(_) => None,
-            },
-            _ => None,
-        }
-    } else {
-        None
-    };
+            match extension.as_str() {
+                "gguf" => match pumas_library::model_library::extract_gguf_metadata(file_path) {
+                    Ok(metadata) => {
+                        let metadata_value: serde_json::Map<String, Value> = metadata
+                            .into_iter()
+                            .map(|(k, v)| (k, Value::String(v)))
+                            .collect();
+                        Some(pumas_library::EmbeddedMetadataResponse {
+                            file_type: "gguf".to_string(),
+                            metadata: Value::Object(metadata_value),
+                        })
+                    }
+                    Err(_) => None,
+                },
+                "safetensors" => match extract_safetensors_header(&file_path.to_string_lossy()) {
+                    Ok(header) => Some(pumas_library::EmbeddedMetadataResponse {
+                        file_type: "safetensors".to_string(),
+                        metadata: header,
+                    }),
+                    Err(_) => None,
+                },
+                _ => None,
+            }
+        } else {
+            None
+        };
 
     let primary_file_str =
         primary_file.map(|p: std::path::PathBuf| p.to_string_lossy().to_string());
@@ -322,12 +322,8 @@ pub async fn get_library_model_metadata(
     let response = pumas_library::LibraryModelMetadataResponse {
         success: true,
         model_id,
-        stored_metadata: stored_metadata
-            .map(serde_json::to_value)
-            .transpose()?,
-        effective_metadata: effective_metadata
-            .map(serde_json::to_value)
-            .transpose()?,
+        stored_metadata: stored_metadata.map(serde_json::to_value).transpose()?,
+        effective_metadata: effective_metadata.map(serde_json::to_value).transpose()?,
         embedded_metadata,
         primary_file: primary_file_str,
         component_manifest,

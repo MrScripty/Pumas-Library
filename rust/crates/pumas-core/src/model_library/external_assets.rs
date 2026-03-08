@@ -59,7 +59,9 @@ pub(crate) fn is_external_diffusers_bundle(metadata: &ModelMetadata) -> bool {
     is_external_reference(metadata) && is_diffusers_bundle(metadata)
 }
 
-pub(crate) fn validate_diffusers_directory_for_import(source_path: &Path) -> DiffusersValidationResult {
+pub(crate) fn validate_diffusers_directory_for_import(
+    source_path: &Path,
+) -> DiffusersValidationResult {
     validate_diffusers_directory(source_path, false)
 }
 
@@ -225,7 +227,10 @@ pub(crate) fn build_diffusers_bundle_metadata(
     metadata
 }
 
-fn apply_validation_result(metadata: &mut ModelMetadata, validation: &DiffusersValidationResult) -> bool {
+fn apply_validation_result(
+    metadata: &mut ModelMetadata,
+    validation: &DiffusersValidationResult,
+) -> bool {
     let next_errors = if validation.validation_errors.is_empty() {
         None
     } else {
@@ -509,10 +514,12 @@ pub(crate) fn normalized_component_relative_path(component_name: &str) -> Result
         });
     }
 
-    if candidate
-        .components()
-        .any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_)))
-    {
+    if candidate.components().any(|component| {
+        matches!(
+            component,
+            Component::ParentDir | Component::RootDir | Component::Prefix(_)
+        )
+    }) {
         return Err(PumasError::Validation {
             field: "component_name".to_string(),
             message: "component path must remain inside the bundle root".to_string(),
@@ -629,12 +636,10 @@ mod tests {
         let result = validate_diffusers_directory_for_import(&bundle_root);
 
         assert_eq!(result.validation_state, AssetValidationState::Invalid);
-        assert!(
-            result
-                .validation_errors
-                .iter()
-                .any(|error| error.code == "missing_component")
-        );
+        assert!(result
+            .validation_errors
+            .iter()
+            .any(|error| error.code == "missing_component"));
     }
 
     #[test]
@@ -713,7 +718,10 @@ mod tests {
         let hints = get_diffusers_bundle_lookup_hints(&bundle_root).unwrap();
 
         assert_eq!(hints.bundle_name, "tiny-sd-turbo");
-        assert_eq!(hints.pipeline_class.as_deref(), Some("StableDiffusionPipeline"));
+        assert_eq!(
+            hints.pipeline_class.as_deref(),
+            Some("StableDiffusionPipeline")
+        );
         assert_eq!(hints.name_or_path.as_deref(), Some("stabilityai/sd-turbo"));
         assert_eq!(hints.diffusers_version, None);
     }

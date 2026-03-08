@@ -19,7 +19,11 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let device = get_str_param(params, "device", "device").unwrap_or("auto");
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let descriptor = match state.api.resolve_model_execution_descriptor(&model_id).await {
+    let descriptor = match state
+        .api
+        .resolve_model_execution_descriptor(&model_id)
+        .await
+    {
         Ok(descriptor) => descriptor,
         Err(err) => {
             return Ok(json!({
@@ -45,12 +49,7 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let compute_device = pumas_app_manager::ComputeDevice::from_server_string(device);
     let client = pumas_app_manager::TorchClient::new(connection_url);
     let slot = client
-        .load_model(
-            &descriptor.entry_path,
-            &model_name,
-            &compute_device,
-            None,
-        )
+        .load_model(&descriptor.entry_path, &model_name, &compute_device, None)
         .await?;
 
     Ok(json!({

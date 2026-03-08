@@ -271,10 +271,7 @@ impl PumasApi {
                         let importer = model_library::ModelImporter::new(lib);
                         match importer.finalize_downloaded_directory(&info).await {
                             Ok(r) if r.success => {
-                                tracing::info!(
-                                    "Post-download import succeeded: {:?}",
-                                    r.model_id
-                                );
+                                tracing::info!("Post-download import succeeded: {:?}", r.model_id);
                             }
                             Ok(r) => {
                                 tracing::warn!("Post-download import failed: {:?}", r.error);

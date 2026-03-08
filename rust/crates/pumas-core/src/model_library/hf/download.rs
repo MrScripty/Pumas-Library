@@ -269,78 +269,77 @@ impl HuggingFaceClient {
 
         // Resolve weight files to download.
         // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
-        let files: Vec<FileToDownload> = if request.bundle_format
-            == Some(crate::models::BundleFormat::DiffusersDirectory)
-        {
-            tree.lfs_files
-                .iter()
-                .map(|f| FileToDownload {
-                    filename: f.filename.clone(),
-                    size: Some(f.size),
-                    sha256: Some(f.sha256.clone()),
-                })
-                .collect()
-        } else if let Some(ref fnames) = request.filenames {
-            // Explicit file list from grouped file selection
-            let name_set: HashSet<&str> = fnames.iter().map(|s| s.as_str()).collect();
-            let matching: Vec<FileToDownload> = tree
-                .lfs_files
-                .iter()
-                .filter(|f| name_set.contains(f.filename.as_str()))
-                .map(|f| FileToDownload {
-                    filename: f.filename.clone(),
-                    size: Some(f.size),
-                    sha256: Some(f.sha256.clone()),
-                })
-                .collect();
-            if matching.is_empty() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: format!("{}:{} files", request.repo_id, fnames.len()),
-                });
-            }
-            matching
-        } else if let Some(ref f) = request.filename {
-            // Specific file requested
-            let lfs = tree.lfs_files.iter().find(|lf| lf.filename == *f);
-            vec![FileToDownload {
-                filename: f.clone(),
-                size: lfs.map(|l| l.size),
-                sha256: lfs.map(|l| l.sha256.clone()),
-            }]
-        } else if let Some(ref quant) = request.quant {
-            // All files matching this quantization (handles sharded models)
-            let matching: Vec<FileToDownload> = tree
-                .lfs_files
-                .iter()
-                .filter(|f| f.filename.contains(quant.as_str()))
-                .map(|f| FileToDownload {
-                    filename: f.filename.clone(),
-                    size: Some(f.size),
-                    sha256: Some(f.sha256.clone()),
-                })
-                .collect();
-            if matching.is_empty() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: format!("{}:{}", request.repo_id, quant),
-                });
-            }
-            matching
-        } else {
-            // All LFS files in the repo
-            if tree.lfs_files.is_empty() {
-                return Err(PumasError::ModelNotFound {
-                    model_id: request.repo_id.clone(),
-                });
-            }
-            tree.lfs_files
-                .iter()
-                .map(|f| FileToDownload {
-                    filename: f.filename.clone(),
-                    size: Some(f.size),
-                    sha256: Some(f.sha256.clone()),
-                })
-                .collect()
-        };
+        let files: Vec<FileToDownload> =
+            if request.bundle_format == Some(crate::models::BundleFormat::DiffusersDirectory) {
+                tree.lfs_files
+                    .iter()
+                    .map(|f| FileToDownload {
+                        filename: f.filename.clone(),
+                        size: Some(f.size),
+                        sha256: Some(f.sha256.clone()),
+                    })
+                    .collect()
+            } else if let Some(ref fnames) = request.filenames {
+                // Explicit file list from grouped file selection
+                let name_set: HashSet<&str> = fnames.iter().map(|s| s.as_str()).collect();
+                let matching: Vec<FileToDownload> = tree
+                    .lfs_files
+                    .iter()
+                    .filter(|f| name_set.contains(f.filename.as_str()))
+                    .map(|f| FileToDownload {
+                        filename: f.filename.clone(),
+                        size: Some(f.size),
+                        sha256: Some(f.sha256.clone()),
+                    })
+                    .collect();
+                if matching.is_empty() {
+                    return Err(PumasError::ModelNotFound {
+                        model_id: format!("{}:{} files", request.repo_id, fnames.len()),
+                    });
+                }
+                matching
+            } else if let Some(ref f) = request.filename {
+                // Specific file requested
+                let lfs = tree.lfs_files.iter().find(|lf| lf.filename == *f);
+                vec![FileToDownload {
+                    filename: f.clone(),
+                    size: lfs.map(|l| l.size),
+                    sha256: lfs.map(|l| l.sha256.clone()),
+                }]
+            } else if let Some(ref quant) = request.quant {
+                // All files matching this quantization (handles sharded models)
+                let matching: Vec<FileToDownload> = tree
+                    .lfs_files
+                    .iter()
+                    .filter(|f| f.filename.contains(quant.as_str()))
+                    .map(|f| FileToDownload {
+                        filename: f.filename.clone(),
+                        size: Some(f.size),
+                        sha256: Some(f.sha256.clone()),
+                    })
+                    .collect();
+                if matching.is_empty() {
+                    return Err(PumasError::ModelNotFound {
+                        model_id: format!("{}:{}", request.repo_id, quant),
+                    });
+                }
+                matching
+            } else {
+                // All LFS files in the repo
+                if tree.lfs_files.is_empty() {
+                    return Err(PumasError::ModelNotFound {
+                        model_id: request.repo_id.clone(),
+                    });
+                }
+                tree.lfs_files
+                    .iter()
+                    .map(|f| FileToDownload {
+                        filename: f.filename.clone(),
+                        size: Some(f.size),
+                        sha256: Some(f.sha256.clone()),
+                    })
+                    .collect()
+            };
 
         // SHA256 of the primary (largest) weight file for import metadata
         // (must be computed before auxiliary files are appended)

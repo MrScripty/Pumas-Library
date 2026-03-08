@@ -98,7 +98,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   >({});
 
   // Import State
-  const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
+  const [importPaths, setImportPaths] = useState<string[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
 
   // HuggingFace Auth State
@@ -561,7 +561,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   // Import handlers (for file picker button)
   const handleImportDialogClose = useCallback(() => {
     setShowImportDialog(false);
-    setDroppedFiles([]);
+    setImportPaths([]);
   }, []);
 
   const handleImportComplete = useCallback(() => {
@@ -690,8 +690,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     try {
       const result = await api.open_model_import_dialog();
       if (result.success && result.paths.length > 0) {
-        logger.info('Files selected for import', { count: result.paths.length });
-        setDroppedFiles(result.paths);
+        logger.info('Import paths selected', { count: result.paths.length });
+        setImportPaths(result.paths);
         setShowImportDialog(true);
       }
     } catch (error) {
@@ -702,9 +702,9 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   return (
     <>
       {/* Import dialog (for file picker button) */}
-      {showImportDialog && droppedFiles.length > 0 && (
+      {showImportDialog && importPaths.length > 0 && (
         <ModelImportDialog
-          filePaths={droppedFiles}
+          importPaths={importPaths}
           onClose={handleImportDialogClose}
           onImportComplete={handleImportComplete}
         />

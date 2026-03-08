@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { importAPI } from '../../api/import';
 import type {
+  BundleFormat,
   HFMetadataLookupResult,
+  ImportPathCandidate,
+  ImportPathClassification,
+  ImportPathClassificationKind,
   ModelImportSpec,
   SecurityTier,
 } from '../../types/api';
@@ -10,12 +14,15 @@ import { getFilename, getSecurityTier } from './metadataUtils';
 
 const logger = getLogger('ModelImportDialog');
 
-export type ImportStep = 'review' | 'lookup' | 'importing' | 'complete';
+export type ImportStep = 'classifying' | 'review' | 'lookup' | 'importing' | 'complete';
 export type MetadataStatus = 'pending' | 'found' | 'not_found' | 'error' | 'manual';
+export type ImportEntryKind = 'single_file' | 'directory_model' | 'external_diffusers_bundle';
 
-export interface FileImportStatus {
+export interface ImportEntryStatus {
   path: string;
+  originPath: string;
   filename: string;
+  kind: ImportEntryKind;
   status: 'pending' | 'importing' | 'success' | 'error';
   error?: string;
   securityTier?: SecurityTier;
@@ -27,6 +34,12 @@ export interface FileImportStatus {
   detectedFileType?: string;
   embeddedMetadata?: Record<string, unknown>;
   embeddedMetadataStatus?: 'pending' | 'loaded' | 'error' | 'unsupported';
+  suggestedFamily: string;
+  suggestedOfficialName: string;
+  modelType?: string;
+  bundleFormat?: BundleFormat;
+  pipelineClass?: string;
+  containerPath?: string;
 }
 
 export interface ShardedSetInfo {
@@ -37,17 +50,172 @@ export interface ShardedSetInfo {
   expanded: boolean;
 }
 
+export interface DirectoryReviewFinding {
+  path: string;
+  kind: Extract<
+    ImportPathClassificationKind,
+    'multi_model_container' | 'ambiguous' | 'unsupported'
+  >;
+  reasons: string[];
+  candidates: ImportPathCandidate[];
+}
+
 interface UseModelImportWorkflowOptions {
-  filePaths: string[];
+  importPaths: string[];
   onImportComplete: () => void;
 }
 
+function pathStem(name: string): string {
+  return name.replace(/\.[^.]+$/, '');
+}
+
+function createEntry(
+  path: string,
+  originPath: string,
+  kind: ImportEntryKind,
+  filename: string,
+  suggestedFamily: string,
+  suggestedOfficialName: string,
+  modelType?: string,
+  bundleFormat?: BundleFormat,
+  pipelineClass?: string,
+  containerPath?: string
+): ImportEntryStatus {
+  const securityTier = kind === 'single_file' ? getSecurityTier(filename) : 'unknown';
+  return {
+    path,
+    originPath,
+    filename,
+    kind,
+    status: 'pending',
+    securityTier,
+    securityAcknowledged: securityTier !== 'pickle',
+    metadataStatus: kind === 'single_file' ? 'pending' : 'manual',
+    suggestedFamily,
+    suggestedOfficialName,
+    modelType,
+    bundleFormat,
+    pipelineClass,
+    containerPath,
+  };
+}
+
+function buildEntries(results: ImportPathClassification[]): ImportEntryStatus[] {
+  const entries: ImportEntryStatus[] = [];
+  const seenPaths = new Set<string>();
+
+  const pushEntry = (entry: ImportEntryStatus) => {
+    if (seenPaths.has(entry.path)) return;
+    seenPaths.add(entry.path);
+    entries.push(entry);
+  };
+
+  for (const result of results) {
+    const suggestedFamily = result.suggested_family || 'imported';
+    const suggestedOfficialName = result.suggested_official_name || pathStem(getFilename(result.path));
+
+    if (result.kind === 'single_file') {
+      pushEntry(
+        createEntry(
+          result.path,
+          result.path,
+          'single_file',
+          getFilename(result.path),
+          suggestedFamily,
+          suggestedOfficialName,
+          result.model_type || undefined
+        )
+      );
+      continue;
+    }
+
+    if (result.kind === 'single_model_directory') {
+      pushEntry(
+        createEntry(
+          result.path,
+          result.path,
+          'directory_model',
+          getFilename(result.path),
+          suggestedFamily,
+          suggestedOfficialName,
+          result.model_type || undefined
+        )
+      );
+      continue;
+    }
+
+    if (result.kind === 'single_bundle') {
+      pushEntry(
+        createEntry(
+          result.path,
+          result.path,
+          'external_diffusers_bundle',
+          getFilename(result.path),
+          suggestedFamily,
+          suggestedOfficialName,
+          result.model_type || undefined,
+          result.bundle_format || undefined,
+          result.pipeline_class || undefined
+        )
+      );
+      continue;
+    }
+
+    if (result.kind !== 'multi_model_container') {
+      continue;
+    }
+
+    for (const candidate of result.candidates) {
+      const candidateKind: ImportEntryKind =
+        candidate.kind === 'external_diffusers_bundle'
+          ? 'external_diffusers_bundle'
+          : candidate.kind === 'directory_model'
+            ? 'directory_model'
+            : 'single_file';
+      const candidateFilename = candidate.display_name || getFilename(candidate.path);
+      pushEntry(
+        createEntry(
+          candidate.path,
+          result.path,
+          candidateKind,
+          candidateFilename,
+          'imported',
+          pathStem(candidateFilename),
+          candidate.model_type || undefined,
+          candidate.bundle_format || undefined,
+          candidate.pipeline_class || undefined,
+          result.path
+        )
+      );
+    }
+  }
+
+  return entries;
+}
+
+function buildReviewFindings(results: ImportPathClassification[]): DirectoryReviewFinding[] {
+  return results
+    .filter((result): result is ImportPathClassification & { kind: DirectoryReviewFinding['kind'] } => (
+      result.kind === 'multi_model_container'
+      || result.kind === 'ambiguous'
+      || result.kind === 'unsupported'
+    ))
+    .map((result) => ({
+      path: result.path,
+      kind: result.kind,
+      reasons: result.reasons,
+      candidates: result.candidates,
+    }));
+}
+
 export function useModelImportWorkflow({
-  filePaths,
+  importPaths,
   onImportComplete,
 }: UseModelImportWorkflowOptions) {
-  const [step, setStep] = useState<ImportStep>('review');
-  const [files, setFiles] = useState<FileImportStatus[]>([]);
+  const [step, setStep] = useState<ImportStep>('classifying');
+  const [entries, setEntries] = useState<ImportEntryStatus[]>([]);
+  const [reviewFindings, setReviewFindings] = useState<DirectoryReviewFinding[]>([]);
+  const [classificationError, setClassificationError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
   const [shardedSets, setShardedSets] = useState<ShardedSetInfo[]>([]);
@@ -55,6 +223,49 @@ export function useModelImportWorkflow({
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(new Set());
   const [showEmbeddedMetadata, setShowEmbeddedMetadata] = useState<Set<string>>(new Set());
   const [showAllEmbeddedMetadata, setShowAllEmbeddedMetadata] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const classifyPaths = async () => {
+      setStep('classifying');
+      setClassificationError(null);
+      setEntries([]);
+      setReviewFindings([]);
+      setImportedCount(0);
+      setFailedCount(0);
+      setShardedSets([]);
+      setLookupProgress({ current: 0, total: 0 });
+
+      if (importPaths.length === 0) {
+        setStep('review');
+        return;
+      }
+
+      try {
+        const results = await importAPI.classifyImportPaths(importPaths);
+        if (cancelled) return;
+        setEntries(buildEntries(results));
+        setReviewFindings(buildReviewFindings(results));
+      } catch (error) {
+        if (cancelled) return;
+        logger.error('Failed to classify import paths', { error });
+        setClassificationError(
+          error instanceof Error ? error.message : 'Failed to classify import paths'
+        );
+      } finally {
+        if (!cancelled) {
+          setStep('review');
+        }
+      }
+    };
+
+    void classifyPaths();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [importPaths]);
 
   const toggleMetadataExpand = useCallback((path: string) => {
     setExpandedMetadata((prev) => {
@@ -70,16 +281,18 @@ export function useModelImportWorkflow({
 
   const toggleMetadataSource = useCallback(async (path: string) => {
     let needsLoad = false;
-    setFiles((prev) => {
-      const file = prev.find((entry) => entry.path === path);
-      if (!file) return prev;
-      if (!file.embeddedMetadata
-        && file.embeddedMetadataStatus !== 'error'
-        && file.embeddedMetadataStatus !== 'unsupported'
-        && file.embeddedMetadataStatus !== 'pending') {
+    setEntries((prev) => {
+      const entry = prev.find((candidate) => candidate.path === path);
+      if (!entry || entry.kind !== 'single_file') return prev;
+      if (!entry.embeddedMetadata
+        && entry.embeddedMetadataStatus !== 'error'
+        && entry.embeddedMetadataStatus !== 'unsupported'
+        && entry.embeddedMetadataStatus !== 'pending') {
         needsLoad = true;
-        return prev.map((entry) => (
-          entry.path === path ? { ...entry, embeddedMetadataStatus: 'pending' } : entry
+        return prev.map((candidate) => (
+          candidate.path === path
+            ? { ...candidate, embeddedMetadataStatus: 'pending' }
+            : candidate
         ));
       }
       return prev;
@@ -90,24 +303,26 @@ export function useModelImportWorkflow({
 
       if (!isCurrentlyShowingEmbedded && needsLoad) {
         importAPI.getEmbeddedMetadata(path).then((result) => {
-          setFiles((prevFiles) => prevFiles.map((entry) => {
-            if (entry.path !== path) return entry;
+          setEntries((prevEntries) => prevEntries.map((candidate) => {
+            if (candidate.path !== path) return candidate;
             if (result.success && result.metadata) {
               return {
-                ...entry,
+                ...candidate,
                 embeddedMetadata: result.metadata,
                 embeddedMetadataStatus: 'loaded',
               };
             }
             if (result.file_type === 'unsupported') {
-              return { ...entry, embeddedMetadataStatus: 'unsupported' };
+              return { ...candidate, embeddedMetadataStatus: 'unsupported' };
             }
-            return { ...entry, embeddedMetadataStatus: 'error' };
+            return { ...candidate, embeddedMetadataStatus: 'error' };
           }));
         }).catch((error: unknown) => {
           logger.error('Failed to fetch embedded metadata', { path, error: String(error) });
-          setFiles((prevFiles) => prevFiles.map((entry) => (
-            entry.path === path ? { ...entry, embeddedMetadataStatus: 'error' } : entry
+          setEntries((prevEntries) => prevEntries.map((candidate) => (
+            candidate.path === path
+              ? { ...candidate, embeddedMetadataStatus: 'error' }
+              : candidate
           )));
         });
       }
@@ -134,28 +349,25 @@ export function useModelImportWorkflow({
     });
   }, []);
 
-  useEffect(() => {
-    const fileStatuses: FileImportStatus[] = filePaths.map((path) => {
-      const filename = getFilename(path);
-      const securityTier = getSecurityTier(filename);
-      return {
-        path,
-        filename,
-        status: 'pending',
-        securityTier,
-        securityAcknowledged: securityTier !== 'pickle',
-        metadataStatus: 'pending',
-      };
-    });
-    setFiles(fileStatuses);
-  }, [filePaths]);
+  const fileEntries = useMemo(
+    () => entries.filter((entry) => entry.kind === 'single_file'),
+    [entries]
+  );
+
+  const nonFileEntries = useMemo(
+    () => entries.filter((entry) => entry.kind !== 'single_file'),
+    [entries]
+  );
 
   useEffect(() => {
-    if (files.length === 0) return;
+    if (fileEntries.length === 0) {
+      setShardedSets([]);
+      return;
+    }
 
     const detectShards = async () => {
       try {
-        const paths = files.map((file) => file.path);
+        const paths = fileEntries.map((entry) => entry.path);
         const result = await importAPI.detectShardedSets(paths);
 
         if (result.success && result.groups) {
@@ -178,9 +390,9 @@ export function useModelImportWorkflow({
           });
 
           setShardedSets(sets);
-          setFiles((prev) => prev.map((file) => ({
-            ...file,
-            shardedSetKey: fileToSetMap[file.path],
+          setEntries((prev) => prev.map((entry) => ({
+            ...entry,
+            shardedSetKey: entry.kind === 'single_file' ? fileToSetMap[entry.path] : undefined,
           })));
         }
       } catch (error) {
@@ -189,27 +401,22 @@ export function useModelImportWorkflow({
     };
 
     void detectShards();
-  }, [files.length]);
+  }, [fileEntries]);
 
-  const allPickleAcknowledged = files.every(
-    (file) => file.securityTier !== 'pickle' || file.securityAcknowledged
+  const allPickleAcknowledged = entries.every(
+    (entry) => entry.securityTier !== 'pickle' || entry.securityAcknowledged
   );
 
-  const toggleSecurityAck = useCallback((index: number) => {
-    setFiles((prev) => {
-      const file = prev[index];
-      if (!file) return prev;
-      const updated = [...prev];
-      updated[index] = {
-        ...file,
-        securityAcknowledged: !file.securityAcknowledged,
-      };
-      return updated;
-    });
+  const toggleSecurityAck = useCallback((path: string) => {
+    setEntries((prev) => prev.map((entry) => (
+      entry.path === path
+        ? { ...entry, securityAcknowledged: !entry.securityAcknowledged }
+        : entry
+    )));
   }, []);
 
-  const removeFile = useCallback((index: number) => {
-    setFiles((prev) => prev.filter((_, currentIndex) => currentIndex !== index));
+  const removeEntry = useCallback((path: string) => {
+    setEntries((prev) => prev.filter((entry) => entry.path !== path));
   }, []);
 
   const toggleShardedSet = useCallback((key: string) => {
@@ -219,28 +426,30 @@ export function useModelImportWorkflow({
   }, []);
 
   const performMetadataLookup = useCallback(async () => {
+    const filesToProcess = fileEntries.map((entry) => ({ path: entry.path, filename: entry.filename }));
     setStep('lookup');
-    const totalFiles = files.length;
-    setLookupProgress({ current: 0, total: totalFiles });
+    setLookupProgress({ current: 0, total: filesToProcess.length });
 
-    const filesToProcess = files.map((file) => ({ path: file.path, filename: file.filename }));
+    if (filesToProcess.length === 0) {
+      return;
+    }
 
     for (let index = 0; index < filesToProcess.length; index += 1) {
-      const file = filesToProcess[index];
-      if (!file) continue;
+      const entry = filesToProcess[index];
+      if (!entry) continue;
 
-      setLookupProgress({ current: index + 1, total: totalFiles });
+      setLookupProgress({ current: index + 1, total: filesToProcess.length });
 
       try {
-        const typeResult = await importAPI.validateFileType(file.path);
+        const typeResult = await importAPI.validateFileType(entry.path);
 
-        setFiles((prev) => prev.map((entry) => {
-          if (entry.path !== file.path) return entry;
+        setEntries((prev) => prev.map((candidate) => {
+          if (candidate.path !== entry.path) return candidate;
           return {
-            ...entry,
+            ...candidate,
             validFileType: typeResult.valid,
             detectedFileType: typeResult.detected_type,
-            metadataStatus: typeResult.valid ? entry.metadataStatus : 'error',
+            metadataStatus: typeResult.valid ? candidate.metadataStatus : 'error',
           };
         }));
 
@@ -253,14 +462,14 @@ export function useModelImportWorkflow({
 
         if (typeResult.detected_type === 'gguf' || typeResult.detected_type === 'safetensors') {
           try {
-            const embeddedResult = await importAPI.getEmbeddedMetadata(file.path);
+            const embeddedResult = await importAPI.getEmbeddedMetadata(entry.path);
 
             if (embeddedResult.success && embeddedResult.metadata) {
               const metadata = embeddedResult.metadata;
-              setFiles((prev) => prev.map((entry) => {
-                if (entry.path !== file.path) return entry;
+              setEntries((prev) => prev.map((candidate) => {
+                if (candidate.path !== entry.path) return candidate;
                 return {
-                  ...entry,
+                  ...candidate,
                   embeddedMetadata: metadata ?? undefined,
                   embeddedMetadataStatus: 'loaded',
                 };
@@ -290,14 +499,14 @@ export function useModelImportWorkflow({
         }
 
         if (skipHfSearch && embeddedRepoId) {
-          setFiles((prev) => prev.map((entry) => {
-            if (entry.path !== file.path) return entry;
+          setEntries((prev) => prev.map((candidate) => {
+            if (candidate.path !== entry.path) return candidate;
             return {
-              ...entry,
+              ...candidate,
               hfMetadata: {
                 repo_id: embeddedRepoId,
-                official_name: file.filename,
-                family: '',
+                official_name: candidate.suggestedOfficialName,
+                family: candidate.suggestedFamily,
                 match_method: 'filename_exact',
                 match_confidence: 0.9,
                 requires_confirmation: false,
@@ -308,113 +517,177 @@ export function useModelImportWorkflow({
           continue;
         }
 
-        const result = await importAPI.lookupHFMetadata(file.filename, file.path);
-        setFiles((prev) => prev.map((entry) => {
-          if (entry.path !== file.path) return entry;
+        const result = await importAPI.lookupHFMetadata(entry.filename, entry.path);
+        setEntries((prev) => prev.map((candidate) => {
+          if (candidate.path !== entry.path) return candidate;
           if (result.success && result.found && result.metadata) {
             return {
-              ...entry,
+              ...candidate,
               hfMetadata: result.metadata,
               metadataStatus: 'found',
             };
           }
           return {
-            ...entry,
+            ...candidate,
             metadataStatus: 'not_found',
           };
         }));
       } catch (error) {
-        logger.error('Metadata lookup failed', { file: file.filename, error });
-        setFiles((prev) => prev.map((entry) => (
-          entry.path === file.path ? { ...entry, metadataStatus: 'error' } : entry
+        logger.error('Metadata lookup failed', { file: entry.filename, error });
+        setEntries((prev) => prev.map((candidate) => (
+          candidate.path === entry.path
+            ? { ...candidate, metadataStatus: 'error' }
+            : candidate
         )));
       }
     }
-  }, [files]);
+  }, [fileEntries]);
 
   const startImport = useCallback(async () => {
-    if (!allPickleAcknowledged || files.length === 0) return;
+    if (!allPickleAcknowledged || entries.length === 0) return;
 
     setStep('importing');
-    const specs: ModelImportSpec[] = files
-      .filter((file) => file.validFileType !== false)
-      .map((file) => ({
-        path: file.path,
-        family: file.hfMetadata?.family || 'imported',
-        official_name: file.hfMetadata?.official_name || file.filename.replace(/\.[^.]+$/, ''),
-        repo_id: file.hfMetadata?.repo_id,
-        model_type: file.hfMetadata?.model_type,
-        subtype: file.hfMetadata?.subtype,
-        tags: file.hfMetadata?.tags,
-        security_acknowledged: file.securityAcknowledged,
-      }));
+    const invalidFileEntries = fileEntries.filter((entry) => entry.validFileType === false);
+    const batchEntries = entries.filter(
+      (entry) => entry.kind !== 'external_diffusers_bundle' && entry.validFileType !== false
+    );
+    const bundleEntries = entries.filter((entry) => entry.kind === 'external_diffusers_bundle');
+
+    const batchSpecs: ModelImportSpec[] = batchEntries.map((entry) => ({
+      path: entry.path,
+      family: entry.hfMetadata?.family || entry.suggestedFamily,
+      official_name: entry.hfMetadata?.official_name || entry.suggestedOfficialName,
+      repo_id: entry.hfMetadata?.repo_id,
+      model_type: entry.hfMetadata?.model_type || entry.modelType,
+      subtype: entry.hfMetadata?.subtype,
+      tags: entry.hfMetadata?.tags,
+      security_acknowledged: entry.securityAcknowledged,
+    }));
 
     try {
-      setFiles((prev) => prev.map((file) => ({
-        ...file,
-        status: file.validFileType !== false ? 'importing' : 'error',
-      })));
-
-      const result = await importAPI.importBatch(specs);
-      setFiles((prev) => prev.map((file) => {
-        if (file.validFileType === false) {
+      setEntries((prev) => prev.map((entry) => {
+        if (entry.kind === 'single_file' && entry.validFileType === false) {
           return {
-            ...file,
+            ...entry,
             status: 'error',
-            error: `Invalid file type: ${file.detectedFileType}`,
+            error: `Invalid file type: ${entry.detectedFileType}`,
           };
         }
-        const importResult = result.results.find((entry) => entry.path === file.path);
-        if (importResult) {
-          return {
-            ...file,
-            status: importResult.success ? 'success' : 'error',
-            error: importResult.error,
-            securityTier: importResult.security_tier || file.securityTier,
-          };
-        }
-        return file;
+
+        return { ...entry, status: 'importing' };
       }));
 
-      setImportedCount(result.imported);
-      setFailedCount(result.failed + files.filter((file) => file.validFileType === false).length);
+      let imported = 0;
+      let failed = invalidFileEntries.length;
+
+      if (batchSpecs.length > 0) {
+        const result = await importAPI.importBatch(batchSpecs);
+        imported += result.imported;
+        failed += result.failed;
+
+        setEntries((prev) => prev.map((entry) => {
+          const importResult = result.results.find((candidate) => candidate.path === entry.path);
+          if (!importResult) {
+            return entry;
+          }
+
+          return {
+            ...entry,
+            status: importResult.success ? 'success' : 'error',
+            error: importResult.error,
+            securityTier: importResult.security_tier || entry.securityTier,
+          };
+        }));
+      }
+
+      for (const entry of bundleEntries) {
+        try {
+          const result = await importAPI.importExternalDiffusersDirectory({
+            source_path: entry.path,
+            family: entry.suggestedFamily,
+            official_name: entry.suggestedOfficialName,
+          });
+
+          imported += result.success ? 1 : 0;
+          failed += result.success ? 0 : 1;
+
+          setEntries((prev) => prev.map((candidate) => (
+            candidate.path === entry.path
+              ? {
+                ...candidate,
+                status: result.success ? 'success' : 'error',
+                error: result.error,
+              }
+              : candidate
+          )));
+        } catch (error) {
+          failed += 1;
+          setEntries((prev) => prev.map((candidate) => (
+            candidate.path === entry.path
+              ? {
+                ...candidate,
+                status: 'error',
+                error: error instanceof Error ? error.message : 'Import failed',
+              }
+              : candidate
+          )));
+        }
+      }
+
+      setImportedCount(imported);
+      setFailedCount(failed);
       setStep('complete');
 
-      if (result.imported > 0) {
+      if (imported > 0) {
         onImportComplete();
       }
     } catch (error) {
       logger.error('Import batch failed', { error });
-      setFiles((prev) => prev.map((file) => ({
-        ...file,
+      setEntries((prev) => prev.map((entry) => ({
+        ...entry,
         status: 'error',
         error: error instanceof Error ? error.message : 'Import failed',
       })));
-      setFailedCount(files.length);
+      setFailedCount(entries.length);
       setStep('complete');
     }
-  }, [allPickleAcknowledged, files, onImportComplete]);
+  }, [allPickleAcknowledged, entries, fileEntries, onImportComplete]);
 
   const proceedToLookup = useCallback(() => {
     void performMetadataLookup();
   }, [performMetadataLookup]);
 
-  const pickleFilesCount = files.filter((file) => file.securityTier === 'pickle').length;
-  const acknowledgedCount = files.filter(
-    (file) => file.securityTier === 'pickle' && file.securityAcknowledged
+  const pickleFilesCount = entries.filter((entry) => entry.securityTier === 'pickle').length;
+  const acknowledgedCount = entries.filter(
+    (entry) => entry.securityTier === 'pickle' && entry.securityAcknowledged
   ).length;
-  const invalidFileCount = files.filter((file) => file.validFileType === false).length;
-  const verifiedCount = files.filter(
-    (file) => file.hfMetadata?.match_method === 'hash' && file.hfMetadata?.match_confidence === 1.0
+  const invalidFileCount = fileEntries.filter((entry) => entry.validFileType === false).length;
+  const verifiedCount = fileEntries.filter(
+    (entry) => entry.hfMetadata?.match_method === 'hash'
+      && entry.hfMetadata?.match_confidence === 1.0
   ).length;
-  const standaloneFiles = useMemo(
-    () => files.filter((file) => !file.shardedSetKey),
-    [files]
+  const standaloneEntries = useMemo(
+    () => entries.filter((entry) => entry.kind !== 'single_file' || !entry.shardedSetKey),
+    [entries]
+  );
+  const blockedFindings = useMemo(
+    () => reviewFindings.filter((finding) => finding.kind !== 'multi_model_container'),
+    [reviewFindings]
+  );
+  const containerFindings = useMemo(
+    () => reviewFindings.filter((finding) => finding.kind === 'multi_model_container'),
+    [reviewFindings]
   );
 
   return {
     step,
-    files,
+    entries,
+    fileEntries,
+    nonFileEntries,
+    reviewFindings,
+    blockedFindings,
+    containerFindings,
+    classificationError,
     importedCount,
     failedCount,
     shardedSets,
@@ -427,7 +700,7 @@ export function useModelImportWorkflow({
     toggleMetadataSource,
     toggleShowAllEmbeddedMetadata,
     toggleSecurityAck,
-    removeFile,
+    removeEntry,
     toggleShardedSet,
     proceedToLookup,
     startImport,
@@ -435,6 +708,6 @@ export function useModelImportWorkflow({
     acknowledgedCount,
     invalidFileCount,
     verifiedCount,
-    standaloneFiles,
+    standaloneEntries,
   };
 }

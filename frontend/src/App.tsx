@@ -38,7 +38,7 @@ export default function App() {
   const [excludedModels, setExcludedModels] = useState<Set<string>>(new Set());
 
   // Model Import State (for app-level drag-drop)
-  const [droppedFiles, setDroppedFiles] = useState<string[]>([]);
+  const [importPaths, setImportPaths] = useState<string[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
 
   // --- Custom Hooks ---
@@ -391,15 +391,15 @@ export default function App() {
   };
 
   // Model import handlers (app-level drag-drop)
-  const handleFilesDropped = useCallback((paths: string[]) => {
-    logger.info('Files dropped for import', { count: paths.length });
-    setDroppedFiles(paths);
+  const handlePathsDropped = useCallback((paths: string[]) => {
+    logger.info('Paths dropped for import', { count: paths.length });
+    setImportPaths(paths);
     setShowImportDialog(true);
   }, []);
 
   const handleImportDialogClose = useCallback(() => {
     setShowImportDialog(false);
-    setDroppedFiles([]);
+    setImportPaths([]);
   }, []);
 
   const handleImportComplete = useCallback(() => {
@@ -465,12 +465,12 @@ export default function App() {
   return (
     <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
       {/* App-level drag-and-drop import overlay */}
-      <ModelImportDropZone onFilesDropped={handleFilesDropped} enabled={true} />
+      <ModelImportDropZone onPathsDropped={handlePathsDropped} enabled={true} />
 
       {/* Import dialog */}
-      {showImportDialog && droppedFiles.length > 0 && (
+      {showImportDialog && importPaths.length > 0 && (
         <ModelImportDialog
-          filePaths={droppedFiles}
+          importPaths={importPaths}
           onClose={handleImportDialogClose}
           onImportComplete={handleImportComplete}
         />

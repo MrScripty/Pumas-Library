@@ -249,7 +249,9 @@ const electronAPI = {
       tags,
     }),
   import_batch: (importSpecs: Array<Record<string, unknown>>) =>
-    apiCall('import_batch', { import_specs: importSpecs }),
+    apiCall('import_batch', { imports: importSpecs }),
+  import_external_diffusers_directory: (spec: Record<string, unknown>) =>
+    apiCall('import_external_diffusers_directory', spec),
   classify_model_import_paths: (paths: string[]) =>
     apiCall('classify_model_import_paths', { paths }),
   get_network_status: () => apiCall('get_network_status'),
@@ -267,7 +269,7 @@ const electronAPI = {
   lookup_hf_metadata_for_file: (filename: string, filePath?: string | null) =>
     apiCall('lookup_hf_metadata_for_file', { filename, file_path: filePath }),
   detect_sharded_sets: (filePaths: string[]) =>
-    apiCall('detect_sharded_sets', { file_paths: filePaths }),
+    apiCall('detect_sharded_sets', { files: filePaths }),
   validate_file_type: (filePath: string) => apiCall('validate_file_type', { file_path: filePath }),
   get_library_status: () => apiCall('get_library_status'),
   get_file_link_count: (filePath: string) => apiCall('get_file_link_count', { file_path: filePath }),
@@ -393,8 +395,8 @@ const electronAPI = {
   // Model Import Dialog - uses Electron's native dialog
   open_model_import_dialog: async () => {
     const result = await ipcRenderer.invoke('dialog:openFile', {
-      title: 'Select Model Files',
-      properties: ['openFile', 'multiSelections'],
+      title: 'Select Model Files or Folders',
+      properties: ['openFile', 'openDirectory', 'multiSelections'],
       filters: [
         {
           name: 'Model Files',

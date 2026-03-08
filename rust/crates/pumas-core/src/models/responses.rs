@@ -210,6 +210,32 @@ pub struct ImportBatchResponse {
     pub results: Vec<ModelImportResult>,
 }
 
+/// Embedded metadata payload for model detail surfaces.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct EmbeddedMetadataResponse {
+    pub file_type: String,
+    pub metadata: serde_json::Value,
+}
+
+/// Detailed metadata response for a single library model.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LibraryModelMetadataResponse {
+    pub success: bool,
+    pub model_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stored_metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_metadata: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedded_metadata: Option<EmbeddedMetadataResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_file: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub component_manifest: Option<Vec<BundleComponentManifestEntry>>,
+}
+
 /// Network status response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

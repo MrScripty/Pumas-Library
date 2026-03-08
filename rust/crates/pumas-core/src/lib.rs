@@ -64,7 +64,10 @@ pub use model_library::{
     BatchImportProgress, DownloadRequest, HfAuthStatus, HfSearchParams, HuggingFaceClient,
     ModelImporter, ModelLibrary, ModelMapper,
 };
-pub use models::CommitInfo;
+pub use models::{
+    BundleComponentManifestEntry, BundleComponentState, BundleFormat, CommitInfo,
+    EmbeddedMetadataResponse, LibraryModelMetadataResponse,
+};
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
 pub use system::{

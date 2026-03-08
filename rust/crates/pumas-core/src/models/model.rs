@@ -287,6 +287,31 @@ pub struct AssetValidationError {
     pub path: Option<String>,
 }
 
+/// Presence/state of a bundle component derived from bundle metadata.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum BundleComponentState {
+    Present,
+    Missing,
+    Unreadable,
+    PathEscape,
+}
+
+/// Derived component metadata for a directory-root bundle model.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct BundleComponentManifestEntry {
+    pub name: String,
+    pub relative_path: String,
+    #[serde(default)]
+    pub source_library: Option<String>,
+    #[serde(default)]
+    pub class_name: Option<String>,
+    pub state: BundleComponentState,
+}
+
 /// Canonical metadata stored with each model directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]

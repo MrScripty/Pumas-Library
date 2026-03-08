@@ -4,6 +4,7 @@ use crate::handlers::{
     extract_safetensors_header, get_bool_param, get_str_param, require_str_param,
 };
 use crate::server::AppState;
+use pumas_library::model_library::get_diffusers_component_manifest;
 use serde_json::{json, Value};
 
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
@@ -234,7 +235,8 @@ pub async fn get_library_model_metadata(
 
     // Find primary model file and get embedded metadata
     let primary_file = library.get_primary_model_file(&model_id);
-    let embedded_metadata: Option<Value> = if let Some(ref file_path) = primary_file {
+    let embedded_metadata: Option<pumas_library::EmbeddedMetadataResponse> =
+        if let Some(ref file_path) = primary_file {
         let extension = file_path
             .extension()
             .and_then(|e: &std::ffi::OsStr| e.to_str())
@@ -248,18 +250,18 @@ pub async fn get_library_model_metadata(
                         .into_iter()
                         .map(|(k, v)| (k, Value::String(v)))
                         .collect();
-                    Some(json!({
-                        "file_type": "gguf",
-                        "metadata": metadata_value
-                    }))
+                    Some(pumas_library::EmbeddedMetadataResponse {
+                        file_type: "gguf".to_string(),
+                        metadata: Value::Object(metadata_value),
+                    })
                 }
                 Err(_) => None,
             },
             "safetensors" => match extract_safetensors_header(&file_path.to_string_lossy()) {
-                Ok(header) => Some(json!({
-                    "file_type": "safetensors",
-                    "metadata": header
-                })),
+                Ok(header) => Some(pumas_library::EmbeddedMetadataResponse {
+                    file_type: "safetensors".to_string(),
+                    metadata: header,
+                }),
                 Err(_) => None,
             },
             _ => None,
@@ -271,14 +273,34 @@ pub async fn get_library_model_metadata(
     let primary_file_str =
         primary_file.map(|p: std::path::PathBuf| p.to_string_lossy().to_string());
 
-    Ok(json!({
-        "success": true,
-        "model_id": model_id,
-        "stored_metadata": stored_metadata,
-        "effective_metadata": effective_metadata,
-        "embedded_metadata": embedded_metadata,
-        "primary_file": primary_file_str
-    }))
+    let component_manifest = effective_metadata
+        .as_ref()
+        .filter(|metadata| {
+            metadata.bundle_format == Some(pumas_library::BundleFormat::DiffusersDirectory)
+        })
+        .and_then(|metadata| {
+            metadata
+                .entry_path
+                .as_deref()
+                .or_else(|| primary_file_str.as_deref())
+                .map(std::path::Path::new)
+        })
+        .and_then(get_diffusers_component_manifest);
+
+    let response = pumas_library::LibraryModelMetadataResponse {
+        success: true,
+        model_id,
+        stored_metadata: stored_metadata
+            .map(serde_json::to_value)
+            .transpose()?,
+        effective_metadata: effective_metadata
+            .map(serde_json::to_value)
+            .transpose()?,
+        embedded_metadata,
+        primary_file: primary_file_str,
+        component_manifest,
+    };
+    Ok(serde_json::to_value(response)?)
 }
 
 pub async fn resolve_model_execution_descriptor(

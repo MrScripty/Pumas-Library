@@ -7,8 +7,9 @@
 use crate::error::{PumasError, Result};
 use crate::model_library::naming::normalize_name;
 use crate::models::{
-    resolve_inference_settings, AssetValidationError, AssetValidationState, BundleFormat,
-    ExternalDiffusersImportSpec, ImportState, ModelMetadata, StorageKind,
+    resolve_inference_settings, AssetValidationError, AssetValidationState,
+    BundleComponentManifestEntry, BundleComponentState, BundleFormat, ExternalDiffusersImportSpec,
+    ImportState, ModelMetadata, StorageKind,
 };
 use serde_json::Value;
 use std::path::{Component, Path, PathBuf};
@@ -22,6 +23,7 @@ pub(crate) struct DiffusersValidationResult {
     pub pipeline_class: Option<String>,
     pub validation_state: AssetValidationState,
     pub validation_errors: Vec<AssetValidationError>,
+    pub component_manifest: Vec<BundleComponentManifestEntry>,
 }
 
 pub(crate) struct DiffusersBundleMetadataSpec<'a> {
@@ -55,6 +57,21 @@ pub(crate) fn validate_diffusers_directory_for_import(source_path: &Path) -> Dif
 
 pub(crate) fn revalidate_diffusers_directory(entry_path: &Path) -> DiffusersValidationResult {
     validate_diffusers_directory(entry_path, true)
+}
+
+fn describe_diffusers_directory(entry_path: &Path) -> Option<DiffusersValidationResult> {
+    let validation = revalidate_diffusers_directory(entry_path);
+    if validation.pipeline_class.is_some() || !validation.component_manifest.is_empty() {
+        Some(validation)
+    } else {
+        None
+    }
+}
+
+pub fn get_diffusers_component_manifest(
+    entry_path: &Path,
+) -> Option<Vec<BundleComponentManifestEntry>> {
+    describe_diffusers_directory(entry_path).map(|validation| validation.component_manifest)
 }
 
 pub(crate) fn refresh_external_metadata_validation(metadata: &mut ModelMetadata) -> bool {
@@ -207,6 +224,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                     message: format!("could not access external bundle root: {}", err),
                     path: Some(path.display().to_string()),
                 }],
+                component_manifest: Vec::new(),
             };
         }
     };
@@ -225,6 +243,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                 message: "external bundle root must be a directory".to_string(),
                 path: Some(canonical_entry_path.display().to_string()),
             }],
+            component_manifest: Vec::new(),
         };
     }
 
@@ -245,6 +264,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                     message: format!("missing model_index.json: {}", err),
                     path: Some(model_index_path.display().to_string()),
                 }],
+                component_manifest: Vec::new(),
             };
         }
     };
@@ -265,6 +285,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                     message: format!("model_index.json is not valid JSON: {}", err),
                     path: Some(model_index_path.display().to_string()),
                 }],
+                component_manifest: Vec::new(),
             };
         }
     };
@@ -290,6 +311,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                 message: "model_index.json is missing _class_name".to_string(),
                 path: Some(model_index_path.display().to_string()),
             }],
+            component_manifest: Vec::new(),
         };
     };
 
@@ -307,67 +329,13 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
                 message: "bundle is not a supported text-to-image diffusers pipeline".to_string(),
                 path: Some(model_index_path.display().to_string()),
             }],
+            component_manifest: Vec::new(),
         };
     }
 
-    let mut validation_errors = Vec::new();
-    if let Some(components) = model_index.as_object() {
-        for (component_name, component_value) in components {
-            if component_name.starts_with('_')
-                || !is_diffusers_component_entry(component_value)
-                || is_optional_component_marker(component_value)
-            {
-                continue;
-            }
-
-            let relative_path = match normalized_component_relative_path(component_name) {
-                Ok(path) => path,
-                Err(err) => {
-                    validation_errors.push(AssetValidationError {
-                        code: "path_escape".to_string(),
-                        message: err.to_string(),
-                        path: Some(component_name.clone()),
-                    });
-                    continue;
-                }
-            };
-
-            let candidate_path = canonical_entry_path.join(&relative_path);
-            if !candidate_path.exists() {
-                validation_errors.push(AssetValidationError {
-                    code: "missing_component".to_string(),
-                    message: format!("referenced component '{}' is missing", component_name),
-                    path: Some(candidate_path.display().to_string()),
-                });
-                continue;
-            }
-
-            match candidate_path.canonicalize() {
-                Ok(canonical_component) => {
-                    if !canonical_component.starts_with(&canonical_entry_path) {
-                        validation_errors.push(AssetValidationError {
-                            code: "path_escape".to_string(),
-                            message: format!(
-                                "component '{}' resolves outside the bundle root",
-                                component_name
-                            ),
-                            path: Some(canonical_component.display().to_string()),
-                        });
-                    }
-                }
-                Err(err) => {
-                    validation_errors.push(AssetValidationError {
-                        code: "component_unreadable".to_string(),
-                        message: format!(
-                            "could not access referenced component '{}': {}",
-                            component_name, err
-                        ),
-                        path: Some(candidate_path.display().to_string()),
-                    });
-                }
-            }
-        }
-    }
+    let component_manifest =
+        collect_diffusers_component_manifest(&canonical_entry_path, &model_index);
+    let validation_errors = collect_component_validation_errors(&component_manifest);
 
     let validation_state = if validation_errors.is_empty() {
         AssetValidationState::Valid
@@ -382,7 +350,109 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
         pipeline_class: Some(pipeline_class),
         validation_state,
         validation_errors,
+        component_manifest,
     }
+}
+
+fn collect_diffusers_component_manifest(
+    bundle_root: &Path,
+    model_index: &Value,
+) -> Vec<BundleComponentManifestEntry> {
+    let Some(components) = model_index.as_object() else {
+        return Vec::new();
+    };
+
+    let mut manifest = Vec::new();
+    for (component_name, component_value) in components {
+        if component_name.starts_with('_')
+            || !is_diffusers_component_entry(component_value)
+            || is_optional_component_marker(component_value)
+        {
+            continue;
+        }
+
+        let (source_library, class_name) = parse_component_signature(component_value);
+        let relative_path = component_name.clone();
+        let state = match normalized_component_relative_path(component_name) {
+            Ok(path) => {
+                let candidate_path = bundle_root.join(&path);
+                if !candidate_path.exists() {
+                    BundleComponentState::Missing
+                } else {
+                    match candidate_path.canonicalize() {
+                        Ok(canonical_component) => {
+                            if canonical_component.starts_with(bundle_root) {
+                                BundleComponentState::Present
+                            } else {
+                                BundleComponentState::PathEscape
+                            }
+                        }
+                        Err(_) => BundleComponentState::Unreadable,
+                    }
+                }
+            }
+            Err(_) => BundleComponentState::PathEscape,
+        };
+
+        manifest.push(BundleComponentManifestEntry {
+            name: component_name.clone(),
+            relative_path,
+            source_library,
+            class_name,
+            state,
+        });
+    }
+
+    manifest.sort_by(|left, right| left.name.cmp(&right.name));
+    manifest
+}
+
+fn parse_component_signature(value: &Value) -> (Option<String>, Option<String>) {
+    let Some(entries) = value.as_array() else {
+        return (None, None);
+    };
+    let source_library = entries
+        .first()
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let class_name = entries
+        .get(1)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    (source_library, class_name)
+}
+
+fn collect_component_validation_errors(
+    component_manifest: &[BundleComponentManifestEntry],
+) -> Vec<AssetValidationError> {
+    component_manifest
+        .iter()
+        .filter_map(|component| match component.state {
+            BundleComponentState::Present => None,
+            BundleComponentState::Missing => Some(AssetValidationError {
+                code: "missing_component".to_string(),
+                message: format!("referenced component '{}' is missing", component.name),
+                path: Some(component.relative_path.clone()),
+            }),
+            BundleComponentState::Unreadable => Some(AssetValidationError {
+                code: "component_unreadable".to_string(),
+                message: format!("could not access referenced component '{}'", component.name),
+                path: Some(component.relative_path.clone()),
+            }),
+            BundleComponentState::PathEscape => Some(AssetValidationError {
+                code: "path_escape".to_string(),
+                message: format!(
+                    "component '{}' must remain inside the bundle root",
+                    component.name
+                ),
+                path: Some(component.relative_path.clone()),
+            }),
+        })
+        .collect()
 }
 
 pub(crate) fn normalized_component_relative_path(component_name: &str) -> Result<PathBuf> {
@@ -554,6 +624,19 @@ mod tests {
 
         assert_eq!(result.validation_state, AssetValidationState::Valid);
         assert!(result.validation_errors.is_empty());
+        let component_names: Vec<&str> = result
+            .component_manifest
+            .iter()
+            .map(|component| component.name.as_str())
+            .collect();
+        assert_eq!(
+            component_names,
+            vec!["scheduler", "text_encoder", "tokenizer", "unet", "vae"]
+        );
+        assert!(result
+            .component_manifest
+            .iter()
+            .all(|component| component.state == BundleComponentState::Present));
     }
 
     #[test]

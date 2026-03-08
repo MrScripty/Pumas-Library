@@ -51,7 +51,7 @@ pub use dependencies::{
 };
 pub use directory_import::classify_import_path;
 pub use download_store::DownloadPersistence;
-pub use external_assets::MODEL_EXECUTION_CONTRACT_VERSION;
+pub use external_assets::{get_diffusers_component_manifest, MODEL_EXECUTION_CONTRACT_VERSION};
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub use hf::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,

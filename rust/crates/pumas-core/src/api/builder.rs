@@ -269,7 +269,7 @@ impl PumasApiBuilder {
                             Ok(r) if r.success => {
                                 tracing::info!(
                                     "Post-download import succeeded: {:?}",
-                                    r.model_path
+                                    r.model_id
                                 );
                             }
                             Ok(r) => {

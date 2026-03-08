@@ -599,12 +599,21 @@ export interface ModelImportSpec {
   security_acknowledged?: boolean;
 }
 
+export interface ExternalDiffusersImportSpec {
+  source_path: string;
+  family: string;
+  official_name: string;
+  repo_id?: string | null;
+  tags?: string[] | null;
+}
+
 /**
  * Individual model import result
  */
 export interface ModelImportResult {
   path: string;
   success: boolean;
+  model_id?: string;
   model_path?: string;
   error?: string;
   security_tier?: SecurityTier;
@@ -1686,6 +1695,11 @@ export interface PyWebViewAPI {
   }>;
 
   /**
+   * Resolve a runtime execution descriptor for a model.
+   */
+  resolve_model_execution_descriptor(modelId: string): Promise<ModelExecutionDescriptor>;
+
+  /**
    * Refetch model metadata from HuggingFace
    */
   refetch_model_metadata_from_hf(modelId: string): Promise<{
@@ -1713,6 +1727,13 @@ export interface PyWebViewAPI {
    * Import multiple models in a batch operation
    */
   import_batch(importSpecs: ModelImportSpec[]): Promise<ImportBatchResponse>;
+
+  /**
+   * Register an external diffusers directory without copying its contents.
+   */
+  import_external_diffusers_directory(
+    spec: ExternalDiffusersImportSpec
+  ): Promise<ModelImportResult>;
 
   /**
    * Get network status including circuit breaker state

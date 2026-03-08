@@ -6,7 +6,12 @@
 
 import { api, isAPIAvailable } from './adapter';
 import { APIError } from '../errors';
-import type { InferenceSettingsResponse, UpdateInferenceSettingsResponse, InferenceParamSchema } from '../types/api';
+import type {
+  InferenceParamSchema,
+  InferenceSettingsResponse,
+  ModelExecutionDescriptor,
+  UpdateInferenceSettingsResponse,
+} from '../types/api';
 
 class ModelsAPI {
   private getAPI() {
@@ -112,6 +117,11 @@ class ModelsAPI {
   }> {
     const api = this.getAPI();
     return await api.get_library_model_metadata(modelId);
+  }
+
+  async resolveModelExecutionDescriptor(modelId: string): Promise<ModelExecutionDescriptor> {
+    const api = this.getAPI();
+    return await api.resolve_model_execution_descriptor(modelId);
   }
 
   /**

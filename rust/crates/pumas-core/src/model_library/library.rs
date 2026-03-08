@@ -14,6 +14,10 @@ use crate::index::{
     DependencyProfileRecord, ModelDependencyBindingRecord, ModelIndex, ModelRecord, SearchResult,
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::external_assets::{
+    is_external_diffusers_bundle, is_external_reference, refresh_external_metadata_validation,
+    MODEL_EXECUTION_CONTRACT_VERSION,
+};
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
@@ -27,6 +31,7 @@ use crate::model_library::{
     resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
     ModelTypeResolution,
 };
+use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
@@ -294,6 +299,13 @@ impl ModelLibrary {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
         })?;
 
+        if is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata) {
+            self.save_metadata(model_dir, &metadata).await?;
+            if let Some(updated) = self.load_metadata(model_dir)? {
+                metadata = updated;
+            }
+        }
+
         let projection =
             self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
         if projection
@@ -504,6 +516,21 @@ impl ModelLibrary {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
 
+                    if is_external_reference(&metadata)
+                        && refresh_external_metadata_validation(&mut metadata)
+                    {
+                        if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
+                            tracing::warn!(
+                                "Failed to persist external asset validation refresh for {}: {}",
+                                model_id,
+                                err
+                            );
+                        }
+                        if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                            metadata = updated;
+                        }
+                    }
+
                     if let Some(projection) = self.apply_custom_runtime_metadata_projection(
                         &model_id,
                         &model_dir,
@@ -575,6 +602,42 @@ impl ModelLibrary {
 
         tracing::info!("Rebuilt index with {} models", count);
         Ok(count)
+    }
+
+    async fn refresh_external_asset_state(&self, model_id: &str) -> Result<()> {
+        let model_dir = self.library_root.join(model_id);
+        let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+            return Ok(());
+        };
+
+        if !is_external_reference(&metadata) {
+            return Ok(());
+        }
+
+        if refresh_external_metadata_validation(&mut metadata) {
+            self.save_metadata(&model_dir, &metadata).await?;
+            self.upsert_index_from_metadata(&model_dir, &metadata)?;
+        }
+
+        Ok(())
+    }
+
+    async fn refresh_external_asset_states(&self) -> Result<()> {
+        for model_dir in self.model_dirs() {
+            let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+                continue;
+            };
+            if !is_external_reference(&metadata) {
+                continue;
+            }
+
+            if refresh_external_metadata_validation(&mut metadata) {
+                self.save_metadata(&model_dir, &metadata).await?;
+                self.upsert_index_from_metadata(&model_dir, &metadata)?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Deep scan and rebuild with optional hash verification.
@@ -693,6 +756,7 @@ impl ModelLibrary {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        self.refresh_external_asset_states().await?;
         let mut result = self.index.search("", None, None, 10000, 0)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
         self.project_display_fields_for_records(&mut result.models);
@@ -706,6 +770,7 @@ impl ModelLibrary {
     ///
     /// * `model_id` - Relative path from library root (e.g., "llm/llama/llama-2-7b")
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        self.refresh_external_asset_state(model_id).await?;
         let mut record = match self.index.get(model_id)? {
             Some(record) => record,
             None => return Ok(None),
@@ -728,6 +793,7 @@ impl ModelLibrary {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
+        self.refresh_external_asset_states().await?;
         let mut result = self.index.search(query, None, None, limit, offset)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
         self.project_display_fields_for_records(&mut result.models);
@@ -753,6 +819,7 @@ impl ModelLibrary {
         model_type: Option<&str>,
         tags: Option<&[String]>,
     ) -> Result<SearchResult> {
+        self.refresh_external_asset_states().await?;
         let model_types = model_type.map(|t| vec![t.to_string()]);
         let tags_owned = tags.map(|t| t.to_vec());
 
@@ -1266,6 +1333,11 @@ impl ModelLibrary {
             });
         }
 
+        let storage_kind = self
+            .load_metadata(&model_dir)?
+            .and_then(|metadata| metadata.storage_kind)
+            .unwrap_or(StorageKind::LibraryOwned);
+
         // Remove from index first
         self.index.delete(model_id)?;
 
@@ -1284,7 +1356,7 @@ impl ModelLibrary {
             }
         }
 
-        // Delete the model directory
+        // Delete the library-owned registry artifact directory only.
         std::fs::remove_dir_all(&model_dir)?;
 
         // Try to clean up empty parent directories
@@ -1295,7 +1367,11 @@ impl ModelLibrary {
             }
         }
 
-        tracing::info!("Deleted model: {}", model_id);
+        if storage_kind == StorageKind::ExternalReference {
+            tracing::info!("Unregistered external model: {}", model_id);
+        } else {
+            tracing::info!("Deleted model: {}", model_id);
+        }
         Ok(())
     }
 
@@ -1373,6 +1449,10 @@ impl ModelLibrary {
             Some(m) => m,
             None => return Ok(None),
         };
+
+        if is_external_reference(&metadata) {
+            return Ok(None);
+        }
 
         let current_type = metadata.model_type.clone().unwrap_or_default();
         let current_family = metadata.family.clone();
@@ -1504,6 +1584,95 @@ impl ModelLibrary {
     pub fn get_primary_model_file(&self, model_id: &str) -> Option<PathBuf> {
         let model_dir = self.library_root.join(model_id);
         find_primary_model_file(&model_dir)
+    }
+
+    /// Resolve a versioned execution descriptor for a model.
+    pub async fn resolve_model_execution_descriptor(
+        &self,
+        model_id: &str,
+    ) -> Result<ModelExecutionDescriptor> {
+        self.refresh_external_asset_state(model_id).await?;
+
+        let model_dir = self.library_root.join(model_id);
+        if !model_dir.exists() {
+            return Err(PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            });
+        }
+
+        let metadata = self
+            .get_effective_metadata(model_id)?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+
+        let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
+        let validation_state = metadata.validation_state.unwrap_or(if storage_kind
+            == StorageKind::ExternalReference
+        {
+            AssetValidationState::Invalid
+        } else {
+            AssetValidationState::Valid
+        });
+
+        if storage_kind == StorageKind::ExternalReference
+            && validation_state != AssetValidationState::Valid
+        {
+            return Err(PumasError::Validation {
+                field: "validation_state".to_string(),
+                message: format!(
+                    "model '{}' is not executable because asset validation_state is {}",
+                    model_id,
+                    serde_json::to_string(&validation_state)
+                        .unwrap_or_else(|_| "\"invalid\"".to_string())
+                ),
+            });
+        }
+
+        let entry_path = if is_external_diffusers_bundle(&metadata) {
+            metadata
+                .entry_path
+                .clone()
+                .ok_or_else(|| PumasError::Validation {
+                    field: "entry_path".to_string(),
+                    message: "external bundle metadata is missing entry_path".to_string(),
+                })?
+        } else if let Some(primary_file) = self.get_primary_model_file(model_id) {
+            primary_file.display().to_string()
+        } else {
+            model_dir.display().to_string()
+        };
+
+        let recommended_backend = metadata.recommended_backend.clone();
+        let dependency_resolution = self
+            .resolve_model_dependency_requirements(
+                model_id,
+                crate::platform::current_platform(),
+                recommended_backend.as_deref(),
+            )
+            .await
+            .ok()
+            .map(|resolution| serde_json::to_value(resolution).unwrap_or(Value::Null))
+            .filter(|value| !value.is_null());
+
+        Ok(ModelExecutionDescriptor {
+            execution_contract_version: MODEL_EXECUTION_CONTRACT_VERSION,
+            model_id: model_id.to_string(),
+            entry_path,
+            model_type: metadata
+                .model_type
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            task_type_primary: metadata
+                .task_type_primary
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
+            recommended_backend,
+            runtime_engine_hints: metadata.runtime_engine_hints.clone().unwrap_or_default(),
+            storage_kind,
+            validation_state,
+            dependency_resolution,
+        })
     }
 
     /// Reclassify a model: re-detect its type and move to the correct directory if needed.
@@ -3639,6 +3808,26 @@ mod tests {
 
         let mut file = std::fs::File::create(path).unwrap();
         file.write_all(&content).unwrap();
+    }
+
+    fn create_external_diffusers_bundle(root: &Path) -> PathBuf {
+        let bundle_root = root.join("tiny-sd-turbo");
+        std::fs::create_dir_all(bundle_root.join("unet")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        std::fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderKL"],
+  "text_encoder": ["transformers", "CLIPTextModel"],
+  "tokenizer": ["transformers", "CLIPTokenizer"]
+}"#,
+        )
+        .unwrap();
+        bundle_root
     }
 
     fn normalize_path_separators(value: &str) -> String {
@@ -5900,6 +6089,156 @@ mod tests {
                 .get("recommended_backend")
                 .and_then(Value::as_str),
             None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_model_execution_descriptor_returns_external_bundle_root() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let descriptor = library
+            .resolve_model_execution_descriptor(model_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            normalize_path_separators(&descriptor.entry_path),
+            normalize_path_separators(&bundle_root.canonicalize().unwrap().display().to_string())
+        );
+        assert_eq!(descriptor.storage_kind, StorageKind::ExternalReference);
+        assert_eq!(descriptor.validation_state, AssetValidationState::Valid);
+        assert_eq!(
+            descriptor.execution_contract_version,
+            MODEL_EXECUTION_CONTRACT_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn test_delete_external_reference_preserves_external_bundle_contents() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        library.delete_model(model_id, false).await.unwrap();
+
+        assert!(!model_dir.exists());
+        assert!(bundle_root.exists());
+        assert!(bundle_root.join("model_index.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_get_model_refreshes_external_validation_to_degraded() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        std::fs::remove_dir_all(&bundle_root).unwrap();
+
+        let record = library.get_model(model_id).await.unwrap().unwrap();
+        assert_eq!(
+            record
+                .metadata
+                .get("validation_state")
+                .and_then(Value::as_str),
+            Some("degraded")
         );
     }
 }

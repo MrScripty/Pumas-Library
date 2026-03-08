@@ -24,6 +24,7 @@
 mod dependencies;
 pub(crate) mod dependency_pins;
 pub mod download_store;
+mod external_assets;
 mod hashing;
 mod hf;
 mod hf_cache;
@@ -48,6 +49,7 @@ pub use dependencies::{
     ModelDependencyRequirementsResolution, DEPENDENCY_CONTRACT_VERSION,
 };
 pub use download_store::DownloadPersistence;
+pub use external_assets::MODEL_EXECUTION_CONTRACT_VERSION;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};
 pub use hf::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,

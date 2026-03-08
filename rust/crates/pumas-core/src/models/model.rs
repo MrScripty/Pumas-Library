@@ -732,6 +732,20 @@ pub struct ModelImportSpec {
     pub security_acknowledged: Option<bool>,
 }
 
+/// External diffusers-directory import specification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ExternalDiffusersImportSpec {
+    pub source_path: String,
+    pub family: String,
+    pub official_name: String,
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+}
+
 /// Model import result.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -739,6 +753,9 @@ pub struct ModelImportSpec {
 pub struct ModelImportResult {
     pub path: String,
     pub success: bool,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    /// Deprecated compatibility field. This is not an execution path contract.
     #[serde(default)]
     pub model_path: Option<String>,
     #[serde(default)]

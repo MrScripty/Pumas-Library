@@ -19,25 +19,17 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let device = get_str_param(params, "device", "device").unwrap_or("auto");
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    // Resolve model path from library
-    let library = state.api.model_library();
-    let primary_file = library.get_primary_model_file(&model_id);
-    let model_path = match primary_file {
-        Some(path) => path,
-        None => {
-            // For safetensors, the model directory itself may be the path
-            let model_dir = library.library_root().join(&model_id);
-            if model_dir.exists() {
-                model_dir
-            } else {
-                return Ok(json!({
-                    "success": false,
-                    "error": format!("No model found for '{}'", model_id)
-                }));
-            }
+    let descriptor = match state.api.resolve_model_execution_descriptor(&model_id).await {
+        Ok(descriptor) => descriptor,
+        Err(err) => {
+            return Ok(json!({
+                "success": false,
+                "error": err.to_string()
+            }));
         }
     };
 
+    let library = state.api.model_library();
     let model_record = library.get_model(&model_id).await?;
     let model_name = model_record
         .as_ref()
@@ -54,7 +46,7 @@ pub async fn torch_load_model(state: &AppState, params: &Value) -> pumas_library
     let client = pumas_app_manager::TorchClient::new(connection_url);
     let slot = client
         .load_model(
-            &model_path.to_string_lossy(),
+            &descriptor.entry_path,
             &model_name,
             &compute_device,
             None,

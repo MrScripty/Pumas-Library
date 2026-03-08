@@ -1032,7 +1032,7 @@ async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result
         return Err(PumasError::Other(message));
     }
 
-    if let Some(ref adopted_id) = import_result.model_path {
+    if let Some(ref adopted_id) = import_result.model_id {
         let _ = primary.model_library.reclassify_model(adopted_id).await?;
     }
 

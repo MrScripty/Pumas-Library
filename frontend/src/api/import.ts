@@ -11,12 +11,14 @@ import type {
   CheckFilesWritableResponse,
   DetectShardedSetsResponse,
   EmbeddedMetadataResponse,
+  ExternalDiffusersImportSpec,
   FileLinkCountResponse,
   FileTypeValidationResponse,
   FTSSearchResponse,
   GetLibraryStatusResponse,
   HFMetadataLookupResponse,
   ImportBatchResponse,
+  ModelImportResult,
   ModelImportSpec,
   NetworkStatusResponse,
 } from '../types/api';
@@ -51,6 +53,16 @@ class ImportAPI {
   async importBatch(specs: ModelImportSpec[]): Promise<ImportBatchResponse> {
     const api = this.getAPI();
     return await api.import_batch(specs);
+  }
+
+  /**
+   * Register an external diffusers bundle without copying its contents.
+   */
+  async importExternalDiffusersDirectory(
+    spec: ExternalDiffusersImportSpec
+  ): Promise<ModelImportResult> {
+    const api = this.getAPI();
+    return await api.import_external_diffusers_directory(spec);
   }
 
   /**

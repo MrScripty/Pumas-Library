@@ -50,6 +50,37 @@ pub async fn import_batch(state: &AppState, params: &Value) -> pumas_library::Re
     }))
 }
 
+pub async fn import_external_diffusers_directory(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let source_path = require_str_param(params, "source_path", "sourcePath")?;
+    let family = require_str_param(params, "family", "family")?;
+    let official_name = require_str_param(params, "official_name", "officialName")?;
+    let repo_id = get_str_param(params, "repo_id", "repoId").map(String::from);
+
+    let tags: Option<Vec<String>> = params
+        .get("tags")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str().map(String::from))
+                .collect()
+        });
+
+    let spec = pumas_library::model_library::ExternalDiffusersImportSpec {
+        source_path,
+        family,
+        official_name,
+        repo_id,
+        tags,
+    };
+
+    let result = state.api.import_external_diffusers_directory(&spec).await?;
+    Ok(serde_json::to_value(result)?)
+}
+
 pub async fn lookup_hf_metadata_for_file(
     state: &AppState,
     params: &Value,
@@ -234,6 +265,15 @@ pub async fn get_library_model_metadata(
         "embedded_metadata": embedded_metadata,
         "primary_file": primary_file_str
     }))
+}
+
+pub async fn resolve_model_execution_descriptor(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let model_id = require_str_param(params, "model_id", "modelId")?;
+    let descriptor = state.api.resolve_model_execution_descriptor(&model_id).await?;
+    Ok(serde_json::to_value(descriptor)?)
 }
 
 pub async fn adopt_orphan_models(

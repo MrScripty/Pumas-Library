@@ -15,6 +15,7 @@ full-text search via SQLite FTS5.
 | `library.rs` | `ModelLibrary` - Central registry managing directory structure, metadata, and FTS5 index |
 | `types.rs` | Data structures: `ModelType`, `ModelMetadata`, `ModelOverrides`, re-exports from `models` |
 | `importer.rs` | `ModelImporter` - Import local files with hash verification, in-place import, orphan recovery |
+| `external_assets.rs` | External diffusers bundle validation, metadata construction, and execution-contract constants |
 | `mapper.rs` | `ModelMapper` - Link models to application directories via symlinks/hardlinks |
 | `hf_client.rs` | `HuggingFaceClient` - HF Hub API integration: search, download, metadata lookup |
 | `hf_cache.rs` | `HfSearchCache` - Cached HuggingFace search results and repo details |

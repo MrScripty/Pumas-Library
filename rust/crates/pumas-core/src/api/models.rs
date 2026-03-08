@@ -251,6 +251,17 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve a runtime execution descriptor for a model.
+    pub async fn resolve_model_execution_descriptor(
+        &self,
+        model_id: &str,
+    ) -> Result<models::ModelExecutionDescriptor> {
+        self.primary()
+            .model_library
+            .resolve_model_execution_descriptor(model_id)
+            .await
+    }
+
     /// Audit dependency pin compliance across active model bindings.
     pub async fn audit_dependency_pin_compliance(
         &self,
@@ -330,6 +341,17 @@ impl PumasApi {
         self.primary()
             .model_importer
             .batch_import(specs, None)
+            .await
+    }
+
+    /// Register an external diffusers directory without copying its contents.
+    pub async fn import_external_diffusers_directory(
+        &self,
+        spec: &model_library::ExternalDiffusersImportSpec,
+    ) -> Result<model_library::ModelImportResult> {
+        self.primary()
+            .model_importer
+            .import_external_diffusers_directory(spec)
             .await
     }
 

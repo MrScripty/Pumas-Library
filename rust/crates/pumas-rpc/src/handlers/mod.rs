@@ -221,11 +221,17 @@ async fn dispatch_method(
         "get_related_models" => models::get_related_models(state, params).await,
         "search_models_fts" => models::search_models_fts(state, params).await,
         "import_batch" => models::import_batch(state, params).await,
+        "import_external_diffusers_directory" => {
+            models::import_external_diffusers_directory(state, params).await
+        }
         "lookup_hf_metadata_for_file" => models::lookup_hf_metadata_for_file(state, params).await,
         "detect_sharded_sets" => models::detect_sharded_sets(state, params).await,
         "validate_file_type" => models::validate_file_type(state, params).await,
         "get_embedded_metadata" => models::get_embedded_metadata(state, params).await,
         "get_library_model_metadata" => models::get_library_model_metadata(state, params).await,
+        "resolve_model_execution_descriptor" => {
+            models::resolve_model_execution_descriptor(state, params).await
+        }
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
         }

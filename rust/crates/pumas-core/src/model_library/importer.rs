@@ -4,6 +4,9 @@
 //! with content-based type detection and integrity verification.
 
 use crate::error::{PumasError, Result};
+use crate::model_library::external_assets::{
+    build_external_diffusers_metadata, validate_diffusers_directory_for_import,
+};
 use crate::model_library::hashing::{compute_dual_hash, DualHash};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::library::ModelLibrary;
@@ -11,7 +14,7 @@ use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
     BatchImportProgress, ImportStage, ModelFileInfo, ModelHashes, ModelImportResult,
-    ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
+    ExternalDiffusersImportSpec, ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
 use crate::model_library::{
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
@@ -63,6 +66,14 @@ use walkdir::WalkDir;
 /// Prefix for temporary import directories.
 const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
 
+fn join_validation_errors(errors: &[crate::models::AssetValidationError]) -> String {
+    errors
+        .iter()
+        .map(|error| error.message.as_str())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 /// Model importer for bringing local files into the library.
 ///
 /// Features:
@@ -111,6 +122,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,
+                model_id: None,
                 model_path: None,
                 error: Some("Pickle files may contain malicious code. Set security_acknowledged=true to proceed.".to_string()),
                 security_tier: Some(security_tier),
@@ -145,6 +157,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,
+                model_id: None,
                 model_path: Some(target_dir.display().to_string()),
                 error: Some("Model already exists at this location".to_string()),
                 security_tier: Some(security_tier),
@@ -174,6 +187,7 @@ impl ModelImporter {
                 Ok(ModelImportResult {
                     path: spec.path.clone(),
                     success: true,
+                    model_id: model_id.clone(),
                     model_path: model_id,
                     error: None,
                     security_tier: Some(security_tier),
@@ -186,12 +200,63 @@ impl ModelImporter {
                 Ok(ModelImportResult {
                     path: spec.path.clone(),
                     success: false,
+                    model_id: None,
                     model_path: None,
                     error: Some(e.to_string()),
                     security_tier: Some(security_tier),
                 })
             }
         }
+    }
+
+    /// Register an existing external diffusers bundle without copying its contents.
+    pub async fn import_external_diffusers_directory(
+        &self,
+        spec: &ExternalDiffusersImportSpec,
+    ) -> Result<ModelImportResult> {
+        let source_path = PathBuf::from(&spec.source_path);
+        let cleaned_name = normalize_name(&spec.official_name);
+        let target_dir = self
+            .library
+            .build_model_path("diffusion", &spec.family, &cleaned_name);
+
+        if target_dir.exists() {
+            return Ok(ModelImportResult {
+                path: spec.source_path.clone(),
+                success: false,
+                model_id: self.library.get_model_id(&target_dir),
+                model_path: None,
+                error: Some("Model already exists at this location".to_string()),
+                security_tier: None,
+            });
+        }
+
+        let validation = validate_diffusers_directory_for_import(&source_path);
+        std::fs::create_dir_all(&target_dir)?;
+        let model_id = self.library.get_model_id(&target_dir).ok_or_else(|| {
+            PumasError::Other(format!(
+                "Could not determine model ID for external registry artifact {:?}",
+                target_dir
+            ))
+        })?;
+
+        let metadata = build_external_diffusers_metadata(spec, &validation, &model_id);
+        self.library.save_metadata(&target_dir, &metadata).await?;
+        self.library.index_model_dir(&target_dir).await?;
+
+        let success = validation.validation_state == crate::models::AssetValidationState::Valid;
+        Ok(ModelImportResult {
+            path: spec.source_path.clone(),
+            success,
+            model_id: Some(model_id.clone()),
+            model_path: Some(model_id),
+            error: if success {
+                None
+            } else {
+                Some(join_validation_errors(&validation.validation_errors))
+            },
+            security_tier: None,
+        })
     }
 
     /// Import with progress reporting.
@@ -238,6 +303,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,
+                model_id: None,
                 model_path: None,
                 error: Some("Pickle files require security acknowledgment".to_string()),
                 security_tier: Some(security_tier),
@@ -268,6 +334,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,
+                model_id: None,
                 model_path: Some(target_dir.display().to_string()),
                 error: Some("Model already exists".to_string()),
                 security_tier: Some(security_tier),
@@ -352,6 +419,7 @@ impl ModelImporter {
         Ok(ModelImportResult {
             path: spec.path.clone(),
             success: true,
+            model_id: self.library.get_model_id(&target_dir),
             model_path: self.library.get_model_id(&target_dir),
             error: None,
             security_tier: Some(security_tier),
@@ -388,6 +456,7 @@ impl ModelImporter {
                 .unwrap_or_else(|e| ModelImportResult {
                     path: spec.path.clone(),
                     success: false,
+                    model_id: None,
                     model_path: None,
                     error: Some(e.to_string()),
                     security_tier: None,
@@ -723,6 +792,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
                 success: true,
+                model_id: model_id.clone(),
                 model_path: model_id,
                 error: None,
                 security_tier: None,
@@ -739,6 +809,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
                 success: false,
+                model_id: None,
                 model_path: None,
                 error: Some("No model files found in directory".to_string()),
                 security_tier: None,
@@ -797,6 +868,7 @@ impl ModelImporter {
                         return Ok(ModelImportResult {
                             path: model_dir.display().to_string(),
                             success: false,
+                            model_id: None,
                             model_path: None,
                             error: Some(format!(
                                 "Incomplete shard set '{}': have {}/{} shards",
@@ -924,6 +996,7 @@ impl ModelImporter {
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
                 success: true,
+                model_id: model_id.clone(),
                 model_path: model_id,
                 error: None,
                 security_tier: None,
@@ -957,6 +1030,7 @@ impl ModelImporter {
         Ok(ModelImportResult {
             path: model_dir.display().to_string(),
             success: true,
+            model_id: model_id.clone(),
             model_path: model_id,
             error: None,
             security_tier: Some(security_tier),
@@ -1051,7 +1125,7 @@ impl ModelImporter {
                         tracing::info!(
                             "Adopted orphan model: {:?} -> {:?}",
                             orphan_dir,
-                            import_result.model_path
+                            import_result.model_id
                         );
                     } else {
                         result.errors.push((
@@ -1521,6 +1595,26 @@ mod tests {
         path
     }
 
+    fn create_external_diffusers_bundle(dir: &Path) -> PathBuf {
+        let bundle_root = dir.join("tiny-sd-turbo");
+        std::fs::create_dir_all(bundle_root.join("unet")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        std::fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderKL"],
+  "text_encoder": ["transformers", "CLIPTextModel"],
+  "tokenizer": ["transformers", "CLIPTokenizer"]
+}"#,
+        )
+        .unwrap();
+        bundle_root
+    }
+
     #[tokio::test]
     async fn test_import_single_file() {
         let (temp_dir, library) = setup().await;
@@ -1699,7 +1793,7 @@ mod tests {
         let result = importer.import(&spec).await.unwrap();
         assert!(result.success);
 
-        let model_id = result.model_path.unwrap();
+        let model_id = result.model_id.unwrap();
         let metadata = library
             .load_metadata(&library.library_root().join(model_id))
             .unwrap()
@@ -1709,5 +1803,54 @@ mod tests {
 
         assert!(keys.contains(&"true_cfg_scale"));
         assert!(!keys.contains(&"guidance_scale"));
+    }
+
+    #[tokio::test]
+    async fn test_import_external_diffusers_directory_creates_registry_artifact() {
+        let (temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let source_dir = temp_dir.path().join("external");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&source_dir);
+
+        let spec = ExternalDiffusersImportSpec {
+            source_path: bundle_root.display().to_string(),
+            family: "stable-diffusion".to_string(),
+            official_name: "tiny-sd-turbo".to_string(),
+            repo_id: Some("hf-internal-testing/tiny-sd-turbo".to_string()),
+            tags: Some(vec!["diffusers".to_string()]),
+        };
+
+        let result = importer
+            .import_external_diffusers_directory(&spec)
+            .await
+            .unwrap();
+
+        assert!(result.success);
+        let model_id = result.model_id.unwrap();
+        let registry_dir = library.library_root().join(&model_id);
+        assert!(registry_dir.exists());
+        assert!(registry_dir.join("metadata.json").exists());
+        assert!(!registry_dir.join("model_index.json").exists());
+        assert!(bundle_root.join("model_index.json").exists());
+
+        let metadata = library.load_metadata(&registry_dir).unwrap().unwrap();
+        assert_eq!(
+            metadata.storage_kind,
+            Some(crate::models::StorageKind::ExternalReference)
+        );
+        assert_eq!(
+            metadata.bundle_format,
+            Some(crate::models::BundleFormat::DiffusersDirectory)
+        );
+        assert_eq!(
+            metadata.validation_state,
+            Some(crate::models::AssetValidationState::Valid)
+        );
+        assert_eq!(
+            metadata.entry_path.as_deref(),
+            Some(bundle_root.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
     }
 }

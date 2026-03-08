@@ -247,6 +247,14 @@ impl ModelMapper {
             if excluded_ids.contains(&model.id) {
                 continue;
             }
+            if model
+                .metadata
+                .get("storage_kind")
+                .and_then(|value| value.as_str())
+                == Some("external_reference")
+            {
+                continue;
+            }
             let model_name = if model.official_name.is_empty() {
                 model.cleaned_name.clone()
             } else {
@@ -871,6 +879,64 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.app, "comfyui");
         assert_eq!(loaded.mappings.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_preview_mapping_skips_external_reference_assets() {
+        let (temp_dir, library, mapper) = setup().await;
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = crate::models::ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("diffusion/stable-diffusion/tiny-sd-turbo".to_string()),
+            model_type: Some("diffusion".to_string()),
+            family: Some("stable-diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            storage_kind: Some(crate::models::StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            validation_state: Some(crate::models::AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        mapper
+            .save_config(&MappingConfig {
+                app: "comfyui".to_string(),
+                version: "0.1.0".to_string(),
+                variant: None,
+                mappings: vec![MappingRule {
+                    target_dir: "checkpoints".to_string(),
+                    model_types: Some(vec!["diffusion".to_string()]),
+                    subtypes: None,
+                    families: None,
+                    tags: None,
+                    exclude_tags: None,
+                }],
+            })
+            .unwrap();
+
+        let preview = mapper
+            .preview_mapping(
+                "comfyui",
+                Some("0.1.0"),
+                &temp_dir.path().join("app-models"),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(preview.total_actions(), 0);
+        assert!(preview.skips.is_empty());
+        assert!(preview.conflicts.is_empty());
     }
 
     #[test]

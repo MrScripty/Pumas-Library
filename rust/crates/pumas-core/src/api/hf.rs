@@ -577,15 +577,7 @@ impl PumasApi {
             return Ok(None);
         };
 
-        let search_results = client
-            .search(&model_library::HfSearchParams {
-                query: hints.bundle_name.clone(),
-                kind: Some("text-to-image".to_string()),
-                limit: Some(5),
-                hydrate_limit: Some(5),
-                ..Default::default()
-            })
-            .await?;
+        let search_results = collect_bundle_lookup_candidates(client, &hints.bundle_name).await?;
 
         for candidate in rank_bundle_lookup_candidates(
             &hints.bundle_name,
@@ -804,6 +796,74 @@ fn rank_bundle_lookup_candidates(
     ranked
 }
 
+async fn collect_bundle_lookup_candidates(
+    client: &model_library::HuggingFaceClient,
+    bundle_name: &str,
+) -> Result<Vec<models::HuggingFaceModel>> {
+    let mut merged = Vec::new();
+    let mut seen_repo_ids = HashSet::new();
+
+    for query in bundle_lookup_query_variants(bundle_name) {
+        for kind in [Some("text-to-image"), None] {
+            let results = client
+                .search(&model_library::HfSearchParams {
+                    query: query.clone(),
+                    kind: kind.map(str::to_string),
+                    limit: Some(20),
+                    hydrate_limit: Some(10),
+                    ..Default::default()
+                })
+                .await?;
+
+            for candidate in results {
+                if seen_repo_ids.insert(candidate.repo_id.clone()) {
+                    merged.push(candidate);
+                }
+            }
+        }
+    }
+
+    Ok(merged)
+}
+
+fn bundle_lookup_query_variants(bundle_name: &str) -> Vec<String> {
+    let mut queries = Vec::new();
+    let mut seen = HashSet::new();
+
+    let mut push = |value: String| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return;
+        }
+        let normalized = trimmed.to_lowercase();
+        if seen.insert(normalized) {
+            queries.push(trimmed.to_string());
+        }
+    };
+
+    push(bundle_name.to_string());
+    push(bundle_name.replace(['-', '_'], " "));
+    push(
+        bundle_name
+            .chars()
+            .map(|ch| {
+                if ch == '-' || ch == '_' {
+                    ' '
+                } else if ch.is_ascii_alphanumeric() || ch.is_whitespace() {
+                    ch
+                } else {
+                    ' '
+                }
+            })
+            .collect::<String>()
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" "),
+    );
+
+    queries
+}
+
 fn fallback_bundle_lookup_candidate(
     bundle_name: &str,
     hinted_repo_id: Option<&str>,
@@ -979,6 +1039,21 @@ mod tests {
         );
 
         assert!(fallback.is_none());
+    }
+
+    #[test]
+    fn bundle_lookup_query_variants_include_spaced_name_once() {
+        let queries = bundle_lookup_query_variants("Juggernaut-X_v10");
+
+        assert_eq!(queries[0], "Juggernaut-X_v10");
+        assert!(queries.iter().any(|query| query == "Juggernaut X v10"));
+        assert_eq!(
+            queries
+                .iter()
+                .filter(|query| query.as_str() == "Juggernaut X v10")
+                .count(),
+            1
+        );
     }
 
     fn hf_model(repo_id: &str, name: &str, downloads: u64) -> HuggingFaceModel {

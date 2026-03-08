@@ -59,15 +59,16 @@ pub async fn import_external_diffusers_directory(
     let official_name = require_str_param(params, "official_name", "officialName")?;
     let repo_id = get_str_param(params, "repo_id", "repoId").map(String::from);
 
-    let tags: Option<Vec<String>> = params
-        .get("tags")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str().map(String::from))
-                .collect()
-        });
+    let tags: Option<Vec<String>> =
+        params
+            .get("tags")
+            .and_then(|value| value.as_array())
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(String::from))
+                    .collect()
+            });
 
     let spec = pumas_library::model_library::ExternalDiffusersImportSpec {
         source_path,
@@ -78,6 +79,19 @@ pub async fn import_external_diffusers_directory(
     };
 
     let result = state.api.import_external_diffusers_directory(&spec).await?;
+    Ok(serde_json::to_value(result)?)
+}
+
+pub async fn classify_model_import_paths(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let paths: Vec<String> = params
+        .get("paths")
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or_default();
+
+    let result = state.api.classify_model_import_paths(&paths);
     Ok(serde_json::to_value(result)?)
 }
 
@@ -272,7 +286,10 @@ pub async fn resolve_model_execution_descriptor(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let model_id = require_str_param(params, "model_id", "modelId")?;
-    let descriptor = state.api.resolve_model_execution_descriptor(&model_id).await?;
+    let descriptor = state
+        .api
+        .resolve_model_execution_descriptor(&model_id)
+        .await?;
     Ok(serde_json::to_value(descriptor)?)
 }
 

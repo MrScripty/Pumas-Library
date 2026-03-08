@@ -17,6 +17,7 @@ import type {
   FTSSearchResponse,
   GetLibraryStatusResponse,
   HFMetadataLookupResponse,
+  ImportPathClassification,
   ImportBatchResponse,
   ModelImportResult,
   ModelImportSpec,
@@ -63,6 +64,14 @@ class ImportAPI {
   ): Promise<ModelImportResult> {
     const api = this.getAPI();
     return await api.import_external_diffusers_directory(spec);
+  }
+
+  /**
+   * Classify import paths before any import-side effects occur.
+   */
+  async classifyImportPaths(paths: string[]): Promise<ImportPathClassification[]> {
+    const api = this.getAPI();
+    return await api.classify_model_import_paths(paths);
   }
 
   /**

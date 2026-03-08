@@ -619,6 +619,41 @@ export interface ModelImportResult {
   security_tier?: SecurityTier;
 }
 
+export type ImportPathClassificationKind =
+  | 'single_file'
+  | 'single_bundle'
+  | 'single_model_directory'
+  | 'multi_model_container'
+  | 'ambiguous'
+  | 'unsupported';
+
+export type ImportPathCandidateKind =
+  | 'file_model'
+  | 'directory_model'
+  | 'external_diffusers_bundle';
+
+export interface ImportPathCandidate {
+  path: string;
+  kind: ImportPathCandidateKind;
+  display_name: string;
+  model_type?: string | null;
+  bundle_format?: BundleFormat | null;
+  pipeline_class?: string | null;
+  reasons: string[];
+}
+
+export interface ImportPathClassification {
+  path: string;
+  kind: ImportPathClassificationKind;
+  suggested_family?: string | null;
+  suggested_official_name?: string | null;
+  model_type?: string | null;
+  bundle_format?: BundleFormat | null;
+  pipeline_class?: string | null;
+  reasons: string[];
+  candidates: ImportPathCandidate[];
+}
+
 export type StorageKind = 'library_owned' | 'external_reference';
 
 export type BundleFormat = 'diffusers_directory';
@@ -1734,6 +1769,11 @@ export interface PyWebViewAPI {
   import_external_diffusers_directory(
     spec: ExternalDiffusersImportSpec
   ): Promise<ModelImportResult>;
+
+  /**
+   * Classify proposed import paths before any persistence side effects occur.
+   */
+  classify_model_import_paths(paths: string[]): Promise<ImportPathClassification[]>;
 
   /**
    * Get network status including circuit breaker state

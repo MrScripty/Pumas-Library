@@ -355,6 +355,17 @@ impl PumasApi {
             .await
     }
 
+    /// Classify import paths without creating any library state.
+    pub fn classify_model_import_paths(
+        &self,
+        paths: &[String],
+    ) -> Vec<model_library::ImportPathClassification> {
+        paths
+            .iter()
+            .map(|path| model_library::classify_import_path(path))
+            .collect()
+    }
+
     /// Import a model in-place (files already in library directory).
     ///
     /// Creates `metadata.json` and indexes without copying. Idempotent.

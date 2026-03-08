@@ -224,6 +224,7 @@ async fn dispatch_method(
         "import_external_diffusers_directory" => {
             models::import_external_diffusers_directory(state, params).await
         }
+        "classify_model_import_paths" => models::classify_model_import_paths(state, params).await,
         "lookup_hf_metadata_for_file" => models::lookup_hf_metadata_for_file(state, params).await,
         "detect_sharded_sets" => models::detect_sharded_sets(state, params).await,
         "validate_file_type" => models::validate_file_type(state, params).await,

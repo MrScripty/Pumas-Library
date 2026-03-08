@@ -250,6 +250,8 @@ const electronAPI = {
     }),
   import_batch: (importSpecs: Array<Record<string, unknown>>) =>
     apiCall('import_batch', { import_specs: importSpecs }),
+  classify_model_import_paths: (paths: string[]) =>
+    apiCall('classify_model_import_paths', { paths }),
   get_network_status: () => apiCall('get_network_status'),
 
   // ========================================

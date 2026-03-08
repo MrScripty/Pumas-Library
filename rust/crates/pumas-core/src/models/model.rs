@@ -764,6 +764,70 @@ pub struct ModelImportResult {
     pub security_tier: Option<SecurityTier>,
 }
 
+/// Classification of an import path before any persistence side effects occur.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum ImportPathClassificationKind {
+    SingleFile,
+    SingleBundle,
+    SingleModelDirectory,
+    MultiModelContainer,
+    Ambiguous,
+    Unsupported,
+}
+
+/// Candidate routing kind discovered during import-path classification.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum ImportPathCandidateKind {
+    FileModel,
+    DirectoryModel,
+    ExternalDiffusersBundle,
+}
+
+/// Child candidate returned from directory/container classification.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ImportPathCandidate {
+    pub path: String,
+    pub kind: ImportPathCandidateKind,
+    pub display_name: String,
+    #[serde(default)]
+    pub model_type: Option<String>,
+    #[serde(default)]
+    pub bundle_format: Option<BundleFormat>,
+    #[serde(default)]
+    pub pipeline_class: Option<String>,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+}
+
+/// Side-effect-free classification result for a proposed import path.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct ImportPathClassification {
+    pub path: String,
+    pub kind: ImportPathClassificationKind,
+    #[serde(default)]
+    pub suggested_family: Option<String>,
+    #[serde(default)]
+    pub suggested_official_name: Option<String>,
+    #[serde(default)]
+    pub model_type: Option<String>,
+    #[serde(default)]
+    pub bundle_format: Option<BundleFormat>,
+    #[serde(default)]
+    pub pipeline_class: Option<String>,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+    #[serde(default)]
+    pub candidates: Vec<ImportPathCandidate>,
+}
+
 /// Versioned runtime execution descriptor for model consumers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -848,6 +912,17 @@ mod tests {
     }
 
     #[test]
+    fn test_import_path_classification_serialization() {
+        let value =
+            serde_json::to_string(&ImportPathClassificationKind::MultiModelContainer).unwrap();
+        assert_eq!(value, "\"multi_model_container\"");
+
+        let value =
+            serde_json::to_string(&ImportPathCandidateKind::ExternalDiffusersBundle).unwrap();
+        assert_eq!(value, "\"external_diffusers_bundle\"");
+    }
+
+    #[test]
     fn test_model_metadata_external_asset_fields_round_trip() {
         let json = r#"{
             "source_path": "/models/external/tiny-sd-turbo",
@@ -862,10 +937,7 @@ mod tests {
             ]
         }"#;
         let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
-        assert_eq!(
-            metadata.storage_kind,
-            Some(StorageKind::ExternalReference)
-        );
+        assert_eq!(metadata.storage_kind, Some(StorageKind::ExternalReference));
         assert_eq!(
             metadata.bundle_format,
             Some(BundleFormat::DiffusersDirectory)
@@ -876,10 +948,7 @@ mod tests {
             metadata.pipeline_class.as_deref(),
             Some("AutoPipelineForText2Image")
         );
-        assert_eq!(
-            metadata.validation_errors.as_ref().unwrap()[0].code,
-            "none"
-        );
+        assert_eq!(metadata.validation_errors.as_ref().unwrap()[0].code, "none");
     }
 
     #[test]

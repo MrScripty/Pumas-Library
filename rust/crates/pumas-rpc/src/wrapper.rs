@@ -109,6 +109,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_related_models"
         | "search_models_fts"
         | "import_batch"
+        | "classify_model_import_paths"
         | "lookup_hf_metadata_for_file"
         | "detect_sharded_sets"
         | "validate_file_type"

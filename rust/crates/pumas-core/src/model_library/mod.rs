@@ -23,6 +23,7 @@
 
 mod dependencies;
 pub(crate) mod dependency_pins;
+mod directory_import;
 pub mod download_store;
 mod external_assets;
 mod hashing;
@@ -48,6 +49,7 @@ pub use dependencies::{
     ModelDependencyBindingRequirements, ModelDependencyRequiredPin, ModelDependencyRequirement,
     ModelDependencyRequirementsResolution, DEPENDENCY_CONTRACT_VERSION,
 };
+pub use directory_import::classify_import_path;
 pub use download_store::DownloadPersistence;
 pub use external_assets::MODEL_EXECUTION_CONTRACT_VERSION;
 pub use hashing::{compute_dual_hash, compute_fast_hash, DualHash};

@@ -15,7 +15,8 @@ use crate::index::{
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
-    is_diffusers_bundle, is_external_reference, refresh_external_metadata_validation,
+    get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
+    refresh_external_metadata_validation,
     MODEL_EXECUTION_CONTRACT_VERSION,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
@@ -73,8 +74,21 @@ const QUANTIZATION_METADATA_KEY: &str = "quantization";
 const KITTENTTS_PROFILE_ID: &str = "kittentts-runtime";
 const KITTENTTS_PROFILE_VERSION: i64 = 1;
 const KITTENTTS_BACKEND_KEY: &str = "onnx-runtime";
+const SD_TURBO_PROFILE_ID: &str = "sd-turbo-diffusers-runtime";
+const SD_TURBO_PROFILE_VERSION: i64 = 1;
+const SD_TURBO_BACKEND_KEY: &str = "diffusers";
+const SD_TURBO_BASE_MODEL_ID: &str = "stabilityai/sd-turbo";
+const SD_TURBO_DIFFUSERS_VERSION: &str = "0.32.0";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CustomRuntimeKind {
+    Kittentts,
+    SdTurboDiffusers,
+}
+
+#[derive(Debug, Clone)]
 struct CustomRuntimeProjection {
+    kind: CustomRuntimeKind,
     binding_id: String,
     metadata_changed: bool,
 }
@@ -320,7 +334,7 @@ impl ModelLibrary {
         let record = metadata_to_record(&model_id, model_dir, &metadata);
         self.index.upsert(&record)?;
         if let Some(projection) = projection {
-            self.ensure_kittentts_runtime_binding(&model_id, &projection.binding_id)?;
+            self.ensure_custom_runtime_binding(&model_id, &projection)?;
         }
 
         Ok(())
@@ -349,10 +363,23 @@ impl ModelLibrary {
         model_dir: &Path,
         metadata: &mut ModelMetadata,
     ) -> Option<CustomRuntimeProjection> {
-        if !is_kittentts_runtime_candidate(model_dir, metadata) {
-            return None;
+        if is_kittentts_runtime_candidate(model_dir, metadata) {
+            return self.apply_kittentts_runtime_projection(model_id, model_dir, metadata);
         }
 
+        if is_sd_turbo_runtime_candidate(model_dir, metadata) {
+            return self.apply_sd_turbo_runtime_projection(model_id, model_dir, metadata);
+        }
+
+        None
+    }
+
+    fn apply_kittentts_runtime_projection(
+        &self,
+        model_id: &str,
+        model_dir: &Path,
+        metadata: &mut ModelMetadata,
+    ) -> Option<CustomRuntimeProjection> {
         let binding_id = kittentts_runtime_binding_id(model_id);
         let mut metadata_changed = false;
 
@@ -431,6 +458,74 @@ impl ModelLibrary {
         }
 
         Some(CustomRuntimeProjection {
+            kind: CustomRuntimeKind::Kittentts,
+            binding_id,
+            metadata_changed,
+        })
+    }
+
+    fn apply_sd_turbo_runtime_projection(
+        &self,
+        model_id: &str,
+        _model_dir: &Path,
+        metadata: &mut ModelMetadata,
+    ) -> Option<CustomRuntimeProjection> {
+        let binding_id = sd_turbo_runtime_binding_id(model_id);
+        let mut metadata_changed = false;
+
+        if metadata.requires_custom_code != Some(false) {
+            metadata.requires_custom_code = Some(false);
+            metadata_changed = true;
+        }
+        if metadata.recommended_backend.as_deref() != Some(SD_TURBO_BACKEND_KEY) {
+            metadata.recommended_backend = Some(SD_TURBO_BACKEND_KEY.to_string());
+            metadata_changed = true;
+        }
+
+        let mut engine_hints = metadata.runtime_engine_hints.clone().unwrap_or_default();
+        for hint in [SD_TURBO_BACKEND_KEY, "pytorch"] {
+            if !engine_hints
+                .iter()
+                .any(|existing| existing.eq_ignore_ascii_case(hint))
+            {
+                engine_hints.push(hint.to_string());
+            }
+        }
+        engine_hints.sort();
+        engine_hints.dedup();
+        let next_engine_hints = if engine_hints.is_empty() {
+            None
+        } else {
+            Some(engine_hints)
+        };
+        if metadata.runtime_engine_hints != next_engine_hints {
+            metadata.runtime_engine_hints = next_engine_hints;
+            metadata_changed = true;
+        }
+
+        let mut binding_refs = metadata.dependency_bindings.clone().unwrap_or_default();
+        let has_sd_turbo_ref = binding_refs.iter().any(|binding| {
+            binding.profile_id.as_deref() == Some(SD_TURBO_PROFILE_ID)
+                && binding.profile_version == Some(SD_TURBO_PROFILE_VERSION)
+                && binding.backend_key.as_deref() == Some(SD_TURBO_BACKEND_KEY)
+        });
+        if !has_sd_turbo_ref {
+            binding_refs.push(crate::models::DependencyBindingRef {
+                binding_id: Some(binding_id.clone()),
+                profile_id: Some(SD_TURBO_PROFILE_ID.to_string()),
+                profile_version: Some(SD_TURBO_PROFILE_VERSION),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some(SD_TURBO_BACKEND_KEY.to_string()),
+                platform_selector: None,
+            });
+            metadata_changed = true;
+        }
+        if !binding_refs.is_empty() {
+            metadata.dependency_bindings = Some(binding_refs);
+        }
+
+        Some(CustomRuntimeProjection {
+            kind: CustomRuntimeKind::SdTurboDiffusers,
             binding_id,
             metadata_changed,
         })
@@ -492,6 +587,93 @@ impl ModelLibrary {
         Ok(())
     }
 
+    fn ensure_sd_turbo_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
+        let created_at = chrono::Utc::now().to_rfc3339();
+        let profile_spec = serde_json::json!({
+            "python_packages": [
+                {
+                    "name": "accelerate",
+                    "version": "==0.31.0",
+                    "source": "https://raw.githubusercontent.com/huggingface/diffusers/v0.32.0/src/diffusers/dependency_versions_table.py"
+                },
+                {
+                    "name": "diffusers",
+                    "version": "==0.32.0",
+                    "source": "https://raw.githubusercontent.com/huggingface/diffusers/v0.32.0/src/diffusers/dependency_versions_table.py"
+                },
+                {
+                    "name": "safetensors",
+                    "version": "==0.3.1",
+                    "source": "https://raw.githubusercontent.com/huggingface/diffusers/v0.32.0/src/diffusers/dependency_versions_table.py"
+                },
+                {
+                    "name": "torch",
+                    "version": "==2.5.1"
+                },
+                {
+                    "name": "transformers",
+                    "version": "==4.41.2",
+                    "source": "https://raw.githubusercontent.com/huggingface/diffusers/v0.32.0/src/diffusers/dependency_versions_table.py"
+                }
+            ],
+            "pin_policy": {
+                "required_packages": [
+                    { "name": "accelerate" },
+                    { "name": "diffusers" },
+                    { "name": "safetensors" },
+                    { "name": "torch" },
+                    { "name": "transformers" }
+                ]
+            }
+        })
+        .to_string();
+
+        self.index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: SD_TURBO_PROFILE_ID.to_string(),
+                profile_version: SD_TURBO_PROFILE_VERSION,
+                profile_hash: None,
+                environment_kind: "python-venv".to_string(),
+                spec_json: profile_spec,
+                created_at: created_at.clone(),
+            })?;
+
+        self.index
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: binding_id.to_string(),
+                model_id: model_id.to_string(),
+                profile_id: SD_TURBO_PROFILE_ID.to_string(),
+                profile_version: SD_TURBO_PROFILE_VERSION,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some(SD_TURBO_BACKEND_KEY.to_string()),
+                platform_selector: None,
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("model-runtime-autobind".to_string()),
+                attached_at: created_at,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })?;
+
+        Ok(())
+    }
+
+    fn ensure_custom_runtime_binding(
+        &self,
+        model_id: &str,
+        projection: &CustomRuntimeProjection,
+    ) -> Result<()> {
+        match projection.kind {
+            CustomRuntimeKind::Kittentts => {
+                self.ensure_kittentts_runtime_binding(model_id, &projection.binding_id)
+            }
+            CustomRuntimeKind::SdTurboDiffusers => {
+                self.ensure_sd_turbo_runtime_binding(model_id, &projection.binding_id)
+            }
+        }
+    }
+
     /// Rebuild the entire index from metadata files.
     ///
     /// This is a fast operation that reads metadata.json files without
@@ -501,7 +683,7 @@ impl ModelLibrary {
 
         let mut discovered_model_ids: HashSet<String> = HashSet::new();
         let mut discovered_records = Vec::new();
-        let mut custom_runtime_bindings: Vec<(String, String)> = Vec::new();
+        let mut custom_runtime_bindings: Vec<(String, CustomRuntimeProjection)> = Vec::new();
         let mut count = 0;
         let existing_ids = self.index.get_all_ids()?;
         let mut existing_model_types: HashMap<String, String> = HashMap::new();
@@ -536,8 +718,7 @@ impl ModelLibrary {
                         &model_dir,
                         &mut metadata,
                     ) {
-                        custom_runtime_bindings
-                            .push((model_id.clone(), projection.binding_id.clone()));
+                        custom_runtime_bindings.push((model_id.clone(), projection.clone()));
                         if projection.metadata_changed {
                             if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
                                 tracing::warn!(
@@ -587,10 +768,10 @@ impl ModelLibrary {
             }
         }
 
-        for (model_id, binding_id) in custom_runtime_bindings {
-            if let Err(err) = self.ensure_kittentts_runtime_binding(&model_id, &binding_id) {
+        for (model_id, projection) in custom_runtime_bindings {
+            if let Err(err) = self.ensure_custom_runtime_binding(&model_id, &projection) {
                 tracing::warn!(
-                    "Failed to ensure KittenTTS runtime binding for {}: {}",
+                    "Failed to ensure custom runtime binding for {}: {}",
                     model_id,
                     err
                 );
@@ -2181,11 +2362,21 @@ fn normalized_repo_key_from_value(metadata: &Value) -> Option<String> {
 fn kittentts_runtime_binding_id(model_id: &str) -> String {
     format!(
         "kittentts-runtime-{}",
-        model_id
-            .chars()
-            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-            .collect::<String>()
+        sanitize_binding_id_fragment(model_id)
     )
+}
+
+fn sd_turbo_runtime_binding_id(model_id: &str) -> String {
+    format!(
+        "sd-turbo-runtime-{}",
+        sanitize_binding_id_fragment(model_id)
+    )
+}
+
+fn sanitize_binding_id_fragment(value: &str) -> String {
+    value.chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>()
 }
 
 fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
@@ -2250,6 +2441,28 @@ fn is_kittentts_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) ->
         }
         _ => false,
     }
+}
+
+fn is_sd_turbo_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> bool {
+    if !is_diffusers_bundle(metadata) {
+        return false;
+    }
+
+    let bundle_root = metadata
+        .entry_path
+        .as_deref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| model_dir.to_path_buf());
+    let Some(hints) = get_diffusers_bundle_lookup_hints(&bundle_root) else {
+        return false;
+    };
+
+    if hints.pipeline_class.as_deref() != Some("StableDiffusionPipeline") {
+        return false;
+    }
+
+    hints.name_or_path.as_deref() == Some(SD_TURBO_BASE_MODEL_ID)
+        && hints.diffusers_version.as_deref() == Some(SD_TURBO_DIFFUSERS_VERSION)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3870,6 +4083,31 @@ mod tests {
   "text_encoder": ["transformers", "CLIPTextModel"],
   "tokenizer": ["transformers", "CLIPTokenizer"]
 }"#,
+        )
+        .unwrap();
+        bundle_root
+    }
+
+    fn create_sd_turbo_bundle(root: &Path) -> PathBuf {
+        let bundle_root = create_external_diffusers_bundle(root);
+        std::fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "_diffusers_version": "0.32.0",
+  "_name_or_path": "stabilityai/sd-turbo",
+  "scheduler": ["diffusers", "EulerDiscreteScheduler"],
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderTiny"],
+  "text_encoder": ["transformers", "CLIPTextModel"],
+  "tokenizer": ["transformers", "CLIPTokenizer"]
+}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(bundle_root.join("scheduler")).unwrap();
+        std::fs::write(
+            bundle_root.join("scheduler").join("scheduler_config.json"),
+            r#"{"scheduler":"euler"}"#,
         )
         .unwrap();
         bundle_root
@@ -6299,6 +6537,133 @@ mod tests {
         );
         assert_eq!(descriptor.storage_kind, StorageKind::LibraryOwned);
         assert_eq!(descriptor.validation_state, AssetValidationState::Valid);
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_autobinds_sd_turbo_runtime_dependencies() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_sd_turbo_bundle(temp_dir.path());
+        let model_id = "diffusion/cc-nms/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("cc-nms".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(model_dir.display().to_string()),
+            entry_path: Some(model_dir.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
+        let binding_refs = loaded.dependency_bindings.unwrap_or_default();
+        assert!(binding_refs.iter().any(|binding| {
+            binding.profile_id.as_deref() == Some(SD_TURBO_PROFILE_ID)
+                && binding.profile_version == Some(SD_TURBO_PROFILE_VERSION)
+                && binding.backend_key.as_deref() == Some(SD_TURBO_BACKEND_KEY)
+        }));
+
+        let requirements = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("diffusers"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            requirements.validation_state,
+            crate::model_library::DependencyValidationState::Resolved
+        );
+        assert_eq!(requirements.bindings.len(), 1);
+        let binding = &requirements.bindings[0];
+        assert_eq!(binding.profile_id, SD_TURBO_PROFILE_ID);
+        assert_eq!(binding.profile_version, SD_TURBO_PROFILE_VERSION);
+        assert_eq!(binding.backend_key.as_deref(), Some(SD_TURBO_BACKEND_KEY));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1"));
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_does_not_autobind_generic_diffusers_bundle() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_external_diffusers_bundle(temp_dir.path());
+        let model_id = "diffusion/test/generic-bundle";
+        let model_dir = library.build_model_path("diffusion", "test", "generic-bundle");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("generic-bundle".to_string()),
+            cleaned_name: Some("generic-bundle".to_string()),
+            source_path: Some(model_dir.display().to_string()),
+            entry_path: Some(model_dir.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert!(loaded
+            .dependency_bindings
+            .unwrap_or_default()
+            .iter()
+            .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID)));
     }
 
     #[tokio::test]

@@ -31,6 +31,7 @@ pub(crate) struct DiffusersBundleLookupHints {
     pub bundle_name: String,
     pub pipeline_class: Option<String>,
     pub name_or_path: Option<String>,
+    pub diffusers_version: Option<String>,
 }
 
 pub(crate) struct DiffusersBundleMetadataSpec<'a> {
@@ -105,6 +106,12 @@ pub(crate) fn get_diffusers_bundle_lookup_hints(
             .map(str::to_string),
         name_or_path: model_index
             .get("_name_or_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        diffusers_version: model_index
+            .get("_diffusers_version")
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|value| !value.is_empty())
@@ -708,5 +715,6 @@ mod tests {
         assert_eq!(hints.bundle_name, "tiny-sd-turbo");
         assert_eq!(hints.pipeline_class.as_deref(), Some("StableDiffusionPipeline"));
         assert_eq!(hints.name_or_path.as_deref(), Some("stabilityai/sd-turbo"));
+        assert_eq!(hints.diffusers_version, None);
     }
 }

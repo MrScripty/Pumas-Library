@@ -177,9 +177,11 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
               >
                 <div className="min-w-0">
                   <div className="text-[hsl(var(--launcher-text-secondary))]">{component.name}</div>
-                  <div className="font-mono text-[hsl(var(--launcher-text-muted))] break-all">
-                    {component.relative_path}
-                  </div>
+                  {component.relative_path !== component.name && (
+                    <div className="font-mono text-[hsl(var(--launcher-text-muted))] break-all">
+                      {component.relative_path}
+                    </div>
+                  )}
                 </div>
                 <span className={`shrink-0 px-2 py-0.5 rounded ${
                   component.state === 'present'

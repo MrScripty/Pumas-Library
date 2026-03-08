@@ -39,6 +39,8 @@ full-text search via SQLite FTS5.
   to hardlinks when symlinks are unavailable (Windows without developer mode).
 - **In-place import**: Models already on disk (post-download or orphan recovery) skip the copy step,
   importing metadata directly.
+- **External-reference assets**: Directory-root bundles must extend the existing metadata/index
+  system instead of introducing a second registry or runtime-routing contract.
 
 ## Dependencies
 
@@ -62,3 +64,15 @@ full-text search via SQLite FTS5.
 - `recommended_backend` is deterministic-only and remains `null` when signals are ambiguous.
 - Canonical values are lowercase backend tokens (`llama.cpp`, `onnx-runtime`, etc.).
 - Consumers must treat missing/`null` as "fallback heuristics required."
+- External directory-root assets must be consumed through a dedicated execution descriptor rather
+  than `primary_file`-style path resolution.
+
+## Structured Producer Contract
+
+- `metadata.json` under the library root remains the canonical persisted model-record artifact.
+- External-reference assets extend persisted metadata with `source_path`, `entry_path`,
+  `storage_kind`, `bundle_format`, `pipeline_class`, `import_state`, and asset validation fields.
+- These fields describe asset ownership and current executable health; they must not create a
+  second source-of-truth outside the model-library metadata/index flow.
+- Compatibility expectation for milestone one is append-only: new optional fields may be added,
+  but existing file-based model records must remain readable without migration-only consumers.

@@ -610,6 +610,33 @@ export interface ModelImportResult {
   security_tier?: SecurityTier;
 }
 
+export type StorageKind = 'library_owned' | 'external_reference';
+
+export type BundleFormat = 'diffusers_directory';
+
+export type ImportState = 'pending' | 'ready' | 'failed';
+
+export type AssetValidationState = 'valid' | 'degraded' | 'invalid';
+
+export interface AssetValidationError {
+  code: string;
+  message: string;
+  path?: string | null;
+}
+
+export interface ModelExecutionDescriptor {
+  execution_contract_version: number;
+  model_id: string;
+  entry_path: string;
+  model_type: string;
+  task_type_primary: string;
+  recommended_backend?: string | null;
+  runtime_engine_hints: string[];
+  storage_kind: StorageKind;
+  validation_state: AssetValidationState;
+  dependency_resolution?: Record<string, unknown> | null;
+}
+
 /**
  * Batch import response
  */

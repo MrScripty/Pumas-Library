@@ -22,6 +22,11 @@ This directory contains project documentation for the current Rust/Electron impl
 - [architecture/SYSTEM_ARCHITECTURE.md](architecture/SYSTEM_ARCHITECTURE.md) - Runtime/process architecture
 - [architecture/MODEL_LIBRARY_ARCHITECTURE.md](architecture/MODEL_LIBRARY_ARCHITECTURE.md) - Model library and dependency contract architecture
 
+## Plans
+
+- [plans/README.md](plans/README.md) - Implementation plans for cross-module changes
+- [plans/external-reference-diffusers-implementation-plan.md](plans/external-reference-diffusers-implementation-plan.md) - Plan for external-reference diffusers bundle support integrated with the current model-library systems
+
 ## Legal and Compliance
 
 - [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md) - Third-party license notices
@@ -37,6 +42,9 @@ docs/
 ├── TESTING.md
 ├── SECURITY.md
 ├── THIRD-PARTY-NOTICES.md
+├── plans/
+│   ├── README.md
+│   └── external-reference-diffusers-implementation-plan.md
 ├── sbom/
 └── architecture/
     ├── README.md

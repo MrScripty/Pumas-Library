@@ -230,6 +230,63 @@ pub struct MetadataArtifactRef {
     pub status: Option<String>,
 }
 
+/// Ownership/storage classification for a model asset.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum StorageKind {
+    /// Model files are owned and stored inside the library root.
+    LibraryOwned,
+    /// Library stores only a registry artifact; executable files stay external.
+    ExternalReference,
+}
+
+/// Bundle layout classification for multi-file executable assets.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum BundleFormat {
+    /// Directory rooted by `model_index.json` for diffusers pipelines.
+    DiffusersDirectory,
+}
+
+/// Lifecycle state of a model import/registration flow.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum ImportState {
+    /// Registry artifact exists, but import/validation is not complete yet.
+    Pending,
+    /// Import completed and the asset is currently usable.
+    Ready,
+    /// Import could not produce a usable asset contract.
+    Failed,
+}
+
+/// Current validation health of an external asset reference.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Enum))]
+pub enum AssetValidationState {
+    /// Asset is present and satisfies the current validation rules.
+    Valid,
+    /// Registry exists, but asset drift or partial loss has reduced usability.
+    Degraded,
+    /// Asset cannot be executed under the supported contract.
+    Invalid,
+}
+
+/// Current-state validation finding for an external asset.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct AssetValidationError {
+    pub code: String,
+    pub message: String,
+    #[serde(default)]
+    pub path: Option<String>,
+}
+
 /// Canonical metadata stored with each model directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -301,6 +358,30 @@ pub struct ModelMetadata {
     /// Populated from the download file list; enables incomplete detection.
     #[serde(default)]
     pub expected_files: Option<Vec<String>>,
+    /// Original imported asset location selected by the operator.
+    #[serde(default)]
+    pub source_path: Option<String>,
+    /// Canonical executable root for runtime consumers.
+    #[serde(default)]
+    pub entry_path: Option<String>,
+    /// Storage ownership classification for the model asset.
+    #[serde(default)]
+    pub storage_kind: Option<StorageKind>,
+    /// Bundle layout format for executable directory-root assets.
+    #[serde(default)]
+    pub bundle_format: Option<BundleFormat>,
+    /// Pipeline class derived from external bundle metadata when available.
+    #[serde(default)]
+    pub pipeline_class: Option<String>,
+    /// Current import lifecycle state for this model asset.
+    #[serde(default)]
+    pub import_state: Option<ImportState>,
+    /// Current health of the persisted asset reference.
+    #[serde(default)]
+    pub validation_state: Option<AssetValidationState>,
+    /// Current-state asset validation findings.
+    #[serde(default)]
+    pub validation_errors: Option<Vec<AssetValidationError>>,
     /// Raw HuggingFace pipeline_tag (e.g. "automatic-speech-recognition").
     /// Cached for auditing and reclassification without re-querying HF.
     #[serde(default)]
@@ -666,6 +747,25 @@ pub struct ModelImportResult {
     pub security_tier: Option<SecurityTier>,
 }
 
+/// Versioned runtime execution descriptor for model consumers.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelExecutionDescriptor {
+    pub execution_contract_version: u32,
+    pub model_id: String,
+    pub entry_path: String,
+    pub model_type: String,
+    pub task_type_primary: String,
+    #[serde(default)]
+    pub recommended_backend: Option<String>,
+    #[serde(default)]
+    pub runtime_engine_hints: Vec<String>,
+    pub storage_kind: StorageKind,
+    pub validation_state: AssetValidationState,
+    #[serde(default)]
+    pub dependency_resolution: Option<serde_json::Value>,
+}
+
 /// FTS5 search result model entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -713,6 +813,56 @@ mod tests {
         let metadata = ModelMetadata::default();
         assert!(metadata.model_id.is_none());
         assert!(metadata.tags.is_none());
+        assert!(metadata.source_path.is_none());
+        assert!(metadata.entry_path.is_none());
+        assert!(metadata.storage_kind.is_none());
+    }
+
+    #[test]
+    fn test_storage_kind_serialization() {
+        let value = serde_json::to_string(&StorageKind::ExternalReference).unwrap();
+        assert_eq!(value, "\"external_reference\"");
+    }
+
+    #[test]
+    fn test_asset_validation_state_serialization() {
+        let value = serde_json::to_string(&AssetValidationState::Degraded).unwrap();
+        assert_eq!(value, "\"degraded\"");
+    }
+
+    #[test]
+    fn test_model_metadata_external_asset_fields_round_trip() {
+        let json = r#"{
+            "source_path": "/models/external/tiny-sd-turbo",
+            "entry_path": "/models/external/tiny-sd-turbo",
+            "storage_kind": "external_reference",
+            "bundle_format": "diffusers_directory",
+            "pipeline_class": "AutoPipelineForText2Image",
+            "import_state": "ready",
+            "validation_state": "valid",
+            "validation_errors": [
+                { "code": "none", "message": "ok" }
+            ]
+        }"#;
+        let metadata: ModelMetadata = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            metadata.storage_kind,
+            Some(StorageKind::ExternalReference)
+        );
+        assert_eq!(
+            metadata.bundle_format,
+            Some(BundleFormat::DiffusersDirectory)
+        );
+        assert_eq!(metadata.import_state, Some(ImportState::Ready));
+        assert_eq!(metadata.validation_state, Some(AssetValidationState::Valid));
+        assert_eq!(
+            metadata.pipeline_class.as_deref(),
+            Some("AutoPipelineForText2Image")
+        );
+        assert_eq!(
+            metadata.validation_errors.as_ref().unwrap()[0].code,
+            "none"
+        );
     }
 
     #[test]

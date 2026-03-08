@@ -693,6 +693,7 @@ impl ModelImporter {
             model_card_artifact: None,
             license_artifact: None,
             license_status: Some("license_unknown".to_string()),
+            ..Default::default()
         };
 
         metadata.inference_settings =

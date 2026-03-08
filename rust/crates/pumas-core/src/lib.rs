@@ -265,30 +265,8 @@ impl PumasApi {
                 move |info: model_library::DownloadCompletionInfo| {
                     let lib = lib.clone();
                     tokio::spawn(async move {
-                        // Remove stale metadata from any previous partial download
-                        // so import_in_place re-scans all files now present
-                        let metadata_path = info.dest_dir.join("metadata.json");
-                        if metadata_path.exists() {
-                            tracing::info!(
-                                "Removing stale metadata before re-import: {}",
-                                metadata_path.display()
-                            );
-                            let _ = tokio::fs::remove_file(&metadata_path).await;
-                        }
-
                         let importer = model_library::ModelImporter::new(lib);
-                        let spec = model_library::InPlaceImportSpec {
-                            model_dir: info.dest_dir,
-                            official_name: info.download_request.official_name,
-                            family: info.download_request.family,
-                            model_type: info.download_request.model_type,
-                            repo_id: Some(info.download_request.repo_id.clone()),
-                            known_sha256: info.known_sha256,
-                            compute_hashes: false,
-                            expected_files: Some(info.filenames.clone()),
-                            pipeline_tag: info.download_request.pipeline_tag,
-                        };
-                        match importer.import_in_place(&spec).await {
+                        match importer.finalize_downloaded_directory(&info).await {
                             Ok(r) if r.success => {
                                 tracing::info!(
                                     "Post-download import succeeded: {:?}",

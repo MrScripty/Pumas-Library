@@ -19,6 +19,7 @@ use crate::model_library::types::{
     ExternalDiffusersImportSpec, ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
 };
 use crate::model_library::{
+    DownloadCompletionInfo,
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
     validate_metadata_v2_with_index, TaskNormalizationStatus,
 };
@@ -318,6 +319,37 @@ impl ModelImporter {
             error: None,
             security_tier: None,
         })
+    }
+
+    /// Finalize a completed HuggingFace download through the normal in-place importer.
+    ///
+    /// This keeps post-download bundle handling and ordinary file-based imports on the
+    /// same importer code path.
+    pub async fn finalize_downloaded_directory(
+        &self,
+        info: &DownloadCompletionInfo,
+    ) -> Result<ModelImportResult> {
+        let metadata_path = info.dest_dir.join("metadata.json");
+        if metadata_path.exists() {
+            tracing::info!(
+                "Removing stale metadata before re-import: {}",
+                metadata_path.display()
+            );
+            let _ = tokio::fs::remove_file(&metadata_path).await;
+        }
+
+        let spec = InPlaceImportSpec {
+            model_dir: info.dest_dir.clone(),
+            official_name: info.download_request.official_name.clone(),
+            family: info.download_request.family.clone(),
+            model_type: info.download_request.model_type.clone(),
+            repo_id: Some(info.download_request.repo_id.clone()),
+            known_sha256: info.known_sha256.clone(),
+            compute_hashes: false,
+            expected_files: Some(info.filenames.clone()),
+            pipeline_tag: info.download_request.pipeline_tag.clone(),
+        };
+        self.import_in_place(&spec).await
     }
 
     /// Import with progress reporting.

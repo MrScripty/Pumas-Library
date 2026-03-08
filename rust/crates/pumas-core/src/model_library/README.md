@@ -15,6 +15,7 @@ full-text search via SQLite FTS5.
 | `library.rs` | `ModelLibrary` - Central registry managing directory structure, metadata, and FTS5 index |
 | `types.rs` | Data structures: `ModelType`, `ModelMetadata`, `ModelOverrides`, re-exports from `models` |
 | `importer.rs` | `ModelImporter` - Import local files with hash verification, in-place import, orphan recovery |
+| `directory_import.rs` | Side-effect-free import-path classification for files, bundle roots, single model directories, and multi-model containers |
 | `external_assets.rs` | External diffusers bundle validation, metadata construction, and execution-contract constants |
 | `mapper.rs` | `ModelMapper` - Link models to application directories via symlinks/hardlinks |
 | `hf_client.rs` | `HuggingFaceClient` - HF Hub API integration: search, download, metadata lookup |
@@ -42,6 +43,8 @@ full-text search via SQLite FTS5.
   importing metadata directly.
 - **External-reference assets**: Directory-root bundles must extend the existing metadata/index
   system instead of introducing a second registry or runtime-routing contract.
+- **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
+  through the model library before import so bundle/container decisions stay deterministic.
 
 ## Dependencies
 

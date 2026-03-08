@@ -9,7 +9,7 @@ Organizes model-domain RPC handlers into focused submodules while preserving the
 | `catalog.rs` | Model list/index/mapping refresh and shared-storage scan handlers. |
 | `downloads.rs` | Hugging Face download lifecycle handlers. |
 | `search.rs` | Model search handlers (HF and local FTS). |
-| `imports.rs` | Import, external bundle registration, execution-descriptor, file-type, and metadata extraction handlers. |
+| `imports.rs` | Import, path classification, external bundle registration, execution-descriptor, file-type, and metadata extraction handlers. |
 | `auth.rs` | Hugging Face token/auth status handlers. |
 | `inference.rs` | Inference settings handlers. |
 | `dependencies.rs` | Dependency and review workflow handlers. |

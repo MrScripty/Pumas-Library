@@ -7,6 +7,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | File/Folder | Description |
 |-------------|-------------|
 | `external-reference-diffusers-implementation-plan.md` | Backend-first implementation plan for external-reference diffusers bundles, including schema, validation, execution descriptor, and regression controls. |
+| `directory-import-disambiguation-implementation-plan.md` | Plan for GUI/backend directory import classification so bundle roots and multi-model containers are imported safely and distinctly. |
 
 ## Problem
 Large model-library changes touch persisted metadata, reconciliation, runtime resolution, and UI/API contracts at the same time. Without a written plan, it is easy to create competing paths for import, validation, or execution that weaken reliability.

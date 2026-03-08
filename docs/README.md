@@ -26,6 +26,7 @@ This directory contains project documentation for the current Rust/Electron impl
 
 - [plans/README.md](plans/README.md) - Implementation plans for cross-module changes
 - [plans/external-reference-diffusers-implementation-plan.md](plans/external-reference-diffusers-implementation-plan.md) - Plan for external-reference diffusers bundle support integrated with the current model-library systems
+- [plans/directory-import-disambiguation-implementation-plan.md](plans/directory-import-disambiguation-implementation-plan.md) - Plan for distinguishing bundle-root directories from multi-model containers during GUI import
 
 ## Legal and Compliance
 
@@ -44,6 +45,7 @@ docs/
 ├── THIRD-PARTY-NOTICES.md
 ├── plans/
 │   ├── README.md
+│   ├── directory-import-disambiguation-implementation-plan.md
 │   └── external-reference-diffusers-implementation-plan.md
 ├── sbom/
 └── architecture/

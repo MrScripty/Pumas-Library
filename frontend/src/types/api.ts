@@ -668,6 +668,35 @@ export interface AssetValidationError {
   path?: string | null;
 }
 
+export type BundleComponentState =
+  | 'present'
+  | 'missing'
+  | 'unreadable'
+  | 'path_escape';
+
+export interface BundleComponentManifestEntry {
+  name: string;
+  relative_path: string;
+  source_library?: string | null;
+  class_name?: string | null;
+  state: BundleComponentState;
+}
+
+export interface LibraryEmbeddedMetadataResponse {
+  file_type: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface LibraryModelMetadataResponse {
+  success: boolean;
+  model_id: string;
+  stored_metadata: Record<string, unknown> | null;
+  effective_metadata?: Record<string, unknown> | null;
+  embedded_metadata: LibraryEmbeddedMetadataResponse | null;
+  primary_file: string | null;
+  component_manifest?: BundleComponentManifestEntry[] | null;
+}
+
 export interface ModelExecutionDescriptor {
   execution_contract_version: number;
   model_id: string;
@@ -1718,16 +1747,7 @@ export interface PyWebViewAPI {
   /**
    * Get metadata for a library model (both stored and embedded)
    */
-  get_library_model_metadata(modelId: string): Promise<{
-    success: boolean;
-    model_id: string;
-    stored_metadata: Record<string, unknown> | null;
-    embedded_metadata: {
-      file_type: string;
-      metadata: Record<string, unknown>;
-    } | null;
-    primary_file: string | null;
-  }>;
+  get_library_model_metadata(modelId: string): Promise<LibraryModelMetadataResponse>;
 
   /**
    * Resolve a runtime execution descriptor for a model.

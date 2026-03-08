@@ -8,7 +8,7 @@
 import React, { useEffect, useState } from 'react';
 import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2, RefreshCw, Settings, Plus, Trash2 } from 'lucide-react';
 import { modelsAPI } from '../api/models';
-import type { InferenceParamSchema } from '../types/api';
+import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
 
 interface ModelMetadataModalProps {
   modelId: string;
@@ -90,13 +90,13 @@ function normalizeAllowedOption(raw: unknown): SelectAllowedOption | null {
     return null;
   }
 
-  const value = typeof raw.value === 'string' ? raw.value : null;
+  const value = typeof raw['value'] === 'string' ? raw['value'] : null;
   if (!value) {
     return null;
   }
 
-  const label = typeof raw.label === 'string' && raw.label.trim() !== ''
-    ? raw.label
+  const label = typeof raw['label'] === 'string' && raw['label'].trim() !== ''
+    ? raw['label']
     : value;
   return { label, value };
 }
@@ -105,10 +105,25 @@ function normalizeStringDefault(raw: unknown): string {
   if (typeof raw === 'string') {
     return raw;
   }
-  if (isRecordValue(raw) && typeof raw.value === 'string') {
-    return raw.value;
+  if (isRecordValue(raw) && typeof raw['value'] === 'string') {
+    return raw['value'];
   }
   return raw == null ? '' : String(raw);
+}
+
+function formatBundleComponentState(state: BundleComponentManifestEntry['state']): string {
+  switch (state) {
+    case 'present':
+      return 'Present';
+    case 'missing':
+      return 'Missing';
+    case 'unreadable':
+      return 'Unreadable';
+    case 'path_escape':
+      return 'Invalid Path';
+    default:
+      return state;
+  }
 }
 
 /** Check whether value is a structured type requiring summary/expand controls */
@@ -203,6 +218,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [embeddedMetadata, setEmbeddedMetadata] = useState<Record<string, unknown> | null>(null);
   const [embeddedFileType, setEmbeddedFileType] = useState<string | null>(null);
   const [primaryFile, setPrimaryFile] = useState<string | null>(null);
+  const [componentManifest, setComponentManifest] = useState<BundleComponentManifestEntry[]>([]);
+  const [showComponents, setShowComponents] = useState(false);
   const [activeSource, setActiveSource] = useState<MetadataSource>('embedded');
   const [showAllFields, setShowAllFields] = useState(false);
   const [refetching, setRefetching] = useState(false);
@@ -253,6 +270,7 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
             setEmbeddedFileType(metaResult.embedded_metadata.file_type);
           }
           setPrimaryFile(metaResult.primary_file);
+          setComponentManifest(metaResult.component_manifest || []);
         } else {
           setError('Failed to load metadata');
         }
@@ -749,6 +767,61 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               ) : (
                 <div className="text-center py-4 text-[hsl(var(--text-muted))]">
                   No {activeSource} metadata available
+                </div>
+              )}
+
+              {componentManifest.length > 0 && (
+                <div className="rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))]">
+                  <button
+                    onClick={() => setShowComponents((prev) => !prev)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-[hsl(var(--surface-mid)/0.35)] transition-colors"
+                  >
+                    <div>
+                      <div className="text-sm font-medium text-[hsl(var(--text-primary))]">
+                        Components ({componentManifest.length})
+                      </div>
+                      <div className="text-xs text-[hsl(var(--text-muted))]">
+                        Bundle component list derived from `model_index.json`
+                      </div>
+                    </div>
+                    {showComponents ? (
+                      <ChevronUp className="w-4 h-4 text-[hsl(var(--text-secondary))]" />
+                    ) : (
+                      <ChevronDown className="w-4 h-4 text-[hsl(var(--text-secondary))]" />
+                    )}
+                  </button>
+
+                  {showComponents && (
+                    <div className="border-t border-[hsl(var(--border-default))] px-3 py-3 space-y-2">
+                      {componentManifest.map((component) => (
+                        <div
+                          key={component.name}
+                          className="rounded-md border border-[hsl(var(--border-muted))] bg-[hsl(var(--surface-high)/0.35)] px-3 py-2"
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm font-medium text-[hsl(var(--text-primary))]">
+                              {component.name}
+                            </div>
+                            <span className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded ${
+                              component.state === 'present'
+                                ? 'bg-[hsl(var(--accent-success)/0.15)] text-[hsl(var(--accent-success))]'
+                                : 'bg-[hsl(var(--accent-error)/0.15)] text-[hsl(var(--accent-error))]'
+                            }`}>
+                              {formatBundleComponentState(component.state)}
+                            </span>
+                          </div>
+                          <div className="mt-1 text-xs font-mono text-[hsl(var(--text-secondary))] break-all">
+                            {component.relative_path}
+                          </div>
+                          {(component.class_name || component.source_library) && (
+                            <div className="mt-1 text-xs text-[hsl(var(--text-muted))]">
+                              {[component.class_name, component.source_library].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 

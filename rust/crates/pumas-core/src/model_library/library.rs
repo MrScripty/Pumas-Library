@@ -3582,6 +3582,7 @@ fn derive_quantization_value(metadata: &serde_json::Map<String, Value>) -> Value
 fn derive_primary_format(metadata: &serde_json::Map<String, Value>) -> Option<String> {
     conversion_source_format(metadata)
         .or_else(|| detect_format_from_file_entries(metadata.get("files")))
+        .or_else(|| detect_format_from_bundle_entry_path(metadata))
         .or_else(|| detect_format_from_string_list(metadata.get("expected_files")))
         .or_else(|| detect_format_from_string_list(metadata.get("tags")))
 }
@@ -3640,6 +3641,44 @@ fn detect_format_from_file_entries(files_value: Option<&Value>) -> Option<String
                 }
             }
         }
+    }
+
+    weighted.sort_by(|left, right| right.0.cmp(&left.0));
+    weighted.into_iter().next().map(|(_, format)| format)
+}
+
+fn detect_format_from_bundle_entry_path(metadata: &serde_json::Map<String, Value>) -> Option<String> {
+    let bundle_format = metadata.get("bundle_format")?.as_str()?;
+    if bundle_format != "diffusers_directory" {
+        return None;
+    }
+
+    let entry_path = metadata
+        .get("entry_path")
+        .and_then(Value::as_str)
+        .or_else(|| metadata.get("source_path").and_then(Value::as_str))?;
+
+    detect_format_from_directory_walk(Path::new(entry_path))
+}
+
+fn detect_format_from_directory_walk(root: &Path) -> Option<String> {
+    if !root.is_dir() {
+        return None;
+    }
+
+    let mut weighted = Vec::new();
+    for entry in WalkDir::new(root).into_iter().filter_map(|entry| entry.ok()) {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let Some(file_name) = entry.path().file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        let Some(format) = detect_format_from_name(file_name) else {
+            continue;
+        };
+        let size = entry.metadata().ok().map(|metadata| metadata.len()).unwrap_or(0);
+        weighted.push((size, format));
     }
 
     weighted.sort_by(|left, right| right.0.cmp(&left.0));
@@ -3814,6 +3853,14 @@ mod tests {
         std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
         std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
         std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        write_min_safetensors(&bundle_root.join("unet").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(&bundle_root.join("vae").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(&bundle_root.join("text_encoder").join("model.safetensors"));
+        std::fs::write(
+            bundle_root.join("tokenizer").join("tokenizer.json"),
+            r#"{"tokenizer":"tiny-sd-turbo"}"#,
+        )
+        .unwrap();
         std::fs::write(
             bundle_root.join("model_index.json"),
             r#"{
@@ -6142,6 +6189,52 @@ mod tests {
         assert_eq!(
             descriptor.execution_contract_version,
             MODEL_EXECUTION_CONTRACT_VERSION
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_projects_primary_format_for_diffusers_bundle_from_entry_path() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library.get_model(model_id).await.unwrap().unwrap();
+
+        assert_eq!(
+            record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
+            Some("safetensors")
         );
     }
 

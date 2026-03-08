@@ -720,7 +720,7 @@ impl PumasApi {
     }
 }
 
-fn resolve_model_type_from_hints<const N: usize>(
+pub(crate) fn resolve_model_type_from_hints<const N: usize>(
     index: &crate::index::ModelIndex,
     hints: [Option<&str>; N],
 ) -> Result<Option<String>> {
@@ -737,7 +737,7 @@ fn resolve_model_type_from_hints<const N: usize>(
     Ok(None)
 }
 
-fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
+pub(crate) fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
     hint.and_then(|value| {
         let trimmed = value.trim();
         if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("unknown") {

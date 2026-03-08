@@ -24,7 +24,7 @@ use crate::model_library::{
     validate_metadata_v2_with_index, TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -1756,7 +1756,7 @@ pub struct IncompleteShardRecovery {
 ///
 /// These directories have `.part` files (indicating an active download was
 /// interrupted) but no download persistence entry.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InterruptedDownload {
     /// Directory containing the partial download.
     pub model_dir: PathBuf,

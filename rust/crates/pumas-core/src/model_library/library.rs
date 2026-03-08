@@ -2213,7 +2213,7 @@ impl ModelLibrary {
 }
 
 /// Result of a library-wide reclassification operation.
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ReclassifyResult {
     /// Total number of models scanned.
     pub total: usize,

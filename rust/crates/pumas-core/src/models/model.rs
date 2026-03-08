@@ -827,6 +827,8 @@ pub struct ImportPathCandidate {
     #[serde(default)]
     pub pipeline_class: Option<String>,
     #[serde(default)]
+    pub component_manifest: Option<Vec<BundleComponentManifestEntry>>,
+    #[serde(default)]
     pub reasons: Vec<String>,
 }
 
@@ -847,6 +849,8 @@ pub struct ImportPathClassification {
     pub bundle_format: Option<BundleFormat>,
     #[serde(default)]
     pub pipeline_class: Option<String>,
+    #[serde(default)]
+    pub component_manifest: Option<Vec<BundleComponentManifestEntry>>,
     #[serde(default)]
     pub reasons: Vec<String>,
     #[serde(default)]

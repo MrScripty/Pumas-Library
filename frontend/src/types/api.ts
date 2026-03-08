@@ -639,6 +639,7 @@ export interface ImportPathCandidate {
   model_type?: string | null;
   bundle_format?: BundleFormat | null;
   pipeline_class?: string | null;
+  component_manifest?: BundleComponentManifestEntry[] | null;
   reasons: string[];
 }
 
@@ -650,6 +651,7 @@ export interface ImportPathClassification {
   model_type?: string | null;
   bundle_format?: BundleFormat | null;
   pipeline_class?: string | null;
+  component_manifest?: BundleComponentManifestEntry[] | null;
   reasons: string[];
   candidates: ImportPathCandidate[];
 }

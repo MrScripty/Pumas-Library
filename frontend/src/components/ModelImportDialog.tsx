@@ -85,11 +85,27 @@ function EntryBadge({ entry }: { entry: ImportEntryStatus }) {
   );
 }
 
+function formatBundleComponentState(state: NonNullable<ImportEntryStatus['componentManifest']>[number]['state']): string {
+  switch (state) {
+    case 'present':
+      return 'Present';
+    case 'missing':
+      return 'Missing';
+    case 'unreadable':
+      return 'Unreadable';
+    case 'path_escape':
+      return 'Invalid Path';
+    default:
+      return state;
+  }
+}
+
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   importPaths,
   onClose,
   onImportComplete,
 }) => {
+  const [expandedBundleComponents, setExpandedBundleComponents] = React.useState<Set<string>>(new Set());
   const {
     step,
     entries,
@@ -121,6 +137,65 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
     standaloneEntries,
   } = useModelImportWorkflow({ importPaths, onImportComplete });
 
+  const toggleBundleComponents = React.useCallback((path: string) => {
+    setExpandedBundleComponents((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) {
+        next.delete(path);
+      } else {
+        next.add(path);
+      }
+      return next;
+    });
+  }, []);
+
+  const renderBundleComponents = (entry: ImportEntryStatus) => {
+    if (entry.kind !== 'external_diffusers_bundle' || !entry.componentManifest?.length) {
+      return null;
+    }
+
+    const expanded = expandedBundleComponents.has(entry.path);
+    return (
+      <div className="mt-2">
+        <button
+          onClick={() => toggleBundleComponents(entry.path)}
+          className="flex items-center gap-2 text-xs text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
+        >
+          {expanded ? (
+            <ChevronDown className="w-3 h-3" />
+          ) : (
+            <ChevronRight className="w-3 h-3" />
+          )}
+          Components ({entry.componentManifest.length})
+        </button>
+        {expanded && (
+          <div className="mt-2 space-y-1 rounded-md bg-[hsl(var(--launcher-bg-secondary))] p-2">
+            {entry.componentManifest.map((component) => (
+              <div
+                key={`${entry.path}:${component.name}`}
+                className="flex items-start justify-between gap-3 text-xs"
+              >
+                <div className="min-w-0">
+                  <div className="text-[hsl(var(--launcher-text-secondary))]">{component.name}</div>
+                  <div className="font-mono text-[hsl(var(--launcher-text-muted))] break-all">
+                    {component.relative_path}
+                  </div>
+                </div>
+                <span className={`shrink-0 px-2 py-0.5 rounded ${
+                  component.state === 'present'
+                    ? 'bg-[hsl(var(--launcher-accent-success)/0.15)] text-[hsl(var(--launcher-accent-success))]'
+                    : 'bg-[hsl(var(--launcher-accent-warning)/0.15)] text-[hsl(var(--launcher-accent-warning))]'
+                }`}>
+                  {formatBundleComponentState(component.state)}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderLookupCard = (entry: ImportEntryStatus) => {
     if (entry.kind !== 'single_file') {
       return (
@@ -138,6 +213,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                 ? `Bundle root${entry.pipelineClass ? ` • ${entry.pipelineClass}` : ''}`
                 : 'Directory model import'}
             </p>
+            {renderBundleComponents(entry)}
           </div>
           <span className="px-2 py-0.5 rounded text-xs font-medium bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))]">
             Ready
@@ -605,6 +681,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                             Expanded from {entry.containerPath}
                           </p>
                         )}
+                        {renderBundleComponents(entry)}
                       </div>
                       <EntryBadge entry={entry} />
                       {entry.securityTier === 'pickle' && (

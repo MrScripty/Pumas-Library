@@ -60,6 +60,7 @@ fn classify_file(path: &Path) -> ImportPathClassification {
             model_type: model_type_string(&type_info),
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons: vec!["recognized model file".to_string()],
             candidates: Vec::new(),
         },
@@ -89,6 +90,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: Some("diffusion".to_string()),
             bundle_format: Some(BundleFormat::DiffusersDirectory),
             pipeline_class: bundle_validation.pipeline_class,
+            component_manifest: Some(bundle_validation.component_manifest),
             reasons: vec![
                 "directory root is a supported diffusers bundle".to_string(),
                 "bundle internals are treated as one executable asset".to_string(),
@@ -125,6 +127,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: root_analysis.model_type,
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons,
             candidates: merge_candidates(root_analysis.file_candidates, child_candidates),
         };
@@ -139,6 +142,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: None,
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons: vec!["directory contains multiple independent import candidates".to_string()],
             candidates: child_candidates,
         };
@@ -153,6 +157,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: None,
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons: vec![
                 "directory contains one nested import candidate; import the child directly"
                     .to_string(),
@@ -174,6 +179,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: root_analysis.model_type,
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons: root_analysis.reasons,
             candidates: Vec::new(),
         };
@@ -188,6 +194,7 @@ fn classify_directory(path: &Path) -> ImportPathClassification {
             model_type: None,
             bundle_format: None,
             pipeline_class: None,
+            component_manifest: None,
             reasons: vec![
                 "directory contains multiple model files or sharded groups at the root".to_string(),
             ],
@@ -220,6 +227,7 @@ fn collect_immediate_child_candidates(path: &Path) -> Vec<ImportPathCandidate> {
                     model_type: Some("diffusion".to_string()),
                     bundle_format: Some(BundleFormat::DiffusersDirectory),
                     pipeline_class: bundle_validation.pipeline_class,
+                    component_manifest: Some(bundle_validation.component_manifest),
                     reasons: vec!["child directory is a supported diffusers bundle".to_string()],
                 });
                 continue;
@@ -249,6 +257,7 @@ fn classify_child_directory_model(path: &Path) -> Option<ImportPathCandidate> {
         model_type: analysis.model_type,
         bundle_format: None,
         pipeline_class: None,
+        component_manifest: None,
         reasons: analysis.reasons,
     })
 }
@@ -300,6 +309,7 @@ fn analyze_root_directory(path: &Path, terminal_dirs: &HashSet<PathBuf>) -> Root
                 model_type: model_type_string(&type_info),
                 bundle_format: None,
                 pipeline_class: None,
+                component_manifest: None,
                 reasons: vec!["root contains a recognized model file".to_string()],
             })
         })
@@ -422,6 +432,7 @@ fn unsupported(
         model_type: None,
         bundle_format: None,
         pipeline_class: None,
+        component_manifest: None,
         reasons: vec![reason],
         candidates,
     }

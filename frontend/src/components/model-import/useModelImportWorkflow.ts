@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { importAPI } from '../../api/import';
 import type {
+  BundleComponentManifestEntry,
   BundleFormat,
   HFMetadataLookupResult,
   ImportPathCandidate,
@@ -39,6 +40,7 @@ export interface ImportEntryStatus {
   modelType?: string;
   bundleFormat?: BundleFormat;
   pipelineClass?: string;
+  componentManifest?: BundleComponentManifestEntry[];
   containerPath?: string;
 }
 
@@ -79,6 +81,7 @@ function createEntry(
   modelType?: string,
   bundleFormat?: BundleFormat,
   pipelineClass?: string,
+  componentManifest?: BundleComponentManifestEntry[],
   containerPath?: string
 ): ImportEntryStatus {
   const securityTier = kind === 'single_file' ? getSecurityTier(filename) : 'unknown';
@@ -96,6 +99,7 @@ function createEntry(
     modelType,
     bundleFormat,
     pipelineClass,
+    componentManifest,
     containerPath,
   };
 }
@@ -155,7 +159,8 @@ function buildEntries(results: ImportPathClassification[]): ImportEntryStatus[] 
           suggestedOfficialName,
           result.model_type || undefined,
           result.bundle_format || undefined,
-          result.pipeline_class || undefined
+          result.pipeline_class || undefined,
+          result.component_manifest || undefined
         )
       );
       continue;
@@ -184,6 +189,7 @@ function buildEntries(results: ImportPathClassification[]): ImportEntryStatus[] 
           candidate.model_type || undefined,
           candidate.bundle_format || undefined,
           candidate.pipeline_class || undefined,
+          candidate.component_manifest || undefined,
           result.path
         )
       );

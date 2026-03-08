@@ -96,6 +96,16 @@ class ImportAPI {
   }
 
   /**
+   * Look up HuggingFace metadata for a diffusers bundle directory.
+   */
+  async lookupHFMetadataForBundleDirectory(
+    directoryPath: string
+  ): Promise<HFMetadataLookupResponse> {
+    const api = this.getAPI();
+    return await api.lookup_hf_metadata_for_bundle_directory(directoryPath);
+  }
+
+  /**
    * Detect and group sharded model files.
    * Identifies patterns like model-00001-of-00005.safetensors and validates completeness.
    */

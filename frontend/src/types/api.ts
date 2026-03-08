@@ -569,15 +569,7 @@ export interface HFMetadataLookupResponse extends BaseResponse {
   found: boolean;
   match_method?: MatchMethod;
   confidence?: number;
-  metadata?: {
-    repo_id: string;
-    official_name: string;
-    family: string;
-    model_type?: string;
-    subtype?: string;
-    tags?: string[];
-    description?: string;
-  };
+  metadata?: HFMetadataLookupResult;
   related_files?: Array<{
     filename: string;
     size_bytes: number;
@@ -1811,6 +1803,13 @@ export interface PyWebViewAPI {
   lookup_hf_metadata_for_file(
     filename: string,
     filePath?: string | null
+  ): Promise<HFMetadataLookupResponse>;
+
+  /**
+   * Look up HuggingFace metadata for a diffusers bundle directory.
+   */
+  lookup_hf_metadata_for_bundle_directory(
+    directoryPath: string
   ): Promise<HFMetadataLookupResponse>;
 
   /**

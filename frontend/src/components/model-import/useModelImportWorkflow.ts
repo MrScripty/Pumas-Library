@@ -93,7 +93,8 @@ function createEntry(
     status: 'pending',
     securityTier,
     securityAcknowledged: securityTier !== 'pickle',
-    metadataStatus: kind === 'single_file' ? 'pending' : 'manual',
+    metadataStatus:
+      kind === 'single_file' || kind === 'external_diffusers_bundle' ? 'pending' : 'manual',
     suggestedFamily,
     suggestedOfficialName,
     modelType,
@@ -360,6 +361,13 @@ export function useModelImportWorkflow({
     [entries]
   );
 
+  const lookupEntries = useMemo(
+    () => entries.filter(
+      (entry) => entry.kind === 'single_file' || entry.kind === 'external_diffusers_bundle'
+    ),
+    [entries]
+  );
+
   const nonFileEntries = useMemo(
     () => entries.filter((entry) => entry.kind !== 'single_file'),
     [entries]
@@ -432,21 +440,44 @@ export function useModelImportWorkflow({
   }, []);
 
   const performMetadataLookup = useCallback(async () => {
-    const filesToProcess = fileEntries.map((entry) => ({ path: entry.path, filename: entry.filename }));
+    const entriesToProcess = lookupEntries.map((entry) => ({
+      path: entry.path,
+      filename: entry.filename,
+      kind: entry.kind,
+    }));
     setStep('lookup');
-    setLookupProgress({ current: 0, total: filesToProcess.length });
+    setLookupProgress({ current: 0, total: entriesToProcess.length });
 
-    if (filesToProcess.length === 0) {
+    if (entriesToProcess.length === 0) {
       return;
     }
 
-    for (let index = 0; index < filesToProcess.length; index += 1) {
-      const entry = filesToProcess[index];
+    for (let index = 0; index < entriesToProcess.length; index += 1) {
+      const entry = entriesToProcess[index];
       if (!entry) continue;
 
-      setLookupProgress({ current: index + 1, total: filesToProcess.length });
+      setLookupProgress({ current: index + 1, total: entriesToProcess.length });
 
       try {
+        if (entry.kind === 'external_diffusers_bundle') {
+          const result = await importAPI.lookupHFMetadataForBundleDirectory(entry.path);
+          setEntries((prev) => prev.map((candidate) => {
+            if (candidate.path !== entry.path) return candidate;
+            if (result.success && result.found && result.metadata) {
+              return {
+                ...candidate,
+                hfMetadata: result.metadata,
+                metadataStatus: 'found',
+              };
+            }
+            return {
+              ...candidate,
+              metadataStatus: result.success ? 'not_found' : 'error',
+            };
+          }));
+          continue;
+        }
+
         const typeResult = await importAPI.validateFileType(entry.path);
 
         setEntries((prev) => prev.map((candidate) => {
@@ -547,7 +578,7 @@ export function useModelImportWorkflow({
         )));
       }
     }
-  }, [fileEntries]);
+  }, [lookupEntries]);
 
   const startImport = useCallback(async () => {
     if (!allPickleAcknowledged || entries.length === 0) return;
@@ -610,8 +641,10 @@ export function useModelImportWorkflow({
         try {
           const result = await importAPI.importExternalDiffusersDirectory({
             source_path: entry.path,
-            family: entry.suggestedFamily,
-            official_name: entry.suggestedOfficialName,
+            family: entry.hfMetadata?.family || entry.suggestedFamily,
+            official_name: entry.hfMetadata?.official_name || entry.suggestedOfficialName,
+            repo_id: entry.hfMetadata?.repo_id || null,
+            tags: entry.hfMetadata?.tags || null,
           });
 
           imported += result.success ? 1 : 0;
@@ -660,8 +693,12 @@ export function useModelImportWorkflow({
   }, [allPickleAcknowledged, entries, fileEntries, onImportComplete]);
 
   const proceedToLookup = useCallback(() => {
+    if (lookupEntries.length === 0) {
+      void startImport();
+      return;
+    }
     void performMetadataLookup();
-  }, [performMetadataLookup]);
+  }, [lookupEntries.length, performMetadataLookup, startImport]);
 
   const pickleFilesCount = entries.filter((entry) => entry.securityTier === 'pickle').length;
   const acknowledgedCount = entries.filter(

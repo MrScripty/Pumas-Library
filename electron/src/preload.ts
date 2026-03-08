@@ -268,6 +268,8 @@ const electronAPI = {
     }),
   lookup_hf_metadata_for_file: (filename: string, filePath?: string | null) =>
     apiCall('lookup_hf_metadata_for_file', { filename, file_path: filePath }),
+  lookup_hf_metadata_for_bundle_directory: (directoryPath: string) =>
+    apiCall('lookup_hf_metadata_for_bundle_directory', { directory_path: directoryPath }),
   detect_sharded_sets: (filePaths: string[]) =>
     apiCall('detect_sharded_sets', { files: filePaths }),
   validate_file_type: (filePath: string) => apiCall('validate_file_type', { file_path: filePath }),

@@ -200,6 +200,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
 
   const renderLookupCard = (entry: ImportEntryStatus) => {
     if (entry.kind !== 'single_file') {
+      const trustBadge = getTrustBadge(entry.hfMetadata);
       return (
         <div
           key={entry.path}
@@ -210,16 +211,50 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
             <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
               {entry.filename}
             </p>
-            <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
-              {entry.kind === 'external_diffusers_bundle'
-                ? `Bundle root${entry.pipelineClass ? ` • ${entry.pipelineClass}` : ''}`
-                : 'Directory model import'}
-            </p>
+            {entry.hfMetadata?.repo_id ? (
+              <a
+                href={`https://huggingface.co/${entry.hfMetadata.repo_id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline truncate flex items-center gap-1"
+              >
+                {entry.hfMetadata.repo_id}
+                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+              </a>
+            ) : (
+              <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
+                {entry.kind === 'external_diffusers_bundle'
+                  ? `Bundle root${entry.pipelineClass ? ` • ${entry.pipelineClass}` : ''}`
+                  : 'Directory model import'}
+              </p>
+            )}
             {renderBundleComponents(entry)}
           </div>
-          <span className="px-2 py-0.5 rounded text-xs font-medium bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))]">
-            Ready
-          </span>
+          {trustBadge ? (
+            <span
+              className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
+              title={trustBadge.tooltip}
+            >
+              <trustBadge.Icon className="w-3 h-3" />
+              {trustBadge.text}
+            </span>
+          ) : (
+            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
+              entry.metadataStatus === 'error'
+                ? 'bg-[hsl(var(--launcher-accent-error)/0.2)] text-[hsl(var(--launcher-accent-error))]'
+                : entry.metadataStatus === 'not_found'
+                  ? 'bg-[hsl(var(--launcher-accent-warning)/0.2)] text-[hsl(var(--launcher-accent-warning))]'
+                  : 'bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))]'
+            }`}>
+              {entry.metadataStatus === 'error'
+                ? 'Lookup Failed'
+                : entry.metadataStatus === 'not_found'
+                  ? 'No Match'
+                  : entry.metadataStatus === 'found'
+                    ? 'Matched'
+                    : 'Ready'}
+            </span>
+          )}
         </div>
       );
     }

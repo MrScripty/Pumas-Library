@@ -132,9 +132,21 @@ impl ModelImporter {
             });
         }
 
+        let bundle_validation = if source_path.is_dir() {
+            Some(validate_diffusers_directory_for_import(&source_path))
+        } else {
+            None
+        };
+
+        let is_valid_diffusers_bundle = bundle_validation.as_ref().is_some_and(|validation| {
+            validation.validation_state == crate::models::AssetValidationState::Valid
+        });
+
         // Determine model type and family
         // Resolve through SQLite model-type mapping rules first.
-        let model_type = if let Some(hint) = spec.model_type.as_deref() {
+        let model_type = if is_valid_diffusers_bundle {
+            "diffusion".to_string()
+        } else if let Some(hint) = spec.model_type.as_deref() {
             self.library
                 .index()
                 .resolve_model_type_hint(hint)?
@@ -143,11 +155,15 @@ impl ModelImporter {
             type_info.model_type.as_str().to_string()
         };
 
-        let family = type_info
-            .family
-            .as_ref()
-            .map(|f| f.to_string())
-            .unwrap_or_else(|| spec.family.clone());
+        let family = if is_valid_diffusers_bundle {
+            spec.family.clone()
+        } else {
+            type_info
+                .family
+                .as_ref()
+                .map(|f| f.to_string())
+                .unwrap_or_else(|| spec.family.clone())
+        };
 
         // Build target path
         let cleaned_name = normalize_name(&spec.official_name);
@@ -165,6 +181,21 @@ impl ModelImporter {
                 error: Some("Model already exists at this location".to_string()),
                 security_tier: Some(security_tier),
             });
+        }
+
+        if let Some(validation) = bundle_validation.as_ref().filter(|validation| {
+            validation.validation_state == crate::models::AssetValidationState::Valid
+        }) {
+            return self
+                .import_copied_diffusers_directory(
+                    &source_path,
+                    &target_dir,
+                    spec,
+                    validation,
+                    &model_type,
+                    &family,
+                )
+                .await;
         }
 
         // Create temporary directory for atomic import
@@ -258,6 +289,54 @@ impl ModelImporter {
             } else {
                 Some(join_validation_errors(&validation.validation_errors))
             },
+            security_tier: None,
+        })
+    }
+
+    async fn import_copied_diffusers_directory(
+        &self,
+        source_path: &Path,
+        target_dir: &Path,
+        spec: &ModelImportSpec,
+        _validation: &DiffusersValidationResult,
+        model_type: &str,
+        family: &str,
+    ) -> Result<ModelImportResult> {
+        let temp_dir = self.create_temp_import_dir()?;
+        if let Err(err) = copy_directory_preserving_layout(source_path, &temp_dir) {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return Err(err);
+        }
+
+        std::fs::create_dir_all(target_dir.parent().unwrap())?;
+        if let Err(err) = std::fs::rename(&temp_dir, target_dir) {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+            return Err(PumasError::Io {
+                message: format!("failed to finalize diffusers bundle import: {}", err),
+                path: Some(target_dir.to_path_buf()),
+                source: Some(err),
+            });
+        }
+
+        let in_place_spec = InPlaceImportSpec {
+            model_dir: target_dir.to_path_buf(),
+            official_name: spec.official_name.clone(),
+            family: family.to_string(),
+            model_type: Some(model_type.to_string()),
+            repo_id: spec.repo_id.clone(),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(collect_relative_file_paths(target_dir)?),
+            pipeline_tag: Some("text-to-image".to_string()),
+        };
+
+        let import_result = self.import_in_place(&in_place_spec).await?;
+        Ok(ModelImportResult {
+            path: spec.path.clone(),
+            success: import_result.success,
+            model_id: import_result.model_id,
+            model_path: import_result.model_path,
+            error: import_result.error,
             security_tier: None,
         })
     }
@@ -1580,6 +1659,54 @@ impl ModelImporter {
     }
 }
 
+fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()> {
+    for entry in WalkDir::new(source)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        let relative = entry.path().strip_prefix(source).map_err(|err| PumasError::Io {
+            message: format!("failed to determine relative path during import: {}", err),
+            path: Some(entry.path().to_path_buf()),
+            source: None,
+        })?;
+        let dest_path = dest_dir.join(relative);
+
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&dest_path)?;
+            continue;
+        }
+
+        if let Some(parent) = dest_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(entry.path(), &dest_path)?;
+    }
+
+    Ok(())
+}
+
+fn collect_relative_file_paths(root: &Path) -> Result<Vec<String>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(root)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let relative = entry.path().strip_prefix(root).map_err(|err| PumasError::Io {
+            message: format!("failed to determine relative path during import: {}", err),
+            path: Some(entry.path().to_path_buf()),
+            source: None,
+        })?;
+        files.push(relative.to_string_lossy().replace('\\', "/"));
+    }
+    files.sort();
+    Ok(files)
+}
+
 /// Specification for in-place import (model files already in final location).
 ///
 /// Unlike `ModelImportSpec` which expects a source path to copy FROM,
@@ -1695,12 +1822,31 @@ mod tests {
         path
     }
 
+    fn write_min_safetensors(path: &Path) {
+        let header = b"{}";
+        let header_size: u64 = header.len() as u64;
+        let mut content = header_size.to_le_bytes().to_vec();
+        content.extend_from_slice(header);
+        content.extend_from_slice(&[0u8; 64]);
+
+        let mut file = std::fs::File::create(path).unwrap();
+        file.write_all(&content).unwrap();
+    }
+
     fn create_external_diffusers_bundle(dir: &Path) -> PathBuf {
         let bundle_root = dir.join("tiny-sd-turbo");
         std::fs::create_dir_all(bundle_root.join("unet")).unwrap();
         std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
         std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
         std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        write_min_safetensors(&bundle_root.join("unet").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(&bundle_root.join("vae").join("diffusion_pytorch_model.safetensors"));
+        write_min_safetensors(&bundle_root.join("text_encoder").join("model.safetensors"));
+        std::fs::write(
+            bundle_root.join("tokenizer").join("tokenizer.json"),
+            r#"{"tokenizer":"tiny-sd-turbo"}"#,
+        )
+        .unwrap();
         std::fs::write(
             bundle_root.join("model_index.json"),
             r#"{
@@ -2015,5 +2161,47 @@ mod tests {
             Some(model_dir.canonicalize().unwrap().to_string_lossy().as_ref())
         );
         assert_eq!(metadata.pipeline_tag.as_deref(), Some("text-to-image"));
+    }
+
+    #[tokio::test]
+    async fn test_import_copies_diffusers_bundle_into_library_owned_model_dir() {
+        let (temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let source_dir = temp_dir.path().join("external");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&source_dir);
+
+        let spec = ModelImportSpec {
+            path: bundle_root.display().to_string(),
+            family: "cc-nms".to_string(),
+            official_name: "tiny-sd-turbo".to_string(),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            model_type: Some("diffusion".to_string()),
+            subtype: None,
+            tags: Some(vec!["diffusers".to_string()]),
+            security_acknowledged: Some(true),
+        };
+
+        let result = importer.import(&spec).await.unwrap();
+        assert!(result.success);
+
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        assert!(model_dir.exists());
+        assert!(model_dir.join("model_index.json").exists());
+        assert!(model_dir.join("unet").join("diffusion_pytorch_model.safetensors").exists());
+        assert!(bundle_root.join("model_index.json").exists());
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            metadata.storage_kind,
+            Some(crate::models::StorageKind::LibraryOwned)
+        );
+        assert_eq!(
+            metadata.entry_path.as_deref(),
+            Some(model_dir.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+        assert_eq!(metadata.repo_id.as_deref(), Some("cc-nms/tiny-sd-turbo"));
+        assert_eq!(metadata.family.as_deref(), Some("cc-nms"));
     }
 }

@@ -395,6 +395,8 @@ impl PumasApiBuilder {
                         filename: None,
                         filenames: None,
                         pipeline_tag: None,
+                        bundle_format: None,
+                        pipeline_class: None,
                     };
                     // start_download skips files already on disk, so it will
                     // only download the missing shards
@@ -455,6 +457,8 @@ impl PumasApiBuilder {
                         filename: None,
                         filenames: None,
                         pipeline_tag: None,
+                        bundle_format: None,
+                        pipeline_class: None,
                     };
                     match client.start_download(&request, &item.model_dir).await {
                         Ok(id) => {

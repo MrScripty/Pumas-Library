@@ -12,7 +12,7 @@ pub use crate::models::{
     FtsSearchModel, HuggingFaceModel, ImportPathCandidate, ImportPathCandidateKind,
     ImportPathClassification, ImportPathClassificationKind, ImportStage, MatchMethod, ModelData,
     ModelDownloadProgress, ModelFileInfo, ModelHashes, ModelImportResult, ModelImportSpec,
-    ModelMetadata, ModelOverrides, SecurityTier,
+    ModelMetadata, ModelOverrides, SecurityTier, BundleFormat,
 };
 
 /// Supported model types.
@@ -528,6 +528,12 @@ pub struct DownloadRequest {
     /// Preserved for authoritative model type classification.
     #[serde(default)]
     pub pipeline_tag: Option<String>,
+    /// Optional bundle layout hint resolved during HF preflight.
+    #[serde(default)]
+    pub bundle_format: Option<BundleFormat>,
+    /// Optional pipeline class derived from remote bundle metadata.
+    #[serde(default)]
+    pub pipeline_class: Option<String>,
 }
 
 /// Batch import progress tracking.

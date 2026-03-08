@@ -15,6 +15,7 @@
 //! - [`auth`] - Authentication token management
 
 mod auth;
+mod bundles;
 mod download;
 mod metadata;
 mod search;

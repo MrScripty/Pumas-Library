@@ -6,7 +6,7 @@ use crate::models;
 use crate::PumasApi;
 use std::collections::HashSet;
 use std::path::Path;
-use tracing::warn;
+use tracing::{info, warn};
 
 impl PumasApi {
     // ========================================
@@ -105,6 +105,44 @@ impl PumasApi {
                             normalized_download_hint(Some(model_info.kind.as_str())),
                         ],
                     )?;
+                }
+            }
+
+            let should_check_bundle = resolved_model_type
+                .as_deref()
+                .is_none_or(|model_type| model_type == "diffusion")
+                || resolved_pipeline_tag.as_deref() == Some("text-to-image");
+            if should_check_bundle {
+                match client.classify_repo_bundle(&request.repo_id).await {
+                    Ok(Some(bundle)) => {
+                        if resolved_request.filename.is_some()
+                            || resolved_request.filenames.is_some()
+                            || resolved_request.quant.is_some()
+                        {
+                            info!(
+                                "HF repo {} classified as {:?}; forcing full bundle download",
+                                request.repo_id, bundle.bundle_format
+                            );
+                        }
+                        resolved_request.filename = None;
+                        resolved_request.filenames = None;
+                        resolved_request.quant = None;
+                        resolved_request.bundle_format = Some(bundle.bundle_format);
+                        resolved_request.pipeline_class = Some(bundle.pipeline_class);
+                        if resolved_pipeline_tag.is_none() {
+                            resolved_pipeline_tag = Some("text-to-image".to_string());
+                        }
+                        if resolved_model_type.is_none() {
+                            resolved_model_type = Some("diffusion".to_string());
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(
+                            "Failed to classify HF repo {} as a bundle: {}",
+                            request.repo_id, err
+                        );
+                    }
                 }
             }
 
@@ -263,6 +301,8 @@ impl PumasApi {
             filename: None,
             filenames: None,
             pipeline_tag: None,
+            bundle_format: None,
+            pipeline_class: None,
         };
 
         client.start_download(&request, dest).await

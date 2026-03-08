@@ -125,6 +125,8 @@ mod tests {
             filename: None,
             filenames: None,
             pipeline_tag: None,
+            bundle_format: None,
+            pipeline_class: None,
         }
     }
 

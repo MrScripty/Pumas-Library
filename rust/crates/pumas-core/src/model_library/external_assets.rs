@@ -382,7 +382,7 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
     }
 }
 
-fn normalized_component_relative_path(component_name: &str) -> Result<PathBuf> {
+pub(crate) fn normalized_component_relative_path(component_name: &str) -> Result<PathBuf> {
     let candidate = PathBuf::from(component_name);
     if candidate.is_absolute() {
         return Err(PumasError::Validation {
@@ -404,14 +404,14 @@ fn normalized_component_relative_path(component_name: &str) -> Result<PathBuf> {
     Ok(candidate)
 }
 
-fn is_optional_component_marker(value: &Value) -> bool {
+pub(crate) fn is_optional_component_marker(value: &Value) -> bool {
     value.is_null()
         || value
             .as_array()
             .is_some_and(|entries| entries.iter().all(Value::is_null))
 }
 
-fn is_supported_text_to_image_pipeline(class_name: &str) -> bool {
+pub(crate) fn is_supported_text_to_image_pipeline(class_name: &str) -> bool {
     let normalized = class_name.trim().to_lowercase();
     if !normalized.contains("pipeline") {
         return false;

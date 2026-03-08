@@ -269,7 +269,18 @@ impl HuggingFaceClient {
 
         // Resolve weight files to download.
         // Priority: filenames (explicit list) > filename (single) > quant (substring) > all.
-        let files: Vec<FileToDownload> = if let Some(ref fnames) = request.filenames {
+        let files: Vec<FileToDownload> = if request.bundle_format
+            == Some(crate::models::BundleFormat::DiffusersDirectory)
+        {
+            tree.lfs_files
+                .iter()
+                .map(|f| FileToDownload {
+                    filename: f.filename.clone(),
+                    size: Some(f.size),
+                    sha256: Some(f.sha256.clone()),
+                })
+                .collect()
+        } else if let Some(ref fnames) = request.filenames {
             // Explicit file list from grouped file selection
             let name_set: HashSet<&str> = fnames.iter().map(|s| s.as_str()).collect();
             let matching: Vec<FileToDownload> = tree
@@ -504,6 +515,8 @@ impl HuggingFaceClient {
                 "family": request.family,
                 "official_name": request.official_name,
                 "model_type": request.model_type,
+                "bundle_format": request.bundle_format,
+                "pipeline_class": request.pipeline_class,
             }))
             .unwrap_or_default(),
         ) {
@@ -1506,6 +1519,8 @@ mod tests {
             filename: None,
             filenames: None,
             pipeline_tag: Some("text-generation".to_string()),
+            bundle_format: None,
+            pipeline_class: None,
         };
 
         persistence
@@ -1599,6 +1614,8 @@ mod tests {
             filename: None,
             filenames: None,
             pipeline_tag: Some("text-ranking".to_string()),
+            bundle_format: None,
+            pipeline_class: None,
         };
 
         {

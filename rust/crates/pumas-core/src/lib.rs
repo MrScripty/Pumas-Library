@@ -401,6 +401,8 @@ impl PumasApi {
                         filename: None,
                         filenames: None,
                         pipeline_tag: None,
+                        bundle_format: None,
+                        pipeline_class: None,
                     };
                     match client.start_download(&request, &recovery.model_dir).await {
                         Ok(id) => {

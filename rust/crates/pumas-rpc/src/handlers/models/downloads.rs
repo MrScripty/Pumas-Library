@@ -30,6 +30,8 @@ pub async fn download_model_from_hf(
         filename,
         filenames,
         pipeline_tag,
+        bundle_format: None,
+        pipeline_class: None,
     };
 
     match state.api.start_hf_download(&request).await {
@@ -70,6 +72,8 @@ pub async fn start_model_download_from_hf(
         filename,
         filenames,
         pipeline_tag,
+        bundle_format: None,
+        pipeline_class: None,
     };
 
     match state.api.start_hf_download(&request).await {

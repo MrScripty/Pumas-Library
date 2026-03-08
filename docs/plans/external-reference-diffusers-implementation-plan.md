@@ -125,7 +125,7 @@ Pumas currently assumes the executable model asset is either a file or a library
 - Documentation updates reflect actual persisted and consumer-facing semantics
 - Review confirms no duplicate top-level backend-routing field is introduced
 
-**Status:** Not started
+**Status:** Completed on 2026-03-08
 
 ### Milestone 2: Registry Artifact and Import Path
 
@@ -143,7 +143,7 @@ Pumas currently assumes the executable model asset is either a file or a library
 - Regression tests cover existing file import and existing in-place import behavior
 - Restart/reindex preserves `model_id` and registry artifact stability
 
-**Status:** Not started
+**Status:** Completed on 2026-03-08
 
 ### Milestone 3: Validation Lifecycle and Reconciliation
 
@@ -161,7 +161,7 @@ Pumas currently assumes the executable model asset is either a file or a library
 - Integration tests cover restart/reindex producing stable `model_id`, `entry_path`, and `validation_state`
 - Acceptance check verifies metadata/index output reflects validation degradation after external asset drift
 
-**Status:** Not started
+**Status:** Completed on 2026-03-08
 
 ### Milestone 4: Execution Descriptor and Consumer Routing
 
@@ -179,7 +179,7 @@ Pumas currently assumes the executable model asset is either a file or a library
 - Integration tests verify `degraded` and `invalid` external assets fail hard
 - Cross-layer acceptance check verifies producer metadata -> execution descriptor -> consumer-visible output consistency
 
-**Status:** Not started
+**Status:** Completed on 2026-03-08
 
 ### Milestone 5: Operator Surfaces and Safety Gates
 
@@ -197,12 +197,14 @@ Pumas currently assumes the executable model asset is either a file or a library
 - Integration tests verify external-reference assets are excluded from mapping previews/apply flows
 - Integration tests verify delete/unregister remove only library-owned registry artifacts
 
-**Status:** Not started
+**Status:** In progress
 
 ## Execution Notes
 
 Update during implementation:
 - 2026-03-08: Plan created against current Rust/Electron codebase after reviewing import, metadata, dependency, reconciliation, delete, and runtime-routing paths for duplication risk.
+- 2026-03-08: Added external diffusers bundle metadata contracts, dedicated external bundle validation/import flow, runtime execution descriptor resolution, safe external-reference delete semantics, and mapping exclusion for external assets.
+- 2026-03-08: Exposed backend/RPC/frontend API surfaces for external diffusers registration and execution descriptor resolution. Full frontend directory-import UX remains deferred.
 
 ## Commit Cadence Notes
 
@@ -237,19 +239,29 @@ Update during implementation:
 
 ### Completed
 
-- None as of 2026-03-08.
+- Milestone 1: external-asset metadata enums/fields, execution descriptor DTO, and contract documentation.
+- Milestone 2: dedicated external diffusers registration path that creates a library-owned registry artifact without copying bundle contents.
+- Milestone 3: backend-owned diffusers validation plus persisted validation refresh through index/query/descriptor flows.
+- Milestone 4: runtime execution descriptor plus torch consumer routing off the descriptor instead of primary-file-first logic.
+- Milestone 5 (partial): external-reference mapping exclusion, delete safety, and API/type exposure for operator-facing metadata.
 
 ### Deviations
 
-- None as of 2026-03-08.
+- The backend/API capability is implemented ahead of a dedicated frontend directory-import workflow.
+- Reason: the existing UI import path is file-centric and would need additional metadata-entry UX to register external bundles cleanly.
+- Follow-up trigger: when the team is ready to add a directory picker and external-bundle review/import dialog in the frontend.
 
 ### Follow-Ups
 
-- Update this section as milestones complete.
+- Add a dedicated frontend directory-import flow for external diffusers bundles.
+- Consider richer operator-visible metadata presentation for external-reference health in the metadata modal/list views.
 
 ### Verification Summary
 
-- None run yet; verification is defined per milestone.
+- `cargo test -p pumas-library model_library:: --manifest-path rust/Cargo.toml`
+- `cargo test -p pumas-library model_library::mapper::tests::test_preview_mapping_skips_external_reference_assets --manifest-path rust/Cargo.toml`
+- `cargo test -p pumas-rpc --manifest-path rust/Cargo.toml --no-run`
+- `npm run check:types` in `frontend/` still fails on pre-existing unrelated TypeScript issues in `ModelMetadataModal.tsx` and `useManagedApps.test.ts`.
 
 ### Traceability Links
 

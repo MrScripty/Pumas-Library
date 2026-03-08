@@ -226,6 +226,9 @@ async fn dispatch_method(
         }
         "classify_model_import_paths" => models::classify_model_import_paths(state, params).await,
         "lookup_hf_metadata_for_file" => models::lookup_hf_metadata_for_file(state, params).await,
+        "lookup_hf_metadata_for_bundle_directory" => {
+            models::lookup_hf_metadata_for_bundle_directory(state, params).await
+        }
         "detect_sharded_sets" => models::detect_sharded_sets(state, params).await,
         "validate_file_type" => models::validate_file_type(state, params).await,
         "get_embedded_metadata" => models::get_embedded_metadata(state, params).await,

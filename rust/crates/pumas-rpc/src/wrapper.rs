@@ -111,6 +111,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "import_batch"
         | "classify_model_import_paths"
         | "lookup_hf_metadata_for_file"
+        | "lookup_hf_metadata_for_bundle_directory"
         | "detect_sharded_sets"
         | "validate_file_type"
         | "refresh_model_mappings"

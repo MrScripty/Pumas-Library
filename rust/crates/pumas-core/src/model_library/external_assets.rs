@@ -26,6 +26,13 @@ pub(crate) struct DiffusersValidationResult {
     pub component_manifest: Vec<BundleComponentManifestEntry>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DiffusersBundleLookupHints {
+    pub bundle_name: String,
+    pub pipeline_class: Option<String>,
+    pub name_or_path: Option<String>,
+}
+
 pub(crate) struct DiffusersBundleMetadataSpec<'a> {
     pub family: &'a str,
     pub official_name: &'a str,
@@ -72,6 +79,37 @@ pub fn get_diffusers_component_manifest(
     entry_path: &Path,
 ) -> Option<Vec<BundleComponentManifestEntry>> {
     describe_diffusers_directory(entry_path).map(|validation| validation.component_manifest)
+}
+
+pub(crate) fn get_diffusers_bundle_lookup_hints(
+    bundle_root: &Path,
+) -> Option<DiffusersBundleLookupHints> {
+    let bundle_name = bundle_root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)?;
+
+    let model_index_path = bundle_root.join("model_index.json");
+    let model_index_data = std::fs::read_to_string(model_index_path).ok()?;
+    let model_index: Value = serde_json::from_str(&model_index_data).ok()?;
+
+    Some(DiffusersBundleLookupHints {
+        bundle_name,
+        pipeline_class: model_index
+            .get("_class_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+        name_or_path: model_index
+            .get("_name_or_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string),
+    })
 }
 
 pub(crate) fn refresh_external_metadata_validation(metadata: &mut ModelMetadata) -> bool {
@@ -648,5 +686,27 @@ mod tests {
 
         assert_eq!(result.validation_state, AssetValidationState::Degraded);
         assert_eq!(result.validation_errors[0].code, "path_not_found");
+    }
+
+    #[test]
+    fn extracts_lookup_hints_from_diffusers_bundle() {
+        let temp_dir = TempDir::new().unwrap();
+        let bundle_root = temp_dir.path().join("tiny-sd-turbo");
+        fs::create_dir_all(&bundle_root).unwrap();
+        fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "_name_or_path": "stabilityai/sd-turbo",
+  "unet": ["diffusers", "UNet2DConditionModel"]
+}"#,
+        )
+        .unwrap();
+
+        let hints = get_diffusers_bundle_lookup_hints(&bundle_root).unwrap();
+
+        assert_eq!(hints.bundle_name, "tiny-sd-turbo");
+        assert_eq!(hints.pipeline_class.as_deref(), Some("StableDiffusionPipeline"));
+        assert_eq!(hints.name_or_path.as_deref(), Some("stabilityai/sd-turbo"));
     }
 }

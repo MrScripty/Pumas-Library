@@ -562,6 +562,95 @@ impl PumasApi {
         }
     }
 
+    /// Look up HuggingFace metadata for a local diffusers bundle directory.
+    pub async fn lookup_hf_metadata_for_bundle_directory(
+        &self,
+        dir_path: &str,
+    ) -> Result<Option<model_library::HfMetadataResult>> {
+        let primary = self.primary();
+        let Some(client) = primary.hf_client.as_ref() else {
+            return Ok(None);
+        };
+
+        let bundle_root = Path::new(dir_path);
+        let Some(hints) = model_library::get_diffusers_bundle_lookup_hints(bundle_root) else {
+            return Ok(None);
+        };
+
+        let search_results = client
+            .search(&model_library::HfSearchParams {
+                query: hints.bundle_name.clone(),
+                kind: Some("text-to-image".to_string()),
+                limit: Some(5),
+                hydrate_limit: Some(5),
+                ..Default::default()
+            })
+            .await?;
+
+        for candidate in rank_bundle_lookup_candidates(
+            &hints.bundle_name,
+            hints.name_or_path.as_deref(),
+            &search_results,
+        ) {
+            if client.classify_repo_bundle(&candidate.repo_id).await?.is_none() {
+                continue;
+            }
+
+            let candidate_repo_id = candidate.repo_id.clone();
+            let match_confidence =
+                if is_exact_bundle_lookup_match(
+                    &hints.bundle_name,
+                    &candidate_repo_id,
+                    &candidate.name,
+                )
+                {
+                    0.95
+                } else {
+                    0.72
+                };
+
+            return Ok(Some(build_lookup_metadata_from_model(
+                primary.model_library.index(),
+                candidate,
+                if match_confidence >= 0.9 {
+                    "filename_exact"
+                } else {
+                    "filename_fuzzy"
+                },
+                match_confidence,
+                hints
+                    .name_or_path
+                    .as_ref()
+                    .filter(|repo_id| *repo_id != &candidate_repo_id)
+                    .cloned(),
+            )?));
+        }
+
+        let Some(base_repo_id) = hints.name_or_path.as_deref() else {
+            return Ok(None);
+        };
+        if !looks_like_repo_id(base_repo_id) {
+            return Ok(None);
+        }
+
+        match client.get_model_info(base_repo_id).await {
+            Ok(model) => Ok(Some(build_lookup_metadata_from_model(
+                primary.model_library.index(),
+                model,
+                "filename_fuzzy",
+                0.55,
+                None,
+            )?)),
+            Err(err) => {
+                warn!(
+                    "Failed to resolve diffusers bundle base model {} for {}: {}",
+                    base_repo_id, dir_path, err
+                );
+                Ok(None)
+            }
+        }
+    }
+
     // ========================================
     // HuggingFace Authentication
     // ========================================
@@ -648,6 +737,113 @@ fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
     })
 }
 
+fn build_lookup_metadata_from_model(
+    index: &crate::index::ModelIndex,
+    model: models::HuggingFaceModel,
+    match_method: &str,
+    match_confidence: f64,
+    base_model: Option<String>,
+) -> Result<model_library::HfMetadataResult> {
+    let model_type = resolve_model_type_from_hints(index, [Some(model.kind.as_str()), None, None])?;
+    Ok(model_library::HfMetadataResult {
+        repo_id: model.repo_id,
+        official_name: Some(model.name),
+        family: None,
+        model_type,
+        subtype: None,
+        variant: None,
+        precision: None,
+        tags: vec![],
+        base_model,
+        download_url: Some(model.url),
+        description: None,
+        match_confidence,
+        match_method: match_method.to_string(),
+        requires_confirmation: match_confidence < 0.8,
+        hash_mismatch: false,
+        matched_filename: None,
+        pending_full_verification: false,
+        fast_hash: None,
+        expected_sha256: None,
+    })
+}
+
+fn rank_bundle_lookup_candidates(
+    bundle_name: &str,
+    hinted_repo_id: Option<&str>,
+    candidates: &[models::HuggingFaceModel],
+) -> Vec<models::HuggingFaceModel> {
+    let mut ranked = candidates.to_vec();
+    ranked.sort_by(|left, right| {
+        let left_score = bundle_lookup_score(bundle_name, hinted_repo_id, left);
+        let right_score = bundle_lookup_score(bundle_name, hinted_repo_id, right);
+        right_score
+            .cmp(&left_score)
+            .then_with(|| right.downloads.unwrap_or(0).cmp(&left.downloads.unwrap_or(0)))
+            .then_with(|| left.repo_id.cmp(&right.repo_id))
+    });
+    ranked
+}
+
+fn bundle_lookup_score(
+    bundle_name: &str,
+    hinted_repo_id: Option<&str>,
+    candidate: &models::HuggingFaceModel,
+) -> i32 {
+    let mut score = 0;
+    if is_exact_bundle_lookup_match(bundle_name, &candidate.repo_id, &candidate.name) {
+        score += 100;
+    }
+
+    let normalized_bundle = normalize_bundle_lookup_key(bundle_name);
+    let repo_basename = repo_basename(&candidate.repo_id);
+    let normalized_repo_basename = normalize_bundle_lookup_key(repo_basename);
+    if !normalized_bundle.is_empty() && normalized_repo_basename.contains(&normalized_bundle) {
+        score += 25;
+    }
+
+    if candidate.kind == "text-to-image" {
+        score += 10;
+    }
+
+    if hinted_repo_id.is_some_and(|repo_id| repo_id == candidate.repo_id) {
+        score += 5;
+    }
+
+    score
+}
+
+fn is_exact_bundle_lookup_match(bundle_name: &str, repo_id: &str, model_name: &str) -> bool {
+    let normalized_bundle = normalize_bundle_lookup_key(bundle_name);
+    if normalized_bundle.is_empty() {
+        return false;
+    }
+
+    let repo_match = normalize_bundle_lookup_key(repo_basename(repo_id)) == normalized_bundle;
+    let name_match = normalize_bundle_lookup_key(model_name) == normalized_bundle;
+    repo_match || name_match
+}
+
+fn normalize_bundle_lookup_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .map(|ch| ch.to_ascii_lowercase())
+        .collect()
+}
+
+fn repo_basename(repo_id: &str) -> &str {
+    repo_id.rsplit('/').next().unwrap_or(repo_id)
+}
+
+fn looks_like_repo_id(value: &str) -> bool {
+    let mut parts = value.split('/');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(owner), Some(name), None) if !owner.trim().is_empty() && !name.trim().is_empty()
+    )
+}
+
 fn partial_download_reason_code(err: &PumasError) -> &'static str {
     match err {
         PumasError::NotFound { .. } => "dest_dir_missing",
@@ -668,6 +864,7 @@ fn partial_download_reason_code(err: &PumasError) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::HuggingFaceModel;
 
     #[test]
     fn test_partial_download_reason_code_maps_invalid_repo_id() {
@@ -694,5 +891,46 @@ mod tests {
             normalized_download_hint(Some("text-generation")),
             Some("text-generation")
         );
+    }
+
+    #[test]
+    fn ranks_exact_bundle_repo_name_ahead_of_base_model_hint() {
+        let ranked = rank_bundle_lookup_candidates(
+            "tiny-sd-turbo",
+            Some("stabilityai/sd-turbo"),
+            &[
+                hf_model("stabilityai/sd-turbo", "sd-turbo", 10),
+                hf_model("cc-nms/tiny-sd-turbo", "tiny-sd-turbo", 1),
+            ],
+        );
+
+        assert_eq!(ranked[0].repo_id, "cc-nms/tiny-sd-turbo");
+    }
+
+    #[test]
+    fn exact_bundle_match_normalizes_separator_variants() {
+        assert!(is_exact_bundle_lookup_match(
+            "tiny-sd-turbo",
+            "cc-nms/tiny_sd_turbo",
+            "Tiny SD Turbo"
+        ));
+    }
+
+    fn hf_model(repo_id: &str, name: &str, downloads: u64) -> HuggingFaceModel {
+        HuggingFaceModel {
+            repo_id: repo_id.to_string(),
+            name: name.to_string(),
+            developer: String::new(),
+            kind: "text-to-image".to_string(),
+            formats: Vec::new(),
+            quants: Vec::new(),
+            download_options: Vec::new(),
+            url: format!("https://huggingface.co/{}", repo_id),
+            release_date: None,
+            downloads: Some(downloads),
+            total_size_bytes: None,
+            quant_sizes: None,
+            compatible_engines: Vec::new(),
+        }
     }
 }

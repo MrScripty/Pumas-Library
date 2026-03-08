@@ -105,14 +105,46 @@ pub async fn lookup_hf_metadata_for_file(
     match state.api.lookup_hf_metadata_for_file(&file_path).await {
         Ok(Some(metadata)) => Ok(json!({
             "success": true,
+            "found": true,
             "metadata": metadata
         })),
         Ok(None) => Ok(json!({
-            "success": false,
-            "error": "No metadata found"
+            "success": true,
+            "found": false,
+            "metadata": null
         })),
         Err(e) => Ok(json!({
             "success": false,
+            "found": false,
+            "error": e.to_string()
+        })),
+    }
+}
+
+pub async fn lookup_hf_metadata_for_bundle_directory(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let directory_path = require_str_param(params, "directory_path", "directoryPath")?;
+
+    match state
+        .api
+        .lookup_hf_metadata_for_bundle_directory(&directory_path)
+        .await
+    {
+        Ok(Some(metadata)) => Ok(json!({
+            "success": true,
+            "found": true,
+            "metadata": metadata
+        })),
+        Ok(None) => Ok(json!({
+            "success": true,
+            "found": false,
+            "metadata": null
+        })),
+        Err(e) => Ok(json!({
+            "success": false,
+            "found": false,
             "error": e.to_string()
         })),
     }

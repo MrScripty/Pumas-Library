@@ -2198,6 +2198,7 @@ name = "pumas-uniffi"
 version = "0.2.0"
 dependencies = [
  "pumas-library",
+ "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",

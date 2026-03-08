@@ -24,6 +24,7 @@ uniffi = { workspace = true, features = ["tokio"] }
 tokio = { workspace = true, features = ["rt", "sync"], optional = true }
 
 # Serialization (for HashMap/Value → JSON string conversion at FFI boundary)
+serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 
 # Error handling
@@ -42,5 +43,5 @@ uniffi = { workspace = true, features = ["bindgen-tests"] }
 
 [features]
 default = ["bindings"]
-bindings = ["dep:pumas-library", "dep:tokio", "dep:serde_json", "dep:thiserror"]
+bindings = ["dep:pumas-library", "dep:tokio", "dep:serde", "dep:serde_json", "dep:thiserror"]
 cli = ["uniffi/cli"]

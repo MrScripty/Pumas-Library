@@ -1,6 +1,9 @@
 // Private imports — core types used in From impls, not exposed in API signatures
+use pumas_library::ipc::IpcClient;
 use pumas_library::models::HuggingFaceModel;
 use pumas_library::{ModelRecord, PumasApi, SearchResult};
+use serde::de::DeserializeOwned;
+use std::path::Path;
 use std::sync::Arc;
 
 // =============================================================================
@@ -666,6 +669,8 @@ impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest 
             filename: r.filename,
             filenames: r.filenames,
             pipeline_tag: r.pipeline_tag,
+            bundle_format: None,
+            pipeline_class: None,
         }
     }
 }
@@ -1078,7 +1083,145 @@ pub struct FfiApiConfig {
 /// The main Pumas Library API handle.
 #[derive(uniffi::Object)]
 pub struct FfiPumasApi {
-    inner: Arc<PumasApi>,
+    inner: FfiApiInner,
+}
+
+enum FfiApiInner {
+    Primary(Arc<PumasApi>),
+    Client(Arc<IpcClient>),
+}
+
+impl FfiPumasApi {
+    async fn new_with_default_root(launcher_root: String) -> Result<Arc<Self>, FfiError> {
+        if let Some(client) = Self::try_connect_client(&launcher_root).await? {
+            return Ok(Arc::new(Self {
+                inner: FfiApiInner::Client(client),
+            }));
+        }
+
+        let api = Arc::new(
+            PumasApi::new(&launcher_root)
+                .await
+                .map_err(FfiError::from)?,
+        );
+
+        if let Some(client) = Self::try_connect_client(&launcher_root).await? {
+            return Ok(Arc::new(Self {
+                inner: FfiApiInner::Client(client),
+            }));
+        }
+
+        api.start_ipc_server().await.map_err(FfiError::from)?;
+        Ok(Arc::new(Self {
+            inner: FfiApiInner::Primary(api),
+        }))
+    }
+
+    async fn new_with_configured_root(config: FfiApiConfig) -> Result<Arc<Self>, FfiError> {
+        if let Some(client) = Self::try_connect_client(&config.launcher_root).await? {
+            return Ok(Arc::new(Self {
+                inner: FfiApiInner::Client(client),
+            }));
+        }
+
+        let api = Arc::new(
+            PumasApi::builder(&config.launcher_root)
+                .auto_create_dirs(config.auto_create_dirs)
+                .with_hf_client(config.enable_hf)
+                .with_process_manager(false)
+                .build()
+                .await
+                .map_err(FfiError::from)?,
+        );
+
+        if let Some(client) = Self::try_connect_client(&config.launcher_root).await? {
+            return Ok(Arc::new(Self {
+                inner: FfiApiInner::Client(client),
+            }));
+        }
+
+        api.start_ipc_server().await.map_err(FfiError::from)?;
+        Ok(Arc::new(Self {
+            inner: FfiApiInner::Primary(api),
+        }))
+    }
+
+    async fn try_connect_client(launcher_root: &str) -> Result<Option<Arc<IpcClient>>, FfiError> {
+        let registry = match pumas_library::registry::LibraryRegistry::open() {
+            Ok(registry) => registry,
+            Err(_) => return Ok(None),
+        };
+
+        let _ = registry.cleanup_stale();
+        let Some(instance) = registry
+            .get_instance(Path::new(launcher_root))
+            .map_err(FfiError::from)?
+        else {
+            return Ok(None);
+        };
+
+        if !pumas_library::platform::is_process_alive(instance.pid) {
+            let _ = registry.unregister_instance(Path::new(launcher_root));
+            return Ok(None);
+        }
+
+        let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
+        match IpcClient::connect(addr, instance.pid).await {
+            Ok(client) => Ok(Some(Arc::new(client))),
+            Err(_) => {
+                let _ = registry.unregister_instance(Path::new(launcher_root));
+                Ok(None)
+            }
+        }
+    }
+
+    async fn call_client_method<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<T, FfiError> {
+        let FfiApiInner::Client(client) = &self.inner else {
+            return Err(FfiError::Other(format!(
+                "IPC method {method} requested on a primary instance"
+            )));
+        };
+
+        let value = client.call(method, params).await.map_err(FfiError::from)?;
+        serde_json::from_value(value).map_err(|err| {
+            FfiError::Other(format!("Failed to decode IPC response for {method}: {err}"))
+        })
+    }
+
+    fn call_client_method_blocking<T: DeserializeOwned>(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<T, FfiError> {
+        let FfiApiInner::Client(client) = &self.inner else {
+            return Err(FfiError::Other(format!(
+                "Blocking IPC method {method} requested on a primary instance"
+            )));
+        };
+
+        let client = client.clone();
+        let method_name = method.to_string();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| FfiError::Other(format!("Failed to create IPC runtime: {err}")))?
+            .block_on(async move {
+                let value = client
+                    .call(&method_name, params)
+                    .await
+                    .map_err(FfiError::from)?;
+                serde_json::from_value(value).map_err(|err| {
+                    FfiError::Other(format!(
+                        "Failed to decode IPC response for {}: {}",
+                        method_name, err
+                    ))
+                })
+            })
+    }
 }
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -1086,25 +1229,13 @@ impl FfiPumasApi {
     /// Create a new API instance with default options.
     #[uniffi::constructor]
     pub async fn new(launcher_root: String) -> Result<Arc<Self>, FfiError> {
-        let api = PumasApi::new(launcher_root).await.map_err(FfiError::from)?;
-        Ok(Arc::new(Self {
-            inner: Arc::new(api),
-        }))
+        Self::new_with_default_root(launcher_root).await
     }
 
     /// Create a new API instance with a configuration record.
     #[uniffi::constructor]
     pub async fn with_config(config: FfiApiConfig) -> Result<Arc<Self>, FfiError> {
-        let api = PumasApi::builder(config.launcher_root)
-            .auto_create_dirs(config.auto_create_dirs)
-            .with_hf_client(config.enable_hf)
-            .with_process_manager(false)
-            .build()
-            .await
-            .map_err(FfiError::from)?;
-        Ok(Arc::new(Self {
-            inner: Arc::new(api),
-        }))
+        Self::new_with_configured_root(config).await
     }
 
     // ========================================
@@ -1113,17 +1244,25 @@ impl FfiPumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<FfiModelRecord>, FfiError> {
-        let models = self.inner.list_models().await.map_err(FfiError::from)?;
+        let models = match &self.inner {
+            FfiApiInner::Primary(api) => api.list_models().await.map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method("list_models", serde_json::json!({}))
+                    .await?
+            }
+        };
         Ok(models.into_iter().map(FfiModelRecord::from).collect())
     }
 
     /// Get a single model by its ID.
     pub async fn get_model(&self, model_id: String) -> Result<Option<FfiModelRecord>, FfiError> {
-        let model = self
-            .inner
-            .get_model(&model_id)
-            .await
-            .map_err(FfiError::from)?;
+        let model = match &self.inner {
+            FfiApiInner::Primary(api) => api.get_model(&model_id).await.map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method("get_model", serde_json::json!({ "model_id": model_id }))
+                    .await?
+            }
+        };
         Ok(model.map(FfiModelRecord::from))
     }
 
@@ -1134,21 +1273,41 @@ impl FfiPumasApi {
         limit: u64,
         offset: u64,
     ) -> Result<FfiSearchResult, FfiError> {
-        let result = self
-            .inner
-            .search_models(&query, limit as usize, offset as usize)
-            .await
-            .map_err(FfiError::from)?;
+        let result = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .search_models(&query, limit as usize, offset as usize)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "search_models",
+                    serde_json::json!({
+                        "query": query,
+                        "limit": limit,
+                        "offset": offset,
+                    }),
+                )
+                .await?
+            }
+        };
         Ok(FfiSearchResult::from(result))
     }
 
     /// Delete a model and all its links.
     pub async fn delete_model(&self, model_id: String) -> Result<FfiDeleteModelResponse, FfiError> {
-        let resp = self
-            .inner
-            .delete_model_with_cascade(&model_id)
-            .await
-            .map_err(FfiError::from)?;
+        let resp = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .delete_model_with_cascade(&model_id)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "delete_model_with_cascade",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await?
+            }
+        };
         Ok(FfiDeleteModelResponse::from(resp))
     }
 
@@ -1158,11 +1317,15 @@ impl FfiPumasApi {
         spec: FfiModelImportSpec,
     ) -> Result<FfiModelImportResult, FfiError> {
         let core_spec = pumas_library::models::ModelImportSpec::from(spec);
-        let result = self
-            .inner
-            .import_model(&core_spec)
-            .await
-            .map_err(FfiError::from)?;
+        let result = match &self.inner {
+            FfiApiInner::Primary(api) => {
+                api.import_model(&core_spec).await.map_err(FfiError::from)?
+            }
+            FfiApiInner::Client(_) => {
+                self.call_client_method("import_model", serde_json::json!({ "spec": core_spec }))
+                    .await?
+            }
+        };
         Ok(FfiModelImportResult::from(result))
     }
 
@@ -1173,31 +1336,72 @@ impl FfiPumasApi {
     ) -> Vec<FfiModelImportResult> {
         let core_specs: Vec<pumas_library::models::ModelImportSpec> =
             specs.into_iter().map(Into::into).collect();
-        self.inner
-            .import_models_batch(core_specs)
-            .await
-            .into_iter()
-            .map(FfiModelImportResult::from)
-            .collect()
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .import_models_batch(core_specs)
+                .await
+                .into_iter()
+                .map(FfiModelImportResult::from)
+                .collect(),
+            FfiApiInner::Client(_) => match self
+                .call_client_method::<Vec<pumas_library::model_library::ModelImportResult>>(
+                    "import_models_batch",
+                    serde_json::json!({ "specs": core_specs.clone() }),
+                )
+                .await
+            {
+                Ok(results) => results
+                    .into_iter()
+                    .map(FfiModelImportResult::from)
+                    .collect(),
+                Err(err) => core_specs
+                    .into_iter()
+                    .map(|spec| {
+                        FfiModelImportResult::from(
+                            pumas_library::model_library::ModelImportResult {
+                                path: spec.path,
+                                success: false,
+                                model_id: None,
+                                model_path: None,
+                                error: Some(err.to_string()),
+                                security_tier: None,
+                            },
+                        )
+                    })
+                    .collect(),
+            },
+        }
     }
 
     /// Rebuild the full-text search index for all models.
     pub async fn rebuild_model_index(&self) -> Result<u64, FfiError> {
-        self.inner
-            .rebuild_model_index()
-            .await
-            .map(|n| n as u64)
-            .map_err(FfiError::from)
+        let count: usize = match &self.inner {
+            FfiApiInner::Primary(api) => api.rebuild_model_index().await.map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method("rebuild_model_index", serde_json::json!({}))
+                    .await?
+            }
+        };
+        Ok(count as u64)
     }
 
     /// Re-detect a model's type and move it to the correct directory if misclassified.
     ///
     /// Returns the new model_id if the model was reclassified, None if unchanged.
     pub async fn reclassify_model(&self, model_id: String) -> Result<Option<String>, FfiError> {
-        self.inner
-            .reclassify_model(&model_id)
-            .await
-            .map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .reclassify_model(&model_id)
+                .await
+                .map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "reclassify_model",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await
+            }
+        }
     }
 
     /// Re-detect and reclassify all models in the library.
@@ -1205,11 +1409,16 @@ impl FfiPumasApi {
     /// Scans every model, re-detects its type from file content, and moves
     /// any misclassified models to the correct directory.
     pub async fn reclassify_all_models(&self) -> Result<FfiReclassifyResult, FfiError> {
-        self.inner
-            .reclassify_all_models()
-            .await
-            .map(FfiReclassifyResult::from)
-            .map_err(FfiError::from)
+        let result = match &self.inner {
+            FfiApiInner::Primary(api) => {
+                api.reclassify_all_models().await.map_err(FfiError::from)?
+            }
+            FfiApiInner::Client(_) => {
+                self.call_client_method("reclassify_all_models", serde_json::json!({}))
+                    .await?
+            }
+        };
+        Ok(FfiReclassifyResult::from(result))
     }
 
     /// Get the inference settings schema for a model.
@@ -1220,11 +1429,19 @@ impl FfiPumasApi {
         &self,
         model_id: String,
     ) -> Result<Vec<FfiInferenceParamSchema>, FfiError> {
-        let settings = self
-            .inner
-            .get_inference_settings(&model_id)
-            .await
-            .map_err(FfiError::from)?;
+        let settings = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .get_inference_settings(&model_id)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "get_inference_settings",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await?
+            }
+        };
         Ok(settings
             .into_iter()
             .map(FfiInferenceParamSchema::from)
@@ -1239,10 +1456,24 @@ impl FfiPumasApi {
     ) -> Result<(), FfiError> {
         let core_settings: Vec<pumas_library::models::InferenceParamSchema> =
             settings.into_iter().map(Into::into).collect();
-        self.inner
-            .update_inference_settings(&model_id, core_settings)
-            .await
-            .map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .update_inference_settings(&model_id, core_settings)
+                .await
+                .map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                let _: serde_json::Value = self
+                    .call_client_method(
+                        "update_inference_settings",
+                        serde_json::json!({
+                            "model_id": model_id,
+                            "settings": core_settings,
+                        }),
+                    )
+                    .await?;
+                Ok(())
+            }
+        }
     }
 
     // ========================================
@@ -1256,21 +1487,42 @@ impl FfiPumasApi {
         kind: Option<String>,
         limit: u64,
     ) -> Result<Vec<FfiHuggingFaceModel>, FfiError> {
-        let models = self
-            .inner
-            .search_hf_models(&query, kind.as_deref(), limit as usize)
-            .await
-            .map_err(FfiError::from)?;
+        let models = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .search_hf_models(&query, kind.as_deref(), limit as usize)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "search_hf_models",
+                    serde_json::json!({
+                        "query": query,
+                        "kind": kind,
+                        "limit": limit,
+                    }),
+                )
+                .await?
+            }
+        };
         Ok(models.into_iter().map(FfiHuggingFaceModel::from).collect())
     }
 
     /// Start downloading a model from HuggingFace.
     pub async fn start_hf_download(&self, request: FfiDownloadRequest) -> Result<String, FfiError> {
         let core_req = pumas_library::model_library::DownloadRequest::from(request);
-        self.inner
-            .start_hf_download(&core_req)
-            .await
-            .map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .start_hf_download(&core_req)
+                .await
+                .map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "start_hf_download",
+                    serde_json::json!({ "request": core_req }),
+                )
+                .await
+            }
+        }
     }
 
     /// Get the progress of an active HuggingFace download.
@@ -1278,24 +1530,46 @@ impl FfiPumasApi {
         &self,
         download_id: String,
     ) -> Option<FfiModelDownloadProgress> {
-        self.inner
-            .get_hf_download_progress(&download_id)
-            .await
-            .map(FfiModelDownloadProgress::from)
+        let progress = match &self.inner {
+            FfiApiInner::Primary(api) => api.get_hf_download_progress(&download_id).await,
+            FfiApiInner::Client(_) => self
+                .call_client_method(
+                    "get_hf_download_progress",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await
+                .ok()
+                .flatten(),
+        };
+        progress.map(FfiModelDownloadProgress::from)
     }
 
     /// Cancel an active HuggingFace download.
     pub async fn cancel_hf_download(&self, download_id: String) -> Result<bool, FfiError> {
-        self.inner
-            .cancel_hf_download(&download_id)
-            .await
-            .map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .cancel_hf_download(&download_id)
+                .await
+                .map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "cancel_hf_download",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await
+            }
+        }
     }
 
     /// List interrupted downloads that lost their persistence state.
     pub fn list_interrupted_downloads(&self) -> Vec<FfiInterruptedDownload> {
-        self.inner
-            .list_interrupted_downloads()
+        let downloads: Vec<pumas_library::model_library::InterruptedDownload> = match &self.inner {
+            FfiApiInner::Primary(api) => api.list_interrupted_downloads(),
+            FfiApiInner::Client(_) => self
+                .call_client_method_blocking("list_interrupted_downloads", serde_json::json!({}))
+                .unwrap_or_default(),
+        };
+        downloads
             .into_iter()
             .map(FfiInterruptedDownload::from)
             .collect()
@@ -1307,10 +1581,22 @@ impl FfiPumasApi {
         repo_id: String,
         dest_dir: String,
     ) -> Result<String, FfiError> {
-        self.inner
-            .recover_download(&repo_id, &dest_dir)
-            .await
-            .map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .recover_download(&repo_id, &dest_dir)
+                .await
+                .map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "recover_download",
+                    serde_json::json!({
+                        "repo_id": repo_id,
+                        "dest_dir": dest_dir,
+                    }),
+                )
+                .await
+            }
+        }
     }
 
     /// Look up HuggingFace metadata for a local model file.
@@ -1318,21 +1604,37 @@ impl FfiPumasApi {
         &self,
         file_path: String,
     ) -> Result<Option<FfiHfMetadataResult>, FfiError> {
-        let result = self
-            .inner
-            .lookup_hf_metadata_for_file(&file_path)
-            .await
-            .map_err(FfiError::from)?;
+        let result = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .lookup_hf_metadata_for_file(&file_path)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "lookup_hf_metadata_for_file",
+                    serde_json::json!({ "file_path": file_path }),
+                )
+                .await?
+            }
+        };
         Ok(result.map(FfiHfMetadataResult::from))
     }
 
     /// Get the file tree for a HuggingFace repository.
     pub async fn get_hf_repo_files(&self, repo_id: String) -> Result<FfiRepoFileTree, FfiError> {
-        let tree = self
-            .inner
-            .get_hf_repo_files(&repo_id)
-            .await
-            .map_err(FfiError::from)?;
+        let tree = match &self.inner {
+            FfiApiInner::Primary(api) => api
+                .get_hf_repo_files(&repo_id)
+                .await
+                .map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method(
+                    "get_hf_repo_files",
+                    serde_json::json!({ "repo_id": repo_id }),
+                )
+                .await?
+            }
+        };
         Ok(FfiRepoFileTree::from(tree))
     }
 
@@ -1342,28 +1644,49 @@ impl FfiPumasApi {
 
     /// Check if the network is currently online.
     pub fn is_online(&self) -> bool {
-        self.inner.is_online()
+        match &self.inner {
+            FfiApiInner::Primary(api) => api.is_online(),
+            FfiApiInner::Client(_) => self
+                .call_client_method_blocking("is_online", serde_json::json!({}))
+                .unwrap_or(false),
+        }
     }
 
     /// Get disk space information for the launcher root.
     pub async fn get_disk_space(&self) -> Result<FfiDiskSpaceResponse, FfiError> {
-        let resp = self.inner.get_disk_space().await.map_err(FfiError::from)?;
+        let resp = match &self.inner {
+            FfiApiInner::Primary(api) => api.get_disk_space().await.map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method("get_disk_space", serde_json::json!({}))
+                    .await?
+            }
+        };
         Ok(FfiDiskSpaceResponse::from(resp))
     }
 
     /// Get overall system status including running processes and resources.
     pub async fn get_status(&self) -> Result<FfiStatusResponse, FfiError> {
-        let resp = self.inner.get_status().await.map_err(FfiError::from)?;
+        let resp = match &self.inner {
+            FfiApiInner::Primary(api) => api.get_status().await.map_err(FfiError::from)?,
+            FfiApiInner::Client(_) => {
+                self.call_client_method("get_status_response", serde_json::json!({}))
+                    .await?
+            }
+        };
         Ok(FfiStatusResponse::from(resp))
     }
 
     /// Get current system resource usage (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<FfiSystemResourcesResponse, FfiError> {
-        let resp = self
-            .inner
-            .get_system_resources()
-            .await
-            .map_err(FfiError::from)?;
+        let resp = match &self.inner {
+            FfiApiInner::Primary(api) => {
+                api.get_system_resources().await.map_err(FfiError::from)?
+            }
+            FfiApiInner::Client(_) => {
+                self.call_client_method("get_system_resources", serde_json::json!({}))
+                    .await?
+            }
+        };
         Ok(FfiSystemResourcesResponse::from(resp))
     }
 
@@ -1373,12 +1696,24 @@ impl FfiPumasApi {
 
     /// Check if the Torch inference server is running.
     pub async fn is_torch_running(&self) -> bool {
-        self.inner.is_torch_running().await
+        match &self.inner {
+            FfiApiInner::Primary(api) => api.is_torch_running().await,
+            FfiApiInner::Client(_) => self
+                .call_client_method("is_torch_running", serde_json::json!({}))
+                .await
+                .unwrap_or(false),
+        }
     }
 
     /// Stop the Torch inference server.
     pub async fn torch_stop(&self) -> Result<bool, FfiError> {
-        self.inner.stop_torch().await.map_err(FfiError::from)
+        match &self.inner {
+            FfiApiInner::Primary(api) => api.stop_torch().await.map_err(FfiError::from),
+            FfiApiInner::Client(_) => {
+                self.call_client_method("stop_torch", serde_json::json!({}))
+                    .await
+            }
+        }
     }
 }
 

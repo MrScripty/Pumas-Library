@@ -626,6 +626,25 @@ impl PumasApi {
             )?));
         }
 
+        if let Some((candidate, match_method, match_confidence)) = fallback_bundle_lookup_candidate(
+            &hints.bundle_name,
+            hints.name_or_path.as_deref(),
+            &search_results,
+        ) {
+            let candidate_repo_id = candidate.repo_id.clone();
+            return Ok(Some(build_lookup_metadata_from_model(
+                primary.model_library.index(),
+                candidate,
+                match_method,
+                match_confidence,
+                hints
+                    .name_or_path
+                    .as_ref()
+                    .filter(|repo_id| *repo_id != &candidate_repo_id)
+                    .cloned(),
+            )?));
+        }
+
         let Some(base_repo_id) = hints.name_or_path.as_deref() else {
             return Ok(None);
         };
@@ -785,6 +804,24 @@ fn rank_bundle_lookup_candidates(
     ranked
 }
 
+fn fallback_bundle_lookup_candidate(
+    bundle_name: &str,
+    hinted_repo_id: Option<&str>,
+    candidates: &[models::HuggingFaceModel],
+) -> Option<(models::HuggingFaceModel, &'static str, f64)> {
+    let ranked = rank_bundle_lookup_candidates(bundle_name, hinted_repo_id, candidates);
+    let candidate = ranked
+        .into_iter()
+        .find(|candidate| bundle_lookup_score(bundle_name, hinted_repo_id, candidate) >= 35)?;
+
+    let exact = is_exact_bundle_lookup_match(bundle_name, &candidate.repo_id, &candidate.name);
+    Some((
+        candidate,
+        if exact { "filename_exact" } else { "filename_fuzzy" },
+        if exact { 0.84 } else { 0.62 },
+    ))
+}
+
 fn bundle_lookup_score(
     bundle_name: &str,
     hinted_repo_id: Option<&str>,
@@ -914,6 +951,34 @@ mod tests {
             "cc-nms/tiny_sd_turbo",
             "Tiny SD Turbo"
         ));
+    }
+
+    #[test]
+    fn bundle_lookup_falls_back_to_exact_non_bundle_repo_match() {
+        let fallback = fallback_bundle_lookup_candidate(
+            "Juggernaut-X-v10",
+            None,
+            &[
+                hf_model("foo/bar", "bar", 100),
+                hf_model("RunDiffusion/Juggernaut-X-v10", "Juggernaut-X-v10", 5),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(fallback.0.repo_id, "RunDiffusion/Juggernaut-X-v10");
+        assert_eq!(fallback.1, "filename_exact");
+        assert_eq!(fallback.2, 0.84);
+    }
+
+    #[test]
+    fn bundle_lookup_fallback_rejects_weak_unrelated_results() {
+        let fallback = fallback_bundle_lookup_candidate(
+            "Juggernaut-X-v10",
+            None,
+            &[hf_model("foo/bar", "bar", 100), hf_model("baz/qux", "qux", 50)],
+        );
+
+        assert!(fallback.is_none());
     }
 
     fn hf_model(repo_id: &str, name: &str, downloads: u64) -> HuggingFaceModel {

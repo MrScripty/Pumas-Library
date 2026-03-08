@@ -71,6 +71,14 @@ function pathStem(name: string): string {
   return name.replace(/\.[^.]+$/, '');
 }
 
+function preferredBundleFamily(entry: ImportEntryStatus): string {
+  const repoOwner = entry.hfMetadata?.repo_id?.split('/')[0]?.trim();
+  if (repoOwner) {
+    return repoOwner;
+  }
+  return entry.hfMetadata?.family || entry.suggestedFamily;
+}
+
 function createEntry(
   path: string,
   originPath: string,
@@ -587,16 +595,21 @@ export function useModelImportWorkflow({
     setStep('importing');
     const invalidFileEntries = fileEntries.filter((entry) => entry.validFileType === false);
     const batchEntries = entries.filter(
-      (entry) => entry.kind !== 'external_diffusers_bundle' && entry.validFileType !== false
+      (entry) => !(entry.kind === 'single_file' && entry.validFileType === false)
     );
-    const bundleEntries = entries.filter((entry) => entry.kind === 'external_diffusers_bundle');
 
     const batchSpecs: ModelImportSpec[] = batchEntries.map((entry) => ({
       path: entry.path,
-      family: entry.hfMetadata?.family || entry.suggestedFamily,
+      family:
+        entry.kind === 'external_diffusers_bundle'
+          ? preferredBundleFamily(entry)
+          : entry.hfMetadata?.family || entry.suggestedFamily,
       official_name: entry.hfMetadata?.official_name || entry.suggestedOfficialName,
       repo_id: entry.hfMetadata?.repo_id,
-      model_type: entry.hfMetadata?.model_type || entry.modelType,
+      model_type:
+        entry.kind === 'external_diffusers_bundle'
+          ? 'diffusion'
+          : entry.hfMetadata?.model_type || entry.modelType,
       subtype: entry.hfMetadata?.subtype,
       tags: entry.hfMetadata?.tags,
       security_acknowledged: entry.securityAcknowledged,
@@ -636,42 +649,6 @@ export function useModelImportWorkflow({
             securityTier: importResult.security_tier || entry.securityTier,
           };
         }));
-      }
-
-      for (const entry of bundleEntries) {
-        try {
-          const result = await importAPI.importExternalDiffusersDirectory({
-            source_path: entry.path,
-            family: entry.hfMetadata?.family || entry.suggestedFamily,
-            official_name: entry.hfMetadata?.official_name || entry.suggestedOfficialName,
-            repo_id: entry.hfMetadata?.repo_id || null,
-            tags: entry.hfMetadata?.tags || null,
-          });
-
-          imported += result.success ? 1 : 0;
-          failed += result.success ? 0 : 1;
-
-          setEntries((prev) => prev.map((candidate) => (
-            candidate.path === entry.path
-              ? {
-                ...candidate,
-                status: result.success ? 'success' : 'error',
-                error: result.error,
-              }
-              : candidate
-          )));
-        } catch (error) {
-          failed += 1;
-          setEntries((prev) => prev.map((candidate) => (
-            candidate.path === entry.path
-              ? {
-                ...candidate,
-                status: 'error',
-                error: error instanceof Error ? error.message : 'Import failed',
-              }
-              : candidate
-          )));
-        }
       }
 
       setImportedCount(imported);

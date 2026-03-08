@@ -15,7 +15,7 @@ use crate::index::{
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
-    is_external_diffusers_bundle, is_external_reference, refresh_external_metadata_validation,
+    is_diffusers_bundle, is_external_reference, refresh_external_metadata_validation,
     MODEL_EXECUTION_CONTRACT_VERSION,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
@@ -1607,17 +1607,15 @@ impl ModelLibrary {
             })?;
 
         let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
-        let validation_state = metadata.validation_state.unwrap_or(if storage_kind
-            == StorageKind::ExternalReference
+        let validation_state = metadata.validation_state.unwrap_or(if is_diffusers_bundle(&metadata)
+            || storage_kind == StorageKind::ExternalReference
         {
             AssetValidationState::Invalid
         } else {
             AssetValidationState::Valid
         });
 
-        if storage_kind == StorageKind::ExternalReference
-            && validation_state != AssetValidationState::Valid
-        {
+        if is_diffusers_bundle(&metadata) && validation_state != AssetValidationState::Valid {
             return Err(PumasError::Validation {
                 field: "validation_state".to_string(),
                 message: format!(
@@ -1629,13 +1627,13 @@ impl ModelLibrary {
             });
         }
 
-        let entry_path = if is_external_diffusers_bundle(&metadata) {
+        let entry_path = if is_diffusers_bundle(&metadata) {
             metadata
                 .entry_path
                 .clone()
                 .ok_or_else(|| PumasError::Validation {
                     field: "entry_path".to_string(),
-                    message: "external bundle metadata is missing entry_path".to_string(),
+                    message: "bundle metadata is missing entry_path".to_string(),
                 })?
         } else if let Some(primary_file) = self.get_primary_model_file(model_id) {
             primary_file.display().to_string()
@@ -6145,6 +6143,69 @@ mod tests {
             descriptor.execution_contract_version,
             MODEL_EXECUTION_CONTRACT_VERSION
         );
+    }
+
+    #[tokio::test]
+    async fn test_resolve_model_execution_descriptor_returns_library_owned_bundle_root() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::create_dir_all(model_dir.join("unet")).unwrap();
+        std::fs::create_dir_all(model_dir.join("vae")).unwrap();
+        std::fs::create_dir_all(model_dir.join("text_encoder")).unwrap();
+        std::fs::create_dir_all(model_dir.join("tokenizer")).unwrap();
+        std::fs::write(
+            model_dir.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderKL"],
+  "text_encoder": ["transformers", "CLIPTextModel"],
+  "tokenizer": ["transformers", "CLIPTokenizer"]
+}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(model_dir.display().to_string()),
+            entry_path: Some(model_dir.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let descriptor = library
+            .resolve_model_execution_descriptor(model_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            normalize_path_separators(&descriptor.entry_path),
+            normalize_path_separators(&model_dir.canonicalize().unwrap().display().to_string())
+        );
+        assert_eq!(descriptor.storage_kind, StorageKind::LibraryOwned);
+        assert_eq!(descriptor.validation_state, AssetValidationState::Valid);
     }
 
     #[tokio::test]

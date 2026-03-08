@@ -5,7 +5,9 @@
 
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
-    build_external_diffusers_metadata, validate_diffusers_directory_for_import,
+    build_diffusers_bundle_metadata, build_external_diffusers_metadata,
+    validate_diffusers_directory_for_import, DiffusersBundleMetadataSpec,
+    DiffusersValidationResult,
 };
 use crate::model_library::hashing::{compute_dual_hash, DualHash};
 use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
@@ -255,6 +257,65 @@ impl ModelImporter {
             } else {
                 Some(join_validation_errors(&validation.validation_errors))
             },
+            security_tier: None,
+        })
+    }
+
+    async fn import_library_owned_diffusers_directory(
+        &self,
+        spec: &InPlaceImportSpec,
+        validation: &DiffusersValidationResult,
+    ) -> Result<ModelImportResult> {
+        let model_dir = &spec.model_dir;
+        let model_id = self.library.get_model_id(model_dir).ok_or_else(|| {
+            PumasError::Other(format!(
+                "Could not determine model ID for bundle directory {:?}",
+                model_dir
+            ))
+        })?;
+
+        let metadata_spec = DiffusersBundleMetadataSpec {
+            family: &spec.family,
+            official_name: &spec.official_name,
+            repo_id: spec.repo_id.as_deref(),
+            tags: None,
+            source_path: model_dir,
+            storage_kind: crate::models::StorageKind::LibraryOwned,
+            match_source: if spec.repo_id.is_some() {
+                "download"
+            } else {
+                "orphan_recovery"
+            },
+            classification_source: "diffusers-directory-import",
+            expected_files: spec.expected_files.as_deref(),
+            pipeline_tag: spec.pipeline_tag.as_deref(),
+        };
+        let metadata = build_diffusers_bundle_metadata(&metadata_spec, validation, &model_id);
+        validate_metadata_v2_with_index(&metadata, self.library.index())?;
+
+        if model_dir.join("metadata.json").exists() {
+            let model_id = self.library.get_model_id(model_dir);
+            return Ok(ModelImportResult {
+                path: model_dir.display().to_string(),
+                success: true,
+                model_id: model_id.clone(),
+                model_path: model_id,
+                error: None,
+                security_tier: None,
+            });
+        }
+
+        self.library.save_metadata(model_dir, &metadata).await?;
+        if let Err(err) = self.library.index_model_dir(model_dir).await {
+            tracing::warn!("Failed to index in-place diffusers bundle: {}", err);
+        }
+
+        Ok(ModelImportResult {
+            path: model_dir.display().to_string(),
+            success: validation.validation_state == crate::models::AssetValidationState::Valid,
+            model_id: Some(model_id.clone()),
+            model_path: Some(model_id),
+            error: None,
             security_tier: None,
         })
     }
@@ -801,6 +862,13 @@ impl ModelImporter {
 
         if !model_dir.is_dir() {
             return Err(PumasError::FileNotFound(model_dir.clone()));
+        }
+
+        let bundle_validation = validate_diffusers_directory_for_import(model_dir);
+        if bundle_validation.validation_state == crate::models::AssetValidationState::Valid {
+            return self
+                .import_library_owned_diffusers_directory(spec, &bundle_validation)
+                .await;
         }
 
         // Find primary model file
@@ -1852,5 +1920,68 @@ mod tests {
             metadata.entry_path.as_deref(),
             Some(bundle_root.canonicalize().unwrap().to_string_lossy().as_ref())
         );
+    }
+
+    #[tokio::test]
+    async fn test_import_in_place_treats_diffusers_bundle_as_one_library_owned_model() {
+        let (temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        let source_bundle = create_external_diffusers_bundle(temp_dir.path());
+        for entry in walkdir::WalkDir::new(&source_bundle)
+            .min_depth(1)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            let relative = entry.path().strip_prefix(&source_bundle).unwrap();
+            let dest_path = model_dir.join(relative);
+            if entry.file_type().is_dir() {
+                std::fs::create_dir_all(&dest_path).unwrap();
+            } else {
+                std::fs::copy(entry.path(), &dest_path).unwrap();
+            }
+        }
+
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "tiny-sd-turbo".to_string(),
+            family: "stable-diffusion".to_string(),
+            model_type: Some("diffusion".to_string()),
+            repo_id: Some("hf-internal-testing/tiny-sd-turbo".to_string()),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec![
+                "model_index.json".to_string(),
+                "unet".to_string(),
+                "vae".to_string(),
+                "text_encoder".to_string(),
+                "tokenizer".to_string(),
+            ]),
+            pipeline_tag: Some("text-to-image".to_string()),
+        };
+
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(result.success);
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            metadata.storage_kind,
+            Some(crate::models::StorageKind::LibraryOwned)
+        );
+        assert_eq!(
+            metadata.bundle_format,
+            Some(crate::models::BundleFormat::DiffusersDirectory)
+        );
+        assert_eq!(
+            metadata.validation_state,
+            Some(crate::models::AssetValidationState::Valid)
+        );
+        assert_eq!(
+            metadata.entry_path.as_deref(),
+            Some(model_dir.canonicalize().unwrap().to_string_lossy().as_ref())
+        );
+        assert_eq!(metadata.pipeline_tag.as_deref(), Some("text-to-image"));
     }
 }

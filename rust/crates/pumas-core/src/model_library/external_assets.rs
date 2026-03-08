@@ -24,12 +24,29 @@ pub(crate) struct DiffusersValidationResult {
     pub validation_errors: Vec<AssetValidationError>,
 }
 
+pub(crate) struct DiffusersBundleMetadataSpec<'a> {
+    pub family: &'a str,
+    pub official_name: &'a str,
+    pub repo_id: Option<&'a str>,
+    pub tags: Option<&'a [String]>,
+    pub source_path: &'a Path,
+    pub storage_kind: StorageKind,
+    pub match_source: &'a str,
+    pub classification_source: &'a str,
+    pub expected_files: Option<&'a [String]>,
+    pub pipeline_tag: Option<&'a str>,
+}
+
 pub(crate) fn is_external_reference(metadata: &ModelMetadata) -> bool {
     metadata.storage_kind == Some(StorageKind::ExternalReference)
 }
 
+pub(crate) fn is_diffusers_bundle(metadata: &ModelMetadata) -> bool {
+    metadata.bundle_format == Some(BundleFormat::DiffusersDirectory)
+}
+
 pub(crate) fn is_external_diffusers_bundle(metadata: &ModelMetadata) -> bool {
-    is_external_reference(metadata) && metadata.bundle_format == Some(BundleFormat::DiffusersDirectory)
+    is_external_reference(metadata) && is_diffusers_bundle(metadata)
 }
 
 pub(crate) fn validate_diffusers_directory_for_import(source_path: &Path) -> DiffusersValidationResult {
@@ -71,8 +88,29 @@ pub(crate) fn build_external_diffusers_metadata(
     validation: &DiffusersValidationResult,
     model_id: &str,
 ) -> ModelMetadata {
+    let source_path = Path::new(&spec.source_path);
+    let metadata_spec = DiffusersBundleMetadataSpec {
+        family: &spec.family,
+        official_name: &spec.official_name,
+        repo_id: spec.repo_id.as_deref(),
+        tags: spec.tags.as_deref(),
+        source_path,
+        storage_kind: StorageKind::ExternalReference,
+        match_source: "external_reference",
+        classification_source: "external-diffusers-import",
+        expected_files: None,
+        pipeline_tag: Some("text-to-image"),
+    };
+    build_diffusers_bundle_metadata(&metadata_spec, validation, model_id)
+}
+
+pub(crate) fn build_diffusers_bundle_metadata(
+    spec: &DiffusersBundleMetadataSpec<'_>,
+    validation: &DiffusersValidationResult,
+    model_id: &str,
+) -> ModelMetadata {
     let now = chrono::Utc::now().to_rfc3339();
-    let cleaned_name = normalize_name(&spec.official_name);
+    let cleaned_name = normalize_name(spec.official_name);
     let validation_errors = if validation.validation_errors.is_empty() {
         None
     } else {
@@ -81,15 +119,15 @@ pub(crate) fn build_external_diffusers_metadata(
     let mut metadata = ModelMetadata {
         schema_version: Some(2),
         model_id: Some(model_id.to_string()),
-        family: Some(spec.family.clone()),
+        family: Some(spec.family.to_string()),
         model_type: Some("diffusion".to_string()),
-        official_name: Some(spec.official_name.clone()),
+        official_name: Some(spec.official_name.to_string()),
         cleaned_name: Some(cleaned_name),
-        tags: spec.tags.clone(),
-        repo_id: spec.repo_id.clone(),
-        source_path: Some(validation.entry_path.display().to_string()),
+        tags: spec.tags.map(|tags| tags.to_vec()),
+        repo_id: spec.repo_id.map(str::to_string),
+        source_path: Some(spec.source_path.display().to_string()),
         entry_path: Some(validation.entry_path.display().to_string()),
-        storage_kind: Some(StorageKind::ExternalReference),
+        storage_kind: Some(spec.storage_kind),
         bundle_format: Some(BundleFormat::DiffusersDirectory),
         pipeline_class: validation.pipeline_class.clone(),
         import_state: Some(match validation.validation_state {
@@ -98,12 +136,14 @@ pub(crate) fn build_external_diffusers_metadata(
         }),
         validation_state: Some(validation.validation_state),
         validation_errors,
+        expected_files: spec.expected_files.map(|files| files.to_vec()),
+        pipeline_tag: spec.pipeline_tag.map(str::to_string),
         task_type_primary: Some("text-to-image".to_string()),
         input_modalities: Some(vec!["text".to_string()]),
         output_modalities: Some(vec!["image".to_string()]),
-        task_classification_source: Some("external-diffusers-import".to_string()),
+        task_classification_source: Some(spec.classification_source.to_string()),
         task_classification_confidence: Some(1.0),
-        model_type_resolution_source: Some("external-diffusers-import".to_string()),
+        model_type_resolution_source: Some(spec.classification_source.to_string()),
         model_type_resolution_confidence: Some(1.0),
         recommended_backend: Some("diffusers".to_string()),
         runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
@@ -111,6 +151,7 @@ pub(crate) fn build_external_diffusers_metadata(
         metadata_needs_review: Some(false),
         review_reasons: Some(Vec::new()),
         review_status: Some("pending".to_string()),
+        match_source: Some(spec.match_source.to_string()),
         added_date: Some(now.clone()),
         updated_date: Some(now),
         size_bytes: Some(calculate_directory_size(&validation.entry_path)),

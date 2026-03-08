@@ -463,6 +463,40 @@ mod tests {
     }
 
     #[test]
+    fn test_classify_import_path_single_bundle_ignores_boolean_metadata_fields() {
+        let temp = tempdir().unwrap();
+        let bundle_root = temp.path().join("tiny-sd-turbo");
+        std::fs::create_dir_all(bundle_root.join("scheduler")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("unet")).unwrap();
+        std::fs::create_dir_all(bundle_root.join("vae")).unwrap();
+        std::fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+                "_class_name": "StableDiffusionPipeline",
+                "_diffusers_version": "0.32.0",
+                "_name_or_path": "stabilityai/sd-turbo",
+                "feature_extractor": [null, null],
+                "image_encoder": [null, null],
+                "requires_safety_checker": true,
+                "safety_checker": [null, null],
+                "scheduler": ["diffusers", "EulerDiscreteScheduler"],
+                "text_encoder": ["transformers", "CLIPTextModel"],
+                "tokenizer": ["transformers", "CLIPTokenizer"],
+                "unet": ["diffusers", "UNet2DConditionModel"],
+                "vae": ["diffusers", "AutoencoderTiny"]
+            }"#,
+        )
+        .unwrap();
+
+        let result = classify_import_path(&bundle_root);
+
+        assert_eq!(result.kind, ImportPathClassificationKind::SingleBundle);
+        assert_eq!(result.bundle_format, Some(BundleFormat::DiffusersDirectory));
+    }
+
+    #[test]
     fn test_classify_import_path_multi_model_container_for_sibling_dirs() {
         let temp = tempdir().unwrap();
         let container = temp.path().join("models");

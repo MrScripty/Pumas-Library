@@ -2,7 +2,7 @@ use super::types::HF_HUB_BASE;
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
-    is_optional_component_marker, is_supported_text_to_image_pipeline,
+    is_diffusers_component_entry, is_optional_component_marker, is_supported_text_to_image_pipeline,
     normalized_component_relative_path,
 };
 use crate::model_library::types::RepoFileTree;
@@ -85,7 +85,10 @@ pub(crate) fn classify_repo_bundle_from_parts(
 
     let components = model_index.as_object()?;
     for (component_name, component_value) in components {
-        if component_name.starts_with('_') || is_optional_component_marker(component_value) {
+        if component_name.starts_with('_')
+            || !is_diffusers_component_entry(component_value)
+            || is_optional_component_marker(component_value)
+        {
             continue;
         }
 

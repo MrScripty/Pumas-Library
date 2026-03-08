@@ -313,7 +313,10 @@ fn validate_diffusers_directory(path: &Path, allow_degraded: bool) -> DiffusersV
     let mut validation_errors = Vec::new();
     if let Some(components) = model_index.as_object() {
         for (component_name, component_value) in components {
-            if component_name.starts_with('_') || is_optional_component_marker(component_value) {
+            if component_name.starts_with('_')
+                || !is_diffusers_component_entry(component_value)
+                || is_optional_component_marker(component_value)
+            {
                 continue;
             }
 
@@ -409,6 +412,10 @@ pub(crate) fn is_optional_component_marker(value: &Value) -> bool {
         || value
             .as_array()
             .is_some_and(|entries| entries.iter().all(Value::is_null))
+}
+
+pub(crate) fn is_diffusers_component_entry(value: &Value) -> bool {
+    matches!(value, Value::Array(entries) if !entries.is_empty())
 }
 
 pub(crate) fn is_supported_text_to_image_pipeline(class_name: &str) -> bool {
@@ -513,6 +520,40 @@ mod tests {
                 .iter()
                 .any(|error| error.code == "missing_component")
         );
+    }
+
+    #[test]
+    fn ignores_non_component_model_index_fields() {
+        let temp_dir = TempDir::new().unwrap();
+        let bundle_root = temp_dir.path().join("tiny-sd-turbo");
+        fs::create_dir_all(bundle_root.join("scheduler")).unwrap();
+        fs::create_dir_all(bundle_root.join("text_encoder")).unwrap();
+        fs::create_dir_all(bundle_root.join("tokenizer")).unwrap();
+        fs::create_dir_all(bundle_root.join("unet")).unwrap();
+        fs::create_dir_all(bundle_root.join("vae")).unwrap();
+        fs::write(
+            bundle_root.join("model_index.json"),
+            r#"{
+  "_class_name": "StableDiffusionPipeline",
+  "_diffusers_version": "0.32.0",
+  "_name_or_path": "stabilityai/sd-turbo",
+  "feature_extractor": [null, null],
+  "image_encoder": [null, null],
+  "requires_safety_checker": true,
+  "safety_checker": [null, null],
+  "scheduler": ["diffusers", "EulerDiscreteScheduler"],
+  "text_encoder": ["transformers", "CLIPTextModel"],
+  "tokenizer": ["transformers", "CLIPTokenizer"],
+  "unet": ["diffusers", "UNet2DConditionModel"],
+  "vae": ["diffusers", "AutoencoderTiny"]
+}"#,
+        )
+        .unwrap();
+
+        let result = validate_diffusers_directory_for_import(&bundle_root);
+
+        assert_eq!(result.validation_state, AssetValidationState::Valid);
+        assert!(result.validation_errors.is_empty());
     }
 
     #[test]

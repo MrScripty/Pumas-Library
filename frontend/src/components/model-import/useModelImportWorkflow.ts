@@ -456,8 +456,6 @@ export function useModelImportWorkflow({
       const entry = entriesToProcess[index];
       if (!entry) continue;
 
-      setLookupProgress({ current: index + 1, total: entriesToProcess.length });
-
       try {
         if (entry.kind === 'external_diffusers_bundle') {
           const result = await importAPI.lookupHFMetadataForBundleDirectory(entry.path);
@@ -475,6 +473,7 @@ export function useModelImportWorkflow({
               metadataStatus: result.success ? 'not_found' : 'error',
             };
           }));
+          setLookupProgress({ current: index + 1, total: entriesToProcess.length });
           continue;
         }
 
@@ -569,6 +568,7 @@ export function useModelImportWorkflow({
             metadataStatus: 'not_found',
           };
         }));
+        setLookupProgress({ current: index + 1, total: entriesToProcess.length });
       } catch (error) {
         logger.error('Metadata lookup failed', { file: entry.filename, error });
         setEntries((prev) => prev.map((candidate) => (
@@ -576,6 +576,7 @@ export function useModelImportWorkflow({
             ? { ...candidate, metadataStatus: 'error' }
             : candidate
         )));
+        setLookupProgress({ current: index + 1, total: entriesToProcess.length });
       }
     }
   }, [lookupEntries]);

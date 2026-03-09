@@ -1820,6 +1820,7 @@ impl ModelLibrary {
         } else {
             model_dir.display().to_string()
         };
+        let entry_path = canonicalize_display_path(&entry_path);
 
         let recommended_backend = metadata.recommended_backend.clone();
         let dependency_resolution = self
@@ -3905,6 +3906,13 @@ fn detect_format_from_directory_walk(root: &Path) -> Option<String> {
 
     weighted.sort_by(|left, right| right.0.cmp(&left.0));
     weighted.into_iter().next().map(|(_, format)| format)
+}
+
+fn canonicalize_display_path(path: &str) -> String {
+    Path::new(path)
+        .canonicalize()
+        .map(|canonical| canonical.display().to_string())
+        .unwrap_or_else(|_| path.to_string())
 }
 
 fn detect_quant_from_file_entries(files_value: Option<&Value>) -> Option<String> {

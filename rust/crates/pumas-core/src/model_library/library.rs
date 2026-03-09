@@ -3909,10 +3909,61 @@ fn detect_format_from_directory_walk(root: &Path) -> Option<String> {
 }
 
 fn canonicalize_display_path(path: &str) -> String {
-    Path::new(path)
+    let canonical = Path::new(path)
         .canonicalize()
-        .map(|canonical| canonical.display().to_string())
-        .unwrap_or_else(|_| path.to_string())
+        .unwrap_or_else(|_| PathBuf::from(path));
+    path_to_display_string(&canonical)
+}
+
+#[cfg(windows)]
+fn path_to_display_string(path: &Path) -> String {
+    normalize_windows_path(path).display().to_string()
+}
+
+#[cfg(not(windows))]
+fn path_to_display_string(path: &Path) -> String {
+    path.display().to_string()
+}
+
+#[cfg(windows)]
+fn normalize_windows_path(path: &Path) -> PathBuf {
+    expand_windows_long_path(&strip_windows_verbatim_prefix(path))
+        .unwrap_or_else(|| strip_windows_verbatim_prefix(path))
+}
+
+#[cfg(windows)]
+fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
+    let raw = path.display().to_string();
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{}", stripped))
+    } else if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(windows)]
+fn expand_windows_long_path(path: &Path) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+
+    let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    let required = unsafe { GetLongPathNameW(input.as_ptr(), std::ptr::null_mut(), 0) };
+    if required == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; required as usize + 1];
+    let written =
+        unsafe { GetLongPathNameW(input.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
+    if written == 0 {
+        return None;
+    }
+
+    buffer.truncate(written as usize);
+    Some(PathBuf::from(OsString::from_wide(&buffer)))
 }
 
 fn detect_quant_from_file_entries(files_value: Option<&Value>) -> Option<String> {
@@ -6444,8 +6495,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            normalize_path_separators(&descriptor.entry_path),
-            normalize_path_separators(&bundle_root.canonicalize().unwrap().display().to_string())
+            normalize_path_separators(&canonicalize_display_path(&descriptor.entry_path)),
+            normalize_path_separators(&canonicalize_display_path(&bundle_root.display().to_string()))
         );
         assert_eq!(descriptor.storage_kind, StorageKind::ExternalReference);
         assert_eq!(descriptor.validation_state, AssetValidationState::Valid);
@@ -6557,8 +6608,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            normalize_path_separators(&descriptor.entry_path),
-            normalize_path_separators(&model_dir.canonicalize().unwrap().display().to_string())
+            normalize_path_separators(&canonicalize_display_path(&descriptor.entry_path)),
+            normalize_path_separators(&canonicalize_display_path(&model_dir.display().to_string()))
         );
         assert_eq!(descriptor.storage_kind, StorageKind::LibraryOwned);
         assert_eq!(descriptor.validation_state, AssetValidationState::Valid);

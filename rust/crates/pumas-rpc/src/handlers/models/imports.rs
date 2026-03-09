@@ -314,7 +314,7 @@ pub async fn get_library_model_metadata(
             metadata
                 .entry_path
                 .as_deref()
-                .or_else(|| primary_file_str.as_deref())
+                .or(primary_file_str.as_deref())
                 .map(std::path::Path::new)
         })
         .and_then(get_diffusers_component_manifest);

@@ -51,17 +51,6 @@ struct ReconciliationState {
     models: HashMap<String, ScopeRuntimeState>,
 }
 
-/// Runtime snapshot exposed to status responses.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct ReconciliationStatusSnapshot {
-    pub all_in_flight: bool,
-    pub model_in_flight_count: usize,
-    pub dirty_all: bool,
-    pub dirty_model_count: usize,
-    pub last_all_reconciled_at: Option<String>,
-    pub model_cooldown_seconds: u64,
-}
-
 /// Internal coordinator for throttled, single-flight reconciliation.
 pub(crate) struct ReconciliationCoordinator {
     state: Mutex<ReconciliationState>,
@@ -152,21 +141,6 @@ impl ReconciliationCoordinator {
         }
     }
 
-    pub(crate) async fn snapshot(&self) -> ReconciliationStatusSnapshot {
-        let state = self.state.lock().await;
-        ReconciliationStatusSnapshot {
-            all_in_flight: state.all.in_flight,
-            model_in_flight_count: state.models.values().filter(|s| s.in_flight).count(),
-            dirty_all: has_unreconciled_dirty(&state.all),
-            dirty_model_count: state
-                .models
-                .values()
-                .filter(|s| has_unreconciled_dirty(s))
-                .count(),
-            last_all_reconciled_at: state.all.last_checked_rfc3339.clone(),
-            model_cooldown_seconds: self.model_cooldown.as_secs(),
-        }
-    }
 }
 
 fn has_unreconciled_dirty(scope_state: &ScopeRuntimeState) -> bool {
@@ -533,9 +507,7 @@ async fn fetch_expected_files_from_hf(primary: &PrimaryState, repo_id: &str) -> 
 }
 
 async fn fetch_model_kind_from_hf(primary: &PrimaryState, repo_id: &str) -> Option<String> {
-    let Some(ref client) = primary.hf_client else {
-        return None;
-    };
+    let client = primary.hf_client.as_ref()?;
 
     match client.get_model_info(repo_id).await {
         Ok(model) => {

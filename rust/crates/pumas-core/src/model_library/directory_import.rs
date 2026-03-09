@@ -415,7 +415,7 @@ fn merge_candidates(
     left
 }
 
-fn sort_candidates(candidates: &mut Vec<ImportPathCandidate>) {
+fn sort_candidates(candidates: &mut [ImportPathCandidate]) {
     candidates.sort_by(|left, right| left.path.cmp(&right.path));
 }
 

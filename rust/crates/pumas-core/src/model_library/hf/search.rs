@@ -513,8 +513,7 @@ impl HuggingFaceClient {
             let normalized = tag
                 .trim()
                 .to_lowercase()
-                .replace(' ', "-")
-                .replace('_', "-");
+                .replace([' ', '_'], "-");
             match normalized.as_str() {
                 "text-ranking" | "text-reranking" | "reranking" => {
                     return Some("text-ranking".to_string());

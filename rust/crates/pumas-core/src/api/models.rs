@@ -362,7 +362,7 @@ impl PumasApi {
     ) -> Vec<model_library::ImportPathClassification> {
         paths
             .iter()
-            .map(|path| model_library::classify_import_path(path))
+            .map(model_library::classify_import_path)
             .collect()
     }
 

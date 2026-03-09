@@ -6,7 +6,8 @@
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-green.svg)
 ![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
 
-![pumaslibrary0 3 0](https://github.com/user-attachments/assets/8b2f813d-f1f2-47ba-8035-12e09929bfc3)
+![banner](https://github.com/user-attachments/assets/be18cffc-b4fe-418b-a3b4-034ee0b35060)
+
 
 Available as a desktop GUI for end-users, and as a headless Rust crate with language bindings for embeddable API use.
 

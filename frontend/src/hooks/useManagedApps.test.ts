@@ -5,7 +5,6 @@ import { decorateManagedApps } from './useManagedApps';
 describe('decorateManagedApps', () => {
   it('prioritizes transition states over offline and error states', () => {
     const decorated = decorateManagedApps(DEFAULT_APPS, {
-      status: null,
       comfyui: {
         isRunning: false,
         isStarting: true,
@@ -34,7 +33,6 @@ describe('decorateManagedApps', () => {
 
   it('derives resource percentages for managed apps with memory data', () => {
     const decorated = decorateManagedApps(DEFAULT_APPS, {
-      status: null,
       systemResources: {
         cpu: { usage: 0 },
         gpu: { usage: 0, memory: 0, memory_total: 1000 },

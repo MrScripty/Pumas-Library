@@ -310,7 +310,18 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
       <div key={entry.path} className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
         <div
           className={`flex items-center gap-3 p-3 ${(hasMetadata || canShowEmbedded) ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
+          role={(hasMetadata || canShowEmbedded) ? 'button' : undefined}
+          tabIndex={(hasMetadata || canShowEmbedded) ? 0 : undefined}
+          aria-expanded={(hasMetadata || canShowEmbedded) ? isExpanded : undefined}
           onClick={(hasMetadata || canShowEmbedded) ? () => toggleMetadataExpand(entry.path) : undefined}
+          onKeyDown={(hasMetadata || canShowEmbedded)
+            ? (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  toggleMetadataExpand(entry.path);
+                }
+              }
+            : undefined}
         >
           {(hasMetadata || canShowEmbedded) ? (
             <button

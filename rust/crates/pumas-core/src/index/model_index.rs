@@ -2106,6 +2106,39 @@ mod tests {
     }
 
     #[test]
+    fn test_dependency_profile_upsert_is_noop_when_content_is_unchanged() {
+        let (index, _temp) = create_test_index();
+        let first_created_at = "2026-03-10T00:00:00Z".to_string();
+        let second_created_at = "2026-03-10T00:05:00Z".to_string();
+
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("ignored".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1"),
+                created_at: first_created_at.clone(),
+            })
+            .unwrap();
+
+        index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("still-ignored".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1"),
+                created_at: second_created_at,
+            })
+            .unwrap();
+
+        let persisted = index.get_dependency_profile("p1", 1).unwrap().unwrap();
+        assert_eq!(persisted.created_at, first_created_at);
+        assert_eq!(persisted.environment_kind, "python-venv");
+    }
+
+    #[test]
     fn test_dependency_binding_history_records_create_and_update() {
         let (index, _temp) = create_test_index();
         let now = chrono::Utc::now().to_rfc3339();

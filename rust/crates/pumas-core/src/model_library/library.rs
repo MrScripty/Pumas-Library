@@ -532,6 +532,7 @@ impl ModelLibrary {
 
     fn ensure_kittentts_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
         let created_at = chrono::Utc::now().to_rfc3339();
+        let attached_by = Some("model-runtime-autobind".to_string());
         let profile_spec = serde_json::json!({
             "python_packages": [
                 {
@@ -565,6 +566,23 @@ impl ModelLibrary {
                 created_at: created_at.clone(),
             })?;
 
+        let attached_at = match self.index.get_model_dependency_binding(binding_id)? {
+            Some(existing)
+                if runtime_binding_matches(
+                    &existing,
+                    model_id,
+                    KITTENTTS_PROFILE_ID,
+                    KITTENTTS_PROFILE_VERSION,
+                    Some(KITTENTTS_BACKEND_KEY),
+                    attached_by.as_deref(),
+                ) =>
+            {
+                return Ok(());
+            }
+            Some(existing) => existing.attached_at,
+            None => created_at.clone(),
+        };
+
         self.index
             .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
                 binding_id: binding_id.to_string(),
@@ -576,8 +594,8 @@ impl ModelLibrary {
                 platform_selector: None,
                 status: "active".to_string(),
                 priority: 100,
-                attached_by: Some("model-runtime-autobind".to_string()),
-                attached_at: created_at,
+                attached_by,
+                attached_at,
                 profile_hash: None,
                 environment_kind: None,
                 spec_json: None,
@@ -588,6 +606,7 @@ impl ModelLibrary {
 
     fn ensure_sd_turbo_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
         let created_at = chrono::Utc::now().to_rfc3339();
+        let attached_by = Some("model-runtime-autobind".to_string());
         let profile_spec = serde_json::json!({
             "python_packages": [
                 {
@@ -637,6 +656,23 @@ impl ModelLibrary {
                 created_at: created_at.clone(),
             })?;
 
+        let attached_at = match self.index.get_model_dependency_binding(binding_id)? {
+            Some(existing)
+                if runtime_binding_matches(
+                    &existing,
+                    model_id,
+                    SD_TURBO_PROFILE_ID,
+                    SD_TURBO_PROFILE_VERSION,
+                    Some(SD_TURBO_BACKEND_KEY),
+                    attached_by.as_deref(),
+                ) =>
+            {
+                return Ok(());
+            }
+            Some(existing) => existing.attached_at,
+            None => created_at.clone(),
+        };
+
         self.index
             .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
                 binding_id: binding_id.to_string(),
@@ -648,8 +684,8 @@ impl ModelLibrary {
                 platform_selector: None,
                 status: "active".to_string(),
                 priority: 100,
-                attached_by: Some("model-runtime-autobind".to_string()),
-                attached_at: created_at,
+                attached_by,
+                attached_at,
                 profile_hash: None,
                 environment_kind: None,
                 spec_json: None,
@@ -2371,6 +2407,25 @@ fn sd_turbo_runtime_binding_id(model_id: &str) -> String {
         "sd-turbo-runtime-{}",
         sanitize_binding_id_fragment(model_id)
     )
+}
+
+fn runtime_binding_matches(
+    binding: &ModelDependencyBindingRecord,
+    model_id: &str,
+    profile_id: &str,
+    profile_version: i64,
+    backend_key: Option<&str>,
+    attached_by: Option<&str>,
+) -> bool {
+    binding.model_id == model_id
+        && binding.profile_id == profile_id
+        && binding.profile_version == profile_version
+        && binding.binding_kind == "required_core"
+        && binding.backend_key.as_deref() == backend_key
+        && binding.platform_selector.is_none()
+        && binding.status == "active"
+        && binding.priority == 100
+        && binding.attached_by.as_deref() == attached_by
 }
 
 fn sanitize_binding_id_fragment(value: &str) -> String {
@@ -6188,6 +6243,31 @@ mod tests {
             .find(|setting| setting.key == "voice")
             .expect("persisted voice setting should exist");
         assert_eq!(persisted_voice.default.as_str(), Some("expr-voice-5-m"));
+
+        let binding_id = kittentts_runtime_binding_id(model_id);
+        let initial_binding = library
+            .index()
+            .get_model_dependency_binding(&binding_id)
+            .unwrap()
+            .unwrap();
+        let initial_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        library.index_model_dir(&model_dir).await.unwrap();
+        let rebound = library
+            .index()
+            .get_model_dependency_binding(&binding_id)
+            .unwrap()
+            .unwrap();
+        let rebound_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        assert_eq!(initial_history.len(), 1);
+        assert_eq!(rebound.attached_at, initial_binding.attached_at);
+        assert_eq!(rebound_history.len(), 1);
     }
 
     #[tokio::test]
@@ -6496,7 +6576,9 @@ mod tests {
 
         assert_eq!(
             normalize_path_separators(&canonicalize_display_path(&descriptor.entry_path)),
-            normalize_path_separators(&canonicalize_display_path(&bundle_root.display().to_string()))
+            normalize_path_separators(&canonicalize_display_path(
+                &bundle_root.display().to_string()
+            ))
         );
         assert_eq!(descriptor.storage_kind, StorageKind::ExternalReference);
         assert_eq!(descriptor.validation_state, AssetValidationState::Valid);
@@ -6695,6 +6777,31 @@ mod tests {
             .requirements
             .iter()
             .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1"));
+
+        let binding_id = sd_turbo_runtime_binding_id(model_id);
+        let initial_binding = library
+            .index()
+            .get_model_dependency_binding(&binding_id)
+            .unwrap()
+            .unwrap();
+        let initial_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        library.index_model_dir(&model_dir).await.unwrap();
+        let rebound = library
+            .index()
+            .get_model_dependency_binding(&binding_id)
+            .unwrap()
+            .unwrap();
+        let rebound_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        assert_eq!(initial_history.len(), 1);
+        assert_eq!(rebound.attached_at, initial_binding.attached_at);
+        assert_eq!(rebound_history.len(), 1);
     }
 
     #[tokio::test]

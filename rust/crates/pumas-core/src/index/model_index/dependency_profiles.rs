@@ -24,17 +24,19 @@ impl ModelIndex {
             &field_context,
         )?;
 
-        let existing: Option<(String, String)> = conn
+        let existing: Option<(String, String, Option<String>)> = conn
             .query_row(
-                "SELECT environment_kind, spec_json
+                "SELECT environment_kind, spec_json, profile_hash
                  FROM dependency_profiles
                  WHERE profile_id = ?1 AND profile_version = ?2",
                 params![record.profile_id, record.profile_version],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .optional()?;
 
-        if let Some((existing_environment_kind, existing_spec_json)) = existing {
+        if let Some((existing_environment_kind, existing_spec_json, existing_profile_hash)) =
+            existing
+        {
             let existing_normalized = parse_and_canonicalize_profile_spec(
                 &existing_spec_json,
                 &existing_environment_kind,
@@ -50,6 +52,12 @@ impl ModelIndex {
                         "dependency_profile_version_immutable: profile content for this (profile_id, profile_version) cannot change"
                             .to_string(),
                 });
+            }
+
+            if existing_profile_hash.as_deref() == Some(normalized.profile_hash.as_str())
+                && existing_spec_json == normalized.canonical_json
+            {
+                return Ok(());
             }
 
             conn.execute(
@@ -139,6 +147,57 @@ impl ModelIndex {
                         environment_kind: row.get(3)?,
                         spec_json: row.get(4)?,
                         created_at: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?;
+
+        Ok(record)
+    }
+
+    /// Load a dependency binding by `binding_id`.
+    pub fn get_model_dependency_binding(
+        &self,
+        binding_id: &str,
+    ) -> Result<Option<ModelDependencyBindingRecord>> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let record = conn
+            .query_row(
+                "SELECT
+                   binding_id,
+                   model_id,
+                   profile_id,
+                   profile_version,
+                   binding_kind,
+                   backend_key,
+                   platform_selector,
+                   status,
+                   priority,
+                   attached_by,
+                   attached_at
+                 FROM model_dependency_bindings
+                 WHERE binding_id = ?1",
+                params![binding_id],
+                |row| {
+                    Ok(ModelDependencyBindingRecord {
+                        binding_id: row.get(0)?,
+                        model_id: row.get(1)?,
+                        profile_id: row.get(2)?,
+                        profile_version: row.get(3)?,
+                        binding_kind: row.get(4)?,
+                        backend_key: row.get(5)?,
+                        platform_selector: row.get(6)?,
+                        status: row.get(7)?,
+                        priority: row.get(8)?,
+                        attached_by: row.get(9)?,
+                        attached_at: row.get(10)?,
+                        profile_hash: None,
+                        environment_kind: None,
+                        spec_json: None,
                     })
                 },
             )

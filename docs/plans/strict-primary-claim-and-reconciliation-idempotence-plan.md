@@ -58,6 +58,30 @@ as clients.
 - Model-library reconcile and index paths
 - Coding standards for planning, testing, tooling, and documentation
 
+### Affected Structured Contracts
+
+- Reconciliation scope and dirtiness contract
+- Watcher-to-reconcile event routing contract
+- Primary claim and startup lifecycle contract
+- SQLite-canonical model-state contract for derived `metadata.json`
+
+### Affected Persisted Artifacts
+
+- `models.db`, `models.db-wal`, `models.db-shm`
+- Per-model `metadata.json`
+- Dependency binding/profile/history tables
+- Registry instance-claim rows and launcher-root ownership records
+
+### Concurrency/Race-Risk Review
+
+- Startup claim, watcher startup, and reconcile scheduling must remain
+  single-owner per launcher root.
+- Watcher-triggered reconcile must not loop on Pumas-owned derived writes.
+- Dirty markers, cooldowns, and startup freshness must remain coherent when
+  watcher events overlap with direct API-triggered reconcile.
+- Any suppression or lifecycle state introduced for watcher idempotence must be
+  bounded, primary-owned, and cleaned up on shutdown.
+
 ### Risks
 
 | Risk | Impact | Mitigation |
@@ -86,6 +110,23 @@ as clients.
 - Regression coverage exists for unchanged reconcile and concurrent startup and
   claim behavior.
 
+## Ownership And Lifecycle Note
+
+- The winning primary owns watcher startup, reconcile scheduling, IPC server
+  startup, and any background repair work for its launcher root.
+- Client instances must not start primary-owned background work.
+- Startup repair work must be evidence-driven and skipped when the launcher
+  root is already clean.
+- Any watcher suppression for Pumas-owned derived writes must be in-memory,
+  primary-local, and automatically expired or cleared on shutdown.
+
+## Public Facade Preservation Note
+
+- Facade-first preservation is required for `PumasApi`, IPC handlers, and
+  UniFFI constructors unless a re-plan trigger is hit.
+- Internal startup/reconcile semantics may change to enforce idempotence and
+  singleton guarantees, but host-facing APIs should remain compatible.
+
 ## Milestones
 
 ### Milestone 1: Lock Runtime Contract
@@ -97,6 +138,10 @@ before implementation.
 - [ ] Record the strict runtime contract for single primary per launcher root.
 - [ ] Record the reconcile contract for unchanged imported models: no persisted
   side effects.
+- [ ] Record that SQLite is the source of truth and `metadata.json` is a
+  derived projection that should change only when derived content changes.
+- [ ] Define watcher handling for Pumas-owned derived writes and the ownership
+  and expiry rules for any suppression state.
 - [ ] Decide facade-first behavior for `PumasApi::new()`, `discover()`, and
   UniFFI constructors.
 - [ ] Add ownership and lifecycle notes for claim acquisition, background task
@@ -106,9 +151,10 @@ before implementation.
 
 **Verification:**
 - Plan review against `PLAN-STANDARDS.md`
+- Concurrency review against `CONCURRENCY-STANDARDS.md`
 - Cross-check contract against current architecture docs and startup code paths
 
-**Status:** In progress
+**Status:** Complete
 
 ### Milestone 2: Audit and Fix Reconcile Write Semantics
 
@@ -119,6 +165,10 @@ before implementation.
   projection, dependency profile persistence, dependency binding persistence,
   external validation refresh, and reclassify-triggered rewrites.
 - [ ] Classify each path as must-write or must-no-op when unchanged.
+- [ ] Add watcher self-write suppression so Pumas-owned derived metadata writes
+  do not re-dirty unchanged model scopes.
+- [ ] Add targeted reconcile prechecks so unchanged model scopes can exit
+  without index or reclassify work.
 - [ ] Implement no-op behavior for unchanged derived runtime state and other
   steady-state projections.
 - [ ] Add focused regressions for repeated reconcile on `kitten-tts`,
@@ -128,6 +178,7 @@ before implementation.
 
 **Verification:**
 - Targeted Rust unit and integration tests for repeated reconcile
+- Cross-layer acceptance coverage from watcher event to reconcile outcome
 - File and database state assertions showing no new writes on unchanged state
 - Existing formatting and tooling checks per repo standards
 
@@ -168,6 +219,8 @@ before implementation.
 - [ ] Update registry docs to describe claim semantics, recovery behavior, and
   client attachment expectations.
 - [ ] Document constructor semantics for embedders and host applications.
+- [ ] Update module READMEs for API and model-library directories so lifecycle,
+  invariants, and SQLite-canonical / derived-metadata contracts remain explicit.
 - [ ] Add troubleshooting guidance for DB lock symptoms, stale claims, and
   startup race diagnostics.
 - [ ] Ensure traceability pointers required by documentation standards are
@@ -185,6 +238,9 @@ before implementation.
 Update during implementation:
 - 2026-03-10: Plan created before continuing code changes so singleton and
   reconcile contracts are explicit in-repo.
+- 2026-03-11: Added explicit SQLite-canonical / derived-metadata contract,
+  watcher lifecycle ownership, and structured-contract coverage to align the
+  plan with Coding-Standards planning and documentation requirements.
 
 ## Commit Cadence Notes
 
@@ -218,6 +274,35 @@ Update during implementation:
   split-brain coordination.
 - Treat primary-owned lifecycle work as a formal invariant: watcher,
   reconciliation scheduler, and server registration start only after claim
+
+## Completion Summary
+
+### Completed
+
+- Milestone 1 planning contract capture and standards alignment updates.
+
+### Deviations
+
+- None yet.
+
+### Follow-Ups
+
+- Complete Milestone 2 watcher/reconcile idempotence implementation.
+- Complete Milestone 3 strict primary-claim enforcement.
+- Complete Milestone 4 architecture and consumer documentation alignment.
+
+### Verification Summary
+
+- Plan structure reviewed against `PLAN-STANDARDS.md`.
+- Lifecycle and race notes aligned with `CONCURRENCY-STANDARDS.md`.
+- Traceability expectations aligned with `DOCUMENTATION-STANDARDS.md`.
+
+### Traceability Links
+
+- Module README updated: `rust/crates/pumas-core/src/api/README.md`
+- Module README updated: `rust/crates/pumas-core/src/model_library/README.md`
+- ADR added/updated: N/A
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: pending implementation completion
   success.
 - Preserve public facades where possible, but prefer explicit behavior over
   silent fallback if compatibility conflicts with singleton safety.

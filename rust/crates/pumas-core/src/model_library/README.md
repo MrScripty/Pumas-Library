@@ -31,7 +31,17 @@ full-text search via SQLite FTS5.
 | `hf/` | HuggingFace helper submodule |
 | `CACHING.md` | Documentation for the caching strategy |
 
-## Design Decisions
+## Problem
+
+Provide a single backend-owned model registry that can import, classify, validate, index, and map models while preserving SQLite as the canonical persisted state for consumers and recovery flows.
+
+## Constraints
+- SQLite is the single source of truth for queryable model state.
+- `metadata.json` is a derived on-disk projection and must not become a competing authority.
+- Startup, watcher, and reconcile flows must avoid steady-state churn on unchanged libraries.
+- Download recovery, orphan adoption, and external-reference assets must reuse the same model-state pipeline.
+
+## Decision
 
 - **Phased Mutation** for library merge: Gather (read-only) -> Validate -> Move -> Index -> Cleanup.
   This ensures no data loss if any phase fails.
@@ -52,6 +62,21 @@ full-text search via SQLite FTS5.
 - **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
   through the model library before import so bundle/container decisions stay deterministic.
 
+## Alternatives Rejected
+- File-first source of truth with SQLite as a cache: rejected because recovery, partial-download handling, and query consistency would depend on repeated filesystem projection.
+- Separate registries for downloaded, external, and imported models: rejected because classification and reconcile behavior would drift across model lifecycles.
+
+## Invariants
+- SQLite remains canonical for persisted model state and query behavior.
+- `metadata.json` is a derived projection that should change only when derived model content changes.
+- Watcher-triggered reconcile must not loop on Pumas-owned derived writes.
+- Duplicate cleanup, reclassification, and index rebuild must be idempotent on unchanged libraries.
+
+## Revisit Triggers
+- A second persisted source of truth is introduced for model-state queries.
+- External tools need to author canonical state outside SQLite.
+- Idempotence or startup-latency requirements cannot be met without schema or architecture changes.
+
 ## Dependencies
 
 ### Internal
@@ -68,6 +93,11 @@ full-text search via SQLite FTS5.
 - `blake3` / `sha2` - Hash computation
 - `regex` - Shard pattern detection
 
+## Related ADRs
+- None identified as of 2026-03-11.
+- Reason: the SQLite-canonical / derived-metadata contract is currently recorded in implementation plans and module documentation rather than a standalone ADR.
+- Revisit trigger: another subsystem or repository starts depending on these persistence semantics as a formal cross-team contract.
+
 ## API Consumer Contract
 
 - Metadata payloads may include `recommended_backend` as an optional runtime hint.
@@ -81,9 +111,8 @@ full-text search via SQLite FTS5.
 
 ## Structured Producer Contract
 
-- `metadata.json` under the library root remains the canonical persisted model-record artifact.
-- SQLite/indexed metadata remains the canonical query surface for persisted evidence and latest
-  classification state; `metadata.json` is the on-disk projection for the same record.
+- SQLite/indexed metadata is the canonical persisted model state and query surface.
+- `metadata.json` is a derived on-disk projection of the same model record and must not become a competing source of truth.
 - External-reference assets extend persisted metadata with `source_path`, `entry_path`,
   `storage_kind`, `bundle_format`, `pipeline_class`, `import_state`, and asset validation fields.
 - Download flows may create a preliminary metadata record with `match_source = download_partial`
@@ -92,5 +121,9 @@ full-text search via SQLite FTS5.
   `model_type` stays separate so future resolver improvements do not destroy source evidence.
 - These fields describe asset ownership and current executable health; they must not create a
   second source-of-truth outside the model-library metadata/index flow.
+- Fields intentionally volatile in derived artifacts include timestamps and validation state that
+  are refreshed only when underlying derived content changes.
+- Regeneration rule: when SQLite-backed model state changes, regenerate `metadata.json` only if the
+  projected content differs.
 - Compatibility expectation for milestone one is append-only: new optional fields may be added,
   but existing file-based model records must remain readable without migration-only consumers.

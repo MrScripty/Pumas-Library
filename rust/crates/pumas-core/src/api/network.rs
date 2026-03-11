@@ -14,26 +14,84 @@ impl PumasApi {
 
     /// Check if network is currently online.
     pub fn is_online(&self) -> bool {
+        if self.try_client().is_some() {
+            return self.call_client_method_blocking_or_default("is_online", serde_json::json!({}));
+        }
+
         self.primary().network_manager.is_online()
     }
 
     /// Get current network connectivity state.
     pub fn connectivity_state(&self) -> network::ConnectivityState {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_blocking("connectivity_state", serde_json::json!({}))
+                .unwrap_or_else(|err| {
+                    tracing::warn!("Failed to proxy connectivity_state over IPC: {}", err);
+                    network::ConnectivityState::Unknown
+                });
+        }
+
         self.primary().network_manager.connectivity()
     }
 
     /// Check network connectivity (performs actual probe).
     pub async fn check_connectivity(&self) -> network::ConnectivityState {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("check_connectivity", serde_json::json!({}))
+                .await
+                .unwrap_or_else(|err| {
+                    tracing::warn!("Failed to proxy check_connectivity over IPC: {}", err);
+                    network::ConnectivityState::Unknown
+                });
+        }
+
         self.primary().network_manager.check_connectivity().await
     }
 
     /// Get detailed network status including circuit breaker states.
     pub async fn network_status(&self) -> network::NetworkStatus {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("network_status", serde_json::json!({}))
+                .await
+                .unwrap_or_else(|err| {
+                    tracing::warn!("Failed to proxy network_status over IPC: {}", err);
+                    network::NetworkStatus {
+                        connectivity: network::ConnectivityState::Unknown,
+                        last_check: None,
+                        last_offline: None,
+                        circuit_breakers: vec![],
+                        registered_sources: vec![],
+                        monitoring_active: false,
+                    }
+                });
+        }
+
         self.primary().network_manager.status().await
     }
 
     /// Get frontend-facing network status counters and circuit states.
     pub async fn get_network_status_response(&self) -> models::NetworkStatusResponse {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_network_status_response", serde_json::json!({}))
+                .await
+                .unwrap_or_else(|err| models::NetworkStatusResponse {
+                    success: false,
+                    error: Some(err.to_string()),
+                    total_requests: 0,
+                    successful_requests: 0,
+                    failed_requests: 0,
+                    circuit_breaker_rejections: 0,
+                    retries: 0,
+                    success_rate: 0.0,
+                    circuit_states: std::collections::HashMap::new(),
+                    is_offline: false,
+                });
+        }
+
         let status = self.network_status().await;
 
         let mut total_successful_requests: u64 = 0;

@@ -10,6 +10,7 @@
 use crate::config::RegistryConfig;
 use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
+use std::io::{Read, Write};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// JSON-RPC 2.0 request for IPC.
@@ -120,6 +121,43 @@ pub async fn write_frame<W: AsyncWriteExt + Unpin>(writer: &mut W, payload: &[u8
     writer.write_all(&len.to_be_bytes()).await?;
     writer.write_all(payload).await?;
     writer.flush().await?;
+    Ok(())
+}
+
+/// Read a length-prefixed frame from a blocking reader.
+pub fn read_frame_blocking<R: Read>(reader: &mut R) -> Result<Option<Vec<u8>>> {
+    let mut len_buf = [0u8; 4];
+    match reader.read_exact(&mut len_buf) {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+        Err(e) => return Err(e.into()),
+    }
+
+    let len = u32::from_be_bytes(len_buf) as usize;
+
+    if len > RegistryConfig::MAX_IPC_MESSAGE_SIZE {
+        return Err(PumasError::Validation {
+            field: "ipc_frame".to_string(),
+            message: format!(
+                "IPC message size {} exceeds maximum {}",
+                len,
+                RegistryConfig::MAX_IPC_MESSAGE_SIZE
+            ),
+        });
+    }
+
+    let mut payload = vec![0u8; len];
+    reader.read_exact(&mut payload)?;
+
+    Ok(Some(payload))
+}
+
+/// Write a length-prefixed frame to a blocking writer.
+pub fn write_frame_blocking<W: Write>(writer: &mut W, payload: &[u8]) -> Result<()> {
+    let len = payload.len() as u32;
+    writer.write_all(&len.to_be_bytes())?;
+    writer.write_all(payload)?;
+    writer.flush()?;
     Ok(())
 }
 

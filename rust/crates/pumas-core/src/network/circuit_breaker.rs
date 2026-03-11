@@ -6,13 +6,14 @@
 //! - HALF_OPEN: Testing recovery, limited requests allowed
 
 use crate::config::NetworkConfig;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::RwLock;
 use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 
 /// Circuit breaker states.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CircuitState {
     /// Normal operation - requests flow through.
     Closed,
@@ -231,7 +232,7 @@ impl CircuitBreaker {
 }
 
 /// Statistics about a circuit breaker.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircuitBreakerStats {
     pub domain: String,
     pub state: CircuitState,

@@ -8,7 +8,9 @@
 //! The client uses a tokio `Mutex` to serialize access to the TCP stream,
 //! allowing safe concurrent use from multiple async tasks.
 
-use super::protocol::{read_frame, write_frame, IpcRequest, IpcResponse};
+use super::protocol::{
+    read_frame, read_frame_blocking, write_frame, write_frame_blocking, IpcRequest, IpcResponse,
+};
 use crate::config::RegistryConfig;
 use crate::{PumasError, Result};
 use std::net::SocketAddr;
@@ -82,6 +84,73 @@ impl IpcClient {
         // Read response
         let response_bytes = read_frame(&mut reader)
             .await
+            .map_err(|_| PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?
+            .ok_or(PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?;
+
+        let response: IpcResponse =
+            serde_json::from_slice(&response_bytes).map_err(|e| PumasError::Json {
+                message: format!("Failed to parse IPC response: {}", e),
+                source: Some(e),
+            })?;
+
+        if let Some(err) = response.error {
+            return Err(PumasError::Other(err.message));
+        }
+
+        response
+            .result
+            .ok_or_else(|| PumasError::Other("IPC response missing result".to_string()))
+    }
+
+    /// Call a JSON-RPC method on the primary instance using a fresh blocking socket.
+    pub fn call_blocking(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let request = IpcRequest::new(method, params, id);
+        let request_bytes = serde_json::to_vec(&request)?;
+
+        let mut stream =
+            std::net::TcpStream::connect_timeout(&self.addr, RegistryConfig::IPC_CONNECT_TIMEOUT)
+                .map_err(|_| PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?;
+        stream
+            .set_nodelay(true)
+            .map_err(|_| PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?;
+        stream
+            .set_read_timeout(Some(RegistryConfig::PRIMARY_READY_TIMEOUT))
+            .map_err(|_| PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?;
+        stream
+            .set_write_timeout(Some(RegistryConfig::PRIMARY_READY_TIMEOUT))
+            .map_err(|_| PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            })?;
+
+        write_frame_blocking(&mut stream, &request_bytes).map_err(|_| {
+            PumasError::SharedInstanceLost {
+                pid: self.primary_pid,
+                port: self.primary_port,
+            }
+        })?;
+
+        let response_bytes = read_frame_blocking(&mut stream)
             .map_err(|_| PumasError::SharedInstanceLost {
                 pid: self.primary_pid,
                 port: self.primary_port,
@@ -186,6 +255,27 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(result, serde_json::json!(7));
+
+        handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn test_client_call_blocking_success() {
+        let Some(mut handle) = start_test_server().await else {
+            return;
+        };
+
+        let client = IpcClient::connect(handle.addr(), std::process::id())
+            .await
+            .unwrap();
+
+        let result = tokio::task::spawn_blocking(move || {
+            client.call_blocking("ping", serde_json::json!({}))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(result, serde_json::json!("pong"));
 
         handle.shutdown();
     }

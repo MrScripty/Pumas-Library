@@ -178,28 +178,11 @@ impl PumasApi {
                 "Blocking IPC method {method} requested on a primary instance"
             ))
         })?;
-        let client = client.clone();
-        let method = method.to_string();
-        let panic_method = method.clone();
-        std::thread::spawn(move || {
-            let runtime = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .map_err(|err| {
-                    PumasError::Other(format!(
-                        "Failed to build blocking IPC runtime for {method}: {err}"
-                    ))
-                })?;
-            runtime.block_on(async move {
-                let value = client.call(&method, params).await?;
-                serde_json::from_value(value).map_err(|err| PumasError::Json {
-                    message: format!("Failed to decode IPC response for {method}: {err}"),
-                    source: Some(err),
-                })
-            })
+        let value = client.call_blocking(method, params)?;
+        serde_json::from_value(value).map_err(|err| PumasError::Json {
+            message: format!("Failed to decode IPC response for {method}: {err}"),
+            source: Some(err),
         })
-        .join()
-        .map_err(|_| PumasError::Other(format!("Blocking IPC call {panic_method} panicked")))?
     }
 
     fn call_client_method_blocking_or_default<T>(
@@ -509,16 +492,46 @@ mod tests {
         let client = PumasApi::discover().await.unwrap();
         assert!(!client.is_primary());
 
-        let models = client.list_models().await.unwrap();
+        let models = tokio::time::timeout(std::time::Duration::from_secs(10), client.list_models())
+            .await
+            .expect("list_models timed out")
+            .unwrap();
         assert!(models.is_empty());
 
-        let search = client.search_models("", 10, 0).await.unwrap();
+        let search = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client.search_models("", 10, 0),
+        )
+        .await
+        .expect("search_models timed out")
+        .unwrap();
         assert!(search.models.is_empty());
 
-        let status = client.get_library_status().await.unwrap();
+        let status = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client.get_library_status(),
+        )
+        .await
+        .expect("get_library_status timed out")
+        .unwrap();
         assert!(status.success);
 
-        let disk = client.get_disk_space().await.unwrap();
+        let processes = tokio::time::timeout(
+            std::time::Duration::from_secs(10),
+            client.get_running_processes(),
+        )
+        .await
+        .expect("get_running_processes timed out");
+        assert!(processes.is_empty());
+
+        let _ = client.is_online();
+        let _ = client.list_conversions();
+
+        let disk =
+            tokio::time::timeout(std::time::Duration::from_secs(10), client.get_disk_space())
+                .await
+                .expect("get_disk_space timed out")
+                .unwrap();
         assert!(disk.success);
     }
 }

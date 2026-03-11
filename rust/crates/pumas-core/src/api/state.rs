@@ -744,6 +744,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(tree)?)
             }
             "is_online" => Ok(serde_json::to_value(self.network_manager.is_online())?),
+            "connectivity_state" => Ok(serde_json::to_value(self.network_manager.connectivity())?),
+            "check_connectivity" => {
+                let state = self.network_manager.check_connectivity().await;
+                Ok(serde_json::to_value(state)?)
+            }
+            "network_status" => {
+                let status = self.network_manager.status().await;
+                Ok(serde_json::to_value(status)?)
+            }
+            "get_network_status_response" => {
+                let response = network_status_response(self).await;
+                Ok(serde_json::to_value(response)?)
+            }
             "get_disk_space" => {
                 let response = disk_space_response(self)?;
                 Ok(serde_json::to_value(response)?)
@@ -756,16 +769,119 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let response = system_resources_response(self).await?;
                 Ok(serde_json::to_value(response)?)
             }
+            "is_comfyui_running" => Ok(serde_json::to_value(is_comfyui_running(self).await)?),
+            "get_running_processes" => {
+                let processes = get_running_processes(self).await;
+                Ok(serde_json::to_value(processes)?)
+            }
+            "set_process_version_paths" => {
+                let version_paths: std::collections::HashMap<String, PathBuf> =
+                    serde_json::from_value(params["version_paths"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid version_paths: {e}"),
+                        }
+                    })?;
+                set_process_version_paths(self, version_paths).await;
+                Ok(serde_json::json!({ "success": true }))
+            }
+            "stop_comfyui" => {
+                let stopped = stop_comfyui(self).await?;
+                Ok(serde_json::to_value(stopped)?)
+            }
+            "is_ollama_running" => Ok(serde_json::to_value(is_ollama_running(self).await)?),
+            "stop_ollama" => {
+                let stopped = stop_ollama(self).await?;
+                Ok(serde_json::to_value(stopped)?)
+            }
+            "launch_ollama" => {
+                let tag = params["tag"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "tag is required".to_string(),
+                    })?;
+                let version_dir =
+                    params["version_dir"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_dir is required".to_string(),
+                        })?;
+                let response = launch_ollama(self, tag, Path::new(version_dir)).await?;
+                Ok(serde_json::to_value(response)?)
+            }
             "is_torch_running" => Ok(serde_json::to_value(is_torch_running(self).await)?),
             "stop_torch" => {
                 let stopped = stop_torch(self).await?;
                 Ok(serde_json::to_value(stopped)?)
+            }
+            "launch_torch" => {
+                let tag = params["tag"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "tag is required".to_string(),
+                    })?;
+                let version_dir =
+                    params["version_dir"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_dir is required".to_string(),
+                        })?;
+                let response = launch_torch(self, tag, Path::new(version_dir)).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "launch_version" => {
+                let tag = params["tag"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "tag is required".to_string(),
+                    })?;
+                let version_dir =
+                    params["version_dir"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_dir is required".to_string(),
+                        })?;
+                let response = launch_version(self, tag, Path::new(version_dir)).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "get_last_launch_log" => {
+                let log = get_last_launch_log(self).await;
+                Ok(serde_json::to_value(log)?)
+            }
+            "get_last_launch_error" => {
+                let error = get_last_launch_error(self).await;
+                Ok(serde_json::to_value(error)?)
             }
             "get_status" => Ok(serde_json::json!({
                 "success": true,
                 "version": env!("CARGO_PKG_VERSION"),
                 "is_primary": true,
             })),
+            "has_background_fetch_completed" => {
+                let completed = self._state.read().await.background_fetch_completed;
+                Ok(serde_json::to_value(completed)?)
+            }
+            "reset_background_fetch_flag" => {
+                self._state.write().await.background_fetch_completed = false;
+                Ok(serde_json::json!({ "success": true }))
+            }
+            "get_launcher_version" => {
+                let updater =
+                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
+                Ok(updater.get_version_info())
+            }
+            "check_launcher_updates" => {
+                let force_refresh = params["force_refresh"].as_bool().unwrap_or(false);
+                let updater =
+                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
+                let result = updater.check_for_updates(force_refresh).await;
+                Ok(serde_json::to_value(result)?)
+            }
+            "apply_launcher_update" => {
+                let updater =
+                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
+                let result = updater.apply_update().await;
+                Ok(serde_json::to_value(result)?)
+            }
             "ping" => Ok(serde_json::json!("pong")),
             // Conversion methods
             "start_conversion" => {
@@ -1771,6 +1887,45 @@ async fn system_resources_response(
     })
 }
 
+async fn network_status_response(primary: &PrimaryState) -> models::NetworkStatusResponse {
+    let status = primary.network_manager.status().await;
+
+    let mut total_successful_requests: u64 = 0;
+    let mut total_failed_requests: u64 = 0;
+    let mut circuit_states = std::collections::HashMap::new();
+    let mut any_open_circuit = false;
+
+    for breaker in &status.circuit_breakers {
+        total_successful_requests += breaker.total_successes;
+        total_failed_requests += breaker.total_failures;
+        let state = breaker.state.to_string();
+        if state == "OPEN" {
+            any_open_circuit = true;
+        }
+        circuit_states.insert(breaker.domain.clone(), state);
+    }
+
+    let total_requests = total_successful_requests + total_failed_requests;
+    let success_rate = if total_requests > 0 {
+        total_successful_requests as f64 / total_requests as f64
+    } else {
+        1.0
+    };
+
+    models::NetworkStatusResponse {
+        success: true,
+        error: None,
+        total_requests,
+        successful_requests: total_successful_requests,
+        failed_requests: total_failed_requests,
+        circuit_breaker_rejections: 0,
+        retries: 0,
+        success_rate,
+        circuit_states,
+        is_offline: status.connectivity == network::ConnectivityState::Offline || any_open_circuit,
+    }
+}
+
 async fn preview_model_mapping_response(
     primary: &PrimaryState,
     version_tag: &str,
@@ -1923,6 +2078,125 @@ async fn sync_with_resolutions_response(
     })
 }
 
+async fn is_comfyui_running(primary: &PrimaryState) -> bool {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.is_running()
+    } else {
+        false
+    }
+}
+
+async fn get_running_processes(primary: &PrimaryState) -> Vec<process::ProcessInfo> {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.get_processes_with_resources()
+    } else {
+        vec![]
+    }
+}
+
+async fn set_process_version_paths(
+    primary: &PrimaryState,
+    version_paths: std::collections::HashMap<String, PathBuf>,
+) {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.set_version_paths(version_paths);
+    } else {
+        tracing::warn!("PumasApi.set_process_version_paths: process manager not initialized");
+    }
+}
+
+async fn stop_comfyui(primary: &PrimaryState) -> std::result::Result<bool, PumasError> {
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.stop_all())
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join stop_comfyui task: {}", e)))?
+    } else {
+        Ok(false)
+    }
+}
+
+async fn is_ollama_running(primary: &PrimaryState) -> bool {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.is_ollama_running()
+    } else {
+        false
+    }
+}
+
+async fn stop_ollama(primary: &PrimaryState) -> std::result::Result<bool, PumasError> {
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.stop_ollama())
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join stop_ollama task: {}", e)))?
+    } else {
+        Ok(false)
+    }
+}
+
+async fn launch_ollama(
+    primary: &PrimaryState,
+    tag: &str,
+    version_dir: &Path,
+) -> std::result::Result<models::LaunchResponse, PumasError> {
+    if !version_dir.exists() {
+        return Ok(models::LaunchResponse {
+            success: false,
+            error: Some(format!(
+                "Version directory does not exist: {}",
+                version_dir.display()
+            )),
+            log_path: None,
+            ready: None,
+        });
+    }
+
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(pm) = process_manager {
+        let log_dir = launcher_root_from_primary(primary)
+            .join("launcher-data")
+            .join("logs");
+        let tag = tag.to_string();
+        let version_dir = version_dir.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            pm.launch_ollama(&tag, &version_dir, Some(&log_dir))
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join launch_ollama task: {}", e)))?;
+
+        Ok(models::LaunchResponse {
+            success: result.success,
+            error: result.error,
+            log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+            ready: Some(result.ready),
+        })
+    } else {
+        Ok(models::LaunchResponse {
+            success: false,
+            error: Some("Process manager not initialized".to_string()),
+            log_path: None,
+            ready: None,
+        })
+    }
+}
+
 async fn is_torch_running(primary: &PrimaryState) -> bool {
     let mgr_lock = primary.process_manager.read().await;
     if let Some(ref mgr) = *mgr_lock {
@@ -1944,5 +2218,124 @@ async fn stop_torch(primary: &PrimaryState) -> std::result::Result<bool, PumasEr
             .map_err(|e| PumasError::Other(format!("Failed to join stop_torch task: {}", e)))?
     } else {
         Ok(false)
+    }
+}
+
+async fn launch_torch(
+    primary: &PrimaryState,
+    tag: &str,
+    version_dir: &Path,
+) -> std::result::Result<models::LaunchResponse, PumasError> {
+    if !version_dir.exists() {
+        return Ok(models::LaunchResponse {
+            success: false,
+            error: Some(format!(
+                "Version directory does not exist: {}",
+                version_dir.display()
+            )),
+            log_path: None,
+            ready: None,
+        });
+    }
+
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(pm) = process_manager {
+        let log_dir = launcher_root_from_primary(primary)
+            .join("launcher-data")
+            .join("logs");
+        let tag = tag.to_string();
+        let version_dir = version_dir.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            pm.launch_torch(&tag, &version_dir, Some(&log_dir))
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join launch_torch task: {}", e)))?;
+
+        Ok(models::LaunchResponse {
+            success: result.success,
+            error: result.error,
+            log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+            ready: Some(result.ready),
+        })
+    } else {
+        Ok(models::LaunchResponse {
+            success: false,
+            error: Some("Process manager not initialized".to_string()),
+            log_path: None,
+            ready: None,
+        })
+    }
+}
+
+async fn launch_version(
+    primary: &PrimaryState,
+    tag: &str,
+    version_dir: &Path,
+) -> std::result::Result<models::LaunchResponse, PumasError> {
+    if !version_dir.exists() {
+        return Ok(models::LaunchResponse {
+            success: false,
+            error: Some(format!(
+                "Version directory does not exist: {}",
+                version_dir.display()
+            )),
+            log_path: None,
+            ready: None,
+        });
+    }
+
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(pm) = process_manager {
+        let log_dir = launcher_root_from_primary(primary)
+            .join("launcher-data")
+            .join("logs");
+        let tag = tag.to_string();
+        let version_dir = version_dir.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            pm.launch_version(&tag, &version_dir, Some(&log_dir))
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join launch_version task: {}", e)))?;
+
+        Ok(models::LaunchResponse {
+            success: result.success,
+            error: result.error,
+            log_path: result.log_path.map(|p| p.to_string_lossy().to_string()),
+            ready: Some(result.ready),
+        })
+    } else {
+        Ok(models::LaunchResponse {
+            success: false,
+            error: Some("Process manager not initialized".to_string()),
+            log_path: None,
+            ready: None,
+        })
+    }
+}
+
+async fn get_last_launch_log(primary: &PrimaryState) -> Option<String> {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.last_launch_log()
+            .map(|p| p.to_string_lossy().to_string())
+    } else {
+        None
+    }
+}
+
+async fn get_last_launch_error(primary: &PrimaryState) -> Option<String> {
+    let mgr_lock = primary.process_manager.read().await;
+    if let Some(ref mgr) = *mgr_lock {
+        mgr.last_launch_error()
+    } else {
+        None
     }
 }

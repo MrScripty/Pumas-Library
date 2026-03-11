@@ -4,6 +4,7 @@ use super::detection::{DetectedProcess, ProcessDetector, ProcessSource};
 use super::launcher::{BinaryLaunchConfig, LaunchConfig, LaunchResult, ProcessLauncher};
 use crate::error::Result;
 use crate::system::{ProcessResources, ResourceTracker};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -11,7 +12,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use tracing::{error, info, warn};
 
 /// Process with resource information.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProcessInfo {
     /// Process ID.
     pub pid: u32,

@@ -289,6 +289,15 @@ impl PumasApi {
 
     /// Check if background fetch has completed.
     pub async fn has_background_fetch_completed(&self) -> bool {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default(
+                    "has_background_fetch_completed",
+                    serde_json::json!({}),
+                )
+                .await;
+        }
+
         self.primary()
             ._state
             .read()
@@ -298,6 +307,19 @@ impl PumasApi {
 
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
+        if self.try_client().is_some() {
+            let result: Result<serde_json::Value> = self
+                .call_client_method("reset_background_fetch_flag", serde_json::json!({}))
+                .await;
+            if let Err(err) = result {
+                tracing::warn!(
+                    "Failed to proxy reset_background_fetch_flag over IPC: {}",
+                    err
+                );
+            }
+            return;
+        }
+
         self.primary()
             ._state
             .write()
@@ -311,18 +333,56 @@ impl PumasApi {
 
     /// Get launcher version information.
     pub fn get_launcher_version(&self) -> serde_json::Value {
+        if self.try_client().is_some() {
+            return self.call_client_method_blocking_or_default(
+                "get_launcher_version",
+                serde_json::json!({}),
+            );
+        }
+
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.get_version_info()
     }
 
     /// Check for launcher updates via GitHub.
     pub async fn check_launcher_updates(&self, force_refresh: bool) -> launcher::UpdateCheckResult {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "check_launcher_updates",
+                    serde_json::json!({ "force_refresh": force_refresh }),
+                )
+                .await
+                .unwrap_or_else(|err| launcher::UpdateCheckResult {
+                    has_update: false,
+                    current_commit: String::new(),
+                    latest_commit: String::new(),
+                    commits_behind: 0,
+                    commits: vec![],
+                    branch: String::new(),
+                    error: Some(err.to_string()),
+                });
+        }
+
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.check_for_updates(force_refresh).await
     }
 
     /// Apply launcher update by pulling latest changes and rebuilding.
     pub async fn apply_launcher_update(&self) -> launcher::UpdateApplyResult {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("apply_launcher_update", serde_json::json!({}))
+                .await
+                .unwrap_or_else(|err| launcher::UpdateApplyResult {
+                    success: false,
+                    message: None,
+                    new_commit: None,
+                    previous_commit: None,
+                    error: Some(err.to_string()),
+                });
+        }
+
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.apply_update().await
     }

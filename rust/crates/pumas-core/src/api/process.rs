@@ -12,6 +12,12 @@ impl PumasApi {
 
     /// Check if ComfyUI is currently running.
     pub async fn is_comfyui_running(&self) -> bool {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("is_comfyui_running", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.is_running()
@@ -22,6 +28,12 @@ impl PumasApi {
 
     /// Get running processes with resource information.
     pub async fn get_running_processes(&self) -> Vec<process::ProcessInfo> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("get_running_processes", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.get_processes_with_resources()
@@ -39,6 +51,22 @@ impl PumasApi {
         &self,
         version_paths: std::collections::HashMap<String, std::path::PathBuf>,
     ) {
+        if self.try_client().is_some() {
+            let result: Result<serde_json::Value> = self
+                .call_client_method(
+                    "set_process_version_paths",
+                    serde_json::json!({ "version_paths": version_paths }),
+                )
+                .await;
+            if let Err(err) = result {
+                tracing::warn!(
+                    "Failed to proxy set_process_version_paths over IPC: {}",
+                    err
+                );
+            }
+            return;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.set_version_paths(version_paths);
@@ -49,6 +77,12 @@ impl PumasApi {
 
     /// Stop all running ComfyUI processes.
     pub async fn stop_comfyui(&self) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("stop_comfyui", serde_json::json!({}))
+                .await;
+        }
+
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -67,6 +101,12 @@ impl PumasApi {
 
     /// Check if Ollama is currently running.
     pub async fn is_ollama_running(&self) -> bool {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("is_ollama_running", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.is_ollama_running()
@@ -77,6 +117,12 @@ impl PumasApi {
 
     /// Stop Ollama processes.
     pub async fn stop_ollama(&self) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("stop_ollama", serde_json::json!({}))
+                .await;
+        }
+
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -100,6 +146,18 @@ impl PumasApi {
         tag: &str,
         version_dir: &std::path::Path,
     ) -> Result<models::LaunchResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "launch_ollama",
+                    serde_json::json!({
+                        "tag": tag,
+                        "version_dir": version_dir,
+                    }),
+                )
+                .await;
+        }
+
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
@@ -146,6 +204,12 @@ impl PumasApi {
 
     /// Check if the Torch inference server is currently running.
     pub async fn is_torch_running(&self) -> bool {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("is_torch_running", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.is_torch_running()
@@ -156,6 +220,12 @@ impl PumasApi {
 
     /// Stop the Torch inference server.
     pub async fn stop_torch(&self) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("stop_torch", serde_json::json!({}))
+                .await;
+        }
+
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -179,6 +249,18 @@ impl PumasApi {
         tag: &str,
         version_dir: &std::path::Path,
     ) -> Result<models::LaunchResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "launch_torch",
+                    serde_json::json!({
+                        "tag": tag,
+                        "version_dir": version_dir,
+                    }),
+                )
+                .await;
+        }
+
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
@@ -232,6 +314,18 @@ impl PumasApi {
         tag: &str,
         version_dir: &std::path::Path,
     ) -> Result<models::LaunchResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "launch_version",
+                    serde_json::json!({
+                        "tag": tag,
+                        "version_dir": version_dir,
+                    }),
+                )
+                .await;
+        }
+
         if !version_dir.exists() {
             return Ok(models::LaunchResponse {
                 success: false,
@@ -278,6 +372,12 @@ impl PumasApi {
 
     /// Get the last launch log path.
     pub async fn get_last_launch_log(&self) -> Option<String> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("get_last_launch_log", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_log()
@@ -289,6 +389,12 @@ impl PumasApi {
 
     /// Get the last launch error.
     pub async fn get_last_launch_error(&self) -> Option<String> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("get_last_launch_error", serde_json::json!({}))
+                .await;
+        }
+
         let mgr_lock = self.primary().process_manager.read().await;
         if let Some(ref mgr) = *mgr_lock {
             mgr.last_launch_error()

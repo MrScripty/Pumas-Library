@@ -1,13 +1,14 @@
 //! Process detection for ComfyUI and other managed applications.
 
 use crate::platform;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::debug;
 
 /// How the process was detected.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ProcessSource {
     /// Detected via PID file.
     PidFile,
@@ -16,7 +17,7 @@ pub enum ProcessSource {
 }
 
 /// Information about a detected process.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DetectedProcess {
     /// Process ID.
     pub pid: u32,

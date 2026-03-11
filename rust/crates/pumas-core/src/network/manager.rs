@@ -11,6 +11,7 @@ use crate::network::circuit_breaker::{CircuitBreaker, CircuitBreakerStats};
 use crate::network::client::HttpClient;
 use crate::network::web_source::DynWebSource;
 use crate::{PumasError, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use tokio::sync::RwLock;
 use tracing::{debug, info, warn};
 
 /// Network connectivity state.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ConnectivityState {
     /// Network is available.
     Online = 0,
@@ -521,7 +522,7 @@ impl NetworkManager {
 }
 
 /// Network status summary.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkStatus {
     pub connectivity: ConnectivityState,
     pub last_check: Option<Duration>,

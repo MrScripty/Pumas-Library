@@ -113,7 +113,10 @@ fn start_primary_background_work(
                     bundle_format: None,
                     pipeline_class: None,
                 };
-                match client.start_download(&request, &recovery.model_dir).await {
+                match client
+                    .start_download(&request, &recovery.model_dir, None)
+                    .await
+                {
                     Ok(id) => {
                         tracing::info!(
                             "Started shard recovery download {} for repo {}",
@@ -171,7 +174,7 @@ fn start_primary_background_work(
                     bundle_format: None,
                     pipeline_class: None,
                 };
-                match client.start_download(&request, &item.model_dir).await {
+                match client.start_download(&request, &item.model_dir, None).await {
                     Ok(id) => {
                         tracing::info!(
                             "Started interrupted download recovery {} for repo {}",
@@ -416,6 +419,23 @@ impl PumasApiBuilder {
 
         // Wire download completion -> in-place import (metadata + indexing)
         if let Some(ref mut client) = hf_client {
+            let lib = model_library.clone();
+            client.set_aux_complete_callback(std::sync::Arc::new(
+                move |info: model_library::AuxFilesCompleteInfo| {
+                    let lib = lib.clone();
+                    tokio::spawn(async move {
+                        let importer = model_library::ModelImporter::new(lib);
+                        if let Err(err) = importer.upsert_download_metadata_stub(&info).await {
+                            tracing::warn!(
+                                "Failed to persist partial download metadata for {}: {}",
+                                info.download_id,
+                                err
+                            );
+                        }
+                    });
+                },
+            ));
+
             let lib = model_library.clone();
             client.set_completion_callback(std::sync::Arc::new(
                 move |info: model_library::DownloadCompletionInfo| {

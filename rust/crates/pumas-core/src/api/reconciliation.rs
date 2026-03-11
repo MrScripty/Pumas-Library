@@ -140,7 +140,6 @@ impl ReconciliationCoordinator {
             }
         }
     }
-
 }
 
 fn has_unreconciled_dirty(scope_state: &ScopeRuntimeState) -> bool {
@@ -385,6 +384,7 @@ fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec 
         compute_hashes: false,
         expected_files: None,
         pipeline_tag: None,
+        huggingface_evidence: None,
     }
 }
 
@@ -558,7 +558,7 @@ fn select_partial_model_type(
     let normalized_model_type_hint = normalize_model_type_hint(index, model_type_hint)?;
 
     // Use hard signals + pipeline hints first; avoid forcing a stale request type hint.
-    let resolved = resolve_model_type_with_rules(index, model_dir, pipeline_tag_hint, None)?;
+    let resolved = resolve_model_type_with_rules(index, model_dir, pipeline_tag_hint, None, None)?;
     if resolved.model_type != ModelType::Unknown {
         return Ok(PartialModelTypeSelection {
             model_type: Some(resolved.model_type.as_str().to_string()),

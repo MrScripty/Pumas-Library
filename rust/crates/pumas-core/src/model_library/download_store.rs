@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::types::DownloadRequest;
 use crate::models::DownloadStatus;
+use crate::models::HuggingFaceEvidence;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use tracing::{debug, warn};
@@ -31,6 +32,9 @@ pub struct PersistedDownload {
     /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation on import).
     #[serde(default)]
     pub known_sha256: Option<String>,
+    /// Normalized HuggingFace evidence captured during download preflight.
+    #[serde(default)]
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 /// All persisted downloads (the JSON root object).
@@ -146,6 +150,7 @@ mod tests {
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
+            huggingface_evidence: None,
         };
 
         store.save(&entry).unwrap();
@@ -171,6 +176,7 @@ mod tests {
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
+            huggingface_evidence: None,
         };
 
         store.save(&entry).unwrap();
@@ -198,6 +204,7 @@ mod tests {
             download_request: make_request(),
             created_at: "2025-01-01T00:00:00Z".to_string(),
             known_sha256: None,
+            huggingface_evidence: None,
         };
 
         store.save(&entry).unwrap();

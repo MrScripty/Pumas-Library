@@ -5,6 +5,7 @@
 
 use crate::model_library::download_store::PersistedDownload;
 use crate::model_library::types::{DownloadRequest, DownloadStatus};
+use crate::models::HuggingFaceEvidence;
 use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -34,6 +35,8 @@ pub struct DownloadCompletionInfo {
     pub download_request: DownloadRequest,
     /// Known SHA256 from HuggingFace LFS metadata (avoids recomputation).
     pub known_sha256: Option<String>,
+    /// Normalized HuggingFace evidence captured during download preflight.
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 /// Callback invoked when a download completes successfully.
@@ -54,6 +57,8 @@ pub struct AuxFilesCompleteInfo {
     pub download_request: DownloadRequest,
     /// Total download size (sum of LFS file sizes).
     pub total_bytes: Option<u64>,
+    /// Normalized HuggingFace evidence captured during download preflight.
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 /// Callback invoked when auxiliary files finish downloading (before weight files begin).
@@ -109,6 +114,8 @@ pub(crate) struct DownloadState {
     pub download_request: Option<DownloadRequest>,
     /// Known SHA256 from HuggingFace LFS metadata (primary file).
     pub known_sha256: Option<String>,
+    /// Normalized HuggingFace evidence captured during download preflight.
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 impl std::fmt::Debug for DownloadState {
@@ -181,6 +188,7 @@ impl DownloadState {
             files_completed: 0,
             download_request: Some(entry.download_request.clone()),
             known_sha256: entry.known_sha256.clone(),
+            huggingface_evidence: entry.huggingface_evidence.clone(),
         }
     }
 }

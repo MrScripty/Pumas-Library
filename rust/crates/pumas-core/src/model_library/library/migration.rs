@@ -246,6 +246,9 @@ impl ModelLibrary {
                     &model_dir,
                     pipeline_tag.as_deref(),
                     None,
+                    metadata
+                        .as_ref()
+                        .and_then(|value| value.huggingface_evidence.as_ref()),
                 )?,
                 &model_dir,
                 file_type_info.as_ref(),

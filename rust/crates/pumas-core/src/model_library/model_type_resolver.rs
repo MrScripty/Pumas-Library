@@ -4,7 +4,7 @@
 //! and deterministic scoring rules to classify model type from hard source signals.
 
 use crate::index::{ModelIndex, ModelTypeArchRule, ModelTypeConfigRule};
-use crate::model_library::types::ModelType;
+use crate::model_library::types::{HuggingFaceEvidence, ModelType};
 use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -33,12 +33,38 @@ pub fn resolve_model_type_with_rules(
     model_dir: &Path,
     pipeline_tag: Option<&str>,
     spec_model_type: Option<&str>,
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
+) -> Result<ModelTypeResolution> {
+    let name_hint = model_dir.file_name().and_then(|name| name.to_str());
+    let signals = load_config_signals(model_dir, huggingface_evidence);
+    let medium_hints =
+        collect_medium_hints(index, pipeline_tag, spec_model_type, huggingface_evidence)?;
+    resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
+}
+
+pub fn resolve_model_type_from_huggingface_evidence(
+    index: &ModelIndex,
+    model_name: Option<&str>,
+    pipeline_tag: Option<&str>,
+    spec_model_type: Option<&str>,
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
+) -> Result<ModelTypeResolution> {
+    let signals = load_remote_config_signals(huggingface_evidence);
+    let medium_hints =
+        collect_medium_hints(index, pipeline_tag, spec_model_type, huggingface_evidence)?;
+    let name_hint = model_name
+        .or_else(|| huggingface_evidence.and_then(|evidence| evidence.repo_id.as_deref()));
+    resolve_model_type_from_inputs(index, signals, medium_hints, name_hint)
+}
+
+fn resolve_model_type_from_inputs(
+    index: &ModelIndex,
+    signals: ConfigSignals,
+    medium_hints: Vec<ModelType>,
+    name_hint: Option<&str>,
 ) -> Result<ModelTypeResolution> {
     let arch_rules = index.list_active_model_type_arch_rules()?;
     let config_rules = index.list_active_model_type_config_rules()?;
-    let signals = load_config_signals(model_dir);
-    let medium_hints = collect_medium_hints(index, pipeline_tag, spec_model_type)?;
-
     let arch_votes = resolve_architecture_votes(&signals.architectures, &arch_rules);
     let config_vote = resolve_config_vote(signals.config_model_type.as_deref(), &config_rules);
 
@@ -54,7 +80,7 @@ pub fn resolve_model_type_with_rules(
         }
     }
 
-    if should_apply_reranker_disambiguation_guard(&hard_types, model_dir, &signals, &medium_hints) {
+    if should_apply_reranker_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints) {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Reranker,
             source: "model-type-reranker-disambiguation-guard".to_string(),
@@ -117,7 +143,7 @@ pub fn resolve_model_type_with_rules(
     // When strong local embedding evidence is present, prefer `embedding`.
     if should_apply_embedding_disambiguation_guard(
         resolved_type,
-        model_dir,
+        name_hint,
         &signals,
         &medium_hints,
     ) {
@@ -162,13 +188,20 @@ fn resolve_hint_only_model_type(medium_hints: &[ModelType]) -> Option<ModelType>
     None
 }
 
-fn load_config_signals(model_dir: &Path) -> ConfigSignals {
+fn load_config_signals(
+    model_dir: &Path,
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
+) -> ConfigSignals {
     let config_path = model_dir.join("config.json");
     let Ok(config_str) = std::fs::read_to_string(&config_path) else {
-        return ConfigSignals::default();
+        let mut signals = ConfigSignals::default();
+        merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
+        return signals;
     };
     let Ok(config) = serde_json::from_str::<serde_json::Value>(&config_str) else {
-        return ConfigSignals::default();
+        let mut signals = ConfigSignals::default();
+        merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
+        return signals;
     };
 
     let architectures = config
@@ -193,11 +226,54 @@ fn load_config_signals(model_dir: &Path) -> ConfigSignals {
         .is_file();
     let has_sentence_transformers_modules = detect_sentence_transformers_modules(model_dir);
 
-    ConfigSignals {
+    let mut signals = ConfigSignals {
         architectures,
         config_model_type,
         has_sentence_transformers_config,
         has_sentence_transformers_modules,
+    };
+    merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
+    signals
+}
+
+fn load_remote_config_signals(huggingface_evidence: Option<&HuggingFaceEvidence>) -> ConfigSignals {
+    let mut signals = ConfigSignals::default();
+    merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
+    signals
+}
+
+fn merge_huggingface_evidence_into_signals(
+    signals: &mut ConfigSignals,
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
+) {
+    let Some(evidence) = huggingface_evidence else {
+        return;
+    };
+
+    let mut architectures = std::mem::take(&mut signals.architectures);
+    for architecture in evidence
+        .architectures
+        .as_ref()
+        .into_iter()
+        .flatten()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        if !architectures
+            .iter()
+            .any(|existing| existing.eq_ignore_ascii_case(&architecture))
+        {
+            architectures.push(architecture);
+        }
+    }
+    signals.architectures = architectures;
+
+    if signals.config_model_type.is_none() {
+        signals.config_model_type = evidence
+            .config_model_type
+            .as_deref()
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty());
     }
 }
 
@@ -213,18 +289,17 @@ fn detect_sentence_transformers_modules(model_dir: &Path) -> bool {
             || lower.contains("sentence_transformers.models.dense"))
 }
 
-fn name_looks_like_embedding(model_dir: &Path) -> bool {
-    model_dir
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(|name| name.to_lowercase().contains("embedding"))
+fn name_looks_like_embedding(name_hint: Option<&str>) -> bool {
+    name_hint
+        .map(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("embedding") || lower.contains("embed-")
+        })
         .unwrap_or(false)
 }
 
-fn name_looks_like_reranker(model_dir: &Path) -> bool {
-    model_dir
-        .file_name()
-        .and_then(|name| name.to_str())
+fn name_looks_like_reranker(name_hint: Option<&str>) -> bool {
+    name_hint
         .map(|name| {
             let lower = name.to_lowercase();
             lower.contains("reranker")
@@ -243,7 +318,7 @@ fn has_reward_model_architecture(signals: &ConfigSignals) -> bool {
 
 fn should_apply_reranker_disambiguation_guard(
     hard_types: &HashSet<ModelType>,
-    model_dir: &Path,
+    name_hint: Option<&str>,
     signals: &ConfigSignals,
     medium_hints: &[ModelType],
 ) -> bool {
@@ -253,7 +328,7 @@ fn should_apply_reranker_disambiguation_guard(
     }
 
     let has_reward_arch = has_reward_model_architecture(signals);
-    let has_reranker_name = name_looks_like_reranker(model_dir);
+    let has_reranker_name = name_looks_like_reranker(name_hint);
     let has_reranker_config = signals
         .config_model_type
         .as_deref()
@@ -273,7 +348,7 @@ fn should_apply_reranker_disambiguation_guard(
 
 fn should_apply_embedding_disambiguation_guard(
     resolved_type: ModelType,
-    model_dir: &Path,
+    name_hint: Option<&str>,
     signals: &ConfigSignals,
     medium_hints: &[ModelType],
 ) -> bool {
@@ -306,7 +381,7 @@ fn should_apply_embedding_disambiguation_guard(
     {
         evidence += 1;
     }
-    if name_looks_like_embedding(model_dir) {
+    if name_looks_like_embedding(name_hint) {
         evidence += 1;
     }
 
@@ -362,9 +437,28 @@ fn collect_medium_hints(
     index: &ModelIndex,
     pipeline_tag: Option<&str>,
     spec_model_type: Option<&str>,
+    huggingface_evidence: Option<&HuggingFaceEvidence>,
 ) -> Result<Vec<ModelType>> {
     let mut hints = HashSet::new();
-    for raw_hint in [pipeline_tag, spec_model_type].into_iter().flatten() {
+    let mut raw_hints = Vec::new();
+    if let Some(evidence) = huggingface_evidence {
+        for raw_hint in [
+            evidence.pipeline_tag.as_deref(),
+            evidence.remote_kind.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            raw_hints.push(raw_hint);
+        }
+    }
+    if raw_hints.is_empty() {
+        for raw_hint in [pipeline_tag, spec_model_type].into_iter().flatten() {
+            raw_hints.push(raw_hint);
+        }
+    }
+
+    for raw_hint in raw_hints {
         if let Some(mapped) = index.resolve_model_type_hint(raw_hint)? {
             let mt = parse_model_type(&mapped);
             if mt != ModelType::Unknown {
@@ -467,6 +561,7 @@ mod tests {
             model_dir.path(),
             Some("text-generation"),
             Some("llm"),
+            None,
         )
         .unwrap();
 
@@ -488,7 +583,8 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "model-type-resolver-hard-conflict");
@@ -508,7 +604,8 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Llm);
         assert!((resolved.confidence - 0.7).abs() < f64::EPSILON);
         assert!(resolved
@@ -538,7 +635,8 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Embedding);
         assert_eq!(resolved.source, "model-type-embedding-disambiguation-guard");
         assert!(resolved.confidence >= 0.9);
@@ -561,6 +659,7 @@ mod tests {
             model_dir.path(),
             Some("text-generation"),
             Some("llm"),
+            None,
         )
         .unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
@@ -582,9 +681,14 @@ mod tests {
             }),
         );
 
-        let resolved =
-            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-ranking"), None)
-                .unwrap();
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-ranking"),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(resolved.model_type, ModelType::Reranker);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
@@ -604,9 +708,14 @@ mod tests {
             }),
         );
 
-        let resolved =
-            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-to-speech"), None)
-                .unwrap();
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-to-speech"),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(resolved.model_type, ModelType::Audio);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
@@ -627,9 +736,14 @@ mod tests {
             }),
         );
 
-        let resolved =
-            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-ranking"), None)
-                .unwrap();
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-ranking"),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(resolved.model_type, ModelType::Reranker);
         assert_eq!(resolved.source, "model-type-reranker-disambiguation-guard");
         assert!(resolved.confidence >= 0.9);
@@ -647,7 +761,8 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Diffusion);
     }
 
@@ -663,7 +778,8 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(&index, model_dir.path(), None, None).unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Audio);
         assert!(resolved.source.starts_with("model-type-resolver-"));
         assert!(resolved.confidence >= 0.7);
@@ -680,13 +796,49 @@ mod tests {
             }),
         );
 
-        let resolved =
-            resolve_model_type_with_rules(&index, model_dir.path(), Some("text-generation"), None)
-                .unwrap();
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-generation"),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert!(resolved
             .review_reasons
             .contains(&"model-type-unresolved".to_string()));
+    }
+
+    #[test]
+    fn persisted_hf_evidence_overrides_stale_pipeline_hint() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Qwen3ForRewardModel"],
+                "model_type": "qwen3"
+            }),
+        );
+
+        let evidence = HuggingFaceEvidence {
+            repo_id: Some("QuantFactory/Qwen3-Reranker-4B-GGUF".to_string()),
+            pipeline_tag: Some("text-ranking".to_string()),
+            remote_kind: Some("text-ranking".to_string()),
+            ..Default::default()
+        };
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-generation"),
+            Some("llm"),
+            Some(&evidence),
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-reranker-disambiguation-guard");
     }
 }

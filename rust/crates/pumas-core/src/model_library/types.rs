@@ -9,10 +9,10 @@ use std::path::PathBuf;
 // Re-export model types from models module
 pub use crate::models::{
     BundleFormat, DetectedFileType, DownloadOption, DownloadStatus, ExternalDiffusersImportSpec,
-    FileGroup, FtsSearchModel, HuggingFaceModel, ImportPathCandidate, ImportPathCandidateKind,
-    ImportPathClassification, ImportPathClassificationKind, ImportStage, MatchMethod, ModelData,
-    ModelDownloadProgress, ModelFileInfo, ModelHashes, ModelImportResult, ModelImportSpec,
-    ModelMetadata, ModelOverrides, SecurityTier,
+    FileGroup, FtsSearchModel, HuggingFaceEvidence, HuggingFaceModel, ImportPathCandidate,
+    ImportPathCandidateKind, ImportPathClassification, ImportPathClassificationKind, ImportStage,
+    MatchMethod, ModelData, ModelDownloadProgress, ModelFileInfo, ModelHashes, ModelImportResult,
+    ModelImportSpec, ModelMetadata, ModelOverrides, SecurityTier,
 };
 
 /// Supported model types.

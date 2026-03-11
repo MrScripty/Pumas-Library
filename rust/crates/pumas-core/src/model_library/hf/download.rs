@@ -260,6 +260,7 @@ impl HuggingFaceClient {
         &self,
         request: &DownloadRequest,
         dest_dir: &Path,
+        remote_evidence: Option<crate::models::HuggingFaceEvidence>,
     ) -> Result<String> {
         let download_id = uuid::Uuid::new_v4().to_string();
         let cancel_flag = Arc::new(AtomicBool::new(false));
@@ -440,6 +441,16 @@ impl HuggingFaceClient {
             }
         };
         let first_filename = files[0].filename.clone();
+        let final_filenames: Vec<String> = files.iter().map(|f| f.filename.clone()).collect();
+        let mut huggingface_evidence = remote_evidence;
+        if let Some(ref mut evidence) = huggingface_evidence {
+            Self::enrich_huggingface_evidence_for_download(
+                evidence,
+                &tree,
+                request,
+                &final_filenames,
+            );
+        }
 
         let pause_flag = Arc::new(AtomicBool::new(false));
 
@@ -465,6 +476,7 @@ impl HuggingFaceClient {
             files_completed: 0,
             download_request: Some(request.clone()),
             known_sha256: known_sha256.clone(),
+            huggingface_evidence: huggingface_evidence.clone(),
         };
 
         self.downloads
@@ -489,6 +501,7 @@ impl HuggingFaceClient {
                 download_request: request.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: known_sha256.clone(),
+                huggingface_evidence: huggingface_evidence.clone(),
             });
         }
 
@@ -501,6 +514,7 @@ impl HuggingFaceClient {
                 filenames: files.iter().map(|f| f.filename.clone()).collect(),
                 download_request: request.clone(),
                 total_bytes,
+                huggingface_evidence: huggingface_evidence.clone(),
             });
         }
 
@@ -514,8 +528,10 @@ impl HuggingFaceClient {
                 "family": request.family,
                 "official_name": request.official_name,
                 "model_type": request.model_type,
+                "pipeline_tag": request.pipeline_tag,
                 "bundle_format": request.bundle_format,
                 "pipeline_class": request.pipeline_class,
+                "huggingface_evidence": huggingface_evidence,
             }))
             .unwrap_or_default(),
         ) {
@@ -702,6 +718,7 @@ impl HuggingFaceClient {
                                     filenames: files.iter().map(|f| f.filename.clone()).collect(),
                                     download_request: req.clone(),
                                     total_bytes: state.total_bytes,
+                                    huggingface_evidence: state.huggingface_evidence.clone(),
                                 })
                         })
                     };
@@ -960,6 +977,7 @@ impl HuggingFaceClient {
                         filenames: files.iter().map(|f| f.filename.clone()).collect(),
                         download_request: req.clone(),
                         known_sha256: state.known_sha256.clone(),
+                        huggingface_evidence: state.huggingface_evidence.clone(),
                     }
                 })
             } else {
@@ -1534,6 +1552,7 @@ mod tests {
                 download_request: request.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
                 known_sha256: None,
+                huggingface_evidence: None,
             })
             .unwrap();
 
@@ -1566,6 +1585,7 @@ mod tests {
                     files_completed: 0,
                     download_request: Some(request.clone()),
                     known_sha256: None,
+                    huggingface_evidence: None,
                 },
             );
         }
@@ -1646,6 +1666,7 @@ mod tests {
                     files_completed: 0,
                     download_request: Some(request),
                     known_sha256: None,
+                    huggingface_evidence: None,
                 },
             );
         }

@@ -75,7 +75,10 @@ pub use metadata_v2::{
     normalize_recommended_backend, normalize_review_reasons, push_review_reason,
     validate_metadata_v2, validate_metadata_v2_with_index,
 };
-pub use model_type_resolver::{resolve_model_type_with_rules, ModelTypeResolution};
+pub use model_type_resolver::{
+    resolve_model_type_from_huggingface_evidence, resolve_model_type_with_rules,
+    ModelTypeResolution,
+};
 pub use naming::normalize_name;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,

@@ -15,12 +15,14 @@ use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
 use crate::model_library::types::{
-    BatchImportProgress, ExternalDiffusersImportSpec, ImportStage, ModelFileInfo, ModelHashes,
-    ModelImportResult, ModelImportSpec, ModelMetadata, ModelType, SecurityTier,
+    BatchImportProgress, ExternalDiffusersImportSpec, HuggingFaceEvidence, ImportStage,
+    ModelFileInfo, ModelHashes, ModelImportResult, ModelImportSpec, ModelMetadata, ModelType,
+    SecurityTier,
 };
 use crate::model_library::{
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, DownloadCompletionInfo, TaskNormalizationStatus,
+    validate_metadata_v2_with_index, AuxFilesCompleteInfo, DownloadCompletionInfo,
+    TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -327,6 +329,7 @@ impl ModelImporter {
             compute_hashes: false,
             expected_files: Some(collect_relative_file_paths(target_dir)?),
             pipeline_tag: Some("text-to-image".to_string()),
+            huggingface_evidence: None,
         };
 
         let import_result = self.import_in_place(&in_place_spec).await?;
@@ -426,8 +429,81 @@ impl ModelImporter {
             compute_hashes: false,
             expected_files: Some(info.filenames.clone()),
             pipeline_tag: info.download_request.pipeline_tag.clone(),
+            huggingface_evidence: info.huggingface_evidence.clone(),
         };
         self.import_in_place(&spec).await
+    }
+
+    /// Persist a preliminary metadata record for a queued/partial download.
+    pub async fn upsert_download_metadata_stub(&self, info: &AuxFilesCompleteInfo) -> Result<()> {
+        let model_dir = &info.dest_dir;
+        let cleaned_name = normalize_name(&info.download_request.official_name);
+        let model_type = info
+            .download_request
+            .model_type
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string());
+        let model_id = self.library.get_model_id(model_dir).unwrap_or_else(|| {
+            format!(
+                "{}/{}/{}",
+                model_type, info.download_request.family, cleaned_name
+            )
+        });
+
+        let mut metadata = self.library.load_metadata(model_dir)?.unwrap_or_default();
+        let now = chrono::Utc::now().to_rfc3339();
+        metadata.schema_version = Some(2);
+        metadata.model_id = Some(model_id);
+        metadata.family = Some(info.download_request.family.clone());
+        metadata.model_type = Some(model_type.clone());
+        metadata.official_name = Some(info.download_request.official_name.clone());
+        metadata.cleaned_name = Some(cleaned_name);
+        metadata.repo_id = Some(info.download_request.repo_id.clone());
+        metadata.expected_files = Some(info.filenames.clone());
+        metadata.pipeline_tag = info.download_request.pipeline_tag.clone();
+        metadata.huggingface_evidence = info.huggingface_evidence.clone();
+        metadata.size_bytes = info.total_bytes;
+        metadata.match_source = Some("download_partial".to_string());
+        metadata.match_method = Some("repo_id".to_string());
+        metadata.match_confidence = Some(1.0);
+        metadata.pending_online_lookup = Some(false);
+        metadata.lookup_attempts = Some(0);
+        metadata.last_lookup_attempt = None;
+        metadata.added_date.get_or_insert_with(|| now.clone());
+        metadata.updated_date = Some(now);
+        metadata.task_type_primary = Some("unknown".to_string());
+        metadata.task_type_secondary = None;
+        metadata.input_modalities = Some(vec!["unknown".to_string()]);
+        metadata.output_modalities = Some(vec!["unknown".to_string()]);
+        metadata.task_classification_source =
+            Some("download-partial-no-task-signature".to_string());
+        metadata.task_classification_confidence = Some(0.0);
+        metadata.model_type_resolution_source = Some("download-preflight".to_string());
+        metadata.model_type_resolution_confidence =
+            Some(if model_type == "unknown" { 0.0 } else { 0.65 });
+        metadata.requires_custom_code.get_or_insert(false);
+        metadata.metadata_needs_review = Some(true);
+        metadata.review_status = Some("pending".to_string());
+        let mut reasons = metadata.review_reasons.take().unwrap_or_default();
+        if !reasons.iter().any(|reason| reason == "download-partial") {
+            reasons.push("download-partial".to_string());
+        }
+        if model_type == "unknown"
+            && !reasons
+                .iter()
+                .any(|reason| reason == "model-type-unresolved")
+        {
+            reasons.push("model-type-unresolved".to_string());
+        }
+        metadata.review_reasons = Some(reasons);
+        metadata
+            .license_status
+            .get_or_insert_with(|| "license_unknown".to_string());
+
+        validate_metadata_v2_with_index(&metadata, self.library.index())?;
+        self.library.save_metadata(model_dir, &metadata).await?;
+        self.library.index_model_dir(model_dir).await?;
+        Ok(())
     }
 
     /// Import with progress reporting.
@@ -1005,6 +1081,7 @@ impl ModelImporter {
             model_dir,
             spec.pipeline_tag.as_deref(),
             spec.model_type.as_deref(),
+            spec.huggingface_evidence.as_ref(),
         )?;
 
         // Detect dLLM subtype from config.json
@@ -1097,6 +1174,7 @@ impl ModelImporter {
         metadata.repo_id = spec.repo_id.clone();
         metadata.expected_files = spec.expected_files.clone();
         metadata.pipeline_tag = spec.pipeline_tag.clone();
+        metadata.huggingface_evidence = spec.huggingface_evidence.clone();
         metadata.model_type_resolution_source = Some(resolved_model_type.source.clone());
         metadata.model_type_resolution_confidence = Some(resolved_model_type.confidence);
         metadata.metadata_needs_review = Some(false);
@@ -1294,6 +1372,7 @@ impl ModelImporter {
                 compute_hashes,
                 expected_files: None,
                 pipeline_tag: None,
+                huggingface_evidence: None,
             };
 
             match self.import_in_place(&spec).await {
@@ -1738,6 +1817,8 @@ pub struct InPlaceImportSpec {
     pub expected_files: Option<Vec<String>>,
     /// Raw HuggingFace pipeline_tag hint used as medium signal for confidence scoring.
     pub pipeline_tag: Option<String>,
+    /// Normalized HuggingFace evidence captured during download preflight.
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 /// Descriptor for an incomplete sharded model that needs recovery download.
@@ -1977,6 +2058,70 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_upsert_download_metadata_stub_persists_hf_evidence() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let model_dir = library.build_model_path("reranker", "quantfactory", "qwen3-reranker-4b");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let info = AuxFilesCompleteInfo {
+            download_id: "dl-qwen3-reranker".to_string(),
+            dest_dir: model_dir.clone(),
+            filenames: vec![
+                "qwen3-reranker-4b-q4_k_m.gguf".to_string(),
+                "config.json".to_string(),
+            ],
+            download_request: crate::model_library::DownloadRequest {
+                repo_id: "QuantFactory/Qwen3-Reranker-4B-GGUF".to_string(),
+                family: "quantfactory".to_string(),
+                official_name: "Qwen3-Reranker-4B".to_string(),
+                model_type: Some("reranker".to_string()),
+                quant: Some("Q4_K_M".to_string()),
+                filename: None,
+                filenames: None,
+                pipeline_tag: Some("text-ranking".to_string()),
+                bundle_format: None,
+                pipeline_class: None,
+            },
+            total_bytes: Some(1024),
+            huggingface_evidence: Some(HuggingFaceEvidence {
+                repo_id: Some("QuantFactory/Qwen3-Reranker-4B-GGUF".to_string()),
+                remote_kind: Some("text-ranking".to_string()),
+                pipeline_tag: Some("text-ranking".to_string()),
+                architectures: Some(vec!["Qwen3ForRewardModel".to_string()]),
+                config_model_type: Some("qwen3".to_string()),
+                selected_filenames: Some(vec!["qwen3-reranker-4b-q4_k_m.gguf".to_string()]),
+                ..Default::default()
+            }),
+        };
+
+        importer.upsert_download_metadata_stub(&info).await.unwrap();
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(metadata.match_source.as_deref(), Some("download_partial"));
+        assert_eq!(
+            metadata.repo_id.as_deref(),
+            Some("QuantFactory/Qwen3-Reranker-4B-GGUF")
+        );
+        assert_eq!(metadata.pipeline_tag.as_deref(), Some("text-ranking"));
+        assert_eq!(
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|value| value.remote_kind.as_deref()),
+            Some("text-ranking")
+        );
+        assert_eq!(
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|value| value.architectures.as_ref())
+                .map(|values| values.len()),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
     async fn test_import_in_place_redetects_unknown_tts_model_to_audio() {
         let (_temp_dir, library) = setup().await;
         let importer = ModelImporter::new(library.clone());
@@ -2009,6 +2154,7 @@ mod tests {
                 "voices.npz".to_string(),
             ]),
             pipeline_tag: None,
+            huggingface_evidence: None,
         };
 
         let result = importer.import_in_place(&spec).await.unwrap();
@@ -2157,6 +2303,7 @@ mod tests {
                 "tokenizer".to_string(),
             ]),
             pipeline_tag: Some("text-to-image".to_string()),
+            huggingface_evidence: None,
         };
 
         let result = importer.import_in_place(&spec).await.unwrap();

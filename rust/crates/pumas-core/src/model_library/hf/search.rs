@@ -508,12 +508,9 @@ impl HuggingFaceClient {
         sorted
     }
 
-    fn infer_pipeline_tag_from_tags(tags: &[String]) -> Option<String> {
+    pub(crate) fn infer_pipeline_tag_from_tags(tags: &[String]) -> Option<String> {
         for tag in tags {
-            let normalized = tag
-                .trim()
-                .to_lowercase()
-                .replace([' ', '_'], "-");
+            let normalized = tag.trim().to_lowercase().replace([' ', '_'], "-");
             match normalized.as_str() {
                 "text-ranking" | "text-reranking" | "reranking" => {
                     return Some("text-ranking".to_string());

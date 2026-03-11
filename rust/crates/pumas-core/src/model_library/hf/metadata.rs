@@ -3,26 +3,23 @@
 //! Handles direct model info lookups, repository file tree retrieval,
 //! metadata lookup by filename/hash, and candidate verification.
 
-use super::types::{HfFileEntry, HfSearchResult, HF_API_BASE, HF_HUB_BASE, REPO_CACHE_TTL_SECS};
+use super::types::{
+    infer_pipeline_tag_from_config, HfFileEntry, HfSearchResult, HF_API_BASE, HF_HUB_BASE,
+    REPO_CACHE_TTL_SECS,
+};
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
-    HfMetadataResult, HfSearchParams, HuggingFaceModel, LfsFileInfo, RepoFileTree,
-    REPO_FILE_TREE_VERSION,
+    DownloadRequest, HfMetadataResult, HfSearchParams, HuggingFaceEvidence, HuggingFaceModel,
+    LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION,
 };
 use std::path::Path;
 use std::time::Duration;
 
 impl HuggingFaceClient {
-    /// Fetch model info directly by repo_id from the HuggingFace API.
-    ///
-    /// Uses `GET /api/models/{repo_id}` which returns the exact model
-    /// without any search or cache involvement.
-    pub async fn get_model_info(&self, repo_id: &str) -> Result<HuggingFaceModel> {
-        // repo_id is "owner/model" -- the slash is part of the URL path,
-        // so we must not encode the whole string (that would turn / into %2F).
+    async fn fetch_model_info_response(&self, repo_id: &str) -> Result<HfSearchResult> {
         let url = format!("{}/models/{}", HF_API_BASE, repo_id);
 
         let mut request = self.client.get(&url);
@@ -46,11 +43,88 @@ impl HuggingFaceClient {
             });
         }
 
-        let result: HfSearchResult = response.json().await.map_err(|e| PumasError::Json {
+        response.json().await.map_err(|e| PumasError::Json {
             message: format!("Failed to parse HuggingFace response: {}", e),
             source: None,
-        })?;
+        })
+    }
 
+    pub(crate) fn build_huggingface_evidence(
+        repo_id: &str,
+        result: &HfSearchResult,
+    ) -> HuggingFaceEvidence {
+        let remote_kind = result
+            .pipeline_tag
+            .clone()
+            .or_else(|| Self::infer_pipeline_tag_from_tags(&result.tags))
+            .or_else(|| infer_pipeline_tag_from_config(result.config.as_ref()));
+        let tags = (!result.tags.is_empty()).then(|| result.tags.clone());
+        let architectures = result
+            .config
+            .as_ref()
+            .map(|config| {
+                config
+                    .architectures
+                    .iter()
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .filter(|values| !values.is_empty());
+        let config_model_type = result
+            .config
+            .as_ref()
+            .and_then(|config| config.model_type.as_ref())
+            .map(|value| value.trim().to_lowercase())
+            .filter(|value| !value.is_empty());
+
+        HuggingFaceEvidence {
+            repo_id: Some(repo_id.to_string()),
+            captured_at: Some(chrono::Utc::now().to_rfc3339()),
+            remote_kind: remote_kind.clone(),
+            pipeline_tag: remote_kind,
+            tags,
+            architectures,
+            config_model_type,
+            sibling_filenames: None,
+            selected_filenames: None,
+            requested_model_type: None,
+            requested_pipeline_tag: None,
+            requested_quant: None,
+        }
+    }
+
+    pub(crate) async fn get_model_evidence(&self, repo_id: &str) -> Result<HuggingFaceEvidence> {
+        let result = self.fetch_model_info_response(repo_id).await?;
+        Ok(Self::build_huggingface_evidence(repo_id, &result))
+    }
+
+    pub(crate) fn enrich_huggingface_evidence_for_download(
+        evidence: &mut HuggingFaceEvidence,
+        tree: &RepoFileTree,
+        request: &DownloadRequest,
+        selected_filenames: &[String],
+    ) {
+        evidence.sibling_filenames = Some(
+            tree.lfs_files
+                .iter()
+                .map(|file| file.filename.clone())
+                .chain(tree.regular_files.iter().cloned())
+                .collect(),
+        );
+        evidence.selected_filenames = Some(selected_filenames.to_vec());
+        evidence.requested_model_type = request.model_type.clone();
+        evidence.requested_pipeline_tag = request.pipeline_tag.clone();
+        evidence.requested_quant = request.quant.clone();
+        evidence.captured_at = Some(chrono::Utc::now().to_rfc3339());
+    }
+
+    /// Fetch model info directly by repo_id from the HuggingFace API.
+    ///
+    /// Uses `GET /api/models/{repo_id}` which returns the exact model
+    /// without any search or cache involvement.
+    pub async fn get_model_info(&self, repo_id: &str) -> Result<HuggingFaceModel> {
+        let result = self.fetch_model_info_response(repo_id).await?;
         Ok(Self::convert_search_result(result))
     }
 

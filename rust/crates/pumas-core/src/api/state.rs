@@ -1088,7 +1088,22 @@ async fn start_hf_download(
     let mut resolved_request = request.clone();
     let mut resolved_pipeline_tag =
         normalized_download_hint(resolved_request.pipeline_tag.as_deref()).map(ToOwned::to_owned);
-
+    let mut huggingface_evidence = match client.get_model_evidence(&request.repo_id).await {
+        Ok(evidence) => Some(evidence),
+        Err(err) => {
+            warn!(
+                "Failed to capture HF evidence for {} before download: {}",
+                request.repo_id, err
+            );
+            None
+        }
+    };
+    if let Some(remote_pipeline_tag) = huggingface_evidence
+        .as_ref()
+        .and_then(|evidence| normalized_download_hint(evidence.pipeline_tag.as_deref()))
+    {
+        resolved_pipeline_tag = Some(remote_pipeline_tag.to_string());
+    }
     let mut resolved_model_type = resolve_model_type_from_hints(
         primary.model_library.index(),
         [
@@ -1168,7 +1183,14 @@ async fn start_hf_download(
             dest_dir.display()
         );
     }
-    client.start_download(&resolved_request, &dest_dir).await
+    if let Some(ref mut evidence) = huggingface_evidence {
+        evidence.requested_model_type = request.model_type.clone();
+        evidence.requested_pipeline_tag = request.pipeline_tag.clone();
+        evidence.requested_quant = request.quant.clone();
+    }
+    client
+        .start_download(&resolved_request, &dest_dir, huggingface_evidence)
+        .await
 }
 
 async fn get_hf_download_progress(
@@ -1292,7 +1314,7 @@ async fn recover_download(
         pipeline_class: None,
     };
 
-    client.start_download(&request, dest).await
+    client.start_download(&request, dest, None).await
 }
 
 async fn resume_partial_download(

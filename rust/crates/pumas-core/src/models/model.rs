@@ -312,6 +312,42 @@ pub struct BundleComponentManifestEntry {
     pub state: BundleComponentState,
 }
 
+/// Normalized HuggingFace evidence captured for a model.
+///
+/// This preserves the source facts used for classification so local re-evaluation
+/// does not need to reconstruct transient remote hints after download/import.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+#[cfg_attr(feature = "uniffi", derive(uniffi::Record))]
+pub struct HuggingFaceEvidence {
+    #[serde(default)]
+    pub repo_id: Option<String>,
+    #[serde(default)]
+    pub captured_at: Option<String>,
+    /// Normalized remote kind used by search/download classification.
+    #[serde(default)]
+    pub remote_kind: Option<String>,
+    /// Raw or inferred HuggingFace pipeline tag.
+    #[serde(default)]
+    pub pipeline_tag: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub architectures: Option<Vec<String>>,
+    #[serde(default)]
+    pub config_model_type: Option<String>,
+    #[serde(default)]
+    pub sibling_filenames: Option<Vec<String>>,
+    #[serde(default)]
+    pub selected_filenames: Option<Vec<String>>,
+    #[serde(default)]
+    pub requested_model_type: Option<String>,
+    #[serde(default)]
+    pub requested_pipeline_tag: Option<String>,
+    #[serde(default)]
+    pub requested_quant: Option<String>,
+}
+
 /// Canonical metadata stored with each model directory.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -411,6 +447,9 @@ pub struct ModelMetadata {
     /// Cached for auditing and reclassification without re-querying HF.
     #[serde(default)]
     pub pipeline_tag: Option<String>,
+    /// Normalized HuggingFace evidence used for local re-evaluation and auditing.
+    #[serde(default)]
+    pub huggingface_evidence: Option<HuggingFaceEvidence>,
     // Metadata v2 classification contract fields
     #[serde(default)]
     pub task_type_primary: Option<String>,

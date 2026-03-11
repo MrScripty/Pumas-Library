@@ -44,12 +44,13 @@ Renderer code does not access Node APIs directly.
 
 ### Core API (`pumas-core`)
 
-`PumasApi` runs in two transparent modes:
+Primary ownership is now enforced per launcher root through the registry.
 
-- `Primary`: owns full state and services
-- `Client`: discovers an existing primary through registry + IPC and proxies calls
+- `PumasApi::new()` and `PumasApi::builder(...).build()` claim primary ownership for the launcher root and return `PrimaryInstanceBusy` if another live process already owns or is starting that root.
+- UniFFI constructors attach to an existing ready primary through registry + IPC. If another process is still in the claim/startup phase, they wait for it to become ready instead of starting a second primary.
+- Watcher startup, reconciliation startup, and download-recovery startup occur only after the winning primary has started IPC and promoted its claim row to `ready`.
 
-Registry and IPC are intentionally best-effort to keep startup resilient.
+This keeps a strict single-primary process model without allowing concurrent startup races to create multiple owners for the same `shared-resources/models` database.
 
 ## Storage Layout (Launcher Root)
 

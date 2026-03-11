@@ -29,12 +29,57 @@ pub struct InstanceEntry {
     pub port: u16,
     pub started_at: String,
     pub version: Option<String>,
+    pub status: InstanceStatus,
+}
+
+/// Lifecycle status for a tracked instance row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InstanceStatus {
+    Claiming,
+    Ready,
+}
+
+impl InstanceStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Claiming => "claiming",
+            Self::Ready => "ready",
+        }
+    }
+
+    fn from_db(value: &str) -> Result<Self> {
+        match value {
+            "claiming" => Ok(Self::Claiming),
+            "ready" => Ok(Self::Ready),
+            _ => Err(PumasError::Validation {
+                field: "instances.status".to_string(),
+                message: format!("unknown instance status '{}'", value),
+            }),
+        }
+    }
+}
+
+/// Claim row owned by a primary instance while startup is in progress.
+#[derive(Debug, Clone)]
+pub struct PrimaryInstanceClaim {
+    pub library_path: PathBuf,
+    pub pid: u32,
+    pub claim_token: String,
+}
+
+/// Outcome of attempting to claim primary ownership for a library path.
+#[derive(Debug, Clone)]
+pub enum InstanceClaimResult {
+    Claimed(PrimaryInstanceClaim),
+    Occupied(InstanceEntry),
 }
 
 /// SQLite-backed global registry for library discovery and instance coordination.
 ///
 /// Uses WAL mode for safe concurrent access across processes and
 /// `Arc<Mutex<Connection>>` for thread safety within a process.
+#[derive(Clone)]
 pub struct LibraryRegistry {
     conn: Arc<Mutex<Connection>>,
 }
@@ -99,7 +144,9 @@ impl LibraryRegistry {
                 pid INTEGER NOT NULL,
                 port INTEGER NOT NULL,
                 started_at TEXT NOT NULL,
-                version TEXT
+                version TEXT,
+                status TEXT NOT NULL DEFAULT 'ready',
+                claim_token TEXT
             );
 
             CREATE TABLE IF NOT EXISTS registry_config (
@@ -107,7 +154,33 @@ impl LibraryRegistry {
                 value TEXT NOT NULL
             );",
         )?;
+        Self::ensure_instances_columns(conn)?;
         Ok(())
+    }
+
+    fn ensure_instances_columns(conn: &Connection) -> Result<()> {
+        if !Self::column_exists(conn, "instances", "status")? {
+            conn.execute(
+                "ALTER TABLE instances ADD COLUMN status TEXT NOT NULL DEFAULT 'ready'",
+                [],
+            )?;
+        }
+        if !Self::column_exists(conn, "instances", "claim_token")? {
+            conn.execute("ALTER TABLE instances ADD COLUMN claim_token TEXT", [])?;
+        }
+        Ok(())
+    }
+
+    fn column_exists(conn: &Connection, table: &str, column: &str) -> Result<bool> {
+        let pragma = format!("PRAGMA table_info({})", table);
+        let mut stmt = conn.prepare(&pragma)?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+        for row in rows {
+            if row? == column {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>> {
@@ -117,6 +190,41 @@ impl LibraryRegistry {
         })
     }
 
+    fn canonicalize_library_path(path: &Path) -> Result<PathBuf> {
+        path.canonicalize().map_err(|e| PumasError::Io {
+            message: format!("Failed to canonicalize path: {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(e),
+        })
+    }
+
+    fn read_instance_entry(conn: &Connection, path_str: &str) -> Result<Option<InstanceEntry>> {
+        conn.query_row(
+            "SELECT library_path, pid, port, started_at, version, status
+             FROM instances WHERE library_path = ?1",
+            params![path_str],
+            |row| {
+                let status: String = row.get(5)?;
+                Ok(InstanceEntry {
+                    library_path: PathBuf::from(row.get::<_, String>(0)?),
+                    pid: row.get(1)?,
+                    port: row.get(2)?,
+                    started_at: row.get(3)?,
+                    version: row.get(4)?,
+                    status: InstanceStatus::from_db(&status).map_err(|err| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            rusqlite::types::Type::Text,
+                            Box::new(err),
+                        )
+                    })?,
+                })
+            },
+        )
+        .optional()
+        .map_err(PumasError::from)
+    }
+
     // ========================================
     // Library CRUD
     // ========================================
@@ -124,11 +232,7 @@ impl LibraryRegistry {
     /// Register a library path. Idempotent: updates last_accessed if already registered.
     pub fn register(&self, path: &Path, name: &str) -> Result<LibraryEntry> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().map_err(|e| PumasError::Io {
-            message: format!("Failed to canonicalize path: {}", path.display()),
-            path: Some(path.to_path_buf()),
-            source: Some(e),
-        })?;
+        let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
 
@@ -300,27 +404,93 @@ impl LibraryRegistry {
     // Instance tracking
     // ========================================
 
+    /// Claim primary ownership for a library path.
+    pub fn try_claim_instance(&self, path: &Path, pid: u32) -> Result<InstanceClaimResult> {
+        let conn = self.lock_conn()?;
+        let canonical = Self::canonicalize_library_path(path)?;
+        let path_str = canonical.to_string_lossy().to_string();
+        let now = Utc::now().to_rfc3339();
+        let version = env!("CARGO_PKG_VERSION").to_string();
+
+        if let Some(existing) = Self::read_instance_entry(&conn, &path_str)? {
+            if crate::platform::is_process_alive(existing.pid) {
+                return Ok(InstanceClaimResult::Occupied(existing));
+            }
+        }
+
+        let claim_token = uuid::Uuid::new_v4().to_string();
+        conn.execute(
+            "INSERT INTO instances (library_path, pid, port, started_at, version, status, claim_token)
+             VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6)
+             ON CONFLICT(library_path) DO UPDATE SET
+                 pid=excluded.pid,
+                 port=excluded.port,
+                 started_at=excluded.started_at,
+                 version=excluded.version,
+                 status=excluded.status,
+                 claim_token=excluded.claim_token",
+            params![
+                path_str,
+                pid,
+                now,
+                version,
+                InstanceStatus::Claiming.as_str(),
+                claim_token,
+            ],
+        )?;
+
+        Ok(InstanceClaimResult::Claimed(PrimaryInstanceClaim {
+            library_path: canonical,
+            pid,
+            claim_token,
+        }))
+    }
+
+    /// Mark a previously claimed instance row as ready for client attachment.
+    pub fn mark_instance_ready(&self, path: &Path, claim_token: &str, port: u16) -> Result<()> {
+        let conn = self.lock_conn()?;
+        let canonical = Self::canonicalize_library_path(path)?;
+        let path_str = canonical.to_string_lossy().to_string();
+
+        let rows = conn.execute(
+            "UPDATE instances
+             SET port = ?1,
+                 status = ?2,
+                 claim_token = NULL
+             WHERE library_path = ?3
+               AND claim_token = ?4",
+            params![port, InstanceStatus::Ready.as_str(), path_str, claim_token],
+        )?;
+
+        if rows == 0 {
+            return Err(PumasError::Validation {
+                field: "instances.claim_token".to_string(),
+                message: "primary claim could not be promoted to ready".to_string(),
+            });
+        }
+
+        Ok(())
+    }
+
     /// Register a running instance for a library path.
     pub fn register_instance(&self, path: &Path, pid: u32, port: u16) -> Result<()> {
         let conn = self.lock_conn()?;
-        let canonical = path.canonicalize().map_err(|e| PumasError::Io {
-            message: format!("Failed to canonicalize path: {}", path.display()),
-            path: Some(path.to_path_buf()),
-            source: Some(e),
-        })?;
+        let canonical = Self::canonicalize_library_path(path)?;
         let path_str = canonical.to_string_lossy().to_string();
         let now = Utc::now().to_rfc3339();
         let version = env!("CARGO_PKG_VERSION").to_string();
 
         conn.execute(
-            "INSERT INTO instances (library_path, pid, port, started_at, version)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO instances (library_path, pid, port, started_at, version, status, claim_token)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL)
              ON CONFLICT(library_path) DO UPDATE SET
                  pid=excluded.pid,
                  port=excluded.port,
                  started_at=excluded.started_at,
-                 version=excluded.version",
-            params![path_str, pid, port, now, version],
+                 version=excluded.version,
+                 status=excluded.status,
+                 claim_token=NULL",
+            params![path_str, pid, port, now, version, InstanceStatus::Ready.as_str()],
         )?;
 
         debug!(
@@ -355,24 +525,7 @@ impl LibraryRegistry {
         let canonical = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         let path_str = canonical.to_string_lossy().to_string();
 
-        let result = conn
-            .query_row(
-                "SELECT library_path, pid, port, started_at, version
-                 FROM instances WHERE library_path = ?1",
-                params![path_str],
-                |row| {
-                    Ok(InstanceEntry {
-                        library_path: PathBuf::from(row.get::<_, String>(0)?),
-                        pid: row.get(1)?,
-                        port: row.get(2)?,
-                        started_at: row.get(3)?,
-                        version: row.get(4)?,
-                    })
-                },
-            )
-            .optional()?;
-
-        Ok(result)
+        Self::read_instance_entry(&conn, &path_str)
     }
 
     /// Remove stale instance entries (dead PIDs or nonexistent library paths).
@@ -611,6 +764,114 @@ mod tests {
         let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
         assert_eq!(instance.pid, 200);
         assert_eq!(instance.port, 54321);
+        assert_eq!(instance.status, InstanceStatus::Ready);
+    }
+
+    #[test]
+    fn test_try_claim_instance_creates_claiming_entry() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib_dir = create_library_dir(temp_dir.path(), "my-library");
+
+        registry.register(&lib_dir, "My Library").unwrap();
+        let claim = registry
+            .try_claim_instance(&lib_dir, std::process::id())
+            .unwrap();
+
+        let InstanceClaimResult::Claimed(claim) = claim else {
+            panic!("expected claim to succeed");
+        };
+        assert_eq!(claim.pid, std::process::id());
+
+        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(instance.pid, std::process::id());
+        assert_eq!(instance.port, 0);
+        assert_eq!(instance.status, InstanceStatus::Claiming);
+    }
+
+    #[test]
+    fn test_try_claim_instance_returns_existing_live_instance() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib_dir = create_library_dir(temp_dir.path(), "my-library");
+
+        registry.register(&lib_dir, "My Library").unwrap();
+        registry
+            .register_instance(&lib_dir, std::process::id(), 12345)
+            .unwrap();
+
+        let claim = registry.try_claim_instance(&lib_dir, 424242).unwrap();
+        let InstanceClaimResult::Occupied(existing) = claim else {
+            panic!("expected live instance to block claim");
+        };
+        assert_eq!(existing.pid, std::process::id());
+        assert_eq!(existing.port, 12345);
+        assert_eq!(existing.status, InstanceStatus::Ready);
+    }
+
+    #[test]
+    fn test_try_claim_instance_replaces_dead_instance() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib_dir = create_library_dir(temp_dir.path(), "my-library");
+
+        registry.register(&lib_dir, "My Library").unwrap();
+        registry
+            .register_instance(&lib_dir, 999_999_999, 12345)
+            .unwrap();
+
+        let claim = registry.try_claim_instance(&lib_dir, 123456).unwrap();
+        let InstanceClaimResult::Claimed(claim) = claim else {
+            panic!("expected dead instance claim to be replaced");
+        };
+
+        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(claim.pid, 123456);
+        assert_eq!(instance.pid, 123456);
+        assert_eq!(instance.port, 0);
+        assert_eq!(instance.status, InstanceStatus::Claiming);
+    }
+
+    #[test]
+    fn test_mark_instance_ready_promotes_claim() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib_dir = create_library_dir(temp_dir.path(), "my-library");
+
+        registry.register(&lib_dir, "My Library").unwrap();
+        let claim = registry
+            .try_claim_instance(&lib_dir, std::process::id())
+            .unwrap();
+        let InstanceClaimResult::Claimed(claim) = claim else {
+            panic!("expected claim to succeed");
+        };
+
+        registry
+            .mark_instance_ready(&lib_dir, &claim.claim_token, 43210)
+            .unwrap();
+
+        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(instance.port, 43210);
+        assert_eq!(instance.status, InstanceStatus::Ready);
+    }
+
+    #[test]
+    fn test_mark_instance_ready_rejects_wrong_token() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib_dir = create_library_dir(temp_dir.path(), "my-library");
+
+        registry.register(&lib_dir, "My Library").unwrap();
+        let claim = registry
+            .try_claim_instance(&lib_dir, std::process::id())
+            .unwrap();
+        let InstanceClaimResult::Claimed(claim) = claim else {
+            panic!("expected claim to succeed");
+        };
+
+        let err = registry
+            .mark_instance_ready(&lib_dir, "wrong-token", 43210)
+            .unwrap_err();
+        assert!(matches!(err, PumasError::Validation { .. }));
+
+        let instance = registry.get_instance(&lib_dir).unwrap().unwrap();
+        assert_eq!(instance.status, InstanceStatus::Claiming);
+        assert_eq!(claim.pid, instance.pid);
     }
 
     #[test]

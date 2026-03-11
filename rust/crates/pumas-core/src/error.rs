@@ -154,6 +154,19 @@ pub enum PumasError {
     #[error("No libraries registered. Initialize with an explicit path first.")]
     NoLibrariesRegistered,
 
+    #[error("Primary instance already active for {library_path} (PID {pid}, status {status})")]
+    PrimaryInstanceBusy {
+        library_path: PathBuf,
+        pid: u32,
+        status: String,
+    },
+
+    #[error("Timed out waiting {timeout:?} for primary instance startup at {library_path}")]
+    PrimaryInstanceStartupTimeout {
+        library_path: PathBuf,
+        timeout: std::time::Duration,
+    },
+
     // Torch inference errors
     #[error("Torch inference error: {message}")]
     TorchInference { message: String },
@@ -297,6 +310,8 @@ impl PumasError {
             PumasError::TorchInference { .. } => -32008,
             PumasError::SlotNotFound { .. } => -32009,
             PumasError::DeviceNotAvailable { .. } => -32010,
+            PumasError::PrimaryInstanceBusy { .. } => -32011,
+            PumasError::PrimaryInstanceStartupTimeout { .. } => -32012,
 
             // All other errors are internal errors
             _ => -32603,

@@ -80,12 +80,8 @@ pub use api::PumasApiBuilder;
 
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use api::{
-    start_model_library_watcher, trigger_reconciliation, ApiState, PrimaryState, ReconcileScope,
-    ReconciliationCoordinator,
-};
+use api::PrimaryState;
 
 /// Main API struct for Pumas operations.
 ///
@@ -166,247 +162,7 @@ impl PumasApi {
     ///
     /// * `launcher_root` - Path to the launcher root directory (containing launcher-data, etc.)
     pub async fn new(launcher_root: impl Into<PathBuf>) -> Result<Self> {
-        let launcher_root = launcher_root.into();
-
-        // Ensure the launcher root exists
-        if !launcher_root.exists() {
-            return Err(PumasError::Config {
-                message: format!("Launcher root does not exist: {}", launcher_root.display()),
-            });
-        }
-
-        let state = Arc::new(RwLock::new(ApiState {
-            background_fetch_completed: false,
-        }));
-
-        // Initialize network manager for connectivity checking
-        let network_manager =
-            Arc::new(
-                network::NetworkManager::new().map_err(|e| PumasError::Config {
-                    message: format!("Failed to initialize network manager: {}", e),
-                })?,
-            );
-
-        // Check initial connectivity (non-blocking, will update state)
-        let nm_clone = network_manager.clone();
-        tokio::spawn(async move {
-            nm_clone.check_connectivity().await;
-        });
-
-        // Initialize process manager
-        let process_manager = match process::ProcessManager::new(&launcher_root, None) {
-            Ok(mgr) => Arc::new(RwLock::new(Some(mgr))),
-            Err(e) => {
-                tracing::warn!("Failed to initialize process manager: {}", e);
-                Arc::new(RwLock::new(None))
-            }
-        };
-
-        // Initialize system utilities
-        let system_utils = Arc::new(system::SystemUtils::new(&launcher_root));
-
-        // Initialize model library for AI model management
-        // Uses shared-resources/models to match Python backend path
-        let model_library_dir = launcher_root.join("shared-resources").join("models");
-        let mapping_config_dir = launcher_root.join("launcher-data").join("mapping-configs");
-
-        // Initialize HuggingFace client for model search/download (optional - external service)
-        let cache_dir = launcher_root
-            .join("launcher-data")
-            .join(config::PathsConfig::CACHE_DIR_NAME);
-        let hf_cache_dir = cache_dir.join("hf");
-
-        // Initialize SQLite search cache at shared-resources/cache/search.sqlite
-        let search_cache_dir = launcher_root.join("shared-resources").join("cache");
-        let search_cache_db = search_cache_dir.join("search.sqlite");
-        let search_cache = match model_library::HfSearchCache::new(&search_cache_db) {
-            Ok(cache) => Some(std::sync::Arc::new(cache)),
-            Err(e) => {
-                tracing::warn!("Failed to initialize HuggingFace search cache: {}", e);
-                None
-            }
-        };
-
-        // Initialize download persistence
-        let data_dir = launcher_root.join("launcher-data");
-        let download_persistence =
-            std::sync::Arc::new(model_library::DownloadPersistence::new(&data_dir));
-
-        let mut hf_client = match model_library::HuggingFaceClient::new(&hf_cache_dir) {
-            Ok(mut client) => {
-                // Attach search cache if available
-                if let Some(cache) = search_cache {
-                    client.set_search_cache(cache);
-                }
-                // Attach download persistence
-                client.set_persistence(download_persistence);
-                // Restore persisted downloads from previous session
-                client.restore_persisted_downloads().await;
-                Some(client)
-            }
-            Err(e) => {
-                tracing::warn!("Failed to initialize HuggingFace client: {}", e);
-                None
-            }
-        };
-
-        // Initialize model library (required - core functionality)
-        let model_library = model_library::ModelLibrary::new(&model_library_dir)
-            .await
-            .map_err(|e| PumasError::Config {
-                message: format!("Model library initialization failed: {}", e),
-            })?;
-        let model_library = Arc::new(model_library);
-        let model_mapper =
-            model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
-        let model_importer = model_library::ModelImporter::new(model_library.clone());
-
-        // Wire download completion -> in-place import (metadata + indexing)
-        if let Some(ref mut client) = hf_client {
-            let lib = model_library.clone();
-            client.set_completion_callback(std::sync::Arc::new(
-                move |info: model_library::DownloadCompletionInfo| {
-                    let lib = lib.clone();
-                    tokio::spawn(async move {
-                        let importer = model_library::ModelImporter::new(lib);
-                        match importer.finalize_downloaded_directory(&info).await {
-                            Ok(r) if r.success => {
-                                tracing::info!("Post-download import succeeded: {:?}", r.model_id);
-                            }
-                            Ok(r) => {
-                                tracing::warn!("Post-download import failed: {:?}", r.error);
-                            }
-                            Err(e) => {
-                                tracing::error!("Post-download import error: {}", e);
-                            }
-                        }
-                    });
-                },
-            ));
-        }
-
-        // Initialize conversion manager
-        let conversion_manager = Arc::new(conversion::ConversionManager::new(
-            launcher_root.clone(),
-            model_library.clone(),
-            Arc::new(model_library::ModelImporter::new(model_library.clone())),
-        ));
-
-        // Best-effort registry connection
-        let registry = match registry::LibraryRegistry::open() {
-            Ok(reg) => Some(reg),
-            Err(e) => {
-                tracing::warn!("Failed to open global registry (non-fatal): {}", e);
-                None
-            }
-        };
-
-        // Spawn non-blocking orphan scan to adopt models missing metadata
-        {
-            let lib_clone = model_library.clone();
-            tokio::spawn(async move {
-                let importer = model_library::ModelImporter::new(lib_clone);
-                let result = importer.adopt_orphans(false).await;
-                if result.orphans_found > 0 {
-                    tracing::info!(
-                        "Startup orphan scan: found={}, adopted={}, errors={}",
-                        result.orphans_found,
-                        result.adopted,
-                        result.errors.len()
-                    );
-                }
-            });
-        }
-
-        let primary_state = Arc::new(PrimaryState {
-            _state: state,
-            network_manager,
-            process_manager,
-            system_utils,
-            model_library,
-            model_mapper,
-            hf_client,
-            model_importer,
-            conversion_manager,
-            reconciliation: Arc::new(ReconciliationCoordinator::new(
-                std::time::Duration::from_secs(5),
-                std::time::Duration::from_secs(5),
-            )),
-            server_handle: tokio::sync::Mutex::new(None),
-            registry,
-        });
-
-        // Startup-triggered full-library reconciliation.
-        {
-            let ps = primary_state.clone();
-            tokio::spawn(async move {
-                ps.reconciliation.mark_dirty_all().await;
-                trigger_reconciliation(ps, ReconcileScope::AllModels, "startup").await;
-            });
-        }
-
-        let model_watcher = match start_model_library_watcher(primary_state.clone()) {
-            Ok(watcher) => Some(watcher),
-            Err(err) => {
-                tracing::warn!("Failed to start model library watcher (non-fatal): {}", err);
-                None
-            }
-        };
-
-        // Spawn one-time recovery for incomplete sharded models
-        {
-            let ps = primary_state.clone();
-            tokio::spawn(async move {
-                let recoveries = ps.model_importer.recover_incomplete_shards();
-                if recoveries.is_empty() {
-                    return;
-                }
-                tracing::info!(
-                    "Found {} incomplete sharded model(s) to recover",
-                    recoveries.len()
-                );
-                let Some(ref client) = ps.hf_client else {
-                    tracing::warn!("Cannot recover incomplete shards: HF client not available");
-                    return;
-                };
-                for recovery in recoveries {
-                    let request = model_library::DownloadRequest {
-                        repo_id: recovery.repo_id.clone(),
-                        family: recovery.family,
-                        official_name: recovery.official_name,
-                        model_type: recovery.model_type,
-                        quant: None,
-                        filename: None,
-                        filenames: None,
-                        pipeline_tag: None,
-                        bundle_format: None,
-                        pipeline_class: None,
-                    };
-                    match client.start_download(&request, &recovery.model_dir).await {
-                        Ok(id) => {
-                            tracing::info!(
-                                "Started shard recovery download {} for repo {}",
-                                id,
-                                recovery.repo_id,
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to start shard recovery for {}: {}",
-                                recovery.repo_id,
-                                e,
-                            );
-                        }
-                    }
-                }
-            });
-        }
-
-        Ok(Self {
-            launcher_root,
-            inner: ApiInner::Primary(primary_state),
-            model_watcher,
-        })
+        Self::builder(launcher_root).build().await
     }
 
     /// Discover and connect to an existing pumas-core instance, or return an error
@@ -433,6 +189,13 @@ impl PumasApi {
         // Check for a running instance
         if let Some(instance) = registry.get_instance(&library.path)? {
             if platform::is_process_alive(instance.pid) {
+                if instance.status == registry::InstanceStatus::Claiming {
+                    return Err(PumasError::PrimaryInstanceBusy {
+                        library_path: instance.library_path,
+                        pid: instance.pid,
+                        status: instance.status.as_str().to_string(),
+                    });
+                }
                 let addr =
                     std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
                 match ipc::IpcClient::connect(addr, instance.pid).await {
@@ -468,28 +231,37 @@ impl PumasApi {
         Self::new(&library.path).await
     }
 
-    /// Start the IPC server and register this instance in the global registry.
+    /// Start the IPC server and promote any pending startup claim to a ready instance row.
     ///
-    /// Call this after creating a Primary instance to enable instance convergence.
-    /// Best-effort: failures are logged but don't affect the API.
+    /// Primary construction already calls this. Repeated calls are idempotent and
+    /// return the existing port.
     pub async fn start_ipc_server(&self) -> Result<u16> {
         let state = self.try_primary()?;
+        let mut server_handle = state.server_handle.lock().await;
+        if let Some(existing) = server_handle.as_ref() {
+            return Ok(existing.port);
+        }
 
         let handle = ipc::IpcServer::start(state.clone()).await?;
         let port = handle.port;
 
-        // Register in the global registry
         if let Some(ref reg) = state.registry {
             let library_name = self
                 .launcher_root
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or("pumas-library");
-            let _ = reg.register(&self.launcher_root, library_name);
-            let _ = reg.register_instance(&self.launcher_root, std::process::id(), port);
+            reg.register(&self.launcher_root, library_name)?;
+
+            let mut claim = state.instance_claim.lock().await;
+            if let Some(claim) = claim.take() {
+                reg.mark_instance_ready(&claim.library_path, &claim.claim_token, port)?;
+            } else {
+                reg.register_instance(&self.launcher_root, std::process::id(), port)?;
+            }
         }
 
-        *state.server_handle.lock().await = Some(handle);
+        *server_handle = Some(handle);
         tracing::info!("IPC server started on port {}", port);
 
         Ok(port)
@@ -545,11 +317,39 @@ impl Drop for PumasApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
     use tempfile::TempDir;
+
+    static REGISTRY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct RegistryTestGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl RegistryTestGuard {
+        fn new(root: &std::path::Path) -> Self {
+            let lock = REGISTRY_TEST_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("registry test lock poisoned");
+            crate::platform::paths::set_test_registry_db_path(Some(
+                root.join("registry-test")
+                    .join(config::RegistryConfig::DB_FILENAME),
+            ));
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for RegistryTestGuard {
+        fn drop(&mut self) {
+            crate::platform::paths::set_test_registry_db_path(None);
+        }
+    }
 
     #[tokio::test]
     async fn test_api_creation() {
         let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
         let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
         assert_eq!(api.launcher_root(), temp_dir.path());
@@ -558,6 +358,7 @@ mod tests {
     #[tokio::test]
     async fn test_api_paths() {
         let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
         let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
         assert!(api.launcher_data_dir().ends_with("launcher-data"));
@@ -570,6 +371,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_status() {
         let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
         let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
         let status = api.get_status().await.unwrap();
@@ -579,10 +381,35 @@ mod tests {
     #[tokio::test]
     async fn test_get_disk_space() {
         let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
         let api = PumasApi::new(temp_dir.path()).await.unwrap();
 
         let disk = api.get_disk_space().await.unwrap();
         assert!(disk.success);
         assert!(disk.total > 0);
+    }
+
+    #[tokio::test]
+    async fn test_new_rejects_second_primary_for_same_root() {
+        let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
+        let _primary = PumasApi::new(temp_dir.path()).await.unwrap();
+
+        let err = match PumasApi::new(temp_dir.path()).await {
+            Ok(_) => panic!("expected second primary to be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, PumasError::PrimaryInstanceBusy { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_start_ipc_server_is_idempotent() {
+        let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
+        let api = PumasApi::new(temp_dir.path()).await.unwrap();
+
+        let first_port = api.start_ipc_server().await.unwrap();
+        let second_port = api.start_ipc_server().await.unwrap();
+        assert_eq!(first_port, second_port);
     }
 }

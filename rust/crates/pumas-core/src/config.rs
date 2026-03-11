@@ -140,6 +140,10 @@ impl RegistryConfig {
     pub const BUSY_TIMEOUT_MS: u32 = 5000;
     /// Timeout for IPC client connection attempts.
     pub const IPC_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+    /// Poll interval while waiting for a claimed primary to finish startup.
+    pub const PRIMARY_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
+    /// Maximum time a client waits for a claiming primary to become ready.
+    pub const PRIMARY_READY_TIMEOUT: Duration = Duration::from_secs(10);
     /// Maximum concurrent IPC connections the server will accept.
     pub const MAX_IPC_CONNECTIONS: usize = 64;
     /// Maximum size of a single IPC message frame (16 MiB).

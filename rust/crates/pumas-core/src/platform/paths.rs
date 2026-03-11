@@ -8,6 +8,11 @@
 
 use crate::error::{PumasError, Result};
 use std::path::{Path, PathBuf};
+#[cfg(test)]
+use std::sync::{Mutex, OnceLock};
+
+#[cfg(test)]
+static TEST_REGISTRY_DB_OVERRIDE: OnceLock<Mutex<Option<PathBuf>>> = OnceLock::new();
 
 /// Get the path to the Python executable within a virtual environment.
 ///
@@ -208,7 +213,25 @@ pub fn pumas_config_dir() -> Result<PathBuf> {
 ///
 /// Returns `{pumas_config_dir}/registry.db`.
 pub fn registry_db_path() -> Result<PathBuf> {
+    #[cfg(test)]
+    if let Some(path) = TEST_REGISTRY_DB_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test registry override lock poisoned")
+        .clone()
+    {
+        return Ok(path);
+    }
+
     Ok(pumas_config_dir()?.join(crate::config::RegistryConfig::DB_FILENAME))
+}
+
+#[cfg(test)]
+pub fn set_test_registry_db_path(path: Option<PathBuf>) {
+    *TEST_REGISTRY_DB_OVERRIDE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .expect("test registry override lock poisoned") = path;
 }
 
 #[cfg(test)]

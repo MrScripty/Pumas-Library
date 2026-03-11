@@ -1,5 +1,6 @@
 //! Builder for configuring PumasApi initialization.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -34,6 +35,171 @@ pub struct PumasApiBuilder {
     auto_create_dirs: bool,
     enable_hf_client: bool,
     enable_process_manager: bool,
+}
+
+struct InstanceClaimGuard {
+    registry: registry::LibraryRegistry,
+    library_path: PathBuf,
+    active: bool,
+}
+
+impl InstanceClaimGuard {
+    fn new(registry: registry::LibraryRegistry, library_path: PathBuf) -> Self {
+        Self {
+            registry,
+            library_path,
+            active: true,
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.active = false;
+    }
+}
+
+impl Drop for InstanceClaimGuard {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = self.registry.unregister_instance(&self.library_path);
+        }
+    }
+}
+
+fn instance_busy_error(existing: registry::InstanceEntry) -> PumasError {
+    PumasError::PrimaryInstanceBusy {
+        library_path: existing.library_path,
+        pid: existing.pid,
+        status: existing.status.as_str().to_string(),
+    }
+}
+
+fn start_primary_background_work(
+    primary_state: Arc<PrimaryState>,
+    known_download_dirs: HashSet<PathBuf>,
+) -> Option<model_library::ModelLibraryWatcher> {
+    {
+        let ps = primary_state.clone();
+        tokio::spawn(async move {
+            ps.reconciliation.mark_dirty_all().await;
+            trigger_reconciliation(ps, ReconcileScope::AllModels, "startup").await;
+        });
+    }
+
+    let model_watcher = match start_model_library_watcher(primary_state.clone()) {
+        Ok(watcher) => Some(watcher),
+        Err(err) => {
+            tracing::warn!("Failed to start model library watcher (non-fatal): {}", err);
+            None
+        }
+    };
+
+    {
+        let ps = primary_state.clone();
+        tokio::spawn(async move {
+            let recoveries = ps.model_importer.recover_incomplete_shards();
+            if recoveries.is_empty() {
+                return;
+            }
+            tracing::info!(
+                "Found {} incomplete sharded model(s) to recover",
+                recoveries.len()
+            );
+            let Some(ref client) = ps.hf_client else {
+                tracing::warn!("Cannot recover incomplete shards: HF client not available");
+                return;
+            };
+            for recovery in recoveries {
+                let request = model_library::DownloadRequest {
+                    repo_id: recovery.repo_id.clone(),
+                    family: recovery.family,
+                    official_name: recovery.official_name,
+                    model_type: recovery.model_type,
+                    quant: None,
+                    filename: None,
+                    filenames: None,
+                    pipeline_tag: None,
+                    bundle_format: None,
+                    pipeline_class: None,
+                };
+                match client.start_download(&request, &recovery.model_dir).await {
+                    Ok(id) => {
+                        tracing::info!(
+                            "Started shard recovery download {} for repo {}",
+                            id,
+                            recovery.repo_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to start shard recovery for {}: {}",
+                            recovery.repo_id,
+                            e,
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    {
+        let ps = primary_state;
+        tokio::spawn(async move {
+            let interrupted = ps
+                .model_importer
+                .find_interrupted_downloads(&known_download_dirs);
+            if interrupted.is_empty() {
+                return;
+            }
+            tracing::info!(
+                "Found {} interrupted download(s) to recover",
+                interrupted.len()
+            );
+            let Some(ref client) = ps.hf_client else {
+                tracing::warn!("Cannot recover interrupted downloads: HF client not available");
+                return;
+            };
+            for item in interrupted {
+                let repo_id = item.repo_id.unwrap_or_else(|| {
+                    let dir_name = item
+                        .model_dir
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(&item.inferred_name);
+                    format!("{}/{}", item.family, dir_name)
+                });
+                let request = model_library::DownloadRequest {
+                    repo_id: repo_id.clone(),
+                    family: item.family,
+                    official_name: item.inferred_name,
+                    model_type: item.model_type,
+                    quant: None,
+                    filename: None,
+                    filenames: None,
+                    pipeline_tag: None,
+                    bundle_format: None,
+                    pipeline_class: None,
+                };
+                match client.start_download(&request, &item.model_dir).await {
+                    Ok(id) => {
+                        tracing::info!(
+                            "Started interrupted download recovery {} for repo {}",
+                            id,
+                            repo_id,
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to recover interrupted download for {}: {}",
+                            repo_id,
+                            e,
+                        );
+                    }
+                }
+            }
+        });
+    }
+
+    model_watcher
 }
 
 impl PumasApiBuilder {
@@ -137,6 +303,21 @@ impl PumasApiBuilder {
                 });
             }
         }
+
+        let registry = registry::LibraryRegistry::open()?;
+        let library_name = self
+            .launcher_root
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("pumas-library");
+        let _ = registry.register(&self.launcher_root, library_name)?;
+        let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
+            registry::InstanceClaimResult::Claimed(claim) => claim,
+            registry::InstanceClaimResult::Occupied(existing) => {
+                return Err(instance_busy_error(existing));
+            }
+        };
+        let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.library_path.clone());
 
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
@@ -266,15 +447,6 @@ impl PumasApiBuilder {
             Arc::new(model_library::ModelImporter::new(model_library.clone())),
         ));
 
-        // Best-effort registry connection (failures don't block initialization)
-        let registry = match registry::LibraryRegistry::open() {
-            Ok(reg) => Some(reg),
-            Err(e) => {
-                tracing::warn!("Failed to open global registry (non-fatal): {}", e);
-                None
-            }
-        };
-
         // Spawn non-blocking orphan scan to adopt models missing metadata
         {
             let lib_clone = model_library.clone();
@@ -324,141 +496,20 @@ impl PumasApiBuilder {
                 Duration::from_secs(5),
             )),
             server_handle: tokio::sync::Mutex::new(None),
-            registry,
+            registry: Some(registry),
+            instance_claim: tokio::sync::Mutex::new(Some(claim)),
         });
 
-        // Startup-triggered full-library reconciliation.
-        {
-            let ps = primary_state.clone();
-            tokio::spawn(async move {
-                ps.reconciliation.mark_dirty_all().await;
-                trigger_reconciliation(ps, ReconcileScope::AllModels, "startup").await;
-            });
-        }
-
-        let model_watcher = match start_model_library_watcher(primary_state.clone()) {
-            Ok(watcher) => Some(watcher),
-            Err(err) => {
-                tracing::warn!("Failed to start model library watcher (non-fatal): {}", err);
-                None
-            }
-        };
-
-        // Spawn one-time recovery for incomplete sharded models
-        {
-            let ps = primary_state.clone();
-            tokio::spawn(async move {
-                let recoveries = ps.model_importer.recover_incomplete_shards();
-                if recoveries.is_empty() {
-                    return;
-                }
-                tracing::info!(
-                    "Found {} incomplete sharded model(s) to recover",
-                    recoveries.len()
-                );
-                let Some(ref client) = ps.hf_client else {
-                    tracing::warn!("Cannot recover incomplete shards: HF client not available");
-                    return;
-                };
-                for recovery in recoveries {
-                    let request = model_library::DownloadRequest {
-                        repo_id: recovery.repo_id.clone(),
-                        family: recovery.family,
-                        official_name: recovery.official_name,
-                        model_type: recovery.model_type,
-                        quant: None, // Download all files for this repo
-                        filename: None,
-                        filenames: None,
-                        pipeline_tag: None,
-                        bundle_format: None,
-                        pipeline_class: None,
-                    };
-                    // start_download skips files already on disk, so it will
-                    // only download the missing shards
-                    match client.start_download(&request, &recovery.model_dir).await {
-                        Ok(id) => {
-                            tracing::info!(
-                                "Started shard recovery download {} for repo {}",
-                                id,
-                                recovery.repo_id,
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to start shard recovery for {}: {}",
-                                recovery.repo_id,
-                                e,
-                            );
-                        }
-                    }
-                }
-            });
-        }
-
-        // Spawn one-time recovery for interrupted downloads (.part files, no persistence)
-        {
-            let ps = primary_state.clone();
-            let known_dirs = known_download_dirs;
-            tokio::spawn(async move {
-                let interrupted = ps.model_importer.find_interrupted_downloads(&known_dirs);
-                if interrupted.is_empty() {
-                    return;
-                }
-                tracing::info!(
-                    "Found {} interrupted download(s) to recover",
-                    interrupted.len()
-                );
-                let Some(ref client) = ps.hf_client else {
-                    tracing::warn!("Cannot recover interrupted downloads: HF client not available");
-                    return;
-                };
-                for item in interrupted {
-                    // Use repo_id from marker file, or fall back to inferred path
-                    let repo_id = item.repo_id.unwrap_or_else(|| {
-                        // Best-guess: {family}/{dir_name} using raw directory name
-                        let dir_name = item
-                            .model_dir
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or(&item.inferred_name);
-                        format!("{}/{}", item.family, dir_name)
-                    });
-                    let request = model_library::DownloadRequest {
-                        repo_id: repo_id.clone(),
-                        family: item.family,
-                        official_name: item.inferred_name,
-                        model_type: item.model_type,
-                        quant: None,
-                        filename: None,
-                        filenames: None,
-                        pipeline_tag: None,
-                        bundle_format: None,
-                        pipeline_class: None,
-                    };
-                    match client.start_download(&request, &item.model_dir).await {
-                        Ok(id) => {
-                            tracing::info!(
-                                "Started interrupted download recovery {} for repo {}",
-                                id,
-                                repo_id,
-                            );
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to recover interrupted download for {}: {}",
-                                repo_id,
-                                e,
-                            );
-                        }
-                    }
-                }
-            });
-        }
-
-        Ok(PumasApi {
+        let mut api = PumasApi {
             launcher_root: self.launcher_root,
             inner: ApiInner::Primary(primary_state),
-            model_watcher,
-        })
+            model_watcher: None,
+        };
+        api.start_ipc_server().await?;
+        api.model_watcher =
+            start_primary_background_work(api.primary().clone(), known_download_dirs);
+        claim_guard.disarm();
+
+        Ok(api)
     }
 }

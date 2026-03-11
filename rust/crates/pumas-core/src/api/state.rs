@@ -34,8 +34,10 @@ pub(crate) struct PrimaryState {
     pub(crate) reconciliation: Arc<ReconciliationCoordinator>,
     /// IPC server handle (Primary only). Protected by async Mutex for shutdown.
     pub(crate) server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
-    /// Global registry connection (best-effort, None if unavailable).
+    /// Global registry connection used for singleton claim ownership.
     pub(crate) registry: Option<registry::LibraryRegistry>,
+    /// Pending startup claim that will be promoted to a ready instance row once IPC starts.
+    pub(crate) instance_claim: tokio::sync::Mutex<Option<registry::PrimaryInstanceClaim>>,
 }
 
 /// IPC dispatch implementation for the primary state.

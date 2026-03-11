@@ -793,7 +793,10 @@ impl ModelIndex {
     }
 
     /// Insert or update a model record.
-    pub fn upsert(&self, record: &ModelRecord) -> Result<()> {
+    ///
+    /// Returns `true` when SQLite inserted or updated a row and `false` when the
+    /// existing row already matched the projected record.
+    pub fn upsert(&self, record: &ModelRecord) -> Result<bool> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -803,7 +806,7 @@ impl ModelIndex {
         let hashes_json = serde_json::to_string(&record.hashes)?;
         let metadata_json = serde_json::to_string_pretty(&record.metadata)?;
 
-        conn.execute(
+        let changed = conn.execute(
             "INSERT INTO models (id, path, cleaned_name, official_name, model_type,
                                  tags_json, hashes_json, metadata_json, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -815,7 +818,15 @@ impl ModelIndex {
                  tags_json=excluded.tags_json,
                  hashes_json=excluded.hashes_json,
                  metadata_json=excluded.metadata_json,
-                 updated_at=excluded.updated_at",
+                 updated_at=excluded.updated_at
+             WHERE path != excluded.path
+                OR cleaned_name != excluded.cleaned_name
+                OR official_name != excluded.official_name
+                OR model_type != excluded.model_type
+                OR tags_json != excluded.tags_json
+                OR hashes_json != excluded.hashes_json
+                OR metadata_json != excluded.metadata_json
+                OR updated_at != excluded.updated_at",
             params![
                 record.id,
                 record.path,
@@ -827,10 +838,12 @@ impl ModelIndex {
                 metadata_json,
                 record.updated_at,
             ],
-        )?;
+        )? > 0;
 
-        debug!("Upserted model: {}", record.id);
-        Ok(())
+        if changed {
+            debug!("Upserted model: {}", record.id);
+        }
+        Ok(changed)
     }
 
     /// Get a model by ID.
@@ -1550,13 +1563,22 @@ mod tests {
         let (index, _temp) = create_test_index();
 
         let record = create_test_record("test-model-1", "Test Model One", "checkpoint");
-        index.upsert(&record).unwrap();
+        assert!(index.upsert(&record).unwrap());
 
         let loaded = index.get("test-model-1").unwrap();
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
         assert_eq!(loaded.official_name, "Test Model One");
         assert_eq!(loaded.model_type, "checkpoint");
+    }
+
+    #[test]
+    fn test_upsert_returns_false_when_record_is_unchanged() {
+        let (index, _temp) = create_test_index();
+
+        let record = create_test_record("stable-row", "Stable Row", "checkpoint");
+        assert!(index.upsert(&record).unwrap());
+        assert!(!index.upsert(&record).unwrap());
     }
 
     #[test]

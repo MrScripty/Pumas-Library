@@ -719,6 +719,7 @@ impl ModelLibrary {
         let mut discovered_model_ids: HashSet<String> = HashSet::new();
         let mut discovered_records = Vec::new();
         let mut custom_runtime_bindings: Vec<(String, CustomRuntimeProjection)> = Vec::new();
+        let mut mutated = false;
         let mut count = 0;
         let existing_ids = self.index.get_all_ids()?;
         let mut existing_model_types: HashMap<String, String> = HashMap::new();
@@ -792,13 +793,14 @@ impl ModelLibrary {
         // (review overlays, dependency bindings/history) remain intact.
         for existing_id in existing_ids {
             if !discovered_model_ids.contains(&existing_id) {
-                let _ = self.index.delete(&existing_id)?;
+                mutated |= self.index.delete(&existing_id)?;
             }
         }
 
         // Upsert current metadata-backed rows.
         for record in discovered_records {
-            if self.index.upsert(&record).is_ok() {
+            if let Ok(changed) = self.index.upsert(&record) {
+                mutated |= changed;
                 count += 1;
             }
         }
@@ -813,8 +815,10 @@ impl ModelLibrary {
             }
         }
 
-        // Checkpoint WAL for durability
-        self.index.checkpoint_wal()?;
+        if mutated {
+            // Avoid checkpoint churn when the projected index is already current.
+            self.index.checkpoint_wal()?;
+        }
 
         tracing::info!("Rebuilt index with {} models", count);
         Ok(count)
@@ -2135,6 +2139,7 @@ impl ModelLibrary {
     /// The retained entry is re-indexed and metadata `model_id` is normalized to path.
     pub fn cleanup_duplicate_repo_entries(&self) -> Result<DuplicateRepoCleanupReport> {
         let mut report = DuplicateRepoCleanupReport::default();
+        let mut mutated = false;
         let mut by_repo: HashMap<String, Vec<DuplicateRepoEntry>> = HashMap::new();
         let model_dirs: Vec<PathBuf> = self.model_dirs().collect();
 
@@ -2151,6 +2156,7 @@ impl ModelLibrary {
                 metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
                 let metadata_path = model_dir.join(METADATA_FILENAME);
                 atomic_write_json(&metadata_path, &metadata, true)?;
+                mutated = true;
                 report.normalized_metadata_ids += 1;
             }
 
@@ -2195,7 +2201,7 @@ impl ModelLibrary {
 
             for duplicate in entries.iter().skip(1) {
                 if !duplicate.model_dir.exists() {
-                    let _ = self.index.delete(&duplicate.model_id);
+                    mutated |= self.index.delete(&duplicate.model_id)?;
                     continue;
                 }
 
@@ -2209,7 +2215,7 @@ impl ModelLibrary {
                 };
 
                 if removable {
-                    let _ = self.index.delete(&duplicate.model_id);
+                    mutated |= self.index.delete(&duplicate.model_id)?;
                     std::fs::remove_dir_all(&duplicate.model_dir)?;
                     cleanup_empty_parent_dirs_after_move(&duplicate.model_dir, &self.library_root);
                     report.removed_duplicate_dirs += 1;
@@ -2229,6 +2235,7 @@ impl ModelLibrary {
                         preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
                         let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
                         atomic_write_json(&metadata_path, &preferred_metadata, true)?;
+                        mutated = true;
                         report.normalized_metadata_ids += 1;
                     }
                     let record = metadata_to_record(
@@ -2236,7 +2243,7 @@ impl ModelLibrary {
                         &preferred.model_dir,
                         &preferred_metadata,
                     );
-                    self.index.upsert(&record)?;
+                    mutated |= self.index.upsert(&record)?;
                 }
             }
 
@@ -2245,7 +2252,9 @@ impl ModelLibrary {
             }
         }
 
-        self.index.checkpoint_wal()?;
+        if mutated {
+            self.index.checkpoint_wal()?;
+        }
         Ok(report)
     }
 }
@@ -3812,11 +3821,26 @@ fn metadata_to_record(model_id: &str, model_dir: &Path, metadata: &ModelMetadata
             })
             .unwrap_or_default(),
         metadata: metadata_json,
-        updated_at: metadata
-            .updated_date
-            .clone()
-            .unwrap_or_else(|| chrono::Utc::now().to_rfc3339()),
+        updated_at: projected_record_updated_at(model_dir, metadata),
     }
+}
+
+fn projected_record_updated_at(model_dir: &Path, metadata: &ModelMetadata) -> String {
+    metadata
+        .updated_date
+        .clone()
+        .or_else(|| latest_filesystem_timestamp(model_dir))
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339())
+}
+
+fn latest_filesystem_timestamp(model_dir: &Path) -> Option<String> {
+    let metadata_path = model_dir.join(METADATA_FILENAME);
+    let newest = [metadata_path.as_path(), model_dir]
+        .into_iter()
+        .filter_map(|path| std::fs::metadata(path).ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .max()?;
+    Some(chrono::DateTime::<chrono::Utc>::from(newest).to_rfc3339())
 }
 
 fn project_display_fields_for_record(record: &mut ModelRecord) {
@@ -4612,6 +4636,45 @@ mod tests {
             .unwrap()
             .expect("model should exist after rebuild");
         assert_eq!(model.model_type, "embedding");
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_index_preserves_updated_at_when_metadata_lacks_updated_date() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "stable-updated-at");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/stable-updated-at".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Stable Updated At".to_string()),
+            cleaned_name: Some("stable-updated-at".to_string()),
+            updated_date: None,
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let _ = library.rebuild_index().await.unwrap();
+        let first = library
+            .get_model("llm/llama/stable-updated-at")
+            .await
+            .unwrap()
+            .expect("model should exist after first rebuild")
+            .updated_at;
+
+        std::thread::sleep(std::time::Duration::from_millis(25));
+
+        let _ = library.rebuild_index().await.unwrap();
+        let second = library
+            .get_model("llm/llama/stable-updated-at")
+            .await
+            .unwrap()
+            .expect("model should exist after second rebuild")
+            .updated_at;
+
+        assert_eq!(first, second);
     }
 
     #[tokio::test]

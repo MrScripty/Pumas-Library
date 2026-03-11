@@ -11,9 +11,7 @@ use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
 
-use super::{
-    start_model_library_watcher, trigger_reconciliation, ReconcileScope, ReconciliationCoordinator,
-};
+use super::{start_model_library_watcher, ReconcileScope, ReconciliationCoordinator};
 
 /// Builder for configuring PumasApi initialization.
 ///
@@ -69,14 +67,6 @@ fn start_primary_background_work(
     primary_state: Arc<PrimaryState>,
     known_download_dirs: HashSet<PathBuf>,
 ) -> Option<model_library::ModelLibraryWatcher> {
-    {
-        let ps = primary_state.clone();
-        tokio::spawn(async move {
-            ps.reconciliation.mark_dirty_all().await;
-            trigger_reconciliation(ps, ReconcileScope::AllModels, "startup").await;
-        });
-    }
-
     let model_watcher = match start_model_library_watcher(primary_state.clone()) {
         Ok(watcher) => Some(watcher),
         Err(err) => {
@@ -517,6 +507,10 @@ impl PumasApiBuilder {
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
         });
+        primary_state
+            .reconciliation
+            .complete(&ReconcileScope::AllModels, chrono::Utc::now().to_rfc3339())
+            .await;
 
         let mut api = PumasApi {
             launcher_root: self.launcher_root,

@@ -1112,6 +1112,23 @@ mod tests {
         assert!(should_run(&scope, Duration::from_secs(5), false));
     }
 
+    #[tokio::test]
+    async fn test_complete_all_scope_suppresses_rerun_until_dirty() {
+        let coordinator =
+            ReconciliationCoordinator::new(Duration::from_secs(5), Duration::from_secs(5));
+        let scope = ReconcileScope::AllModels;
+
+        assert!(coordinator.try_start(&scope, false).await);
+        coordinator
+            .complete(&scope, "2026-03-11T00:00:00Z".to_string())
+            .await;
+
+        assert!(!coordinator.try_start(&scope, false).await);
+
+        coordinator.mark_dirty_all().await;
+        assert!(coordinator.try_start(&scope, false).await);
+    }
+
     #[test]
     fn test_partial_download_dir_is_not_importable() {
         let temp = TempDir::new().unwrap();

@@ -10,6 +10,7 @@
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
 use tempfile::TempDir;
+use walkdir::WalkDir;
 
 /// Create a test environment with proper directory structure.
 fn create_test_env() -> TempDir {
@@ -214,6 +215,55 @@ async fn test_model_search_with_empty_library() {
     let search = result.unwrap();
     assert!(search.models.is_empty());
     assert_eq!(search.total_count, 0);
+}
+
+#[tokio::test]
+async fn test_api_creation_clean_startup_remains_idle() {
+    let temp_dir = create_test_env();
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let models_root = temp_dir.path().join("shared-resources").join("models");
+    let db_path = models_root.join("models.db");
+    let wal_path = models_root.join("models.db-wal");
+    let shm_path = models_root.join("models.db-shm");
+
+    let db_modified_before = std::fs::metadata(&db_path).unwrap().modified().unwrap();
+    let wal_modified_before = std::fs::metadata(&wal_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    let shm_modified_before = std::fs::metadata(&shm_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+
+    let db_modified_after = std::fs::metadata(&db_path).unwrap().modified().unwrap();
+    let wal_modified_after = std::fs::metadata(&wal_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+    let shm_modified_after = std::fs::metadata(&shm_path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok());
+
+    assert_eq!(db_modified_before, db_modified_after);
+    assert_eq!(wal_modified_before, wal_modified_after);
+    assert_eq!(shm_modified_before, shm_modified_after);
+    assert_eq!(
+        WalkDir::new(&models_root)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .filter(|entry| entry.file_name() == "metadata.json")
+            .count(),
+        0
+    );
+
+    drop(api);
 }
 
 #[tokio::test]

@@ -467,18 +467,20 @@ impl PumasApiBuilder {
         // Spawn non-blocking orphan scan to adopt models missing metadata
         {
             let lib_clone = model_library.clone();
-            tokio::spawn(async move {
-                let importer = model_library::ModelImporter::new(lib_clone);
-                let result = importer.adopt_orphans(false).await;
-                if result.orphans_found > 0 {
-                    tracing::info!(
-                        "Startup orphan scan: found={}, adopted={}, errors={}",
-                        result.orphans_found,
-                        result.adopted,
-                        result.errors.len()
-                    );
-                }
-            });
+            let importer = model_library::ModelImporter::new(lib_clone);
+            if importer.has_orphan_candidates() {
+                tokio::spawn(async move {
+                    let result = importer.adopt_orphans(false).await;
+                    if result.orphans_found > 0 {
+                        tracing::info!(
+                            "Startup orphan scan: found={}, adopted={}, errors={}",
+                            result.orphans_found,
+                            result.adopted,
+                            result.errors.len()
+                        );
+                    }
+                });
+            }
         }
 
         // Collect known dest_dirs for interrupted download detection

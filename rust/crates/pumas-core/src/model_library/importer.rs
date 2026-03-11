@@ -1340,7 +1340,7 @@ impl ModelImporter {
         let mut result = OrphanScanResult::default();
         let library_root = self.library.library_root();
 
-        let orphan_dirs = self.find_orphan_dirs(library_root);
+        let orphan_dirs = self.find_orphan_dirs(library_root, false);
         result.orphans_found = orphan_dirs.len();
 
         if orphan_dirs.is_empty() {
@@ -1409,8 +1409,16 @@ impl ModelImporter {
         result
     }
 
+    /// Cheap clean-state probe used to avoid spawning startup orphan adoption
+    /// work when the library tree has no orphan candidates.
+    pub fn has_orphan_candidates(&self) -> bool {
+        !self
+            .find_orphan_dirs(self.library.library_root(), true)
+            .is_empty()
+    }
+
     /// Find directories with model files but no metadata.json.
-    fn find_orphan_dirs(&self, library_root: &Path) -> Vec<PathBuf> {
+    fn find_orphan_dirs(&self, library_root: &Path, stop_after_first: bool) -> Vec<PathBuf> {
         let mut orphans = Vec::new();
         let model_extensions: &[&str] =
             &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
@@ -1466,6 +1474,9 @@ impl ModelImporter {
 
             if has_model_files {
                 orphans.push(dir.to_path_buf());
+                if stop_after_first {
+                    break;
+                }
             }
         }
 
@@ -1906,6 +1917,21 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(content).unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn test_has_orphan_candidates_detects_missing_metadata_model_dir() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let orphan_dir = library
+            .library_root()
+            .join("llm")
+            .join("llama")
+            .join("candidate");
+        std::fs::create_dir_all(&orphan_dir).unwrap();
+        create_test_file(&orphan_dir, "weights.gguf", b"ok");
+
+        assert!(importer.has_orphan_candidates());
     }
 
     fn write_min_safetensors(path: &Path) {

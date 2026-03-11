@@ -7,6 +7,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | File/Folder | Description |
 |-------------|-------------|
 | `strict-primary-claim-and-reconciliation-idempotence-plan.md` | Plan for making reconciliation side effects idempotent and enforcing a strict single-primary-per-launcher-root startup contract. |
+| `transparent-client-mode-dispatch-plan.md` | Plan for making raw Rust `PumasApi` callers converge to a real client-backed handle with explicit module-by-module IPC parity. |
 | `external-reference-diffusers-implementation-plan.md` | Backend-first implementation plan for external-reference diffusers bundles, including schema, validation, execution descriptor, and regression controls. |
 | `directory-import-disambiguation-implementation-plan.md` | Plan for GUI/backend directory import classification so bundle roots and multi-model containers are imported safely and distinctly. |
 

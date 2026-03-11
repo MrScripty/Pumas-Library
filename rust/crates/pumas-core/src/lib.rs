@@ -79,7 +79,7 @@ pub use system::{
 pub use api::PumasApiBuilder;
 
 use serde::de::DeserializeOwned;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use api::PrimaryState;
@@ -226,11 +226,14 @@ impl PumasApi {
         PumasApiBuilder::new(launcher_root)
     }
 
-    /// Create a new PumasApi instance.
+    /// Create a PumasApi instance for the given launcher root.
     ///
     /// # Arguments
     ///
     /// * `launcher_root` - Path to the launcher root directory (containing launcher-data, etc.)
+    ///
+    /// If another process already owns the launcher root, this returns a
+    /// client-backed API handle instead of starting a second primary.
     pub async fn new(launcher_root: impl Into<PathBuf>) -> Result<Self> {
         Self::builder(launcher_root).build().await
     }
@@ -240,8 +243,8 @@ impl PumasApi {
     ///
     /// This is the entry point for host applications that don't know the library path.
     /// It checks the global registry for a registered library and a running instance:
-    /// 1. If a running instance is found (alive PID), connects as a Client.
-    /// 2. If a library is registered but no instance, creates a new Primary.
+    /// 1. If a library is registered and a primary already exists, attaches as a Client.
+    /// 2. If a library is registered but no primary exists, creates a new Primary.
     /// 3. If no libraries are registered, returns `NoLibrariesRegistered`.
     pub async fn discover() -> Result<Self> {
         let registry = registry::LibraryRegistry::open().map_err(|e| {
@@ -256,49 +259,66 @@ impl PumasApi {
             .get_default()?
             .ok_or(PumasError::NoLibrariesRegistered)?;
 
-        // Check for a running instance
-        if let Some(instance) = registry.get_instance(&library.path)? {
-            if platform::is_process_alive(instance.pid) {
-                if instance.status == registry::InstanceStatus::Claiming {
-                    return Err(PumasError::PrimaryInstanceBusy {
-                        library_path: instance.library_path,
-                        pid: instance.pid,
-                        status: instance.status.as_str().to_string(),
+        Self::new(&library.path).await
+    }
+
+    pub(crate) async fn connect_or_wait_for_existing_instance(
+        launcher_root: &Path,
+    ) -> Result<Option<Self>> {
+        let timeout = config::RegistryConfig::PRIMARY_READY_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + timeout;
+
+        loop {
+            let registry = registry::LibraryRegistry::open()?;
+            let _ = registry.cleanup_stale();
+            let Some(instance) = registry.get_instance(launcher_root)? else {
+                return Ok(None);
+            };
+
+            if !platform::is_process_alive(instance.pid) {
+                let _ = registry.unregister_instance(launcher_root);
+                return Ok(None);
+            }
+
+            if instance.status == registry::InstanceStatus::Claiming {
+                if tokio::time::Instant::now() >= deadline {
+                    return Err(PumasError::PrimaryInstanceStartupTimeout {
+                        library_path: launcher_root.to_path_buf(),
+                        timeout,
                     });
                 }
-                let addr =
-                    std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
-                match ipc::IpcClient::connect(addr, instance.pid).await {
-                    Ok(client) => {
-                        tracing::info!(
-                            "Connected to existing instance (PID {} on port {})",
-                            instance.pid,
-                            instance.port
-                        );
-                        return Ok(Self {
-                            launcher_root: library.path.clone(),
-                            inner: ApiInner::Client(Arc::new(client)),
-                            model_watcher: None,
-                        });
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to connect to instance PID {}: {}, creating new primary",
-                            instance.pid,
-                            e
-                        );
-                        // Stale entry, clean it up
-                        let _ = registry.unregister_instance(&library.path);
-                    }
+
+                tokio::time::sleep(config::RegistryConfig::PRIMARY_READY_POLL_INTERVAL).await;
+                continue;
+            }
+
+            let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
+            match ipc::IpcClient::connect(addr, instance.pid).await {
+                Ok(client) => {
+                    tracing::info!(
+                        "Connected to existing instance for {} (PID {} on port {})",
+                        launcher_root.display(),
+                        instance.pid,
+                        instance.port
+                    );
+                    return Ok(Some(Self {
+                        launcher_root: launcher_root.to_path_buf(),
+                        inner: ApiInner::Client(Arc::new(client)),
+                        model_watcher: None,
+                    }));
                 }
-            } else {
-                // PID is dead, clean up
-                let _ = registry.unregister_instance(&library.path);
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to connect to existing instance for {} (PID {}): {}",
+                        launcher_root.display(),
+                        instance.pid,
+                        err
+                    );
+                    let _ = registry.unregister_instance(launcher_root);
+                    return Ok(None);
+                }
             }
         }
-
-        // No running instance found — create a new Primary
-        Self::new(&library.path).await
     }
 
     /// Start the IPC server and promote any pending startup claim to a ready instance row.
@@ -460,16 +480,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_new_rejects_second_primary_for_same_root() {
+    async fn test_new_returns_client_for_existing_primary() {
         let temp_dir = TempDir::new().unwrap();
         let _registry = RegistryTestGuard::new(temp_dir.path());
-        let _primary = PumasApi::new(temp_dir.path()).await.unwrap();
+        let primary = PumasApi::new(temp_dir.path()).await.unwrap();
+        assert!(primary.is_primary());
 
-        let err = match PumasApi::new(temp_dir.path()).await {
-            Ok(_) => panic!("expected second primary to be rejected"),
-            Err(err) => err,
-        };
-        assert!(matches!(err, PumasError::PrimaryInstanceBusy { .. }));
+        let client = PumasApi::new(temp_dir.path()).await.unwrap();
+        assert!(!client.is_primary());
     }
 
     #[tokio::test]

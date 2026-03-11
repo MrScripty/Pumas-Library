@@ -65,14 +65,6 @@ impl Drop for InstanceClaimGuard {
     }
 }
 
-fn instance_busy_error(existing: registry::InstanceEntry) -> PumasError {
-    PumasError::PrimaryInstanceBusy {
-        library_path: existing.library_path,
-        pid: existing.pid,
-        status: existing.status.as_str().to_string(),
-    }
-}
-
 fn start_primary_background_work(
     primary_state: Arc<PrimaryState>,
     known_download_dirs: HashSet<PathBuf>,
@@ -311,10 +303,16 @@ impl PumasApiBuilder {
             .and_then(|name| name.to_str())
             .unwrap_or("pumas-library");
         let _ = registry.register(&self.launcher_root, library_name)?;
-        let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
-            registry::InstanceClaimResult::Claimed(claim) => claim,
-            registry::InstanceClaimResult::Occupied(existing) => {
-                return Err(instance_busy_error(existing));
+        let claim = loop {
+            match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
+                registry::InstanceClaimResult::Claimed(claim) => break claim,
+                registry::InstanceClaimResult::Occupied(_) => {
+                    if let Some(client) =
+                        PumasApi::connect_or_wait_for_existing_instance(&self.launcher_root).await?
+                    {
+                        return Ok(client);
+                    }
+                }
             }
         };
         let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.library_path.clone());

@@ -12,7 +12,7 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
@@ -30,11 +30,57 @@ use crate::model_library::{
 
 use super::state::PrimaryState;
 
+pub(crate) const WATCHER_WRITE_SUPPRESSION_TTL: Duration = Duration::from_secs(2);
+
 /// Reconciliation scope.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum ReconcileScope {
     AllModels,
     Model(String),
+}
+
+#[derive(Debug, Default)]
+struct WatcherChangeSummary {
+    model_ids: HashSet<String>,
+    requires_full_scope: bool,
+}
+
+/// Primary-local registry for short-lived watcher suppressions around
+/// internally initiated derived-file writes.
+pub(crate) struct WatcherWriteSuppressor {
+    ttl: Duration,
+    suppressed_paths: StdMutex<HashMap<PathBuf, Instant>>,
+}
+
+impl WatcherWriteSuppressor {
+    pub(crate) fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            suppressed_paths: StdMutex::new(HashMap::new()),
+        }
+    }
+
+    pub(crate) fn record(&self, path: PathBuf) {
+        let mut suppressed_paths = match self.suppressed_paths.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        prune_expired_suppressions(&mut suppressed_paths, self.ttl);
+        for suppressed_path in expand_suppressed_paths(&path) {
+            suppressed_paths.insert(suppressed_path, Instant::now());
+        }
+    }
+
+    fn should_ignore(&self, path: &Path) -> bool {
+        let mut suppressed_paths = match self.suppressed_paths.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        prune_expired_suppressions(&mut suppressed_paths, self.ttl);
+        expand_suppressed_paths(path)
+            .into_iter()
+            .any(|candidate| suppressed_paths.contains_key(&candidate))
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -307,30 +353,10 @@ fn model_scope_depth(library_root: &Path, path: &Path) -> Option<usize> {
 /// Process file-system change notifications from the model watcher.
 pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths: Vec<PathBuf>) {
     let library_root = primary.model_library.library_root().to_path_buf();
-    let mut model_ids: HashSet<String> = HashSet::new();
-    let mut requires_full_scope = false;
-
-    for path in paths {
-        if is_internal_library_artifact_path(&library_root, &path) {
-            continue;
-        }
-
-        // Ignore type/family directory churn (depth < 3); model/file paths at depth >= 3
-        // carry enough scope for targeted reconciliation and avoid full-scope loops.
-        let Some(depth) = model_scope_depth(&library_root, &path) else {
-            requires_full_scope = true;
-            continue;
-        };
-        if depth < 3 {
-            continue;
-        }
-
-        if let Some(model_id) = model_id_from_path(&library_root, &path) {
-            model_ids.insert(model_id);
-        } else {
-            requires_full_scope = true;
-        }
-    }
+    let WatcherChangeSummary {
+        model_ids,
+        requires_full_scope,
+    } = classify_watcher_changes(&library_root, &primary.watcher_write_suppressor, paths);
 
     if !requires_full_scope && model_ids.is_empty() {
         return;
@@ -355,6 +381,51 @@ pub(crate) async fn notify_filesystem_changes(primary: Arc<PrimaryState>, paths:
         )
         .await;
     }
+}
+
+fn classify_watcher_changes(
+    library_root: &Path,
+    suppressor: &WatcherWriteSuppressor,
+    paths: Vec<PathBuf>,
+) -> WatcherChangeSummary {
+    let mut summary = WatcherChangeSummary::default();
+
+    for path in paths {
+        if is_internal_library_artifact_path(library_root, &path) || suppressor.should_ignore(&path)
+        {
+            continue;
+        }
+
+        let Some(depth) = model_scope_depth(library_root, &path) else {
+            summary.requires_full_scope = true;
+            continue;
+        };
+        if depth < 3 {
+            continue;
+        }
+
+        if let Some(model_id) = model_id_from_path(library_root, &path) {
+            summary.model_ids.insert(model_id);
+        } else {
+            summary.requires_full_scope = true;
+        }
+    }
+
+    summary
+}
+
+fn expand_suppressed_paths(path: &Path) -> Vec<PathBuf> {
+    let mut suppressed = vec![path.to_path_buf()];
+    if path.file_name().and_then(|name| name.to_str()) == Some("metadata.json") {
+        if let Some(parent) = path.parent() {
+            suppressed.push(parent.to_path_buf());
+        }
+    }
+    suppressed
+}
+
+fn prune_expired_suppressions(suppressed_paths: &mut HashMap<PathBuf, Instant>, ttl: Duration) {
+    suppressed_paths.retain(|_, recorded_at| recorded_at.elapsed() <= ttl);
 }
 
 fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec {
@@ -1160,6 +1231,42 @@ mod tests {
             "Incomplete shard set 'model': have 1/2 shards"
         ));
         assert!(!is_non_fatal_adoption_error("permission denied"));
+    }
+
+    #[test]
+    fn test_watcher_write_suppressor_expires_entries() {
+        let suppressor = WatcherWriteSuppressor::new(Duration::from_millis(1));
+        let path = PathBuf::from("/library/llm/llama/model-a/metadata.json");
+
+        suppressor.record(path.clone());
+        assert!(suppressor.should_ignore(&path));
+
+        std::thread::sleep(Duration::from_millis(10));
+        assert!(!suppressor.should_ignore(&path));
+    }
+
+    #[test]
+    fn test_classify_watcher_changes_ignores_suppressed_metadata_and_model_dir_events() {
+        let root = Path::new("/library");
+        let suppressor = WatcherWriteSuppressor::new(WATCHER_WRITE_SUPPRESSION_TTL);
+        let metadata_path = root
+            .join("llm")
+            .join("llama")
+            .join("model-a")
+            .join("metadata.json");
+        let model_dir = root.join("llm").join("llama").join("model-a");
+        let external_path = root
+            .join("llm")
+            .join("llama")
+            .join("model-b")
+            .join("weights.gguf");
+
+        suppressor.record(metadata_path);
+        let summary = classify_watcher_changes(root, &suppressor, vec![model_dir, external_path]);
+
+        assert!(!summary.requires_full_scope);
+        assert!(summary.model_ids.contains("llm/llama/model-b"));
+        assert!(!summary.model_ids.contains("llm/llama/model-a"));
     }
 
     #[test]

@@ -32,6 +32,8 @@ pub(crate) struct PrimaryState {
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
     /// Internal scheduler for event-driven reconciliation.
     pub(crate) reconciliation: Arc<ReconciliationCoordinator>,
+    /// Primary-local suppressor for Pumas-owned watcher feedback paths.
+    pub(crate) watcher_write_suppressor: Arc<super::WatcherWriteSuppressor>,
     /// IPC server handle (Primary only). Protected by async Mutex for shutdown.
     pub(crate) server_handle: tokio::sync::Mutex<Option<ipc::IpcServerHandle>>,
     /// Global registry connection used for singleton claim ownership.

@@ -36,8 +36,8 @@ use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
 use std::sync::OnceLock;
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
@@ -79,6 +79,8 @@ const SD_TURBO_BACKEND_KEY: &str = "diffusers";
 const SD_TURBO_BASE_MODEL_ID: &str = "stabilityai/sd-turbo";
 const SD_TURBO_DIFFUSERS_VERSION: &str = "0.32.0";
 
+type MetadataWriteNotifier = Arc<dyn Fn(PathBuf) + Send + Sync>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CustomRuntimeKind {
     Kittentts,
@@ -108,6 +110,9 @@ pub struct ModelLibrary {
     link_registry: Arc<RwLock<LinkRegistry>>,
     /// Write lock for metadata operations (exclusive access only)
     write_lock: Arc<Mutex<()>>,
+    /// Optional callback used by primaries to suppress watcher feedback from
+    /// Pumas-owned metadata projection writes.
+    metadata_write_notifier: Arc<StdMutex<Option<MetadataWriteNotifier>>>,
 }
 
 impl ModelLibrary {
@@ -138,6 +143,7 @@ impl ModelLibrary {
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
             write_lock: Arc::new(Mutex::new(())),
+            metadata_write_notifier: Arc::new(StdMutex::new(None)),
         };
 
         // Rebuild index from existing metadata files on disk
@@ -162,6 +168,15 @@ impl ModelLibrary {
     /// Get a reference to the link registry.
     pub fn link_registry(&self) -> &Arc<RwLock<LinkRegistry>> {
         &self.link_registry
+    }
+
+    /// Register a callback for Pumas-owned metadata writes.
+    pub fn set_metadata_write_notifier(&self, notifier: Option<MetadataWriteNotifier>) {
+        let mut slot = match self.metadata_write_notifier.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *slot = notifier;
     }
 
     /// Get a reference to the model index.
@@ -274,7 +289,7 @@ impl ModelLibrary {
                 return Ok(());
             }
         }
-        atomic_write_json(&path, &normalized, true)
+        self.write_metadata_projection(&path, &normalized)
     }
 
     /// Load user overrides from a model directory.
@@ -2155,7 +2170,7 @@ impl ModelLibrary {
                 metadata.model_id = Some(model_id.clone());
                 metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
                 let metadata_path = model_dir.join(METADATA_FILENAME);
-                atomic_write_json(&metadata_path, &metadata, true)?;
+                self.write_metadata_projection(&metadata_path, &metadata)?;
                 mutated = true;
                 report.normalized_metadata_ids += 1;
             }
@@ -2234,7 +2249,7 @@ impl ModelLibrary {
                         preferred_metadata.model_id = Some(preferred_model_id.clone());
                         preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
                         let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
-                        atomic_write_json(&metadata_path, &preferred_metadata, true)?;
+                        self.write_metadata_projection(&metadata_path, &preferred_metadata)?;
                         mutated = true;
                         report.normalized_metadata_ids += 1;
                     }
@@ -2256,6 +2271,23 @@ impl ModelLibrary {
             self.index.checkpoint_wal()?;
         }
         Ok(report)
+    }
+}
+
+impl ModelLibrary {
+    fn write_metadata_projection(&self, path: &Path, metadata: &ModelMetadata) -> Result<()> {
+        self.notify_metadata_projection_write(path);
+        atomic_write_json(path, metadata, true)
+    }
+
+    fn notify_metadata_projection_write(&self, path: &Path) {
+        let notifier = match self.metadata_write_notifier.lock() {
+            Ok(guard) => guard.clone(),
+            Err(poisoned) => poisoned.into_inner().clone(),
+        };
+        if let Some(notifier) = notifier {
+            notifier(path.to_path_buf());
+        }
     }
 }
 
@@ -4675,6 +4707,34 @@ mod tests {
             .updated_at;
 
         assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn test_save_metadata_notifies_only_when_projection_changes() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (_, library) = setup_library().await;
+        let writes = Arc::new(AtomicUsize::new(0));
+        let write_counter = writes.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            write_counter.fetch_add(1, Ordering::SeqCst);
+        })));
+
+        let model_dir = library.build_model_path("llm", "llama", "notify-on-change");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/notify-on-change".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Notify On Change".to_string()),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        assert_eq!(writes.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]

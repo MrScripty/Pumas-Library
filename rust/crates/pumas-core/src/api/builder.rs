@@ -11,7 +11,10 @@ use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
 
-use super::{start_model_library_watcher, ReconcileScope, ReconciliationCoordinator};
+use super::{
+    start_model_library_watcher, ReconcileScope, ReconciliationCoordinator, WatcherWriteSuppressor,
+    WATCHER_WRITE_SUPPRESSION_TTL,
+};
 
 /// Builder for configuring PumasApi initialization.
 ///
@@ -403,6 +406,12 @@ impl PumasApiBuilder {
                 message: format!("Model library initialization failed: {}", e),
             })?;
         let model_library = Arc::new(model_library);
+        let watcher_write_suppressor =
+            Arc::new(WatcherWriteSuppressor::new(WATCHER_WRITE_SUPPRESSION_TTL));
+        model_library.set_metadata_write_notifier(Some(Arc::new({
+            let suppressor = watcher_write_suppressor.clone();
+            move |path| suppressor.record(path)
+        })));
         let model_mapper =
             model_library::ModelMapper::new(model_library.clone(), &mapping_config_dir);
         let model_importer = model_library::ModelImporter::new(model_library.clone());
@@ -503,6 +512,7 @@ impl PumasApiBuilder {
                 Duration::from_secs(5),
                 Duration::from_secs(5),
             )),
+            watcher_write_suppressor,
             server_handle: tokio::sync::Mutex::new(None),
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),

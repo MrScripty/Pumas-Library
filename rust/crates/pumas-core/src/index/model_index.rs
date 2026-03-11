@@ -2144,7 +2144,7 @@ mod tests {
             })
             .unwrap();
 
-        index
+        assert!(!index
             .upsert_dependency_profile(&DependencyProfileRecord {
                 profile_id: "p1".to_string(),
                 profile_version: 1,
@@ -2153,7 +2153,7 @@ mod tests {
                 spec_json: pinned_profile_spec("torch", "==2.5.1"),
                 created_at: second_created_at,
             })
-            .unwrap();
+            .unwrap());
 
         let persisted = index.get_dependency_profile("p1", 1).unwrap().unwrap();
         assert_eq!(persisted.created_at, first_created_at);
@@ -2196,13 +2196,13 @@ mod tests {
             spec_json: None,
         };
 
-        index.upsert_model_dependency_binding(&binding).unwrap();
+        assert!(index.upsert_model_dependency_binding(&binding).unwrap());
         // Idempotent upsert should not append history.
-        index.upsert_model_dependency_binding(&binding).unwrap();
+        assert!(!index.upsert_model_dependency_binding(&binding).unwrap());
 
         binding.priority = 200;
         binding.status = "deprecated".to_string();
-        index.upsert_model_dependency_binding(&binding).unwrap();
+        assert!(index.upsert_model_dependency_binding(&binding).unwrap());
 
         let history = index.list_dependency_binding_history("m1").unwrap();
         assert_eq!(history.len(), 2);

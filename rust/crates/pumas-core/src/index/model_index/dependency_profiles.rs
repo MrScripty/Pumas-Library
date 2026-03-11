@@ -8,7 +8,7 @@ use rusqlite::{params, OptionalExtension};
 
 impl ModelIndex {
     /// Insert or update a dependency profile row.
-    pub fn upsert_dependency_profile(&self, record: &DependencyProfileRecord) -> Result<()> {
+    pub fn upsert_dependency_profile(&self, record: &DependencyProfileRecord) -> Result<bool> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -57,7 +57,7 @@ impl ModelIndex {
             if existing_profile_hash.as_deref() == Some(normalized.profile_hash.as_str())
                 && existing_spec_json == normalized.canonical_json
             {
-                return Ok(());
+                return Ok(false);
             }
 
             conn.execute(
@@ -74,7 +74,7 @@ impl ModelIndex {
                     normalized.canonical_json,
                 ],
             )?;
-            return Ok(());
+            return Ok(true);
         }
 
         conn.execute(
@@ -91,7 +91,7 @@ impl ModelIndex {
             ],
         )?;
 
-        Ok(())
+        Ok(true)
     }
 
     /// Check whether a dependency profile exists by (profile_id, profile_version).
@@ -210,7 +210,7 @@ impl ModelIndex {
     pub fn upsert_model_dependency_binding(
         &self,
         record: &ModelDependencyBindingRecord,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),
             source: None,
@@ -255,7 +255,7 @@ impl ModelIndex {
             )
             .optional()?;
 
-        tx.execute(
+        let changed = tx.execute(
             "INSERT INTO model_dependency_bindings (
                binding_id, model_id, profile_id, profile_version, binding_kind, backend_key,
                platform_selector, status, priority, attached_by, attached_at
@@ -270,7 +270,17 @@ impl ModelIndex {
                status = excluded.status,
                priority = excluded.priority,
                attached_by = excluded.attached_by,
-               attached_at = excluded.attached_at",
+               attached_at = excluded.attached_at
+             WHERE model_id != excluded.model_id
+                OR profile_id != excluded.profile_id
+                OR profile_version != excluded.profile_version
+                OR binding_kind != excluded.binding_kind
+                OR backend_key IS NOT excluded.backend_key
+                OR platform_selector IS NOT excluded.platform_selector
+                OR status != excluded.status
+                OR priority != excluded.priority
+                OR attached_by IS NOT excluded.attached_by
+                OR attached_at != excluded.attached_at",
             params![
                 record.binding_id,
                 record.model_id,
@@ -284,7 +294,7 @@ impl ModelIndex {
                 record.attached_by,
                 record.attached_at,
             ],
-        )?;
+        )? > 0;
 
         let old_snapshot = existing.as_ref().map(dependency_binding_snapshot_json);
         let new_snapshot = dependency_binding_snapshot_json(record);
@@ -328,7 +338,7 @@ impl ModelIndex {
 
         tx.commit()?;
 
-        Ok(())
+        Ok(changed)
     }
 
     /// List dependency binding history rows in deterministic event order.

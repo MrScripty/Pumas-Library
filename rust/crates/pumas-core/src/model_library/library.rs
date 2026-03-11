@@ -317,41 +317,32 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub async fn index_model_dir(&self, model_dir: &Path) -> Result<()> {
-        let mut metadata =
-            self.load_metadata(model_dir)?
-                .ok_or_else(|| PumasError::ModelNotFound {
-                    model_id: model_dir.display().to_string(),
-                })?;
-
-        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
-            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
-        })?;
-
-        if is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata) {
-            self.save_metadata(model_dir, &metadata).await?;
-            if let Some(updated) = self.load_metadata(model_dir)? {
-                metadata = updated;
-            }
-        }
-
-        let projection =
-            self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
-        if projection
-            .as_ref()
-            .is_some_and(|projection| projection.metadata_changed)
-        {
-            self.save_metadata(model_dir, &metadata).await?;
-            if let Some(updated) = self.load_metadata(model_dir)? {
-                metadata = updated;
-            }
-        }
-        let record = metadata_to_record(&model_id, model_dir, &metadata);
-        self.index.upsert(&record)?;
-        if let Some(projection) = projection {
-            self.ensure_custom_runtime_binding(&model_id, &projection)?;
-        }
+        let prepared = self.prepare_index_projection(model_dir)?;
+        self.persist_index_projection(model_dir, prepared).await?;
 
         Ok(())
+    }
+
+    pub async fn model_scope_is_current(&self, model_dir: &Path) -> Result<bool> {
+        let prepared = self.prepare_index_projection(model_dir)?;
+        let existing = self.index.get(&prepared.model_id)?;
+        let Some(existing) = existing else {
+            return Ok(false);
+        };
+
+        if filesystem_projection_is_newer(model_dir, &existing.updated_at) {
+            return Ok(false);
+        }
+
+        if !model_record_matches(&existing, &prepared.record) {
+            return Ok(false);
+        }
+
+        if let Some(projection) = prepared.projection.as_ref() {
+            return self.custom_runtime_binding_is_current(&prepared.model_id, projection);
+        }
+
+        Ok(true)
     }
 
     /// Upsert a model index record directly from in-memory metadata.
@@ -545,7 +536,7 @@ impl ModelLibrary {
         })
     }
 
-    fn ensure_kittentts_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
+    fn ensure_kittentts_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<bool> {
         let created_at = chrono::Utc::now().to_rfc3339();
         let attached_by = Some("model-runtime-autobind".to_string());
         let profile_spec = serde_json::json!({
@@ -571,7 +562,8 @@ impl ModelLibrary {
         })
         .to_string();
 
-        self.index
+        let profile_changed = self
+            .index
             .upsert_dependency_profile(&DependencyProfileRecord {
                 profile_id: KITTENTTS_PROFILE_ID.to_string(),
                 profile_version: KITTENTTS_PROFILE_VERSION,
@@ -592,34 +584,35 @@ impl ModelLibrary {
                     attached_by.as_deref(),
                 ) =>
             {
-                return Ok(());
+                return Ok(profile_changed);
             }
             Some(existing) => existing.attached_at,
             None => created_at.clone(),
         };
 
-        self.index
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: binding_id.to_string(),
-                model_id: model_id.to_string(),
-                profile_id: KITTENTTS_PROFILE_ID.to_string(),
-                profile_version: KITTENTTS_PROFILE_VERSION,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some(KITTENTTS_BACKEND_KEY.to_string()),
-                platform_selector: None,
-                status: "active".to_string(),
-                priority: 100,
-                attached_by,
-                attached_at,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })?;
+        let binding_changed =
+            self.index
+                .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                    binding_id: binding_id.to_string(),
+                    model_id: model_id.to_string(),
+                    profile_id: KITTENTTS_PROFILE_ID.to_string(),
+                    profile_version: KITTENTTS_PROFILE_VERSION,
+                    binding_kind: "required_core".to_string(),
+                    backend_key: Some(KITTENTTS_BACKEND_KEY.to_string()),
+                    platform_selector: None,
+                    status: "active".to_string(),
+                    priority: 100,
+                    attached_by,
+                    attached_at,
+                    profile_hash: None,
+                    environment_kind: None,
+                    spec_json: None,
+                })?;
 
-        Ok(())
+        Ok(profile_changed || binding_changed)
     }
 
-    fn ensure_sd_turbo_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<()> {
+    fn ensure_sd_turbo_runtime_binding(&self, model_id: &str, binding_id: &str) -> Result<bool> {
         let created_at = chrono::Utc::now().to_rfc3339();
         let attached_by = Some("model-runtime-autobind".to_string());
         let profile_spec = serde_json::json!({
@@ -661,7 +654,8 @@ impl ModelLibrary {
         })
         .to_string();
 
-        self.index
+        let profile_changed = self
+            .index
             .upsert_dependency_profile(&DependencyProfileRecord {
                 profile_id: SD_TURBO_PROFILE_ID.to_string(),
                 profile_version: SD_TURBO_PROFILE_VERSION,
@@ -682,38 +676,39 @@ impl ModelLibrary {
                     attached_by.as_deref(),
                 ) =>
             {
-                return Ok(());
+                return Ok(profile_changed);
             }
             Some(existing) => existing.attached_at,
             None => created_at.clone(),
         };
 
-        self.index
-            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
-                binding_id: binding_id.to_string(),
-                model_id: model_id.to_string(),
-                profile_id: SD_TURBO_PROFILE_ID.to_string(),
-                profile_version: SD_TURBO_PROFILE_VERSION,
-                binding_kind: "required_core".to_string(),
-                backend_key: Some(SD_TURBO_BACKEND_KEY.to_string()),
-                platform_selector: None,
-                status: "active".to_string(),
-                priority: 100,
-                attached_by,
-                attached_at,
-                profile_hash: None,
-                environment_kind: None,
-                spec_json: None,
-            })?;
+        let binding_changed =
+            self.index
+                .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                    binding_id: binding_id.to_string(),
+                    model_id: model_id.to_string(),
+                    profile_id: SD_TURBO_PROFILE_ID.to_string(),
+                    profile_version: SD_TURBO_PROFILE_VERSION,
+                    binding_kind: "required_core".to_string(),
+                    backend_key: Some(SD_TURBO_BACKEND_KEY.to_string()),
+                    platform_selector: None,
+                    status: "active".to_string(),
+                    priority: 100,
+                    attached_by,
+                    attached_at,
+                    profile_hash: None,
+                    environment_kind: None,
+                    spec_json: None,
+                })?;
 
-        Ok(())
+        Ok(profile_changed || binding_changed)
     }
 
     fn ensure_custom_runtime_binding(
         &self,
         model_id: &str,
         projection: &CustomRuntimeProjection,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         match projection.kind {
             CustomRuntimeKind::Kittentts => {
                 self.ensure_kittentts_runtime_binding(model_id, &projection.binding_id)
@@ -821,12 +816,17 @@ impl ModelLibrary {
         }
 
         for (model_id, projection) in custom_runtime_bindings {
-            if let Err(err) = self.ensure_custom_runtime_binding(&model_id, &projection) {
-                tracing::warn!(
-                    "Failed to ensure custom runtime binding for {}: {}",
-                    model_id,
-                    err
-                );
+            match self.ensure_custom_runtime_binding(&model_id, &projection) {
+                Ok(changed) => {
+                    mutated |= changed;
+                }
+                Err(err) => {
+                    tracing::warn!(
+                        "Failed to ensure custom runtime binding for {}: {}",
+                        model_id,
+                        err
+                    );
+                }
             }
         }
 
@@ -2275,6 +2275,110 @@ impl ModelLibrary {
 }
 
 impl ModelLibrary {
+    fn prepare_index_projection(&self, model_dir: &Path) -> Result<PreparedIndexProjection> {
+        let mut metadata =
+            self.load_metadata(model_dir)?
+                .ok_or_else(|| PumasError::ModelNotFound {
+                    model_id: model_dir.display().to_string(),
+                })?;
+
+        let model_id = self.get_model_id(model_dir).ok_or_else(|| {
+            PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
+        })?;
+
+        let mut metadata_changed =
+            is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata);
+
+        let projection =
+            self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
+        metadata_changed |= projection
+            .as_ref()
+            .is_some_and(|projection| projection.metadata_changed);
+
+        let mut record = metadata_to_record(&model_id, model_dir, &metadata);
+        let metadata_type_missing = metadata
+            .model_type
+            .as_deref()
+            .map(str::trim)
+            .map(str::is_empty)
+            .unwrap_or(true);
+        if metadata_type_missing {
+            if let Some(existing) = self.index.get(&model_id)? {
+                record.model_type = existing.model_type;
+            }
+        }
+
+        Ok(PreparedIndexProjection {
+            model_id,
+            metadata,
+            record,
+            projection,
+            metadata_changed,
+        })
+    }
+
+    async fn persist_index_projection(
+        &self,
+        model_dir: &Path,
+        mut prepared: PreparedIndexProjection,
+    ) -> Result<bool> {
+        if prepared.metadata_changed {
+            self.save_metadata(model_dir, &prepared.metadata).await?;
+            if let Some(updated) = self.load_metadata(model_dir)? {
+                prepared.metadata = updated;
+            }
+            prepared.record = metadata_to_record(&prepared.model_id, model_dir, &prepared.metadata);
+            let metadata_type_missing = prepared
+                .metadata
+                .model_type
+                .as_deref()
+                .map(str::trim)
+                .map(str::is_empty)
+                .unwrap_or(true);
+            if metadata_type_missing {
+                if let Some(existing) = self.index.get(&prepared.model_id)? {
+                    prepared.record.model_type = existing.model_type;
+                }
+            }
+        }
+
+        let mut mutated = self.index.upsert(&prepared.record)?;
+        if let Some(projection) = prepared.projection.as_ref() {
+            mutated |= self.ensure_custom_runtime_binding(&prepared.model_id, projection)?;
+        }
+        Ok(mutated)
+    }
+
+    fn custom_runtime_binding_is_current(
+        &self,
+        model_id: &str,
+        projection: &CustomRuntimeProjection,
+    ) -> Result<bool> {
+        let (profile_id, profile_version, backend_key) = runtime_binding_expectation(projection);
+        if !self
+            .index
+            .dependency_profile_exists(profile_id, profile_version)?
+        {
+            return Ok(false);
+        }
+
+        let Some(existing) = self
+            .index
+            .get_model_dependency_binding(&projection.binding_id)?
+        else {
+            return Ok(false);
+        };
+
+        Ok(runtime_binding_matches(
+            &existing,
+            model_id,
+            profile_id,
+            profile_version,
+            Some(backend_key),
+            Some("model-runtime-autobind"),
+        ))
+    }
+
     fn write_metadata_projection(&self, path: &Path, metadata: &ModelMetadata) -> Result<()> {
         self.notify_metadata_projection_write(path);
         atomic_write_json(path, metadata, true)
@@ -2288,6 +2392,44 @@ impl ModelLibrary {
         if let Some(notifier) = notifier {
             notifier(path.to_path_buf());
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct PreparedIndexProjection {
+    model_id: String,
+    metadata: ModelMetadata,
+    record: ModelRecord,
+    projection: Option<CustomRuntimeProjection>,
+    metadata_changed: bool,
+}
+
+fn model_record_matches(existing: &ModelRecord, projected: &ModelRecord) -> bool {
+    existing.id == projected.id
+        && existing.path == projected.path
+        && existing.cleaned_name == projected.cleaned_name
+        && existing.official_name == projected.official_name
+        && existing.model_type == projected.model_type
+        && existing.tags == projected.tags
+        && existing.hashes == projected.hashes
+        && existing.metadata == projected.metadata
+        && existing.updated_at == projected.updated_at
+}
+
+fn runtime_binding_expectation(
+    projection: &CustomRuntimeProjection,
+) -> (&'static str, i64, &'static str) {
+    match projection.kind {
+        CustomRuntimeKind::Kittentts => (
+            KITTENTTS_PROFILE_ID,
+            KITTENTTS_PROFILE_VERSION,
+            KITTENTTS_BACKEND_KEY,
+        ),
+        CustomRuntimeKind::SdTurboDiffusers => (
+            SD_TURBO_PROFILE_ID,
+            SD_TURBO_PROFILE_VERSION,
+            SD_TURBO_BACKEND_KEY,
+        ),
     }
 }
 
@@ -3866,13 +4008,29 @@ fn projected_record_updated_at(model_dir: &Path, metadata: &ModelMetadata) -> St
 }
 
 fn latest_filesystem_timestamp(model_dir: &Path) -> Option<String> {
-    let metadata_path = model_dir.join(METADATA_FILENAME);
-    let newest = [metadata_path.as_path(), model_dir]
+    let newest = WalkDir::new(model_dir)
+        .min_depth(0)
+        .max_depth(2)
         .into_iter()
-        .filter_map(|path| std::fs::metadata(path).ok())
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| entry.metadata().ok())
         .filter_map(|metadata| metadata.modified().ok())
         .max()?;
     Some(chrono::DateTime::<chrono::Utc>::from(newest).to_rfc3339())
+}
+
+fn filesystem_projection_is_newer(model_dir: &Path, indexed_updated_at: &str) -> bool {
+    let Some(filesystem_updated_at) = latest_filesystem_timestamp(model_dir) else {
+        return false;
+    };
+    let Ok(indexed_updated_at) = chrono::DateTime::parse_from_rfc3339(indexed_updated_at) else {
+        return false;
+    };
+    let Ok(filesystem_updated_at) = chrono::DateTime::parse_from_rfc3339(&filesystem_updated_at)
+    else {
+        return false;
+    };
+    filesystem_updated_at > indexed_updated_at
 }
 
 fn project_display_fields_for_record(record: &mut ModelRecord) {
@@ -4707,6 +4865,78 @@ mod tests {
             .updated_at;
 
         assert_eq!(first, second);
+    }
+
+    #[tokio::test]
+    async fn test_model_scope_is_current_returns_true_after_indexing() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "scope-current");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/scope-current".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Scope Current".to_string()),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        assert!(library.model_scope_is_current(&model_dir).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_model_scope_is_current_returns_false_after_metadata_change() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "scope-dirty");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/scope-dirty".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Scope Dirty".to_string()),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let mut changed = metadata.clone();
+        changed.official_name = Some("Scope Dirty Updated".to_string());
+        library.save_metadata(&model_dir, &changed).await.unwrap();
+
+        assert!(!library.model_scope_is_current(&model_dir).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_model_scope_is_current_returns_false_after_payload_file_change() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "scope-payload-dirty");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.gguf"), b"v1").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/scope-payload-dirty".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Scope Payload Dirty".to_string()),
+            updated_date: Some("2026-03-11T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        std::fs::write(model_dir.join("weights.gguf"), b"v2").unwrap();
+
+        assert!(!library.model_scope_is_current(&model_dir).await.unwrap());
     }
 
     #[tokio::test]

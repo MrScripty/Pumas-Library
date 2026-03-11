@@ -1033,6 +1033,13 @@ async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result
     }
 
     if model_dir.join("metadata.json").exists() {
+        if primary
+            .model_library
+            .model_scope_is_current(&model_dir)
+            .await?
+        {
+            return Ok(());
+        }
         primary.model_library.index_model_dir(&model_dir).await?;
         if let Err(err) = primary.model_library.reclassify_model(model_id).await {
             let message = err.to_string();

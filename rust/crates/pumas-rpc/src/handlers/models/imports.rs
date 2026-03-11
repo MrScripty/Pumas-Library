@@ -378,6 +378,10 @@ pub async fn import_model_in_place(
         .or_else(|| params.get("pipelineTag"))
         .and_then(|v| v.as_str())
         .map(String::from);
+    let huggingface_evidence: Option<pumas_library::model_library::HuggingFaceEvidence> = params
+        .get("huggingface_evidence")
+        .or_else(|| params.get("huggingFaceEvidence"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
 
     let spec = pumas_library::model_library::InPlaceImportSpec {
         model_dir: std::path::PathBuf::from(model_dir),
@@ -389,6 +393,7 @@ pub async fn import_model_in_place(
         compute_hashes,
         expected_files,
         pipeline_tag,
+        huggingface_evidence,
     };
 
     let result = state.api.import_model_in_place(&spec).await?;

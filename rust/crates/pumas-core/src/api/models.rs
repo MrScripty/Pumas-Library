@@ -120,6 +120,12 @@ impl PumasApi {
 
     /// Get model-library status information for GUI polling.
     pub async fn get_library_status(&self) -> Result<models::LibraryStatusResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_library_status", serde_json::json!({}))
+                .await;
+        }
+
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -201,6 +207,15 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Vec<models::InferenceParamSchema>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "get_inference_settings",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         let library = &self.primary().model_library;
         let model_dir = library.library_root().join(model_id);
 
@@ -238,6 +253,19 @@ impl PumasApi {
         model_id: &str,
         settings: Vec<models::InferenceParamSchema>,
     ) -> Result<()> {
+        if self.try_client().is_some() {
+            let _: serde_json::Value = self
+                .call_client_method(
+                    "update_inference_settings",
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "settings": settings,
+                    }),
+                )
+                .await?;
+            return Ok(());
+        }
+
         let library = &self.primary().model_library;
         let model_dir = library.library_root().join(model_id);
 
@@ -270,6 +298,19 @@ impl PumasApi {
         platform_context: &str,
         backend_key: Option<&str>,
     ) -> Result<model_library::ModelDependencyRequirementsResolution> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_model_dependency_requirements",
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "platform_context": platform_context,
+                        "backend_key": backend_key,
+                    }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .resolve_model_dependency_requirements(model_id, platform_context, backend_key)
@@ -281,6 +322,15 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::ModelExecutionDescriptor> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_model_execution_descriptor",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .resolve_model_execution_descriptor(model_id)
@@ -291,6 +341,12 @@ impl PumasApi {
     pub async fn audit_dependency_pin_compliance(
         &self,
     ) -> Result<model_library::DependencyPinAuditReport> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("audit_dependency_pin_compliance", serde_json::json!({}))
+                .await;
+        }
+
         self.primary()
             .model_library
             .audit_dependency_pin_compliance()
@@ -302,6 +358,15 @@ impl PumasApi {
         &self,
         filter: Option<model_library::ModelReviewFilter>,
     ) -> Result<Vec<model_library::ModelReviewItem>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "list_models_needing_review",
+                    serde_json::json!({ "filter": filter }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .list_models_needing_review(filter)
@@ -316,6 +381,20 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<model_library::SubmitModelReviewResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "submit_model_review",
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "patch": patch,
+                        "reviewer": reviewer,
+                        "reason": reason,
+                    }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .submit_model_review(model_id, patch, reviewer, reason)
@@ -329,6 +408,19 @@ impl PumasApi {
         reviewer: &str,
         reason: Option<&str>,
     ) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "reset_model_review",
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "reviewer": reviewer,
+                        "reason": reason,
+                    }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .reset_model_review(model_id, reviewer, reason)
@@ -340,6 +432,15 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Option<models::ModelMetadata>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "get_effective_model_metadata",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -355,6 +456,12 @@ impl PumasApi {
         &self,
         spec: &model_library::ModelImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("import_model", serde_json::json!({ "spec": spec }))
+                .await;
+        }
+
         self.primary().model_importer.import(spec).await
     }
 
@@ -363,6 +470,15 @@ impl PumasApi {
         &self,
         specs: Vec<model_library::ModelImportSpec>,
     ) -> Vec<model_library::ModelImportResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default(
+                    "import_models_batch",
+                    serde_json::json!({ "specs": specs }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_importer
             .batch_import(specs, None)
@@ -374,6 +490,15 @@ impl PumasApi {
         &self,
         spec: &model_library::ExternalDiffusersImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "import_external_diffusers_directory",
+                    serde_json::json!({ "spec": spec }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_importer
             .import_external_diffusers_directory(spec)
@@ -398,6 +523,12 @@ impl PumasApi {
         &self,
         spec: &model_library::InPlaceImportSpec,
     ) -> Result<model_library::ModelImportResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("import_model_in_place", serde_json::json!({ "spec": spec }))
+                .await;
+        }
+
         self.primary().model_importer.import_in_place(spec).await
     }
 
@@ -407,6 +538,12 @@ impl PumasApi {
     /// creates metadata from directory structure and file type detection, and
     /// indexes the models.
     pub async fn adopt_orphan_models(&self) -> Result<model_library::OrphanScanResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("adopt_orphan_models", serde_json::json!({}))
+                .await;
+        }
+
         Ok(self.primary().model_importer.adopt_orphans(false).await)
     }
 
@@ -421,6 +558,12 @@ impl PumasApi {
         &self,
         _version_tag: Option<&str>,
     ) -> Result<models::LinkHealthResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_link_health", serde_json::json!({}))
+                .await;
+        }
+
         let registry = self.primary().model_library.link_registry().read().await;
         let all_links = registry.get_all().await;
 
@@ -464,6 +607,12 @@ impl PumasApi {
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("clean_broken_links", serde_json::json!({}))
+                .await;
+        }
+
         let registry = self.primary().model_library.link_registry().write().await;
         let broken = registry.cleanup_broken().await?;
 
@@ -485,6 +634,15 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::LinksForModelResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "get_links_for_model",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         let registry = self.primary().model_library.link_registry().read().await;
         let links = registry.get_links_for_model(model_id).await;
 
@@ -511,6 +669,15 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::DeleteModelResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "delete_model_with_cascade",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .delete_model(model_id, true)
@@ -530,6 +697,18 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingPreviewResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "preview_model_mapping",
+                    serde_json::json!({
+                        "version_tag": version_tag,
+                        "models_path": models_path,
+                    }),
+                )
+                .await;
+        }
+
         if !models_path.exists() {
             return Ok(models::MappingPreviewResponse {
                 success: false,
@@ -602,6 +781,18 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::MappingApplyResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "apply_model_mapping",
+                    serde_json::json!({
+                        "version_tag": version_tag,
+                        "models_path": models_path,
+                    }),
+                )
+                .await;
+        }
+
         if !models_path.exists() {
             std::fs::create_dir_all(models_path)?;
         }
@@ -634,6 +825,18 @@ impl PumasApi {
         version_tag: &str,
         models_path: &std::path::Path,
     ) -> Result<models::SyncModelsResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "sync_models_incremental",
+                    serde_json::json!({
+                        "version_tag": version_tag,
+                        "models_path": models_path,
+                    }),
+                )
+                .await;
+        }
+
         // Incremental sync is essentially the same as apply_mapping
         // but we could add additional logic here for detecting changes
         let result = self.apply_model_mapping(version_tag, models_path).await?;
@@ -653,6 +856,19 @@ impl PumasApi {
         models_path: &Path,
         resolutions: HashMap<String, model_library::ConflictResolution>,
     ) -> Result<models::SyncWithResolutionsResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "sync_with_resolutions",
+                    serde_json::json!({
+                        "version_tag": version_tag,
+                        "models_path": models_path,
+                        "resolutions": resolutions,
+                    }),
+                )
+                .await;
+        }
+
         if !models_path.exists() {
             std::fs::create_dir_all(models_path)?;
         }
@@ -754,6 +970,15 @@ impl PumasApi {
 
     /// Reclassify a single model (re-detect type and relocate directory if needed).
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "reclassify_model",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .reclassify_model(model_id)
@@ -762,6 +987,12 @@ impl PumasApi {
 
     /// Reclassify all models in the library (re-detect types and relocate directories).
     pub async fn reclassify_all_models(&self) -> Result<model_library::ReclassifyResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("reclassify_all_models", serde_json::json!({}))
+                .await;
+        }
+
         self.primary().model_library.reclassify_all_models().await
     }
 
@@ -769,6 +1000,15 @@ impl PumasApi {
     pub async fn generate_model_migration_dry_run_report(
         &self,
     ) -> Result<model_library::MigrationDryRunReport> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "generate_model_migration_dry_run_report",
+                    serde_json::json!({}),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .generate_migration_dry_run_report_with_artifacts()
@@ -776,6 +1016,12 @@ impl PumasApi {
 
     /// Execute checkpointed metadata v2 migration moves.
     pub async fn execute_model_migration(&self) -> Result<model_library::MigrationExecutionReport> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("execute_model_migration", serde_json::json!({}))
+                .await;
+        }
+
         let primary = self.primary();
         let mut report = primary
             .model_library
@@ -796,11 +1042,26 @@ impl PumasApi {
     pub async fn list_model_migration_reports(
         &self,
     ) -> Result<Vec<model_library::MigrationReportArtifact>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("list_model_migration_reports", serde_json::json!({}))
+                .await;
+        }
+
         self.primary().model_library.list_migration_reports()
     }
 
     /// Delete a migration report artifact pair (JSON + Markdown) and index entry.
     pub async fn delete_model_migration_report(&self, report_path: &str) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "delete_model_migration_report",
+                    serde_json::json!({ "report_path": report_path }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .delete_migration_report(report_path)
@@ -808,6 +1069,15 @@ impl PumasApi {
 
     /// Prune migration report history to `keep_latest` entries.
     pub async fn prune_model_migration_reports(&self, keep_latest: usize) -> Result<usize> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "prune_model_migration_reports",
+                    serde_json::json!({ "keep_latest": keep_latest }),
+                )
+                .await;
+        }
+
         self.primary()
             .model_library
             .prune_migration_reports(keep_latest)
@@ -846,7 +1116,7 @@ impl PumasApi {
     }
 }
 
-fn split_model_id(model_id: &str) -> Option<(&str, &str, &str)> {
+pub(crate) fn split_model_id(model_id: &str) -> Option<(&str, &str, &str)> {
     let mut parts = model_id.splitn(3, '/');
     let model_type = parts.next()?;
     let family = parts.next()?;
@@ -854,7 +1124,7 @@ fn split_model_id(model_id: &str) -> Option<(&str, &str, &str)> {
     Some((model_type, family, cleaned_name))
 }
 
-fn update_download_marker(
+pub(crate) fn update_download_marker(
     target_dir: &Path,
     target_model_type: &str,
     target_family: &str,
@@ -887,7 +1157,7 @@ fn update_download_marker(
     Ok(())
 }
 
-fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
+pub(crate) fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
     let mut current = source_dir.parent();
     while let Some(dir) = current {
         if dir == library_root {
@@ -900,7 +1170,7 @@ fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) 
     }
 }
 
-async fn wait_for_download_pause(
+pub(crate) async fn wait_for_download_pause(
     client: &model_library::HuggingFaceClient,
     download_id: &str,
 ) -> Result<()> {
@@ -930,7 +1200,7 @@ async fn wait_for_download_pause(
     )))
 }
 
-async fn relocate_skipped_partial_downloads(
+pub(crate) async fn relocate_skipped_partial_downloads(
     primary: &super::state::PrimaryState,
     report: &mut model_library::MigrationExecutionReport,
 ) -> Result<bool> {
@@ -1094,7 +1364,9 @@ async fn relocate_skipped_partial_downloads(
     Ok(mutated)
 }
 
-fn recompute_execution_report_counts(report: &mut model_library::MigrationExecutionReport) {
+pub(crate) fn recompute_execution_report_counts(
+    report: &mut model_library::MigrationExecutionReport,
+) {
     report.completed_move_count = 0;
     report.skipped_move_count = 0;
     report.error_count = 0;

@@ -1717,7 +1717,7 @@ fn collect_relative_file_paths(root: &Path) -> Result<Vec<String>> {
 /// Unlike `ModelImportSpec` which expects a source path to copy FROM,
 /// this describes a directory that already contains model files in the library tree.
 /// Used for post-download finalization and orphan recovery.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InPlaceImportSpec {
     /// Directory containing the model files (already in library tree).
     pub model_dir: PathBuf,
@@ -1780,7 +1780,7 @@ pub struct InterruptedDownload {
 }
 
 /// Result of an orphan recovery scan.
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OrphanScanResult {
     /// Number of orphan directories found.
     pub orphans_found: usize,

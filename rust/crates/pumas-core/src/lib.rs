@@ -156,6 +156,19 @@ impl PumasApi {
         })
     }
 
+    async fn call_client_method_or_default<T>(&self, method: &str, params: serde_json::Value) -> T
+    where
+        T: DeserializeOwned + Default,
+    {
+        match self.call_client_method(method, params).await {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!("Client IPC call {} failed: {}", method, err);
+                T::default()
+            }
+        }
+    }
+
     /// Returns true if this instance is the primary (owns full state).
     pub fn is_primary(&self) -> bool {
         matches!(&self.inner, ApiInner::Primary(_))
@@ -448,6 +461,12 @@ mod tests {
 
         let models = client.list_models().await.unwrap();
         assert!(models.is_empty());
+
+        let search = client.search_models("", 10, 0).await.unwrap();
+        assert!(search.models.is_empty());
+
+        let status = client.get_library_status().await.unwrap();
+        assert!(status.success);
 
         let disk = client.get_disk_space().await.unwrap();
         assert!(disk.success);

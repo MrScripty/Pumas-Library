@@ -203,6 +203,367 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 store_inference_settings(self, model_id, settings).await?;
                 Ok(serde_json::json!({ "success": true }))
             }
+            "get_library_status" => {
+                let _ =
+                    reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-get-library-status")
+                        .await?;
+                let model_count = self.model_library.list_models().await?.len() as u32;
+                let pending_lookups = self.model_library.get_pending_lookups().await?.len() as u32;
+                Ok(serde_json::to_value(models::LibraryStatusResponse {
+                    success: true,
+                    error: None,
+                    indexing: false,
+                    deep_scan_in_progress: false,
+                    model_count,
+                    pending_lookups: Some(pending_lookups),
+                    deep_scan_progress: None,
+                })?)
+            }
+            "resolve_model_dependency_requirements" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let platform_context = params["platform_context"].as_str().ok_or_else(|| {
+                    PumasError::InvalidParams {
+                        message: "platform_context is required".to_string(),
+                    }
+                })?;
+                let backend_key = params["backend_key"].as_str();
+                let resolution = self
+                    .model_library
+                    .resolve_model_dependency_requirements(model_id, platform_context, backend_key)
+                    .await?;
+                Ok(serde_json::to_value(resolution)?)
+            }
+            "resolve_model_execution_descriptor" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let descriptor = self
+                    .model_library
+                    .resolve_model_execution_descriptor(model_id)
+                    .await?;
+                Ok(serde_json::to_value(descriptor)?)
+            }
+            "audit_dependency_pin_compliance" => {
+                let report = self.model_library.audit_dependency_pin_compliance().await?;
+                Ok(serde_json::to_value(report)?)
+            }
+            "list_models_needing_review" => {
+                let filter: Option<model_library::ModelReviewFilter> =
+                    serde_json::from_value(params["filter"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid review filter: {e}"),
+                        }
+                    })?;
+                let items = self
+                    .model_library
+                    .list_models_needing_review(filter)
+                    .await?;
+                Ok(serde_json::to_value(items)?)
+            }
+            "submit_model_review" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let patch = params["patch"].clone();
+                let reviewer =
+                    params["reviewer"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "reviewer is required".to_string(),
+                        })?;
+                let reason = params["reason"].as_str();
+                let result = self
+                    .model_library
+                    .submit_model_review(model_id, patch, reviewer, reason)
+                    .await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            "reset_model_review" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let reviewer =
+                    params["reviewer"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "reviewer is required".to_string(),
+                        })?;
+                let reason = params["reason"].as_str();
+                let reset = self
+                    .model_library
+                    .reset_model_review(model_id, reviewer, reason)
+                    .await?;
+                Ok(serde_json::to_value(reset)?)
+            }
+            "get_effective_model_metadata" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let _ = reconcile_on_demand(
+                    self,
+                    ReconcileScope::Model(model_id.to_string()),
+                    "ipc-get-effective-metadata",
+                )
+                .await?;
+                let metadata = self.model_library.get_effective_metadata(model_id)?;
+                Ok(serde_json::to_value(metadata)?)
+            }
+            "import_external_diffusers_directory" => {
+                let spec: model_library::ExternalDiffusersImportSpec =
+                    serde_json::from_value(params["spec"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid external diffusers import spec: {e}"),
+                        }
+                    })?;
+                let result = self
+                    .model_importer
+                    .import_external_diffusers_directory(&spec)
+                    .await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            "import_model_in_place" => {
+                let spec: model_library::InPlaceImportSpec =
+                    serde_json::from_value(params["spec"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid in-place import spec: {e}"),
+                        }
+                    })?;
+                let result = self.model_importer.import_in_place(&spec).await?;
+                Ok(serde_json::to_value(result)?)
+            }
+            "adopt_orphan_models" => {
+                let result = self.model_importer.adopt_orphans(false).await;
+                Ok(serde_json::to_value(result)?)
+            }
+            "get_link_health" => {
+                let registry = self.model_library.link_registry().read().await;
+                let all_links = registry.get_all().await;
+
+                let mut healthy = 0;
+                let mut broken: Vec<String> = Vec::new();
+
+                for link in &all_links {
+                    if link.target.is_symlink() {
+                        if link.source.exists() {
+                            healthy += 1;
+                        } else {
+                            broken.push(link.target.to_string_lossy().to_string());
+                        }
+                    } else if link.target.exists() {
+                        healthy += 1;
+                    } else {
+                        broken.push(link.target.to_string_lossy().to_string());
+                    }
+                }
+
+                Ok(serde_json::to_value(models::LinkHealthResponse {
+                    success: true,
+                    error: None,
+                    status: if broken.is_empty() {
+                        "healthy".to_string()
+                    } else {
+                        "degraded".to_string()
+                    },
+                    total_links: all_links.len(),
+                    healthy_links: healthy,
+                    broken_links: broken,
+                    orphaned_links: vec![],
+                    warnings: vec![],
+                    errors: vec![],
+                })?)
+            }
+            "clean_broken_links" => {
+                let registry = self.model_library.link_registry().write().await;
+                let broken = registry.cleanup_broken().await?;
+                for entry in &broken {
+                    if entry.target.exists() || entry.target.is_symlink() {
+                        let _ = std::fs::remove_file(&entry.target);
+                    }
+                }
+                Ok(serde_json::to_value(models::CleanBrokenLinksResponse {
+                    success: true,
+                    cleaned: broken.len(),
+                })?)
+            }
+            "get_links_for_model" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let registry = self.model_library.link_registry().read().await;
+                let links = registry.get_links_for_model(model_id).await;
+
+                let link_info: Vec<models::LinkInfo> = links
+                    .into_iter()
+                    .map(|l| models::LinkInfo {
+                        source: l.source.to_string_lossy().to_string(),
+                        target: l.target.to_string_lossy().to_string(),
+                        link_type: format!("{:?}", l.link_type).to_lowercase(),
+                        app_id: l.app_id,
+                        app_version: l.app_version,
+                        created_at: l.created_at,
+                    })
+                    .collect();
+
+                Ok(serde_json::to_value(models::LinksForModelResponse {
+                    success: true,
+                    links: link_info,
+                })?)
+            }
+            "preview_model_mapping" => {
+                let version_tag =
+                    params["version_tag"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_tag is required".to_string(),
+                        })?;
+                let models_path =
+                    params["models_path"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "models_path is required".to_string(),
+                        })?;
+                let models_path = PathBuf::from(models_path);
+                let response =
+                    preview_model_mapping_response(self, version_tag, models_path.as_path())
+                        .await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "apply_model_mapping" => {
+                let version_tag =
+                    params["version_tag"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_tag is required".to_string(),
+                        })?;
+                let models_path =
+                    params["models_path"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "models_path is required".to_string(),
+                        })?;
+                let models_path = PathBuf::from(models_path);
+                let response =
+                    apply_model_mapping_response(self, version_tag, models_path.as_path()).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "sync_models_incremental" => {
+                let version_tag =
+                    params["version_tag"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_tag is required".to_string(),
+                        })?;
+                let models_path =
+                    params["models_path"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "models_path is required".to_string(),
+                        })?;
+                let models_path = PathBuf::from(models_path);
+                let apply =
+                    apply_model_mapping_response(self, version_tag, models_path.as_path()).await?;
+                let response = models::SyncModelsResponse {
+                    success: apply.success,
+                    error: apply.error,
+                    synced: apply.links_created,
+                    errors: vec![],
+                };
+                Ok(serde_json::to_value(response)?)
+            }
+            "sync_with_resolutions" => {
+                let version_tag =
+                    params["version_tag"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_tag is required".to_string(),
+                        })?;
+                let models_path =
+                    params["models_path"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "models_path is required".to_string(),
+                        })?;
+                let resolutions: std::collections::HashMap<
+                    String,
+                    model_library::ConflictResolution,
+                > = serde_json::from_value(params["resolutions"].clone()).map_err(|e| {
+                    PumasError::InvalidParams {
+                        message: format!("Invalid mapping resolutions: {e}"),
+                    }
+                })?;
+                let response = sync_with_resolutions_response(
+                    self,
+                    version_tag,
+                    Path::new(models_path),
+                    resolutions,
+                )
+                .await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "generate_model_migration_dry_run_report" => {
+                let report = self
+                    .model_library
+                    .generate_migration_dry_run_report_with_artifacts()?;
+                Ok(serde_json::to_value(report)?)
+            }
+            "execute_model_migration" => {
+                let mut report = self
+                    .model_library
+                    .execute_migration_with_checkpoint()
+                    .await?;
+                let mutated =
+                    super::models::relocate_skipped_partial_downloads(self, &mut report).await?;
+                if mutated {
+                    super::models::recompute_execution_report_counts(&mut report);
+                    self.model_library
+                        .rewrite_migration_execution_report(&report)?;
+                }
+                Ok(serde_json::to_value(report)?)
+            }
+            "list_model_migration_reports" => {
+                let reports = self.model_library.list_migration_reports()?;
+                Ok(serde_json::to_value(reports)?)
+            }
+            "delete_model_migration_report" => {
+                let report_path =
+                    params["report_path"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "report_path is required".to_string(),
+                        })?;
+                let deleted = self.model_library.delete_migration_report(report_path)?;
+                Ok(serde_json::to_value(deleted)?)
+            }
+            "prune_model_migration_reports" => {
+                let keep_latest =
+                    params["keep_latest"]
+                        .as_u64()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "keep_latest is required".to_string(),
+                        })? as usize;
+                let pruned = self.model_library.prune_migration_reports(keep_latest)?;
+                Ok(serde_json::to_value(pruned)?)
+            }
             "search_hf_models" => {
                 let query = params["query"].as_str().unwrap_or("");
                 let kind = params["kind"].as_str();
@@ -895,6 +1256,158 @@ async fn system_resources_response(
                 free: disk_free,
             },
         },
+    })
+}
+
+async fn preview_model_mapping_response(
+    primary: &PrimaryState,
+    version_tag: &str,
+    models_path: &Path,
+) -> std::result::Result<models::MappingPreviewResponse, PumasError> {
+    if !models_path.exists() {
+        return Ok(models::MappingPreviewResponse {
+            success: false,
+            error: Some(format!(
+                "Version models directory not found: {}",
+                models_path.display()
+            )),
+            to_create: vec![],
+            to_skip_exists: vec![],
+            conflicts: vec![],
+            broken_to_remove: vec![],
+            total_actions: 0,
+            warnings: vec![],
+            errors: vec![],
+        });
+    }
+
+    primary
+        .model_mapper
+        .create_default_comfyui_config("*", models_path)?;
+
+    let preview = primary
+        .model_mapper
+        .preview_mapping("comfyui", Some(version_tag), models_path)
+        .await?;
+
+    let to_action_info = |a: &crate::model_library::MappingAction| models::MappingActionInfo {
+        model_id: a.model_id.clone(),
+        model_name: a.model_name.clone(),
+        source_path: a.source.display().to_string(),
+        target_path: a.target.display().to_string(),
+        reason: a.reason.clone().unwrap_or_default(),
+    };
+
+    let to_create: Vec<_> = preview.creates.iter().map(to_action_info).collect();
+    let to_skip_exists: Vec<_> = preview.skips.iter().map(to_action_info).collect();
+    let conflicts: Vec<_> = preview.conflicts.iter().map(to_action_info).collect();
+    let broken_to_remove: Vec<_> = preview
+        .broken
+        .iter()
+        .map(|a| models::BrokenLinkEntry {
+            target_path: a.target.display().to_string(),
+            existing_target: a.source.display().to_string(),
+            reason: a.reason.clone().unwrap_or_default(),
+        })
+        .collect();
+    let total_actions = to_create.len() + broken_to_remove.len();
+
+    Ok(models::MappingPreviewResponse {
+        success: true,
+        error: None,
+        to_create,
+        to_skip_exists,
+        conflicts,
+        broken_to_remove,
+        total_actions,
+        warnings: vec![],
+        errors: vec![],
+    })
+}
+
+async fn apply_model_mapping_response(
+    primary: &PrimaryState,
+    version_tag: &str,
+    models_path: &Path,
+) -> std::result::Result<models::MappingApplyResponse, PumasError> {
+    if !models_path.exists() {
+        std::fs::create_dir_all(models_path)?;
+    }
+
+    primary
+        .model_mapper
+        .create_default_comfyui_config("*", models_path)?;
+
+    let result = primary
+        .model_mapper
+        .apply_mapping("comfyui", Some(version_tag), models_path)
+        .await?;
+
+    Ok(models::MappingApplyResponse {
+        success: true,
+        error: None,
+        links_created: result.created,
+        links_removed: result.broken_removed,
+        total_links: result.created + result.skipped,
+    })
+}
+
+async fn sync_with_resolutions_response(
+    primary: &PrimaryState,
+    version_tag: &str,
+    models_path: &Path,
+    resolutions: std::collections::HashMap<String, model_library::ConflictResolution>,
+) -> std::result::Result<models::SyncWithResolutionsResponse, PumasError> {
+    if !models_path.exists() {
+        std::fs::create_dir_all(models_path)?;
+    }
+
+    primary
+        .model_mapper
+        .create_default_comfyui_config("*", models_path)?;
+
+    let resolution_count = |kind: model_library::ConflictResolution| {
+        resolutions.values().filter(|value| **value == kind).count()
+    };
+    let overwrite_count = resolution_count(model_library::ConflictResolution::Overwrite);
+    let rename_count = resolution_count(model_library::ConflictResolution::Rename);
+
+    let typed_resolutions: std::collections::HashMap<PathBuf, model_library::ConflictResolution> =
+        resolutions
+            .into_iter()
+            .map(|(target, resolution)| (PathBuf::from(target), resolution))
+            .collect();
+
+    let result = primary
+        .model_mapper
+        .apply_mapping_with_resolutions(
+            "comfyui",
+            Some(version_tag),
+            models_path,
+            &typed_resolutions,
+        )
+        .await?;
+
+    let errors: Vec<String> = result
+        .errors
+        .iter()
+        .map(|(path, err)| format!("{}: {}", path.display(), err))
+        .collect();
+    let success = errors.is_empty();
+    let error = if success {
+        None
+    } else {
+        Some(format!("{} mapping operation(s) failed", errors.len()))
+    };
+
+    Ok(models::SyncWithResolutionsResponse {
+        success,
+        error,
+        links_created: result.created,
+        links_skipped: result.skipped + result.conflicts,
+        links_renamed: rename_count,
+        overwrites: overwrite_count,
+        errors,
     })
 }
 

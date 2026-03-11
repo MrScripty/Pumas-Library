@@ -37,6 +37,20 @@ impl PumasApi {
         limit: usize,
         hydrate_limit: usize,
     ) -> Result<Vec<models::HuggingFaceModel>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "search_hf_models_with_hydration",
+                    serde_json::json!({
+                        "query": query,
+                        "kind": kind,
+                        "limit": limit,
+                        "hydrate_limit": hydrate_limit,
+                    }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             let params = model_library::HfSearchParams {
                 query: query.to_string(),
@@ -58,6 +72,18 @@ impl PumasApi {
         repo_id: &str,
         quants: &[String],
     ) -> Result<models::HfDownloadDetails> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "get_hf_download_details",
+                    serde_json::json!({
+                        "repo_id": repo_id,
+                        "quants": quants,
+                    }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.get_download_details(repo_id, quants).await
         } else {
@@ -72,6 +98,15 @@ impl PumasApi {
         &self,
         request: &model_library::DownloadRequest,
     ) -> Result<String> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "start_hf_download",
+                    serde_json::json!({ "request": request }),
+                )
+                .await;
+        }
+
         let primary = self.primary();
         if let Some(ref client) = primary.hf_client {
             let mut resolved_request = request.clone();
@@ -176,6 +211,15 @@ impl PumasApi {
         &self,
         download_id: &str,
     ) -> Option<models::ModelDownloadProgress> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default(
+                    "get_hf_download_progress",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.get_download_progress(download_id).await
         } else {
@@ -185,6 +229,15 @@ impl PumasApi {
 
     /// Cancel a HuggingFace download.
     pub async fn cancel_hf_download(&self, download_id: &str) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "cancel_hf_download",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.cancel_download(download_id).await
         } else {
@@ -194,6 +247,15 @@ impl PumasApi {
 
     /// Pause a HuggingFace download, preserving the `.part` file for later resume.
     pub async fn pause_hf_download(&self, download_id: &str) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "pause_hf_download",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.pause_download(download_id).await
         } else {
@@ -203,6 +265,15 @@ impl PumasApi {
 
     /// Resume a paused or errored HuggingFace download.
     pub async fn resume_hf_download(&self, download_id: &str) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resume_hf_download",
+                    serde_json::json!({ "download_id": download_id }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.resume_download(download_id).await
         } else {
@@ -212,6 +283,12 @@ impl PumasApi {
 
     /// List all HuggingFace downloads (active, paused, completed, etc.).
     pub async fn list_hf_downloads(&self) -> Vec<models::ModelDownloadProgress> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method_or_default("list_hf_downloads", serde_json::json!({}))
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.list_downloads().await
         } else {
@@ -225,6 +302,13 @@ impl PumasApi {
     /// These are downloads that lost their tracking state (e.g. due to crash).
     /// Use `recover_download()` with the correct repo_id to resume them.
     pub fn list_interrupted_downloads(&self) -> Vec<model_library::InterruptedDownload> {
+        if self.try_client().is_some() {
+            return self.call_client_method_blocking_or_default(
+                "list_interrupted_downloads",
+                serde_json::json!({}),
+            );
+        }
+
         let primary = self.primary();
 
         // Collect dest_dirs of all known persisted downloads
@@ -255,6 +339,18 @@ impl PumasApi {
     /// download system handles `.part` file resume via HTTP Range headers and
     /// skips files that are already complete.
     pub async fn recover_download(&self, repo_id: &str, dest_dir: &str) -> Result<String> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "recover_download",
+                    serde_json::json!({
+                        "repo_id": repo_id,
+                        "dest_dir": dest_dir,
+                    }),
+                )
+                .await;
+        }
+
         let dest = std::path::Path::new(dest_dir);
         if !dest.is_dir() {
             return Err(PumasError::NotFound {
@@ -320,6 +416,18 @@ impl PumasApi {
         repo_id: &str,
         dest_dir: &str,
     ) -> Result<models::PartialDownloadAction> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resume_partial_download",
+                    serde_json::json!({
+                        "repo_id": repo_id,
+                        "dest_dir": dest_dir,
+                    }),
+                )
+                .await;
+        }
+
         let dest = Path::new(dest_dir);
         if !dest.is_dir() {
             return Ok(models::PartialDownloadAction {
@@ -447,6 +555,15 @@ impl PumasApi {
     /// filename-based lookup via `lookup_metadata()`. Returns the updated
     /// metadata on success.
     pub async fn refetch_metadata_from_hf(&self, model_id: &str) -> Result<models::ModelMetadata> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "refetch_metadata_from_hf",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
         let primary = self.primary();
         let hf_client = primary
             .hf_client
@@ -550,6 +667,15 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "lookup_hf_metadata_for_file",
+                    serde_json::json!({ "file_path": file_path }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             let path = std::path::Path::new(file_path);
             let filename = path
@@ -567,6 +693,15 @@ impl PumasApi {
         &self,
         dir_path: &str,
     ) -> Result<Option<model_library::HfMetadataResult>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "lookup_hf_metadata_for_bundle_directory",
+                    serde_json::json!({ "dir_path": dir_path }),
+                )
+                .await;
+        }
+
         let primary = self.primary();
         let Some(client) = primary.hf_client.as_ref() else {
             return Ok(None);
@@ -672,6 +807,13 @@ impl PumasApi {
     ///
     /// Persists to disk and updates the in-memory token for immediate use.
     pub async fn set_hf_token(&self, token: &str) -> Result<()> {
+        if self.try_client().is_some() {
+            let _: serde_json::Value = self
+                .call_client_method("set_hf_token", serde_json::json!({ "token": token }))
+                .await?;
+            return Ok(());
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.set_auth_token(token).await
         } else {
@@ -685,6 +827,13 @@ impl PumasApi {
     ///
     /// Removes the persisted token file and clears the in-memory value.
     pub async fn clear_hf_token(&self) -> Result<()> {
+        if self.try_client().is_some() {
+            let _: serde_json::Value = self
+                .call_client_method("clear_hf_token", serde_json::json!({}))
+                .await?;
+            return Ok(());
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.clear_auth_token().await
         } else {
@@ -699,6 +848,12 @@ impl PumasApi {
     /// Makes a lightweight API call to validate the token and retrieve
     /// the associated username.
     pub async fn get_hf_auth_status(&self) -> Result<model_library::HfAuthStatus> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_hf_auth_status", serde_json::json!({}))
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.get_auth_status().await
         } else {
@@ -712,6 +867,15 @@ impl PumasApi {
 
     /// Get repository file tree from HuggingFace.
     pub async fn get_hf_repo_files(&self, repo_id: &str) -> Result<model_library::RepoFileTree> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "get_hf_repo_files",
+                    serde_json::json!({ "repo_id": repo_id }),
+                )
+                .await;
+        }
+
         if let Some(ref client) = self.primary().hf_client {
             client.get_repo_files(repo_id).await
         } else {
@@ -750,7 +914,7 @@ pub(crate) fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
     })
 }
 
-fn build_lookup_metadata_from_model(
+pub(crate) fn build_lookup_metadata_from_model(
     index: &crate::index::ModelIndex,
     model: models::HuggingFaceModel,
     match_method: &str,
@@ -781,7 +945,7 @@ fn build_lookup_metadata_from_model(
     })
 }
 
-fn rank_bundle_lookup_candidates(
+pub(crate) fn rank_bundle_lookup_candidates(
     bundle_name: &str,
     hinted_repo_id: Option<&str>,
     candidates: &[models::HuggingFaceModel],
@@ -803,7 +967,7 @@ fn rank_bundle_lookup_candidates(
     ranked
 }
 
-async fn collect_bundle_lookup_candidates(
+pub(crate) async fn collect_bundle_lookup_candidates(
     client: &model_library::HuggingFaceClient,
     bundle_name: &str,
 ) -> Result<Vec<models::HuggingFaceModel>> {
@@ -871,7 +1035,7 @@ fn bundle_lookup_query_variants(bundle_name: &str) -> Vec<String> {
     queries
 }
 
-fn fallback_bundle_lookup_candidate(
+pub(crate) fn fallback_bundle_lookup_candidate(
     bundle_name: &str,
     hinted_repo_id: Option<&str>,
     candidates: &[models::HuggingFaceModel],
@@ -921,7 +1085,11 @@ fn bundle_lookup_score(
     score
 }
 
-fn is_exact_bundle_lookup_match(bundle_name: &str, repo_id: &str, model_name: &str) -> bool {
+pub(crate) fn is_exact_bundle_lookup_match(
+    bundle_name: &str,
+    repo_id: &str,
+    model_name: &str,
+) -> bool {
     let normalized_bundle = normalize_bundle_lookup_key(bundle_name);
     if normalized_bundle.is_empty() {
         return false;
@@ -944,7 +1112,7 @@ fn repo_basename(repo_id: &str) -> &str {
     repo_id.rsplit('/').next().unwrap_or(repo_id)
 }
 
-fn looks_like_repo_id(value: &str) -> bool {
+pub(crate) fn looks_like_repo_id(value: &str) -> bool {
     let mut parts = value.split('/');
     matches!(
         (parts.next(), parts.next(), parts.next()),
@@ -952,7 +1120,7 @@ fn looks_like_repo_id(value: &str) -> bool {
     )
 }
 
-fn partial_download_reason_code(err: &PumasError) -> &'static str {
+pub(crate) fn partial_download_reason_code(err: &PumasError) -> &'static str {
     match err {
         PumasError::NotFound { .. } => "dest_dir_missing",
         PumasError::ModelNotFound { .. } => "repo_not_found",

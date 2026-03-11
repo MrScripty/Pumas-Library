@@ -169,6 +169,56 @@ impl PumasApi {
         }
     }
 
+    fn call_client_method_blocking<T>(&self, method: &str, params: serde_json::Value) -> Result<T>
+    where
+        T: DeserializeOwned + Send + 'static,
+    {
+        let client = self.try_client().ok_or_else(|| {
+            PumasError::Other(format!(
+                "Blocking IPC method {method} requested on a primary instance"
+            ))
+        })?;
+        let client = client.clone();
+        let method = method.to_string();
+        let panic_method = method.clone();
+        std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to build blocking IPC runtime for {method}: {err}"
+                    ))
+                })?;
+            runtime.block_on(async move {
+                let value = client.call(&method, params).await?;
+                serde_json::from_value(value).map_err(|err| PumasError::Json {
+                    message: format!("Failed to decode IPC response for {method}: {err}"),
+                    source: Some(err),
+                })
+            })
+        })
+        .join()
+        .map_err(|_| PumasError::Other(format!("Blocking IPC call {panic_method} panicked")))?
+    }
+
+    fn call_client_method_blocking_or_default<T>(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> T
+    where
+        T: DeserializeOwned + Default + Send + 'static,
+    {
+        match self.call_client_method_blocking(method, params) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!("Blocking client IPC call {} failed: {}", method, err);
+                T::default()
+            }
+        }
+    }
+
     /// Returns true if this instance is the primary (owns full state).
     pub fn is_primary(&self) -> bool {
         matches!(&self.inner, ApiInner::Primary(_))

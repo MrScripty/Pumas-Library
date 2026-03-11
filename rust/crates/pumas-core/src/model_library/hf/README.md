@@ -14,6 +14,10 @@ Hugging Face-specific integrations for model discovery, download orchestration, 
 ## Design Decisions
 - Provider-specific concerns are isolated under `hf/` to keep the main model-library flow provider-agnostic.
 - Typed DTOs are used to avoid ad-hoc JSON parsing across the codebase.
+- HF metadata is normalized into a persisted evidence payload before download placement so later
+  import/reclassification can reuse the same source facts.
+- Download orchestration emits evidence at two stages: auxiliary-files-complete for partial
+  metadata persistence and final completion for full in-place import.
 
 ## Dependencies
 **Internal:** `crate::model_library`, `crate::network`, `crate::models`.

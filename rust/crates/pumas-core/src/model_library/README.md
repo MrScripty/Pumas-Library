@@ -41,6 +41,12 @@ full-text search via SQLite FTS5.
   to hardlinks when symlinks are unavailable (Windows without developer mode).
 - **In-place import**: Models already on disk (post-download or orphan recovery) skip the copy step,
   importing metadata directly.
+- **Persisted HF evidence**: Normalized Hugging Face provenance is captured before download,
+  enriched during file selection, and persisted into `metadata.json`/the SQLite index so later
+  local evaluation does not depend on transient API responses.
+- **Single resolver, staged evidence**: Model typing runs through one resolver for remote-only,
+  partial-download, and fully imported models. The evidence set grows by stage; the resolver does
+  not change by phase.
 - **External-reference assets**: Directory-root bundles must extend the existing metadata/index
   system instead of introducing a second registry or runtime-routing contract.
 - **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
@@ -68,14 +74,22 @@ full-text search via SQLite FTS5.
 - `recommended_backend` is deterministic-only and remains `null` when signals are ambiguous.
 - Canonical values are lowercase backend tokens (`llama.cpp`, `onnx-runtime`, etc.).
 - Consumers must treat missing/`null` as "fallback heuristics required."
+- Metadata payloads may include `huggingface_evidence` and should treat it as audit/provenance
+  data owned by the backend classifier, not as a UI-authored override.
 - External directory-root assets must be consumed through a dedicated execution descriptor rather
   than `primary_file`-style path resolution.
 
 ## Structured Producer Contract
 
 - `metadata.json` under the library root remains the canonical persisted model-record artifact.
+- SQLite/indexed metadata remains the canonical query surface for persisted evidence and latest
+  classification state; `metadata.json` is the on-disk projection for the same record.
 - External-reference assets extend persisted metadata with `source_path`, `entry_path`,
   `storage_kind`, `bundle_format`, `pipeline_class`, `import_state`, and asset validation fields.
+- Download flows may create a preliminary metadata record with `match_source = download_partial`
+  before weight files complete so recovery/reclassification can reuse persisted HF evidence.
+- `huggingface_evidence` stores normalized remote facts and selected-file context. Resolved
+  `model_type` stays separate so future resolver improvements do not destroy source evidence.
 - These fields describe asset ownership and current executable health; they must not create a
   second source-of-truth outside the model-library metadata/index flow.
 - Compatibility expectation for milestone one is append-only: new optional fields may be added,

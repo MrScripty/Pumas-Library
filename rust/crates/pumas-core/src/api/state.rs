@@ -1104,13 +1104,19 @@ async fn start_hf_download(
     {
         resolved_pipeline_tag = Some(remote_pipeline_tag.to_string());
     }
-    let mut resolved_model_type = resolve_model_type_from_hints(
-        primary.model_library.index(),
-        [
-            normalized_download_hint(request.model_type.as_deref()),
+    let mut resolved_model_type = if let Some(ref evidence) = huggingface_evidence {
+        let resolved = model_library::resolve_model_type_from_huggingface_evidence(
+            primary.model_library.index(),
+            Some(&resolved_request.official_name),
             resolved_pipeline_tag.as_deref(),
-        ],
-    )?;
+            request.model_type.as_deref(),
+            Some(evidence),
+        )?;
+        (resolved.model_type != model_library::ModelType::Unknown)
+            .then(|| resolved.model_type.as_str().to_string())
+    } else {
+        None
+    };
 
     if resolved_model_type.is_none() || resolved_pipeline_tag.is_none() {
         let model_info = client.get_model_info(&request.repo_id).await?;

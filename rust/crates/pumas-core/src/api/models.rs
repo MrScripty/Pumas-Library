@@ -18,6 +18,12 @@ impl PumasApi {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("list_models", serde_json::json!({}))
+                .await;
+        }
+
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),
@@ -35,6 +41,19 @@ impl PumasApi {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "search_models",
+                    serde_json::json!({
+                        "query": query,
+                        "limit": limit,
+                        "offset": offset,
+                    }),
+                )
+                .await;
+        }
+
         let primary = self.primary();
 
         if query.trim().is_empty() {
@@ -157,6 +176,12 @@ impl PumasApi {
 
     /// Get a single model by ID.
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_model", serde_json::json!({ "model_id": model_id }))
+                .await;
+        }
+
         let primary = self.primary();
         let _ = reconcile_on_demand(
             primary.as_ref(),

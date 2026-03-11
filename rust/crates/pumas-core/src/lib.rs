@@ -78,6 +78,7 @@ pub use system::{
 // Re-export builder from api module
 pub use api::PumasApiBuilder;
 
+use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -107,7 +108,7 @@ pub struct PumasApi {
 /// Internal dispatch: Primary owns state, Client proxies via IPC.
 enum ApiInner {
     Primary(Arc<PrimaryState>),
-    Client,
+    Client(Arc<ipc::IpcClient>),
 }
 
 impl PumasApi {
@@ -115,9 +116,16 @@ impl PumasApi {
     fn try_primary(&self) -> Result<&Arc<PrimaryState>> {
         match &self.inner {
             ApiInner::Primary(state) => Ok(state),
-            ApiInner::Client => Err(PumasError::Other(
+            ApiInner::Client(_) => Err(PumasError::Other(
                 "This method is only available on primary instances".to_string(),
             )),
+        }
+    }
+
+    fn try_client(&self) -> Option<&Arc<ipc::IpcClient>> {
+        match &self.inner {
+            ApiInner::Client(client) => Some(client),
+            ApiInner::Primary(_) => None,
         }
     }
 
@@ -126,10 +134,26 @@ impl PumasApi {
     fn primary(&self) -> &Arc<PrimaryState> {
         match &self.inner {
             ApiInner::Primary(state) => state,
-            ApiInner::Client => {
+            ApiInner::Client(_) => {
                 panic!("BUG: primary-only method called on client instance")
             }
         }
+    }
+
+    async fn call_client_method<T>(&self, method: &str, params: serde_json::Value) -> Result<T>
+    where
+        T: DeserializeOwned,
+    {
+        let client = self.try_client().ok_or_else(|| {
+            PumasError::Other(format!(
+                "IPC method {method} requested on a primary instance"
+            ))
+        })?;
+        let value = client.call(method, params).await?;
+        serde_json::from_value(value).map_err(|err| PumasError::Json {
+            message: format!("Failed to decode IPC response for {method}: {err}"),
+            source: Some(err),
+        })
     }
 
     /// Returns true if this instance is the primary (owns full state).
@@ -199,7 +223,7 @@ impl PumasApi {
                 let addr =
                     std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
                 match ipc::IpcClient::connect(addr, instance.pid).await {
-                    Ok(_client) => {
+                    Ok(client) => {
                         tracing::info!(
                             "Connected to existing instance (PID {} on port {})",
                             instance.pid,
@@ -207,7 +231,7 @@ impl PumasApi {
                         );
                         return Ok(Self {
                             launcher_root: library.path.clone(),
-                            inner: ApiInner::Client,
+                            inner: ApiInner::Client(Arc::new(client)),
                             model_watcher: None,
                         });
                     }
@@ -411,5 +435,21 @@ mod tests {
         let first_port = api.start_ipc_server().await.unwrap();
         let second_port = api.start_ipc_server().await.unwrap();
         assert_eq!(first_port, second_port);
+    }
+
+    #[tokio::test]
+    async fn test_discover_returns_working_client_for_basic_ipc_methods() {
+        let temp_dir = TempDir::new().unwrap();
+        let _registry = RegistryTestGuard::new(temp_dir.path());
+        let _primary = PumasApi::new(temp_dir.path()).await.unwrap();
+
+        let client = PumasApi::discover().await.unwrap();
+        assert!(!client.is_primary());
+
+        let models = client.list_models().await.unwrap();
+        assert!(models.is_empty());
+
+        let disk = client.get_disk_space().await.unwrap();
+        assert!(disk.success);
     }
 }

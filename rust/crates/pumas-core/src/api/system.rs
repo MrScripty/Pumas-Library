@@ -17,6 +17,12 @@ impl PumasApi {
     /// Note: This returns basic status. Version-specific status (shortcuts, active version)
     /// should be obtained through pumas-app-manager in the RPC layer.
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_status_response", serde_json::json!({}))
+                .await;
+        }
+
         // Get actual running status
         let comfyui_running = self.is_comfyui_running().await;
         let ollama_running = self.is_ollama_running().await;
@@ -102,6 +108,12 @@ impl PumasApi {
 
     /// Get disk space information.
     pub async fn get_disk_space(&self) -> Result<models::DiskSpaceResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_disk_space", serde_json::json!({}))
+                .await;
+        }
+
         use sysinfo::Disks;
 
         let disks = Disks::new_with_refreshed_list();
@@ -158,6 +170,12 @@ impl PumasApi {
 
     /// Get system resources (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<models::SystemResourcesResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method("get_system_resources", serde_json::json!({}))
+                .await;
+        }
+
         use sysinfo::{Disks, System};
 
         let mut sys = System::new_all();

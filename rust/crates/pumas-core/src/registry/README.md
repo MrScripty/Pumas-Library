@@ -40,7 +40,8 @@ launcher root, only one live process can hold that claim at a time.
 
 **Crash recovery**: If a claimed or ready instance row belongs to a dead PID,
 the next starter can replace it. Live claiming rows are treated as startup in
-progress and should be awaited by wrapper layers rather than overwritten.
+progress and should be awaited by constructors and wrapper layers rather than
+overwritten.
 
 ## Files
 

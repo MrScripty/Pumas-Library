@@ -14,7 +14,7 @@ IPC startup is coordinated by the registry claim flow:
 - a primary contender first writes a `claiming` row in the registry
 - the IPC server binds a local port
 - the claim row is promoted to `ready` with that port
-- wrapper layers attach only to ready rows and wait while startup is still claiming
+- constructors and wrapper layers attach only to ready rows and wait while startup is still claiming
 
 ## Protocol
 
@@ -49,6 +49,7 @@ When a Client detects a broken TCP connection (server crashed, network error),
 it returns `PumasError::SharedInstanceLost { pid, port }` so the host app
 can decide to reconnect or create a new Primary instance.
 
-When a process loses the primary race before IPC is ready, startup returns
-`PumasError::PrimaryInstanceBusy` and wrapper layers should wait for the ready
-row rather than starting a second primary.
+Default startup paths do not start a second primary when they lose the race.
+They wait for the winning claim to become `ready`, then attach as clients over
+IPC. If the winning process never reaches readiness, startup returns
+`PumasError::PrimaryInstanceStartupTimeout`.

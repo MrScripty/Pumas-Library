@@ -46,8 +46,8 @@ Renderer code does not access Node APIs directly.
 
 Primary ownership is now enforced per launcher root through the registry.
 
-- `PumasApi::new()` and `PumasApi::builder(...).build()` claim primary ownership for the launcher root and return `PrimaryInstanceBusy` if another live process already owns or is starting that root.
-- UniFFI constructors attach to an existing ready primary through registry + IPC. If another process is still in the claim/startup phase, they wait for it to become ready instead of starting a second primary.
+- `PumasApi::new()` and `PumasApi::builder(...).build()` now converge automatically: they claim primary ownership when possible, otherwise they attach as clients to the existing primary for that launcher root.
+- UniFFI constructors keep the same convergence behavior, with an eager client fast-path before falling back to the shared Rust startup path.
 - Watcher startup, reconciliation startup, and download-recovery startup occur only after the winning primary has started IPC and promoted its claim row to `ready`.
 
 This keeps a strict single-primary process model without allowing concurrent startup races to create multiple owners for the same `shared-resources/models` database.

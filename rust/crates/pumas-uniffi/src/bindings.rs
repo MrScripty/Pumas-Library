@@ -1121,18 +1121,12 @@ impl FfiPumasApi {
             }));
         }
 
-        match PumasApi::new(&launcher_root).await {
-            Ok(api) => Ok(Arc::new(Self {
-                inner: FfiApiInner::Primary(Arc::new(api)),
-            })),
-            Err(pumas_library::PumasError::PrimaryInstanceBusy { .. }) => {
-                let client = Self::wait_for_client(&launcher_root).await?;
-                Ok(Arc::new(Self {
-                    inner: FfiApiInner::Client(client),
-                }))
-            }
-            Err(err) => Err(FfiError::from(err)),
-        }
+        let api = PumasApi::new(&launcher_root)
+            .await
+            .map_err(FfiError::from)?;
+        Ok(Arc::new(Self {
+            inner: FfiApiInner::Primary(Arc::new(api)),
+        }))
     }
 
     async fn new_with_configured_root(config: FfiApiConfig) -> Result<Arc<Self>, FfiError> {
@@ -1142,24 +1136,16 @@ impl FfiPumasApi {
             }));
         }
 
-        match PumasApi::builder(&config.launcher_root)
+        let api = PumasApi::builder(&config.launcher_root)
             .auto_create_dirs(config.auto_create_dirs)
             .with_hf_client(config.enable_hf)
             .with_process_manager(false)
             .build()
             .await
-        {
-            Ok(api) => Ok(Arc::new(Self {
-                inner: FfiApiInner::Primary(Arc::new(api)),
-            })),
-            Err(pumas_library::PumasError::PrimaryInstanceBusy { .. }) => {
-                let client = Self::wait_for_client(&config.launcher_root).await?;
-                Ok(Arc::new(Self {
-                    inner: FfiApiInner::Client(client),
-                }))
-            }
-            Err(err) => Err(FfiError::from(err)),
-        }
+            .map_err(FfiError::from)?;
+        Ok(Arc::new(Self {
+            inner: FfiApiInner::Primary(Arc::new(api)),
+        }))
     }
 
     async fn try_connect_client(launcher_root: &str) -> Result<Option<Arc<IpcClient>>, FfiError> {
@@ -1192,29 +1178,6 @@ impl FfiPumasApi {
                 let _ = registry.unregister_instance(Path::new(launcher_root));
                 Ok(None)
             }
-        }
-    }
-
-    async fn wait_for_client(launcher_root: &str) -> Result<Arc<IpcClient>, FfiError> {
-        let timeout = pumas_library::config::RegistryConfig::PRIMARY_READY_TIMEOUT;
-        let deadline = tokio::time::Instant::now() + timeout;
-
-        loop {
-            if let Some(client) = Self::try_connect_client(launcher_root).await? {
-                return Ok(client);
-            }
-
-            if tokio::time::Instant::now() >= deadline {
-                return Err(FfiError::from(
-                    pumas_library::PumasError::PrimaryInstanceStartupTimeout {
-                        library_path: Path::new(launcher_root).to_path_buf(),
-                        timeout,
-                    },
-                ));
-            }
-
-            tokio::time::sleep(pumas_library::config::RegistryConfig::PRIMARY_READY_POLL_INTERVAL)
-                .await;
         }
     }
 

@@ -15,11 +15,11 @@ use crate::index::{
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
-    get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
-    refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
+    MODEL_EXECUTION_CONTRACT_VERSION, get_diffusers_bundle_lookup_hints, is_diffusers_bundle,
+    is_external_reference, refresh_external_metadata_validation,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
-use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
+use crate::model_library::identifier::{ModelTypeInfo, identify_model_type};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{
@@ -27,9 +27,8 @@ use crate::model_library::types::{
     SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_recommended_backend, normalize_review_reasons, push_review_reason,
-    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
-    ModelTypeResolution,
+    LinkRegistry, ModelTypeResolution, normalize_recommended_backend, normalize_review_reasons,
+    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
 };
 use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
 use serde_json::Value;
@@ -182,6 +181,11 @@ impl ModelLibrary {
     /// Get a reference to the model index.
     pub fn index(&self) -> &ModelIndex {
         &self.index
+    }
+
+    /// Return the canonical SQLite-backed model count.
+    pub fn model_count(&self) -> Result<usize> {
+        self.index.count()
     }
 
     // ========================================
@@ -4889,6 +4893,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_model_count_reads_canonical_index_rows() {
+        let (_, library) = setup_library().await;
+
+        for (family, name) in [("llama", "count-one"), ("mistral", "count-two")] {
+            let model_dir = library.build_model_path("llm", family, name);
+            std::fs::create_dir_all(&model_dir).unwrap();
+            let metadata = ModelMetadata {
+                model_id: Some(format!("llm/{family}/{name}")),
+                family: Some(family.to_string()),
+                model_type: Some("llm".to_string()),
+                official_name: Some(name.to_string()),
+                ..Default::default()
+            };
+            library.save_metadata(&model_dir, &metadata).await.unwrap();
+            library.index_model_dir(&model_dir).await.unwrap();
+        }
+
+        assert_eq!(library.model_count().unwrap(), 2);
+    }
+
+    #[tokio::test]
     async fn test_model_scope_is_current_returns_false_after_metadata_change() {
         let (_, library) = setup_library().await;
 
@@ -5003,10 +5028,12 @@ mod tests {
             Some("model-type-resolver-arch-rules".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.7));
-        assert!(updated
-            .review_reasons
-            .unwrap_or_default()
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            updated
+                .review_reasons
+                .unwrap_or_default()
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[tokio::test]
@@ -5085,10 +5112,12 @@ mod tests {
             Some("model-type-file-signature".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.65));
-        assert!(updated
-            .review_reasons
-            .unwrap_or_default()
-            .contains(&"model-type-fallback-file-signature".to_string()));
+        assert!(
+            updated
+                .review_reasons
+                .unwrap_or_default()
+                .contains(&"model-type-fallback-file-signature".to_string())
+        );
     }
 
     #[tokio::test]
@@ -5685,11 +5714,13 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(library
-            .list_models_needing_review(None)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            library
+                .list_models_needing_review(None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         let reset = library
             .reset_model_review("llm/llama/reset-review", "bob", Some("revert"))
@@ -5704,9 +5735,11 @@ mod tests {
             "llm/llama/reset-review"
         );
         assert_eq!(queue_after[0].review_status.as_deref(), Some("pending"));
-        assert!(queue_after[0]
-            .review_reasons
-            .contains(&"unknown-task-signature".to_string()));
+        assert!(
+            queue_after[0]
+                .review_reasons
+                .contains(&"unknown-task-signature".to_string())
+        );
     }
 
     #[tokio::test]
@@ -5802,10 +5835,12 @@ mod tests {
         let report = library.generate_migration_dry_run_report().unwrap();
         assert_eq!(report.total_models, 2);
         assert_eq!(report.collision_count, 1);
-        assert!(report
-            .items
-            .iter()
-            .any(|item| item.action == "blocked_collision"));
+        assert!(
+            report
+                .items
+                .iter()
+                .any(|item| item.action == "blocked_collision")
+        );
     }
 
     #[tokio::test]
@@ -5850,10 +5885,12 @@ mod tests {
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
         assert!(!index.entries.is_empty());
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "dry_run"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "dry_run")
+        );
     }
 
     #[tokio::test]
@@ -6055,10 +6092,12 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "execution"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "execution")
+        );
     }
 
     #[tokio::test]
@@ -6119,10 +6158,12 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "execution"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "execution")
+        );
     }
 
     #[tokio::test]
@@ -6165,10 +6206,12 @@ mod tests {
 
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         assert!(!report.referential_integrity_ok);
-        assert!(report
-            .referential_integrity_errors
-            .iter()
-            .any(|error| error.contains("metadata validation failed")));
+        assert!(
+            report
+                .referential_integrity_errors
+                .iter()
+                .any(|error| error.contains("metadata validation failed"))
+        );
         assert!(report.error_count >= 1);
     }
 
@@ -6212,10 +6255,11 @@ mod tests {
         assert_eq!(row.action, "blocked_partial_download");
         assert_eq!(row.current_model_type.as_deref(), Some("reranker"));
         assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
-        assert!(row
-            .findings
-            .iter()
-            .any(|finding| finding == "partial_download_blocked_migration_move"));
+        assert!(
+            row.findings
+                .iter()
+                .any(|finding| finding == "partial_download_blocked_migration_move")
+        );
     }
 
     #[tokio::test]
@@ -6249,10 +6293,12 @@ mod tests {
         assert_eq!(report.completed_move_count, 0);
         assert_eq!(report.skipped_move_count, 1);
         assert_eq!(report.error_count, 0);
-        assert!(report
-            .results
-            .iter()
-            .any(|row| row.action == "skipped_partial_download"));
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|row| row.action == "skipped_partial_download")
+        );
     }
 
     #[tokio::test]
@@ -6293,10 +6339,12 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 1);
         assert_eq!(integrity.index_stale_model_count, 0);
-        assert!(!integrity
-            .errors
-            .iter()
-            .any(|error| error.contains("metadata mismatch")));
+        assert!(
+            !integrity
+                .errors
+                .iter()
+                .any(|error| error.contains("metadata mismatch"))
+        );
     }
 
     #[tokio::test]
@@ -6336,10 +6384,12 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 0);
         assert_eq!(integrity.index_stale_model_count, 1);
-        assert!(integrity
-            .errors
-            .iter()
-            .any(|error| error.contains("stale index rows detected")));
+        assert!(
+            integrity
+                .errors
+                .iter()
+                .any(|error| error.contains("stale index rows detected"))
+        );
     }
 
     #[tokio::test]
@@ -7112,26 +7162,36 @@ mod tests {
         assert_eq!(binding.profile_id, SD_TURBO_PROFILE_ID);
         assert_eq!(binding.profile_version, SD_TURBO_PROFILE_VERSION);
         assert_eq!(binding.backend_key.as_deref(), Some(SD_TURBO_BACKEND_KEY));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1"));
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1")
+        );
 
         let binding_id = sd_turbo_runtime_binding_id(model_id);
         let initial_binding = library
@@ -7197,11 +7257,13 @@ mod tests {
         library.index_model_dir(&model_dir).await.unwrap();
 
         let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
-        assert!(loaded
-            .dependency_bindings
-            .unwrap_or_default()
-            .iter()
-            .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID)));
+        assert!(
+            loaded
+                .dependency_bindings
+                .unwrap_or_default()
+                .iter()
+                .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID))
+        );
     }
 
     #[tokio::test]

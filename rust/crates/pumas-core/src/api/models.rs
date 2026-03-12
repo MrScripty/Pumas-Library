@@ -1,15 +1,15 @@
 //! Model library methods on PumasApi.
 
-use super::{reconcile_on_demand, ReconcileScope};
+use super::{ReconcileScope, reconcile_on_demand};
+use crate::PumasApi;
 use crate::error::{PumasError, Result};
 use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
 use crate::models;
-use crate::PumasApi;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 impl PumasApi {
     // ========================================
@@ -115,7 +115,7 @@ impl PumasApi {
             "api-rebuild-model-index",
         )
         .await?;
-        Ok(primary.model_library.list_models().await?.len())
+        primary.model_library.model_count()
     }
 
     /// Get model-library status information for GUI polling.
@@ -134,7 +134,7 @@ impl PumasApi {
         )
         .await?;
 
-        let model_count = primary.model_library.list_models().await?.len() as u32;
+        let model_count = primary.model_library.model_count()? as u32;
         let pending_lookups = primary.model_library.get_pending_lookups().await?.len() as u32;
 
         Ok(models::LibraryStatusResponse {

@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator};
+use super::{ReconcileScope, ReconciliationCoordinator, reconcile_on_demand};
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;
@@ -162,7 +162,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 self.reconciliation.mark_dirty_all().await;
                 let _ = reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-rebuild-index")
                     .await?;
-                let model_count = self.model_library.list_models().await?.len();
+                let model_count = self.model_library.model_count()?;
                 Ok(serde_json::to_value(model_count)?)
             }
             "reclassify_model" => {
@@ -209,7 +209,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let _ =
                     reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-get-library-status")
                         .await?;
-                let model_count = self.model_library.list_models().await?.len() as u32;
+                let model_count = self.model_library.model_count()? as u32;
                 let pending_lookups = self.model_library.get_pending_lookups().await?.len() as u32;
                 Ok(serde_json::to_value(models::LibraryStatusResponse {
                     success: true,

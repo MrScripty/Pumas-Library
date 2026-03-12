@@ -861,24 +861,6 @@ impl ModelLibrary {
         Ok(())
     }
 
-    async fn refresh_external_asset_states(&self) -> Result<()> {
-        for model_dir in self.model_dirs() {
-            let Some(mut metadata) = self.load_metadata(&model_dir)? else {
-                continue;
-            };
-            if !is_external_reference(&metadata) {
-                continue;
-            }
-
-            if refresh_external_metadata_validation(&mut metadata) {
-                self.save_metadata(&model_dir, &metadata).await?;
-                self.upsert_index_from_metadata(&model_dir, &metadata)?;
-            }
-        }
-
-        Ok(())
-    }
-
     /// Deep scan and rebuild with optional hash verification.
     ///
     /// This is a slower operation that can optionally recompute hashes
@@ -995,7 +977,6 @@ impl ModelLibrary {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        self.refresh_external_asset_states().await?;
         let mut result = self.index.search("", None, None, 10000, 0)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
         self.project_display_fields_for_records(&mut result.models);
@@ -1032,7 +1013,6 @@ impl ModelLibrary {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        self.refresh_external_asset_states().await?;
         let mut result = self.index.search(query, None, None, limit, offset)?;
         self.project_dependency_bindings_for_records(&mut result.models)?;
         self.project_display_fields_for_records(&mut result.models);
@@ -1058,7 +1038,6 @@ impl ModelLibrary {
         model_type: Option<&str>,
         tags: Option<&[String]>,
     ) -> Result<SearchResult> {
-        self.refresh_external_asset_states().await?;
         let model_types = model_type.map(|t| vec![t.to_string()]);
         let tags_owned = tags.map(|t| t.to_vec());
 
@@ -4990,6 +4969,135 @@ mod tests {
         library.save_metadata(&model_dir, &metadata).await.unwrap();
 
         assert_eq!(writes.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn test_list_models_does_not_refresh_external_metadata_on_read() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+
+        let model_id = "diffusion/test/read-only-list";
+        let model_dir = library.build_model_path("diffusion", "test", "read-only-list");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let stale_metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("read-only-list".to_string()),
+            cleaned_name: Some("read-only-list".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Failed),
+            validation_state: Some(AssetValidationState::Invalid),
+            validation_errors: Some(vec![crate::models::AssetValidationError {
+                code: "stale".to_string(),
+                message: "stale validation state".to_string(),
+                path: None,
+            }]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&model_dir, &stale_metadata)
+            .await
+            .unwrap();
+        library
+            .upsert_index_from_metadata(&model_dir, &stale_metadata)
+            .unwrap();
+
+        let writes = Arc::new(AtomicUsize::new(0));
+        let write_counter = writes.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            write_counter.fetch_add(1, Ordering::SeqCst);
+        })));
+
+        let listed = library.list_models().await.unwrap();
+        assert!(listed.iter().any(|model| model.id == model_id));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+
+        let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            persisted.validation_state,
+            Some(AssetValidationState::Invalid)
+        );
+        assert_eq!(
+            persisted.import_state,
+            Some(crate::models::ImportState::Failed)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_models_does_not_refresh_external_metadata_on_read() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+
+        let model_id = "diffusion/test/read-only-search";
+        let model_dir = library.build_model_path("diffusion", "test", "read-only-search");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let stale_metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("read-only-search".to_string()),
+            cleaned_name: Some("read-only-search".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Failed),
+            validation_state: Some(AssetValidationState::Invalid),
+            validation_errors: Some(vec![crate::models::AssetValidationError {
+                code: "stale".to_string(),
+                message: "stale validation state".to_string(),
+                path: None,
+            }]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&model_dir, &stale_metadata)
+            .await
+            .unwrap();
+        library
+            .upsert_index_from_metadata(&model_dir, &stale_metadata)
+            .unwrap();
+
+        let writes = Arc::new(AtomicUsize::new(0));
+        let write_counter = writes.clone();
+        library.set_metadata_write_notifier(Some(Arc::new(move |_| {
+            write_counter.fetch_add(1, Ordering::SeqCst);
+        })));
+
+        let search = library
+            .search_models("read-only-search", 10, 0)
+            .await
+            .unwrap();
+        assert!(search.models.iter().any(|model| model.id == model_id));
+        assert_eq!(writes.load(Ordering::SeqCst), 0);
+
+        let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            persisted.validation_state,
+            Some(AssetValidationState::Invalid)
+        );
+        assert_eq!(
+            persisted.import_state,
+            Some(crate::models::ImportState::Failed)
+        );
     }
 
     #[tokio::test]

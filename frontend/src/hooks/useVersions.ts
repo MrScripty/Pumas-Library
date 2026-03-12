@@ -56,9 +56,14 @@ export interface UseVersionsResult {
 export interface UseVersionsOptions {
   appId?: string;
   enabled?: boolean;
+  trackAvailableVersions?: boolean;
 }
 
-export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}): UseVersionsResult {
+export function useVersions({
+  appId,
+  enabled = true,
+  trackAvailableVersions = true,
+}: UseVersionsOptions = {}): UseVersionsResult {
   const resolvedAppId = appId ?? 'comfyui';
   const isEnabled = enabled;
   const [localInstallingTag, setLocalInstallingTag] = useState<string | null>(null);
@@ -84,6 +89,7 @@ export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}):
   } = useVersionFetching({
     appId: resolvedAppId,
     enabled: isEnabled,
+    trackAvailableVersions,
     onInstallingTagUpdate: setLocalInstallingTag,
   });
 
@@ -135,7 +141,7 @@ export function useVersions({ appId, enabled = true }: UseVersionsOptions = {}):
     return () => {
       if (waitTimeout) clearTimeout(waitTimeout);
     };
-  }, [isEnabled, refreshAll, resolvedAppId]);
+  }, [isEnabled, refreshAll, resolvedAppId, trackAvailableVersions]);
 
   return {
     // State

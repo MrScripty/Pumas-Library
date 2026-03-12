@@ -76,9 +76,18 @@ export default function App() {
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
 
-  const comfyVersions = useVersions({ appId: 'comfyui' });
-  const ollamaVersions = useVersions({ appId: 'ollama' });
-  const torchVersions = useVersions({ appId: 'torch' });
+  const comfyVersions = useVersions({
+    appId: 'comfyui',
+    trackAvailableVersions: selectedAppId === 'comfyui',
+  });
+  const ollamaVersions = useVersions({
+    appId: 'ollama',
+    trackAvailableVersions: selectedAppId === 'ollama',
+  });
+  const torchVersions = useVersions({
+    appId: 'torch',
+    trackAvailableVersions: selectedAppId === 'torch',
+  });
 
   // Map app IDs to their version hooks - only supported apps have versions
   const activeVersions = useMemo(() => {
@@ -210,7 +219,7 @@ export default function App() {
     const startPolling = () => {
       // Delay update check to not block initial render
       setTimeout(() => {
-        checkLauncherVersion(true).catch((err: unknown) => {
+        checkLauncherVersion(false).catch((err: unknown) => {
           logger.debug('Background update check failed', { error: err });
         });
       }, 3000);

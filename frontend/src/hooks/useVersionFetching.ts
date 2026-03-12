@@ -33,6 +33,7 @@ const logger = getLogger('useVersionFetching');
 interface UseVersionFetchingOptions {
   appId?: string;
   enabled?: boolean;
+  trackAvailableVersions?: boolean;
   onInstallingTagUpdate?: (tag: string | null) => void;
 }
 
@@ -61,6 +62,7 @@ interface UseVersionFetchingResult {
 export function useVersionFetching({
   appId,
   enabled = true,
+  trackAvailableVersions = true,
   onInstallingTagUpdate,
 }: UseVersionFetchingOptions = {}): UseVersionFetchingResult {
   const resolvedAppId = appId ?? 'comfyui';
@@ -101,7 +103,7 @@ export function useVersionFetching({
     if (!isEnabled) {
       setIsLoading(false);
     }
-  }, [resolvedAppId, isEnabled]);
+  }, [resolvedAppId, isEnabled, trackAvailableVersions]);
 
   // Fetch installed versions
   const fetchInstalledVersions = useCallback(async () => {
@@ -309,13 +311,18 @@ export function useVersionFetching({
     }
     setIsLoading(true);
     try {
-      await Promise.all([
+      const requests = [
         fetchInstalledVersions(),
         fetchActiveVersion(),
         fetchDefaultVersion(),
-        fetchAvailableVersions(forceRefresh),
         fetchVersionStatus(),
-      ]);
+      ];
+
+      if (trackAvailableVersions) {
+        requests.push(fetchAvailableVersions(forceRefresh));
+      }
+
+      await Promise.all(requests);
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error refreshing version data', { error: error.message, endpoint: error.endpoint });
@@ -334,6 +341,7 @@ export function useVersionFetching({
     fetchAvailableVersions,
     fetchVersionStatus,
     isEnabled,
+    trackAvailableVersions,
   ]);
 
   // Poll cache status for background GitHub fetches
@@ -342,7 +350,7 @@ export function useVersionFetching({
     let waitTimeout: NodeJS.Timeout | null = null;
     const supportsBackgroundFetch = resolvedAppId === 'comfyui';
 
-    if (!isEnabled) {
+    if (!isEnabled || !trackAvailableVersions) {
       return () => {};
     }
 
@@ -398,7 +406,7 @@ export function useVersionFetching({
       if (waitTimeout) clearTimeout(waitTimeout);
       if (followupRefreshRef.current) clearTimeout(followupRefreshRef.current);
     };
-  }, [fetchAvailableVersionsRef, isEnabled, resolvedAppId]);
+  }, [fetchAvailableVersionsRef, isEnabled, resolvedAppId, trackAvailableVersions]);
 
   return {
     installedVersions,

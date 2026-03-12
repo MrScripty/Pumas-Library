@@ -762,6 +762,40 @@ fn merge_partial_candidates(
     }
 }
 
+fn apply_stable_partial_metadata_timestamps(
+    metadata: &mut ModelMetadata,
+    existing_metadata: Option<&ModelMetadata>,
+    candidate_created_at: Option<&String>,
+    now: &str,
+) {
+    let added_date = existing_metadata
+        .and_then(|metadata| metadata.added_date.clone())
+        .or_else(|| candidate_created_at.cloned())
+        .unwrap_or_else(|| now.to_string());
+
+    let updated_date = existing_metadata
+        .and_then(|existing| existing.updated_date.clone().or_else(|| existing.added_date.clone()))
+        .unwrap_or_else(|| added_date.clone());
+
+    metadata.added_date = Some(added_date);
+    metadata.updated_date = Some(updated_date);
+}
+
+fn reuse_existing_partial_lookup_hints(
+    candidate: &mut PartialDownloadCandidate,
+    existing_metadata: Option<&ModelMetadata>,
+) {
+    if candidate.expected_files.is_empty() {
+        candidate.expected_files = existing_metadata
+            .and_then(|metadata| metadata.expected_files.clone())
+            .unwrap_or_default();
+    }
+    if candidate.pipeline_tag_hint.is_none() {
+        candidate.pipeline_tag_hint =
+            existing_metadata.and_then(|metadata| metadata.pipeline_tag.clone());
+    }
+}
+
 async fn stage_partial_candidate(
     primary: &PrimaryState,
     mut candidate: PartialDownloadCandidate,
@@ -774,6 +808,12 @@ async fn stage_partial_candidate(
         return Ok(());
     }
 
+    let existing_metadata = primary
+        .model_library
+        .index()
+        .get(&candidate.model_id)?
+        .and_then(|record| serde_json::from_value::<ModelMetadata>(record.metadata).ok());
+
     if candidate.expected_files.is_empty() {
         if let Some(ref repo_id) = candidate.repo_id {
             candidate.expected_files = fetch_expected_files_from_hf(primary, repo_id).await;
@@ -784,6 +824,7 @@ async fn stage_partial_candidate(
             candidate.pipeline_tag_hint = fetch_model_kind_from_hf(primary, repo_id).await;
         }
     }
+    reuse_existing_partial_lookup_hints(&mut candidate, existing_metadata.as_ref());
     candidate.expected_files = dedupe_sort(candidate.expected_files);
 
     let now = chrono::Utc::now().to_rfc3339();
@@ -827,8 +868,8 @@ async fn stage_partial_candidate(
             Some(candidate.expected_files.clone())
         },
         match_source: Some("download_partial".to_string()),
-        added_date: Some(candidate.created_at.unwrap_or_else(|| now.clone())),
-        updated_date: Some(now.clone()),
+        added_date: None,
+        updated_date: None,
         pending_online_lookup: Some(candidate.repo_id.is_none()),
         model_type_resolution_source: selected_type.source.clone(),
         model_type_resolution_confidence: selected_type.confidence,
@@ -845,6 +886,12 @@ async fn stage_partial_candidate(
         metadata.match_method = Some("repo_id".to_string());
         metadata.match_confidence = Some(1.0);
     }
+    apply_stable_partial_metadata_timestamps(
+        &mut metadata,
+        existing_metadata.as_ref(),
+        candidate.created_at.as_ref(),
+        &now,
+    );
 
     primary
         .model_library
@@ -1390,5 +1437,88 @@ mod tests {
             .review_reasons
             .iter()
             .any(|reason| reason == "model-type-overridden-by-name-hint"));
+    }
+
+    #[test]
+    fn test_partial_metadata_timestamps_remain_stable_when_staging_is_unchanged() {
+        let existing = ModelMetadata {
+            model_id: Some("llm/test/partial".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Partial".to_string()),
+            cleaned_name: Some("partial".to_string()),
+            expected_files: Some(vec!["model.gguf".to_string()]),
+            match_source: Some("download_partial".to_string()),
+            added_date: Some("2026-03-10T00:00:00Z".to_string()),
+            updated_date: Some("2026-03-10T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+        let mut staged = existing.clone();
+
+        apply_stable_partial_metadata_timestamps(
+            &mut staged,
+            Some(&existing),
+            Some(&"2026-03-10T00:00:00Z".to_string()),
+            "2026-03-12T00:00:00Z",
+        );
+
+        assert_eq!(staged.added_date, existing.added_date);
+        assert_eq!(staged.updated_date, existing.updated_date);
+    }
+
+    #[test]
+    fn test_partial_metadata_updated_date_stays_stable_after_initial_stage() {
+        let existing = ModelMetadata {
+            model_id: Some("llm/test/partial".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Partial".to_string()),
+            cleaned_name: Some("partial".to_string()),
+            expected_files: Some(vec!["model.gguf".to_string()]),
+            match_source: Some("download_partial".to_string()),
+            added_date: Some("2026-03-10T00:00:00Z".to_string()),
+            updated_date: Some("2026-03-10T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+        let mut staged = existing.clone();
+        staged.expected_files = Some(vec!["config.json".to_string(), "model.gguf".to_string()]);
+
+        apply_stable_partial_metadata_timestamps(
+            &mut staged,
+            Some(&existing),
+            Some(&"2026-03-10T00:00:00Z".to_string()),
+            "2026-03-12T00:00:00Z",
+        );
+
+        assert_eq!(staged.added_date, existing.added_date);
+        assert_eq!(staged.updated_date, existing.updated_date);
+    }
+
+    #[test]
+    fn test_partial_lookup_hints_reuse_existing_sqlite_values() {
+        let existing = ModelMetadata {
+            expected_files: Some(vec!["model.gguf".to_string(), "config.json".to_string()]),
+            pipeline_tag: Some("text-generation".to_string()),
+            ..Default::default()
+        };
+        let mut candidate = PartialDownloadCandidate {
+            model_id: "reranker/forturne/qwen3-reranker-4b-nvfp4".to_string(),
+            model_dir: PathBuf::from("/tmp/reranker/forturne/qwen3-reranker-4b-nvfp4"),
+            repo_id: Some("Forturne/Qwen3-Reranker-4B-NVFP4".to_string()),
+            model_type_hint: Some("llm".to_string()),
+            pipeline_tag_hint: None,
+            family: Some("forturne".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            expected_files: Vec::new(),
+            created_at: None,
+        };
+
+        reuse_existing_partial_lookup_hints(&mut candidate, Some(&existing));
+
+        assert_eq!(
+            candidate.expected_files,
+            vec!["model.gguf".to_string(), "config.json".to_string()]
+        );
+        assert_eq!(candidate.pipeline_tag_hint.as_deref(), Some("text-generation"));
     }
 }

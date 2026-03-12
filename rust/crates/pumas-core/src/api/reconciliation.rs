@@ -77,9 +77,12 @@ impl WatcherWriteSuppressor {
             Err(poisoned) => poisoned.into_inner(),
         };
         prune_expired_suppressions(&mut suppressed_paths, self.ttl);
-        expand_suppressed_paths(path)
-            .into_iter()
-            .any(|candidate| suppressed_paths.contains_key(&candidate))
+        let candidates = expand_suppressed_paths(path);
+        candidates.iter().any(|candidate| {
+            suppressed_paths.iter().any(|(suppressed_path, _)| {
+                candidate == suppressed_path || candidate.starts_with(suppressed_path)
+            })
+        })
     }
 }
 
@@ -1262,6 +1265,8 @@ mod tests {
             .join("model-a")
             .join("metadata.json");
         let model_dir = root.join("llm").join("llama").join("model-a");
+        let sibling_config = model_dir.join("config.json");
+        let sibling_weights = model_dir.join("weights.gguf");
         let external_path = root
             .join("llm")
             .join("llama")
@@ -1269,7 +1274,11 @@ mod tests {
             .join("weights.gguf");
 
         suppressor.record(metadata_path);
-        let summary = classify_watcher_changes(root, &suppressor, vec![model_dir, external_path]);
+        let summary = classify_watcher_changes(
+            root,
+            &suppressor,
+            vec![model_dir, sibling_config, sibling_weights, external_path],
+        );
 
         assert!(!summary.requires_full_scope);
         assert!(summary.model_ids.contains("llm/llama/model-b"));

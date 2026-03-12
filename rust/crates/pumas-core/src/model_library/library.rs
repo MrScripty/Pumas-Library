@@ -15,11 +15,11 @@ use crate::index::{
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
-    MODEL_EXECUTION_CONTRACT_VERSION, get_diffusers_bundle_lookup_hints, is_diffusers_bundle,
-    is_external_reference, refresh_external_metadata_validation,
+    get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
+    refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
-use crate::model_library::identifier::{ModelTypeInfo, identify_model_type};
+use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{
@@ -27,8 +27,9 @@ use crate::model_library::types::{
     SubmitModelReviewResult,
 };
 use crate::model_library::{
-    LinkRegistry, ModelTypeResolution, normalize_recommended_backend, normalize_review_reasons,
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
+    normalize_recommended_backend, normalize_review_reasons, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
+    ModelTypeResolution,
 };
 use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
 use serde_json::Value;
@@ -334,7 +335,7 @@ impl ModelLibrary {
             return Ok(false);
         };
 
-        if filesystem_projection_is_newer(model_dir, &existing.updated_at) {
+        if payload_filesystem_is_newer(model_dir, &existing.updated_at) {
             return Ok(false);
         }
 
@@ -1716,7 +1717,6 @@ impl ModelLibrary {
         }
         metadata.subtype = new_subtype;
         let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
-        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
 
         let type_or_family_changed = metadata.model_type.as_deref().unwrap_or_default()
             != current_type
@@ -1733,6 +1733,7 @@ impl ModelLibrary {
             return Ok(None);
         }
 
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
         validate_metadata_v2_with_index(&metadata, self.index())?;
 
         // Save and re-index
@@ -1975,10 +1976,9 @@ impl ModelLibrary {
         metadata.family = Some(new_family.clone());
         metadata.subtype = new_subtype;
         let resolution_changed = apply_model_type_resolution(&mut metadata, &resolved);
-        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
 
-        let identity_changed = new_type_str != current_path_type
-            || new_family != current_path_family
+        let identity_changed = normalize_name(&new_type_str) != normalize_name(&current_path_type)
+            || normalize_name(&new_family) != normalize_name(&current_path_family)
             || metadata.subtype != current_subtype;
         if !identity_changed
             && !resolution_changed
@@ -1991,6 +1991,7 @@ impl ModelLibrary {
             return Ok(None);
         }
 
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
         validate_metadata_v2_with_index(&metadata, self.index())?;
 
         if !identity_changed {
@@ -2987,13 +2988,16 @@ fn apply_model_type_resolution(
     resolution: &ModelTypeResolution,
 ) -> bool {
     let prev_source = metadata.model_type_resolution_source.clone();
-    let prev_confidence = metadata.model_type_resolution_confidence;
+    let prev_confidence = metadata
+        .model_type_resolution_confidence
+        .map(normalize_confidence_score);
     let prev_reasons = metadata.review_reasons.clone();
     let prev_needs_review = metadata.metadata_needs_review;
     let prev_review_status = metadata.review_status.clone();
 
     metadata.model_type_resolution_source = Some(resolution.source.clone());
-    metadata.model_type_resolution_confidence = Some(resolution.confidence);
+    metadata.model_type_resolution_confidence =
+        Some(normalize_confidence_score(resolution.confidence));
     for reason in &resolution.review_reasons {
         push_review_reason(metadata, reason);
     }
@@ -3007,6 +3011,17 @@ fn apply_model_type_resolution(
         || metadata.review_reasons != prev_reasons
         || metadata.metadata_needs_review != prev_needs_review
         || metadata.review_status != prev_review_status
+}
+
+fn normalize_confidence_score(confidence: f64) -> f64 {
+    let rounded = (confidence * 1_000_000_000.0).round() / 1_000_000_000.0;
+    if (rounded - 1.0).abs() <= f64::EPSILON {
+        1.0
+    } else if rounded == -0.0 {
+        0.0
+    } else {
+        rounded.clamp(0.0, 1.0)
+    }
 }
 
 fn license_status_unresolved(status: Option<&str>) -> bool {
@@ -4002,8 +4017,37 @@ fn latest_filesystem_timestamp(model_dir: &Path) -> Option<String> {
     Some(chrono::DateTime::<chrono::Utc>::from(newest).to_rfc3339())
 }
 
-fn filesystem_projection_is_newer(model_dir: &Path, indexed_updated_at: &str) -> bool {
-    let Some(filesystem_updated_at) = latest_filesystem_timestamp(model_dir) else {
+fn latest_payload_filesystem_timestamp(model_dir: &Path) -> Option<String> {
+    let newest = WalkDir::new(model_dir)
+        .min_depth(0)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                return false;
+            };
+            !matches!(
+                name,
+                METADATA_FILENAME
+                    | OVERRIDES_FILENAME
+                    | "metadata.json.bak"
+                    | "metadata.json.tmp"
+                    | "overrides.json.bak"
+                    | "overrides.json.tmp"
+            ) && !name.starts_with("metadata.json.")
+                && !name.starts_with("overrides.json.")
+        })
+        .filter_map(|entry| entry.metadata().ok())
+        .filter_map(|metadata| metadata.modified().ok())
+        .max()?;
+    Some(chrono::DateTime::<chrono::Utc>::from(newest).to_rfc3339())
+}
+
+fn payload_filesystem_is_newer(model_dir: &Path, indexed_updated_at: &str) -> bool {
+    let Some(filesystem_updated_at) = latest_payload_filesystem_timestamp(model_dir) else {
         return false;
     };
     let Ok(indexed_updated_at) = chrono::DateTime::parse_from_rfc3339(indexed_updated_at) else {
@@ -4872,6 +4916,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_model_scope_is_current_ignores_metadata_projection_mtime_when_payload_unchanged()
+    {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "llama", "scope-current-stamped");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("weights.gguf"), b"v1").unwrap();
+        let updated_date = chrono::Utc::now().to_rfc3339();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/scope-current-stamped".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Scope Current Stamped".to_string()),
+            updated_date: Some(updated_date),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        assert!(library.model_scope_is_current(&model_dir).await.unwrap());
+    }
+
+    #[tokio::test]
     async fn test_model_count_reads_canonical_index_rows() {
         let (_, library) = setup_library().await;
 
@@ -5136,12 +5205,10 @@ mod tests {
             Some("model-type-resolver-arch-rules".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.7));
-        assert!(
-            updated
-                .review_reasons
-                .unwrap_or_default()
-                .contains(&"model-type-low-confidence".to_string())
-        );
+        assert!(updated
+            .review_reasons
+            .unwrap_or_default()
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[tokio::test]
@@ -5190,6 +5257,146 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reclassify_model_noop_does_not_rewrite_metadata() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("diffusion", "llama", "steady-reclassify");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("diffusion/llama/steady-reclassify".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("Steady Reclassify".to_string()),
+            cleaned_name: Some("steady-reclassify".to_string()),
+            updated_date: Some("2026-03-11T00:00:00Z".to_string()),
+            model_type_resolution_source: Some("model-type-resolver-arch-rules".to_string()),
+            model_type_resolution_confidence: Some(0.7),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec!["model-type-low-confidence".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let metadata_path = model_dir.join("metadata.json");
+        let before_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let changed = library
+            .reclassify_model("diffusion/llama/steady-reclassify")
+            .await
+            .unwrap();
+        assert!(changed.is_none());
+
+        let after = library.load_metadata(&model_dir).unwrap().unwrap();
+        let after_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        assert_eq!(after.updated_date.as_deref(), Some("2026-03-11T00:00:00Z"));
+        assert_eq!(before_modified, after_modified);
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_ignores_case_only_family_path_differences() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("diffusion", "qwen", "case-family-noop");
+        std::fs::create_dir_all(model_dir.join("transformer")).unwrap();
+        std::fs::create_dir_all(model_dir.join("vae")).unwrap();
+        std::fs::create_dir_all(model_dir.join("text_encoder")).unwrap();
+        std::fs::write(
+            model_dir.join("model_index.json"),
+            r#"{"_class_name":"FluxPipeline"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("diffusion/qwen/case-family-noop".to_string()),
+            family: Some("Qwen".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("Case Family Noop".to_string()),
+            cleaned_name: Some("case-family-noop".to_string()),
+            pipeline_tag: Some("text-to-image".to_string()),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("manual-review".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("model-type-directory-layout".to_string()),
+            model_type_resolution_confidence: Some(0.75),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec![
+                "model-type-fallback-directory-layout".to_string(),
+                "model-type-low-confidence".to_string(),
+            ]),
+            updated_date: Some("2026-03-11T00:00:00Z".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let metadata_path = model_dir.join("metadata.json");
+        let before_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let changed = library
+            .reclassify_model("diffusion/qwen/case-family-noop")
+            .await
+            .unwrap();
+        assert!(changed.is_none());
+
+        let after = library.load_metadata(&model_dir).unwrap().unwrap();
+        let after_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        assert_eq!(after.family.as_deref(), Some("Qwen"));
+        assert_eq!(after.updated_date.as_deref(), Some("2026-03-11T00:00:00Z"));
+        assert_eq!(before_modified, after_modified);
+    }
+
+    #[test]
+    fn test_apply_model_type_resolution_normalizes_equivalent_confidence_scores() {
+        let mut metadata = ModelMetadata {
+            model_type_resolution_source: Some("resolver".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            review_reasons: Some(Vec::new()),
+            metadata_needs_review: Some(false),
+            review_status: Some("accepted".to_string()),
+            ..Default::default()
+        };
+        let resolution = ModelTypeResolution {
+            model_type: ModelType::Audio,
+            source: "resolver".to_string(),
+            confidence: 0.9999999999999999,
+            review_reasons: Vec::new(),
+        };
+
+        let changed = apply_model_type_resolution(&mut metadata, &resolution);
+
+        assert!(!changed);
+        assert_eq!(metadata.model_type_resolution_confidence, Some(1.0));
+    }
+
+    #[tokio::test]
     async fn test_redetect_model_type_falls_back_to_file_signature_when_unresolved() {
         let (_, library) = setup_library().await;
 
@@ -5220,12 +5427,66 @@ mod tests {
             Some("model-type-file-signature".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.65));
-        assert!(
-            updated
-                .review_reasons
-                .unwrap_or_default()
-                .contains(&"model-type-fallback-file-signature".to_string())
+        assert!(updated
+            .review_reasons
+            .unwrap_or_default()
+            .contains(&"model-type-fallback-file-signature".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_noop_does_not_rewrite_metadata() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("unknown", "test", "resolver-fallback-embedding");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/test/resolver-fallback-embedding".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("Steady Redetect".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let initial = library
+            .redetect_model_type("unknown/test/resolver-fallback-embedding")
+            .await
+            .unwrap();
+        assert_eq!(initial, Some("embedding".to_string()));
+
+        let settled = library.load_metadata(&model_dir).unwrap().unwrap();
+        let expected_updated_date = settled
+            .updated_date
+            .clone()
+            .expect("first redetect should stamp updated_date");
+
+        let metadata_path = model_dir.join("metadata.json");
+        let before_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+
+        let changed = library
+            .redetect_model_type("unknown/test/resolver-fallback-embedding")
+            .await
+            .unwrap();
+        assert!(changed.is_none());
+
+        let after = library.load_metadata(&model_dir).unwrap().unwrap();
+        let after_modified = std::fs::metadata(&metadata_path)
+            .unwrap()
+            .modified()
+            .unwrap();
+
+        assert_eq!(
+            after.updated_date.as_deref(),
+            Some(expected_updated_date.as_str())
         );
+        assert_eq!(before_modified, after_modified);
     }
 
     #[tokio::test]
@@ -5822,13 +6083,11 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(
-            library
-                .list_models_needing_review(None)
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(library
+            .list_models_needing_review(None)
+            .await
+            .unwrap()
+            .is_empty());
 
         let reset = library
             .reset_model_review("llm/llama/reset-review", "bob", Some("revert"))
@@ -5843,11 +6102,9 @@ mod tests {
             "llm/llama/reset-review"
         );
         assert_eq!(queue_after[0].review_status.as_deref(), Some("pending"));
-        assert!(
-            queue_after[0]
-                .review_reasons
-                .contains(&"unknown-task-signature".to_string())
-        );
+        assert!(queue_after[0]
+            .review_reasons
+            .contains(&"unknown-task-signature".to_string()));
     }
 
     #[tokio::test]
@@ -5943,12 +6200,10 @@ mod tests {
         let report = library.generate_migration_dry_run_report().unwrap();
         assert_eq!(report.total_models, 2);
         assert_eq!(report.collision_count, 1);
-        assert!(
-            report
-                .items
-                .iter()
-                .any(|item| item.action == "blocked_collision")
-        );
+        assert!(report
+            .items
+            .iter()
+            .any(|item| item.action == "blocked_collision"));
     }
 
     #[tokio::test]
@@ -5993,12 +6248,10 @@ mod tests {
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
         assert!(!index.entries.is_empty());
-        assert!(
-            index
-                .entries
-                .iter()
-                .any(|entry| entry.report_kind == "dry_run")
-        );
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "dry_run"));
     }
 
     #[tokio::test]
@@ -6200,12 +6453,10 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(
-            index
-                .entries
-                .iter()
-                .any(|entry| entry.report_kind == "execution")
-        );
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "execution"));
     }
 
     #[tokio::test]
@@ -6266,12 +6517,10 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(
-            index
-                .entries
-                .iter()
-                .any(|entry| entry.report_kind == "execution")
-        );
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.report_kind == "execution"));
     }
 
     #[tokio::test]
@@ -6314,12 +6563,10 @@ mod tests {
 
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         assert!(!report.referential_integrity_ok);
-        assert!(
-            report
-                .referential_integrity_errors
-                .iter()
-                .any(|error| error.contains("metadata validation failed"))
-        );
+        assert!(report
+            .referential_integrity_errors
+            .iter()
+            .any(|error| error.contains("metadata validation failed")));
         assert!(report.error_count >= 1);
     }
 
@@ -6363,11 +6610,10 @@ mod tests {
         assert_eq!(row.action, "blocked_partial_download");
         assert_eq!(row.current_model_type.as_deref(), Some("reranker"));
         assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
-        assert!(
-            row.findings
-                .iter()
-                .any(|finding| finding == "partial_download_blocked_migration_move")
-        );
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "partial_download_blocked_migration_move"));
     }
 
     #[tokio::test]
@@ -6401,12 +6647,10 @@ mod tests {
         assert_eq!(report.completed_move_count, 0);
         assert_eq!(report.skipped_move_count, 1);
         assert_eq!(report.error_count, 0);
-        assert!(
-            report
-                .results
-                .iter()
-                .any(|row| row.action == "skipped_partial_download")
-        );
+        assert!(report
+            .results
+            .iter()
+            .any(|row| row.action == "skipped_partial_download"));
     }
 
     #[tokio::test]
@@ -6447,12 +6691,10 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 1);
         assert_eq!(integrity.index_stale_model_count, 0);
-        assert!(
-            !integrity
-                .errors
-                .iter()
-                .any(|error| error.contains("metadata mismatch"))
-        );
+        assert!(!integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("metadata mismatch")));
     }
 
     #[tokio::test]
@@ -6492,12 +6734,10 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 0);
         assert_eq!(integrity.index_stale_model_count, 1);
-        assert!(
-            integrity
-                .errors
-                .iter()
-                .any(|error| error.contains("stale index rows detected"))
-        );
+        assert!(integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("stale index rows detected")));
     }
 
     #[tokio::test]
@@ -7270,36 +7510,26 @@ mod tests {
         assert_eq!(binding.profile_id, SD_TURBO_PROFILE_ID);
         assert_eq!(binding.profile_version, SD_TURBO_PROFILE_VERSION);
         assert_eq!(binding.backend_key.as_deref(), Some(SD_TURBO_BACKEND_KEY));
-        assert!(
-            binding
-                .requirements
-                .iter()
-                .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0")
-        );
-        assert!(
-            binding
-                .requirements
-                .iter()
-                .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2")
-        );
-        assert!(
-            binding
-                .requirements
-                .iter()
-                .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0")
-        );
-        assert!(
-            binding
-                .requirements
-                .iter()
-                .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1")
-        );
-        assert!(
-            binding
-                .requirements
-                .iter()
-                .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1")
-        );
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1"));
+        assert!(binding
+            .requirements
+            .iter()
+            .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1"));
 
         let binding_id = sd_turbo_runtime_binding_id(model_id);
         let initial_binding = library
@@ -7365,13 +7595,11 @@ mod tests {
         library.index_model_dir(&model_dir).await.unwrap();
 
         let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
-        assert!(
-            loaded
-                .dependency_bindings
-                .unwrap_or_default()
-                .iter()
-                .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID))
-        );
+        assert!(loaded
+            .dependency_bindings
+            .unwrap_or_default()
+            .iter()
+            .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID)));
     }
 
     #[tokio::test]

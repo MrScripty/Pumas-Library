@@ -2700,35 +2700,35 @@ fn default_kittentts_voice_options() -> Vec<KittenTtsVoiceOption> {
     vec![
         KittenTtsVoiceOption {
             label: "Bella".to_string(),
-            value: "Bella".to_string(),
+            value: "expr-voice-2-f".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Jasper".to_string(),
-            value: "Jasper".to_string(),
+            value: "expr-voice-2-m".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Luna".to_string(),
-            value: "Luna".to_string(),
+            value: "expr-voice-3-f".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Bruno".to_string(),
-            value: "Bruno".to_string(),
+            value: "expr-voice-3-m".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Rosie".to_string(),
-            value: "Rosie".to_string(),
+            value: "expr-voice-4-f".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Hugo".to_string(),
-            value: "Hugo".to_string(),
+            value: "expr-voice-4-m".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Kiki".to_string(),
-            value: "Kiki".to_string(),
+            value: "expr-voice-5-f".to_string(),
         },
         KittenTtsVoiceOption {
             label: "Leo".to_string(),
-            value: "Leo".to_string(),
+            value: "expr-voice-5-m".to_string(),
         },
     ]
 }
@@ -2810,7 +2810,7 @@ fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::Inferenc
     if allowed_voices.is_empty() {
         allowed_voices.push(KittenTtsVoiceOption {
             label: "Leo".to_string(),
-            value: "Leo".to_string(),
+            value: "expr-voice-5-m".to_string(),
         });
     }
     let default_voice = allowed_voices
@@ -2818,7 +2818,7 @@ fn kittentts_inference_settings(model_dir: &Path) -> Vec<crate::models::Inferenc
         .find(|voice| voice.label.eq_ignore_ascii_case("Leo"))
         .or_else(|| allowed_voices.first())
         .map(|voice| voice.value.clone())
-        .unwrap_or_else(|| "Leo".to_string());
+        .unwrap_or_else(|| "expr-voice-5-m".to_string());
 
     vec![
         crate::models::InferenceParamSchema {

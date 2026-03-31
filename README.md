@@ -125,6 +125,21 @@ Migration reports now distinguish:
 Partial downloads (`.part` files) remain resumable and are tracked as partial rows until completed.
 Migration execution can now safely relocate partial-download directories to canonical paths by pausing tracked downloads, moving the directory, updating persistence/index paths, and resuming when appropriate.
 
+## Current Reliability Milestone
+
+Current focus is making library reads and download staging safe enough for dependent apps to trust by default.
+
+Done for this milestone means:
+
+- Read-heavy flows such as list, search, and status checks stay side-effect free.
+- Partial downloads remain resumable after restart or path reconciliation.
+- Reconciliation can restage partial downloads into canonical paths without leaving duplicate or stale index rows behind.
+- Startup does not trigger avoidable background write churn before the library is actually being used.
+
+Current known limitation:
+
+- The recent stabilization work is spread across multiple fixes, so the release story is clearer in commit history than in the README.
+
 ### HuggingFace Download Retry Tuning
 
 HuggingFace file downloads automatically retry transient network failures with resume support.

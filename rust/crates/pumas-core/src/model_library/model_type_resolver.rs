@@ -415,12 +415,18 @@ fn should_apply_audio_disambiguation_guard(
             || value.contains("wav2vec")
             || value.contains("hubert")
     });
+    let has_audio_specific_evidence =
+        has_audio_architecture(signals) || has_audio_config || name_looks_like_audio(name_hint);
+
+    if hard_types.contains(&ModelType::Audio)
+        && hard_types.contains(&ModelType::Llm)
+        && has_audio_specific_evidence
+    {
+        return true;
+    }
 
     medium_hints.contains(&ModelType::Audio)
-        && (has_audio_architecture(signals)
-            || has_audio_config
-            || name_looks_like_audio(name_hint)
-            || hard_types.contains(&ModelType::Llm))
+        && (has_audio_specific_evidence || hard_types.contains(&ModelType::Llm))
 }
 
 fn should_apply_embedding_disambiguation_guard(
@@ -739,6 +745,26 @@ mod tests {
         assert!(resolved
             .review_reasons
             .contains(&"model-type-unresolved".to_string()));
+    }
+
+    #[test]
+    fn audio_guard_overrides_generic_conditional_generation_conflict() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["WhisperForConditionalGeneration"],
+                "model_type": "whisper"
+            }),
+        );
+
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Audio);
+        assert_eq!(resolved.source, "model-type-audio-disambiguation-guard");
+        assert!(resolved.confidence >= 0.9);
+        assert!(resolved.review_reasons.is_empty());
     }
 
     #[test]

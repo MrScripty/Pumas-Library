@@ -27,9 +27,9 @@ use crate::model_library::types::{
     SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_recommended_backend, normalize_review_reasons, push_review_reason,
-    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
-    ModelTypeResolution,
+    normalize_recommended_backend, normalize_review_reasons, normalize_task_signature,
+    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
+    LinkRegistry, ModelTypeResolution, TaskNormalizationStatus,
 };
 use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
 use serde_json::Value;
@@ -756,6 +756,19 @@ impl ModelLibrary {
                         if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
                             tracing::warn!(
                                 "Failed to persist external asset validation refresh for {}: {}",
+                                model_id,
+                                err
+                            );
+                        }
+                        if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                            metadata = updated;
+                        }
+                    }
+
+                    if apply_task_projection_from_persisted_evidence(&mut metadata) {
+                        if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
+                            tracing::warn!(
+                                "Failed to persist task projection repair for {}: {}",
                                 model_id,
                                 err
                             );
@@ -2292,6 +2305,7 @@ impl ModelLibrary {
 
         let mut metadata_changed =
             is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata);
+        metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
 
         let projection =
             self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
@@ -3073,6 +3087,109 @@ fn apply_model_type_resolution(
         || metadata.review_status != prev_review_status
 }
 
+fn apply_task_projection_from_persisted_evidence(metadata: &mut ModelMetadata) -> bool {
+    let Some(pipeline_tag) = preferred_pipeline_tag(metadata) else {
+        return false;
+    };
+
+    let normalized = normalize_task_signature(&pipeline_tag);
+    let previous_pipeline_tag = metadata.pipeline_tag.clone();
+    let previous_task_type = metadata.task_type_primary.clone();
+    let previous_inputs = metadata.input_modalities.clone();
+    let previous_outputs = metadata.output_modalities.clone();
+    let previous_source = metadata.task_classification_source.clone();
+    let previous_confidence = metadata.task_classification_confidence;
+    let previous_review_reasons = metadata.review_reasons.clone();
+    let previous_needs_review = metadata.metadata_needs_review;
+    let previous_review_status = metadata.review_status.clone();
+
+    metadata.pipeline_tag = Some(pipeline_tag.clone());
+    metadata.task_type_primary = Some(pipeline_tag);
+    metadata.input_modalities = Some(normalized.input_modalities.clone());
+    metadata.output_modalities = Some(normalized.output_modalities.clone());
+
+    match normalized.normalization_status {
+        TaskNormalizationStatus::Ok | TaskNormalizationStatus::Warning => {
+            metadata.task_classification_source = Some("hf-pipeline-tag".to_string());
+            metadata.task_classification_confidence = Some(match normalized.normalization_status {
+                TaskNormalizationStatus::Ok => 1.0,
+                TaskNormalizationStatus::Warning => 0.8,
+                TaskNormalizationStatus::Error => 0.0,
+            });
+        }
+        TaskNormalizationStatus::Error => {
+            metadata.task_classification_source = Some("invalid-task-signature".to_string());
+            metadata.task_classification_confidence = Some(0.0);
+        }
+    }
+
+    let mut review_reasons = metadata.review_reasons.clone().unwrap_or_default();
+    review_reasons.retain(|reason| reason != "unknown-task-signature");
+    review_reasons.retain(|reason| reason != "invalid-task-signature");
+    for warning in &normalized.normalization_warnings {
+        if !review_reasons.iter().any(|existing| existing == warning) {
+            review_reasons.push(warning.clone());
+        }
+    }
+    if normalized.normalization_status == TaskNormalizationStatus::Error
+        && !review_reasons
+            .iter()
+            .any(|reason| reason == "invalid-task-signature")
+    {
+        review_reasons.push("invalid-task-signature".to_string());
+    }
+    normalize_review_reasons(&mut review_reasons);
+
+    metadata.review_reasons = if review_reasons.is_empty() {
+        None
+    } else {
+        Some(review_reasons.clone())
+    };
+    metadata.metadata_needs_review = Some(!review_reasons.is_empty());
+    if metadata.review_status.as_deref() != Some("reviewed") {
+        metadata.review_status = Some(if review_reasons.is_empty() {
+            "not_required".to_string()
+        } else {
+            "pending".to_string()
+        });
+    }
+
+    let changed = metadata.pipeline_tag != previous_pipeline_tag
+        || metadata.task_type_primary != previous_task_type
+        || metadata.input_modalities != previous_inputs
+        || metadata.output_modalities != previous_outputs
+        || metadata.task_classification_source != previous_source
+        || metadata.task_classification_confidence != previous_confidence
+        || metadata.review_reasons != previous_review_reasons
+        || metadata.metadata_needs_review != previous_needs_review
+        || metadata.review_status != previous_review_status;
+    if changed {
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+    }
+    changed
+}
+
+fn preferred_pipeline_tag(metadata: &ModelMetadata) -> Option<String> {
+    metadata
+        .pipeline_tag
+        .as_deref()
+        .or_else(|| {
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.pipeline_tag.as_deref())
+        })
+        .or_else(|| {
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.remote_kind.as_deref())
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && !value.eq_ignore_ascii_case("unknown"))
+        .map(str::to_string)
+}
+
 fn normalize_confidence_score(confidence: f64) -> f64 {
     let rounded = (confidence * 1_000_000_000.0).round() / 1_000_000_000.0;
     if (rounded - 1.0).abs() <= f64::EPSILON {
@@ -3166,6 +3283,10 @@ fn collect_relative_file_paths(root: &Path) -> Result<BTreeSet<PathBuf>> {
         .filter_map(|e| e.ok())
     {
         if !entry.file_type().is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy();
+        if is_metadata_artifact_filename(&name) {
             continue;
         }
         let rel = entry
@@ -4955,6 +5076,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_rebuild_index_repairs_task_projection_from_pipeline_tag() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("vision", "vit", "repair-task-projection");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("vision/vit/repair-task-projection".to_string()),
+            family: Some("vit".to_string()),
+            model_type: Some("vision".to_string()),
+            official_name: Some("Repair Task Projection".to_string()),
+            cleaned_name: Some("repair-task-projection".to_string()),
+            pipeline_tag: Some("image-segmentation".to_string()),
+            task_type_primary: Some("unknown".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("runtime-discovered-signature".to_string()),
+            task_classification_confidence: Some(0.0),
+            metadata_needs_review: Some(true),
+            review_status: Some("pending".to_string()),
+            review_reasons: Some(vec!["unknown-task-signature".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let count = library.rebuild_index().await.unwrap();
+        assert_eq!(count, 1);
+
+        let repaired = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            repaired.task_type_primary.as_deref(),
+            Some("image-segmentation")
+        );
+        assert_eq!(
+            repaired.input_modalities.as_deref(),
+            Some(&["image".to_string()][..])
+        );
+        assert_eq!(
+            repaired.output_modalities.as_deref(),
+            Some(&["mask".to_string()][..])
+        );
+        assert_eq!(
+            repaired.task_classification_source.as_deref(),
+            Some("hf-pipeline-tag")
+        );
+        assert_eq!(repaired.task_classification_confidence, Some(1.0));
+        assert_eq!(repaired.metadata_needs_review, Some(false));
+        assert_eq!(repaired.review_status.as_deref(), Some("not_required"));
+        assert_eq!(repaired.review_reasons, None);
+    }
+
+    #[tokio::test]
     async fn test_model_scope_is_current_returns_true_after_indexing() {
         let (_, library) = setup_library().await;
 
@@ -5799,6 +5972,63 @@ mod tests {
         assert!(unknown_row.is_none());
         let canonical_row = library.index().get("llm/dup-test/repo-cleanup").unwrap();
         assert!(canonical_row.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_duplicate_repo_entries_ignores_metadata_artifact_differences() {
+        let (_, library) = setup_library().await;
+
+        let canonical_dir = library.build_model_path("audio", "dup-test", "artifact-dedupe");
+        let unknown_dir = library.build_model_path("unknown", "dup-test", "artifact-dedupe");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(canonical_dir.join("model.onnx"), b"same-payload").unwrap();
+        std::fs::write(unknown_dir.join("model.onnx"), b"same-payload").unwrap();
+        std::fs::write(canonical_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(unknown_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(
+            canonical_dir.join(".pumas_download"),
+            br#"{"repo_id":"example/artifact-dedupe","model_type":"audio"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            unknown_dir.join(".pumas_download"),
+            br#"{"repo_id":"example/artifact-dedupe","model_type":"unknown"}"#,
+        )
+        .unwrap();
+
+        let canonical_metadata = ModelMetadata {
+            model_id: Some("audio/dup-test/artifact-dedupe".to_string()),
+            model_type: Some("audio".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("artifact-dedupe".to_string()),
+            repo_id: Some("example/artifact-dedupe".to_string()),
+            ..Default::default()
+        };
+        let unknown_metadata = ModelMetadata {
+            model_id: Some("unknown/dup-test/artifact-dedupe".to_string()),
+            model_type: Some("unknown".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("artifact-dedupe".to_string()),
+            repo_id: Some("example/artifact-dedupe".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&canonical_dir, &canonical_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&unknown_dir, &unknown_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&canonical_dir).await.unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let report = library.cleanup_duplicate_repo_entries().unwrap();
+        assert_eq!(report.duplicate_repo_groups, 1);
+        assert_eq!(report.removed_duplicate_dirs, 1);
+        assert!(!unknown_dir.exists());
+        assert!(canonical_dir.exists());
     }
 
     #[tokio::test]

@@ -12,7 +12,7 @@ use crate::{config, conversion, model_library, network, process, registry, syste
 use crate::{ApiInner, PumasApi};
 
 use super::{
-    start_model_library_watcher, ReconcileScope, ReconciliationCoordinator, WatcherWriteSuppressor,
+    start_model_library_watcher, ReconciliationCoordinator, WatcherWriteSuppressor,
     WATCHER_WRITE_SUPPRESSION_TTL,
 };
 
@@ -519,10 +519,7 @@ impl PumasApiBuilder {
             registry: Some(registry),
             instance_claim: tokio::sync::Mutex::new(Some(claim)),
         });
-        primary_state
-            .reconciliation
-            .complete(&ReconcileScope::AllModels, chrono::Utc::now().to_rfc3339())
-            .await;
+        primary_state.reconciliation.mark_dirty_all().await;
 
         let mut api = PumasApi {
             launcher_root: self.launcher_root,

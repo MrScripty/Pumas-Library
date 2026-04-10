@@ -733,7 +733,8 @@ impl ModelLibrary {
 
         let mut discovered_model_ids: HashSet<String> = HashSet::new();
         let mut discovered_records = Vec::new();
-        let mut custom_runtime_bindings: Vec<(String, CustomRuntimeProjection)> = Vec::new();
+        let mut custom_runtime_bindings: Vec<(String, PathBuf, CustomRuntimeProjection)> =
+            Vec::new();
         let mut mutated = false;
         let mut count = 0;
         let existing_ids = self.index.get_all_ids()?;
@@ -769,7 +770,11 @@ impl ModelLibrary {
                         &model_dir,
                         &mut metadata,
                     ) {
-                        custom_runtime_bindings.push((model_id.clone(), projection.clone()));
+                        custom_runtime_bindings.push((
+                            model_id.clone(),
+                            model_dir.clone(),
+                            projection.clone(),
+                        ));
                         if projection.metadata_changed {
                             if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
                                 tracing::warn!(
@@ -820,10 +825,25 @@ impl ModelLibrary {
             }
         }
 
-        for (model_id, projection) in custom_runtime_bindings {
+        for (model_id, model_dir, projection) in custom_runtime_bindings {
             match self.ensure_custom_runtime_binding(&model_id, &projection) {
                 Ok(changed) => {
                     mutated |= changed;
+                    match self
+                        .sync_active_dependency_projection(&model_dir, &model_id)
+                        .await
+                    {
+                        Ok(projection_changed) => {
+                            mutated |= projection_changed;
+                        }
+                        Err(err) => {
+                            tracing::warn!(
+                                "Failed to sync dependency projection for {}: {}",
+                                model_id,
+                                err
+                            );
+                        }
+                    }
                 }
                 Err(err) => {
                     tracing::warn!(
@@ -2329,8 +2349,44 @@ impl ModelLibrary {
         let mut mutated = self.index.upsert(&prepared.record)?;
         if let Some(projection) = prepared.projection.as_ref() {
             mutated |= self.ensure_custom_runtime_binding(&prepared.model_id, projection)?;
+            mutated |= self
+                .sync_active_dependency_projection(model_dir, &prepared.model_id)
+                .await?;
         }
         Ok(mutated)
+    }
+
+    async fn sync_active_dependency_projection(
+        &self,
+        model_dir: &Path,
+        model_id: &str,
+    ) -> Result<bool> {
+        let Some(mut metadata) = self.load_metadata(model_dir)? else {
+            return Ok(false);
+        };
+        let before = serde_json::to_value(&metadata).unwrap_or(Value::Null);
+        self.project_active_dependency_refs(model_id, &mut metadata)?;
+        let after = serde_json::to_value(&metadata).unwrap_or(Value::Null);
+        if before == after {
+            return Ok(false);
+        }
+
+        self.save_metadata(model_dir, &metadata).await?;
+
+        let mut record = metadata_to_record(model_id, model_dir, &metadata);
+        let metadata_type_missing = metadata
+            .model_type
+            .as_deref()
+            .map(str::trim)
+            .map(str::is_empty)
+            .unwrap_or(true);
+        if metadata_type_missing {
+            if let Some(existing) = self.index.get(model_id)? {
+                record.model_type = existing.model_type;
+            }
+        }
+
+        self.index.upsert(&record)
     }
 
     fn custom_runtime_binding_is_current(
@@ -7612,6 +7668,100 @@ mod tests {
         );
         assert_eq!(requirements.bindings.len(), 1);
         assert_eq!(requirements.bindings[0].profile_id, SD_TURBO_PROFILE_ID);
+    }
+
+    #[tokio::test]
+    async fn test_rebuild_index_repairs_sd_turbo_binding_projection_from_sqlite() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_sd_turbo_bundle(temp_dir.path());
+        let model_id = "diffusion/cc-nms/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let stale_binding_id = "stale-sd-turbo-binding";
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("cc-nms".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(model_dir.display().to_string()),
+            entry_path: Some(model_dir.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            dependency_bindings: Some(vec![crate::models::DependencyBindingRef {
+                binding_id: Some(stale_binding_id.to_string()),
+                profile_id: Some(SD_TURBO_PROFILE_ID.to_string()),
+                profile_version: Some(SD_TURBO_PROFILE_VERSION),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some(SD_TURBO_BACKEND_KEY.to_string()),
+                platform_selector: None,
+            }]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let count = library.rebuild_index().await.unwrap();
+        assert_eq!(count, 1);
+
+        let binding_id = sd_turbo_runtime_binding_id(model_id);
+        let binding = library
+            .index()
+            .get_model_dependency_binding(&binding_id)
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.status, "active");
+
+        let repaired = library.load_metadata(&model_dir).unwrap().unwrap();
+        let repaired_bindings = repaired.dependency_bindings.unwrap_or_default();
+        assert_eq!(repaired_bindings.len(), 1);
+        assert_eq!(
+            repaired_bindings[0].binding_id.as_deref(),
+            Some(binding_id.as_str())
+        );
+        assert_ne!(
+            repaired_bindings[0].binding_id.as_deref(),
+            Some(stale_binding_id)
+        );
+
+        let requirements = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("diffusers"))
+            .await
+            .unwrap();
+        assert_eq!(
+            requirements.validation_state,
+            crate::model_library::DependencyValidationState::Resolved
+        );
+        assert_eq!(requirements.bindings.len(), 1);
+
+        let initial_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        let repeat_count = library.rebuild_index().await.unwrap();
+        let repeat_history = library
+            .index()
+            .list_dependency_binding_history(model_id)
+            .unwrap();
+        assert_eq!(repeat_count, 1);
+        assert_eq!(initial_history.len(), 1);
+        assert_eq!(repeat_history.len(), 1);
     }
 
     #[tokio::test]

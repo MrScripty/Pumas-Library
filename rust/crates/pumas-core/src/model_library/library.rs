@@ -2673,11 +2673,15 @@ fn is_sd_turbo_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> 
         return false;
     }
 
-    let bundle_root = metadata
-        .entry_path
-        .as_deref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| model_dir.to_path_buf());
+    let bundle_root = if model_dir.join("model_index.json").is_file() {
+        model_dir.to_path_buf()
+    } else {
+        metadata
+            .entry_path
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| model_dir.to_path_buf())
+    };
     let Some(hints) = get_diffusers_bundle_lookup_hints(&bundle_root) else {
         return false;
     };
@@ -7555,6 +7559,59 @@ mod tests {
         assert_eq!(initial_history.len(), 1);
         assert_eq!(rebound.attached_at, initial_binding.attached_at);
         assert_eq!(rebound_history.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_autobinds_sd_turbo_with_stale_projected_entry_path() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_sd_turbo_bundle(temp_dir.path());
+        let stale_root = temp_dir.path().join("stale-entry-path");
+        std::fs::create_dir_all(&stale_root).unwrap();
+        let model_id = "diffusion/cc-nms/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("cc-nms".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(model_dir.display().to_string()),
+            entry_path: Some(stale_root.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let requirements = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("diffusers"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            requirements.validation_state,
+            crate::model_library::DependencyValidationState::Resolved
+        );
+        assert_eq!(requirements.bindings.len(), 1);
+        assert_eq!(requirements.bindings[0].profile_id, SD_TURBO_PROFILE_ID);
     }
 
     #[tokio::test]

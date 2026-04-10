@@ -162,18 +162,22 @@ impl ModelLibrary {
         let requested_backend_key = normalize_optional_token(backend_key);
         let model_metadata = self.get_effective_metadata(model_id)?;
 
-        let binding_rows = self
+        let active_binding_rows = self
             .index()
-            .list_active_model_dependency_bindings(model_id, requested_backend_key.as_deref())?
-            .into_iter()
+            .list_active_model_dependency_bindings(model_id, None)?;
+        let binding_rows = active_binding_rows
+            .iter()
             .filter(|binding| {
-                platform_selector_matches(binding.platform_selector.as_deref(), &platform_key)
+                backend_key_matches(
+                    binding.backend_key.as_deref(),
+                    requested_backend_key.as_deref(),
+                ) && platform_selector_matches(binding.platform_selector.as_deref(), &platform_key)
             })
+            .cloned()
             .collect::<Vec<_>>();
 
         if binding_rows.is_empty() {
-            let has_declared_refs = load_declared_binding_refs(self, model_id)?;
-            if has_declared_refs {
+            if !active_binding_rows.is_empty() {
                 let error = top_level_error(
                     "declared_bindings_unresolved",
                     Some("dependency_bindings"),
@@ -741,16 +745,6 @@ fn ensure_model_exists(library: &ModelLibrary, model_id: &str) -> Result<()> {
     }
 }
 
-fn load_declared_binding_refs(library: &ModelLibrary, model_id: &str) -> Result<bool> {
-    let model_dir = library.library_root().join(model_id);
-    let metadata = library.load_metadata(&model_dir)?;
-    Ok(metadata
-        .as_ref()
-        .and_then(|m| m.dependency_bindings.as_ref())
-        .map(|bindings| !bindings.is_empty())
-        .unwrap_or(false))
-}
-
 fn normalize_platform_key(platform_context: &str) -> String {
     let normalized = platform_context.trim().to_lowercase();
     if normalized.is_empty() {
@@ -765,6 +759,17 @@ fn normalize_optional_token(value: Option<&str>) -> Option<String> {
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_lowercase)
+}
+
+fn backend_key_matches(binding_backend: Option<&str>, requested_backend: Option<&str>) -> bool {
+    match requested_backend {
+        Some(requested_backend) => binding_backend
+            .map(str::trim)
+            .filter(|token| !token.is_empty())
+            .map(|token| token.eq_ignore_ascii_case(requested_backend))
+            .unwrap_or(true),
+        None => true,
+    }
 }
 
 fn normalize_optional_owned(value: Option<String>) -> Option<String> {
@@ -1088,7 +1093,7 @@ mod tests {
         library.index_model_dir(&model_dir).await.unwrap();
     }
 
-    async fn create_model_with_declared_bindings(library: &ModelLibrary, model_id: &str) {
+    async fn create_model_with_projected_bindings_only(library: &ModelLibrary, model_id: &str) {
         let model_dir = library.library_root().join(model_id);
         std::fs::create_dir_all(&model_dir).unwrap();
         let metadata = ModelMetadata {
@@ -1156,12 +1161,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn resolve_requirements_marks_unknown_when_declared_bindings_unresolved() {
+    async fn resolve_requirements_ignores_projected_bindings_without_active_rows() {
         let (_tmp, library) = setup_library().await;
-        create_model_with_declared_bindings(&library, "llm/llama/declared-only").await;
+        create_model_with_projected_bindings_only(&library, "llm/llama/declared-only").await;
 
         let result = library
             .resolve_model_dependency_requirements("llm/llama/declared-only", "linux-x86_64", None)
+            .await
+            .unwrap();
+
+        assert_eq!(result.validation_state, DependencyValidationState::Resolved);
+        assert_eq!(result.bindings.len(), 0);
+        assert!(result.validation_errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn resolve_requirements_marks_unknown_when_active_rows_do_not_match_context() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/active-but-unresolved";
+        create_model(&library, model_id).await;
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("h1".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.4.0"),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+                binding_id: "b1".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("transformers".to_string()),
+                platform_selector: Some("linux-x86_64".to_string()),
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now,
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+
+        let result = library
+            .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("diffusers"))
             .await
             .unwrap();
 
@@ -1169,11 +1222,9 @@ mod tests {
             result.validation_state,
             DependencyValidationState::UnknownProfile
         );
-        assert_eq!(result.bindings.len(), 0);
-        assert_eq!(
-            result.validation_errors[0].code,
-            "declared_bindings_unresolved".to_string()
-        );
+        assert!(result.bindings.is_empty());
+        assert_eq!(result.validation_errors.len(), 1);
+        assert_eq!(result.validation_errors[0].code, "declared_bindings_unresolved");
     }
 
     #[tokio::test]

@@ -7739,6 +7739,21 @@ mod tests {
             Some(stale_binding_id)
         );
 
+        let fetched = library.get_model(model_id).await.unwrap().unwrap();
+        let fetched_bindings = fetched
+            .metadata
+            .get("dependency_bindings")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        assert_eq!(fetched_bindings.len(), 1);
+        assert_eq!(
+            fetched_bindings[0]
+                .get("binding_id")
+                .and_then(Value::as_str),
+            Some(binding_id.as_str())
+        );
+
         let requirements = library
             .resolve_model_dependency_requirements(model_id, "linux-x86_64", Some("diffusers"))
             .await

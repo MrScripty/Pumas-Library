@@ -69,6 +69,7 @@ Provide a single backend-owned model registry that can import, classify, validat
 ## Invariants
 - SQLite remains canonical for persisted model state and query behavior.
 - `metadata.json` is a derived projection that should change only when derived model content changes.
+- `dependency_bindings` in `metadata.json` are projected from active SQLite binding rows and must never be used as dependency-resolution authority.
 - Watcher-triggered reconcile must not loop on Pumas-owned derived writes.
 - Duplicate cleanup, reclassification, and index rebuild must be idempotent on unchanged libraries.
 
@@ -113,6 +114,7 @@ Provide a single backend-owned model registry that can import, classify, validat
 
 - SQLite/indexed metadata is the canonical persisted model state and query surface.
 - `metadata.json` is a derived on-disk projection of the same model record and must not become a competing source of truth.
+- Dependency resolution and runtime autobind repair must read authoritative binding state from SQLite plus canonical bundle filesystem facts, not from projected `metadata.json` fields.
 - External-reference assets extend persisted metadata with `source_path`, `entry_path`,
   `storage_kind`, `bundle_format`, `pipeline_class`, `import_state`, and asset validation fields.
 - Download flows may create a preliminary metadata record with `match_source = download_partial`
@@ -123,6 +125,8 @@ Provide a single backend-owned model registry that can import, classify, validat
   second source-of-truth outside the model-library metadata/index flow.
 - Fields intentionally volatile in derived artifacts include timestamps and validation state that
   are refreshed only when underlying derived content changes.
+- Regeneration rule for `dependency_bindings`: after index/rebuild/runtime-autobind changes active
+  SQLite bindings, rewrite projected binding refs from SQLite before treating the projection as current.
 - Regeneration rule: when SQLite-backed model state changes, regenerate `metadata.json` only if the
   projected content differs.
 - Compatibility expectation for milestone one is append-only: new optional fields may be added,

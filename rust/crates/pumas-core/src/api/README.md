@@ -7,7 +7,10 @@ Defines the primary API facade (`PumasApi`) methods that orchestrate core subsys
 | File/Folder | Description |
 | ----------- | ----------- |
 | `builder.rs` | API builder and initialization wiring. |
-| `models.rs` | Model-library and link-management API methods. |
+| `links.rs` | Link registry, health, cleanup, cascade delete, and link-exclusion API methods. |
+| `migration.rs` | Migration report generation/execution API methods and partial-download relocation helpers. |
+| `mapping.rs` | App-facing model-mapping, sync, and cross-filesystem warning API methods. |
+| `models.rs` | Model-library query, metadata, import, review, and reclassification API methods. |
 | `network.rs` | Connectivity and network-status API methods. |
 | `process.rs` | Process lifecycle/status API methods. |
 | `reconciliation.rs` | Reconcile scheduling, watcher routing, and startup freshness rules. |
@@ -24,6 +27,12 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 ## Decision
 - Group API methods by domain so transport layers call one facade instead of reaching into subsystems directly.
 - Keep startup, watcher, and reconciliation lifecycle ownership in this directory so primary/client behavior stays explicit.
+- Split larger API surfaces into focused submodules such as `migration.rs` when
+  one feature area starts adding its own lifecycle, reporting, and recovery
+  helpers.
+- Keep link-registry health/cleanup flows and app mapping flows in separate
+  modules so `models.rs` stays centered on model-library metadata and import
+  behavior.
 
 ## Alternatives Rejected
 - Let transport layers orchestrate model-library and process subsystems directly: rejected because lifecycle ownership would fragment across process boundaries.
@@ -32,7 +41,10 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 ## Invariants
 - Only the primary instance starts watcher, reconcile, and other primary-owned background work.
 - `PumasApi` remains the facade boundary; transport code adapts requests and responses but does not own domain state.
-- Clean startup must not force redundant reconcile work for unchanged libraries.
+- Startup establishes runtime ownership, but freshness-sensitive read paths may
+  still trigger bounded reconcile work before returning state.
+- Migration report generation and execution must operate on reconciled library
+  state rather than stale SQLite projections.
 
 ## Revisit Triggers
 - A new host-facing API surface needs different lifecycle guarantees.
@@ -57,7 +69,10 @@ println!("offline={}", net.is_offline);
 ## API Consumer Contract
 - Consumers call `PumasApi` methods as the stable facade regardless of whether the instance is primary or attached as a client.
 - Startup ordering is backend-owned: callers construct the API, then use methods; they do not manually start watcher or reconcile loops.
-- Read paths may trigger bounded on-demand reconcile, but unchanged state must remain side-effect free from the consumer perspective.
+- Read paths may trigger bounded on-demand reconcile when the backend marks the
+  library dirty or runtime freshness is unknown.
+- Migration dry-run and execute calls may force a full-library reconcile before
+  generating artifacts so the returned report reflects current library state.
 - Errors are surfaced as backend errors rather than partial transport-specific states.
 - Compatibility policy is facade-first: internal reconcile and startup sequencing may evolve without changing host-facing method shapes unless a documented breaking change is introduced.
 

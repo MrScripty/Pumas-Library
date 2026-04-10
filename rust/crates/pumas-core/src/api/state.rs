@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use super::{ReconcileScope, ReconciliationCoordinator, reconcile_on_demand};
+use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator};
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;
@@ -534,9 +534,9 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .execute_migration_with_checkpoint()
                     .await?;
                 let mutated =
-                    super::models::relocate_skipped_partial_downloads(self, &mut report).await?;
+                    super::migration::relocate_skipped_partial_downloads(self, &mut report).await?;
                 if mutated {
-                    super::models::recompute_execution_report_counts(&mut report);
+                    super::migration::recompute_execution_report_counts(&mut report);
                     self.model_library
                         .rewrite_migration_execution_report(&report)?;
                 }

@@ -57,6 +57,9 @@ Provide a single backend-owned model registry that can import, classify, validat
 - **Single resolver, staged evidence**: Model typing runs through one resolver for remote-only,
   partial-download, and fully imported models. The evidence set grows by stage; the resolver does
   not change by phase.
+- **Repair-before-report migration flow**: Migration dry-run and execution must
+  operate on reconciled library state so duplicate cleanup and path/family
+  normalization are reflected in generated reports.
 - **External-reference assets**: Directory-root bundles must extend the existing metadata/index
   system instead of introducing a second registry or runtime-routing contract.
 - **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
@@ -72,6 +75,8 @@ Provide a single backend-owned model registry that can import, classify, validat
 - `dependency_bindings` in `metadata.json` are projected from active SQLite binding rows and must never be used as dependency-resolution authority.
 - Watcher-triggered reconcile must not loop on Pumas-owned derived writes.
 - Duplicate cleanup, reclassification, and index rebuild must be idempotent on unchanged libraries.
+- Saved Hugging Face evidence must remain available for future backfill and
+  reclassification passes even when the original remote lookup is not repeated.
 
 ## Revisit Triggers
 - A second persisted source of truth is introduced for model-state queries.
@@ -121,6 +126,8 @@ Provide a single backend-owned model registry that can import, classify, validat
   before weight files complete so recovery/reclassification can reuse persisted HF evidence.
 - `huggingface_evidence` stores normalized remote facts and selected-file context. Resolved
   `model_type` stays separate so future resolver improvements do not destroy source evidence.
+- Bulk repair or backfill flows must use stored evidence to reproject task and
+  model typing without requiring model-weight re-download.
 - These fields describe asset ownership and current executable health; they must not create a
   second source-of-truth outside the model-library metadata/index flow.
 - Fields intentionally volatile in derived artifacts include timestamps and validation state that

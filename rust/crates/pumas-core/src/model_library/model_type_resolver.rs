@@ -89,6 +89,15 @@ fn resolve_model_type_from_inputs(
         });
     }
 
+    if should_apply_audio_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints) {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Audio,
+            source: "model-type-audio-disambiguation-guard".to_string(),
+            confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
     if hard_types.len() > 1 {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Unknown,
@@ -175,14 +184,13 @@ fn resolve_model_type_from_inputs(
 }
 
 fn resolve_hint_only_model_type(medium_hints: &[ModelType]) -> Option<ModelType> {
-    // Preserve strict hard-signal-first behavior by default.
-    // Only allow hint-only classification for high-signal task hints.
+    // Preserve hard-signal-first behavior, but accept a single unambiguous
+    // task-derived hint as a low-confidence classification. HF pipeline tags
+    // are often the only available source signal for remote metadata audits.
     if medium_hints.len() == 1 {
-        if medium_hints.contains(&ModelType::Reranker) {
-            return Some(ModelType::Reranker);
-        }
-        if medium_hints.contains(&ModelType::Audio) {
-            return Some(ModelType::Audio);
+        let hint = medium_hints[0];
+        if hint != ModelType::Unknown {
+            return Some(hint);
         }
     }
     None
@@ -305,6 +313,27 @@ fn name_looks_like_reranker(name_hint: Option<&str>) -> bool {
             lower.contains("reranker")
                 || lower.contains("re-ranker")
                 || lower.contains("text-ranking")
+                || lower.starts_with("rank")
+                || lower.contains("-rank")
+                || lower.contains("rank-")
+                || lower.contains("_rank")
+        })
+        .unwrap_or(false)
+}
+
+fn name_looks_like_audio(name_hint: Option<&str>) -> bool {
+    name_hint
+        .map(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("audio")
+                || lower.contains("speech")
+                || lower.contains("whisper")
+                || lower.contains("tts")
+                || lower.contains("musicgen")
+                || lower.contains("encodec")
+                || lower.contains("wav2vec")
+                || lower.contains("hubert")
+                || lower.contains("canary")
         })
         .unwrap_or(false)
 }
@@ -334,6 +363,10 @@ fn should_apply_reranker_disambiguation_guard(
         .as_deref()
         .is_some_and(|value| value.contains("rerank"));
 
+    if medium_hints.contains(&ModelType::Reranker) && hard_types.contains(&ModelType::Llm) {
+        return true;
+    }
+
     if has_reward_arch
         && (hard_types.contains(&ModelType::Llm)
             || medium_hints.contains(&ModelType::Reranker)
@@ -344,6 +377,50 @@ fn should_apply_reranker_disambiguation_guard(
     }
 
     medium_hints.contains(&ModelType::Reranker) && (has_reranker_name || has_reranker_config)
+}
+
+fn has_audio_architecture(signals: &ConfigSignals) -> bool {
+    signals.architectures.iter().any(|arch| {
+        let lower = arch.to_lowercase();
+        lower.contains("whisper")
+            || lower.contains("speech")
+            || lower.contains("audio")
+            || lower.contains("wav2vec")
+            || lower.contains("hubert")
+            || lower.contains("wavlm")
+            || lower.contains("encodec")
+            || lower.contains("musicgen")
+            || lower.contains("speecht5")
+            || lower.contains("bark")
+    })
+}
+
+fn should_apply_audio_disambiguation_guard(
+    hard_types: &HashSet<ModelType>,
+    name_hint: Option<&str>,
+    signals: &ConfigSignals,
+    medium_hints: &[ModelType],
+) -> bool {
+    if medium_hints.iter().any(|hint| *hint != ModelType::Audio) {
+        return false;
+    }
+
+    let has_audio_config = signals.config_model_type.as_deref().is_some_and(|value| {
+        value.contains("audio")
+            || value.contains("speech")
+            || value.contains("whisper")
+            || value.contains("tts")
+            || value.contains("musicgen")
+            || value.contains("encodec")
+            || value.contains("wav2vec")
+            || value.contains("hubert")
+    });
+
+    medium_hints.contains(&ModelType::Audio)
+        && (has_audio_architecture(signals)
+            || has_audio_config
+            || name_looks_like_audio(name_hint)
+            || hard_types.contains(&ModelType::Llm))
 }
 
 fn should_apply_embedding_disambiguation_guard(
@@ -654,20 +731,41 @@ mod tests {
             }),
         );
 
-        let resolved = resolve_model_type_with_rules(
-            &index,
-            model_dir.path(),
-            Some("text-generation"),
-            Some("llm"),
-            None,
-        )
-        .unwrap();
+        let resolved =
+            resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "unresolved");
         assert!(resolved
             .review_reasons
             .contains(&"model-type-unresolved".to_string()));
+    }
+
+    #[test]
+    fn llm_medium_hint_resolves_without_hard_signals() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["UnmappedArchitecture"]
+            }),
+        );
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("text-generation"),
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(resolved.model_type, ModelType::Llm);
+        assert_eq!(resolved.source, "model-type-resolver-medium-hints");
+        assert_eq!(resolved.confidence, 0.65);
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[test]

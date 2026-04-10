@@ -1192,34 +1192,53 @@ impl ModelImporter {
         metadata.input_modalities = Some(normalized.input_modalities.clone());
         metadata.output_modalities = Some(normalized.output_modalities.clone());
 
-        match self
+        let active_mapping = self
             .library
             .index()
-            .get_active_task_signature_mapping(&normalized.signature_key)?
+            .get_active_task_signature_mapping(&normalized.signature_key)?;
+        if active_mapping.is_none() {
+            self.library.index().upsert_pending_task_signature_mapping(
+                &normalized.signature_key,
+                &normalized.input_modalities,
+                &normalized.output_modalities,
+            )?;
+        }
+
+        if let Some(pipeline_tag) = metadata
+            .pipeline_tag
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
         {
-            Some(mapping) => {
-                metadata.task_type_primary = Some(mapping.task_type_primary);
-                metadata.task_classification_source = Some("task-signature-mapping".to_string());
-                metadata.task_classification_confidence =
-                    Some(match normalized.normalization_status {
-                        TaskNormalizationStatus::Ok => 1.0,
-                        TaskNormalizationStatus::Warning => 0.8,
-                        TaskNormalizationStatus::Error => 0.0,
-                    });
-            }
-            None => {
-                self.library.index().upsert_pending_task_signature_mapping(
-                    &normalized.signature_key,
-                    &normalized.input_modalities,
-                    &normalized.output_modalities,
-                )?;
-                metadata.task_type_primary = Some("unknown".to_string());
-                metadata.task_classification_source =
-                    Some("runtime-discovered-signature".to_string());
-                metadata.task_classification_confidence = Some(0.0);
-                metadata.metadata_needs_review = Some(true);
-                metadata.review_status = Some("pending".to_string());
-                push_review_reason(&mut metadata, "unknown-task-signature");
+            metadata.task_type_primary = Some(pipeline_tag.to_string());
+            metadata.task_classification_source = Some("hf-pipeline-tag".to_string());
+            metadata.task_classification_confidence = Some(match normalized.normalization_status {
+                TaskNormalizationStatus::Ok => 1.0,
+                TaskNormalizationStatus::Warning => 0.8,
+                TaskNormalizationStatus::Error => 0.0,
+            });
+        } else {
+            match active_mapping {
+                Some(mapping) => {
+                    metadata.task_type_primary = Some(mapping.task_type_primary);
+                    metadata.task_classification_source =
+                        Some("task-signature-mapping".to_string());
+                    metadata.task_classification_confidence =
+                        Some(match normalized.normalization_status {
+                            TaskNormalizationStatus::Ok => 1.0,
+                            TaskNormalizationStatus::Warning => 0.8,
+                            TaskNormalizationStatus::Error => 0.0,
+                        });
+                }
+                None => {
+                    metadata.task_type_primary = Some("unknown".to_string());
+                    metadata.task_classification_source =
+                        Some("runtime-discovered-signature".to_string());
+                    metadata.task_classification_confidence = Some(0.0);
+                    metadata.metadata_needs_review = Some(true);
+                    metadata.review_status = Some("pending".to_string());
+                    push_review_reason(&mut metadata, "unknown-task-signature");
+                }
             }
         }
 
@@ -2353,6 +2372,46 @@ mod tests {
             Some(model_dir.canonicalize().unwrap().to_string_lossy().as_ref())
         );
         assert_eq!(metadata.pipeline_tag.as_deref(), Some("text-to-image"));
+    }
+
+    #[tokio::test]
+    async fn test_import_in_place_preserves_hf_pipeline_tag_as_task_type() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("vision", "idea-research", "grounding-dino-base");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"not-a-real-model").unwrap();
+
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "grounding-dino-base".to_string(),
+            family: "idea-research".to_string(),
+            model_type: Some("vision".to_string()),
+            repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec!["detector.onnx".to_string()]),
+            pipeline_tag: Some("zero-shot-object-detection".to_string()),
+            huggingface_evidence: None,
+        };
+
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(result.success);
+
+        let metadata = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            metadata.task_type_primary.as_deref(),
+            Some("zero-shot-object-detection")
+        );
+        assert_eq!(
+            metadata.task_classification_source.as_deref(),
+            Some("hf-pipeline-tag")
+        );
+        assert_eq!(
+            metadata.output_modalities.as_deref(),
+            Some(&["bbox".to_string()][..])
+        );
     }
 
     #[tokio::test]

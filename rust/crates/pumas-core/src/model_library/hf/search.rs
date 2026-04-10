@@ -527,6 +527,27 @@ impl HuggingFaceClient {
                 "audio-classification" => {
                     return Some("audio-classification".to_string());
                 }
+                "image-classification" | "zero-shot-image-classification" => {
+                    return Some("image-classification".to_string());
+                }
+                "image-segmentation" | "mask-generation" => {
+                    return Some("image-segmentation".to_string());
+                }
+                "object-detection" | "zero-shot-object-detection" => {
+                    return Some("object-detection".to_string());
+                }
+                "depth-estimation" => {
+                    return Some("depth-estimation".to_string());
+                }
+                "image-to-text" | "image-text-to-text" => {
+                    return Some("image-text-to-text".to_string());
+                }
+                "feature-extraction" | "image-feature-extraction" => {
+                    return Some("feature-extraction".to_string());
+                }
+                "video-classification" => {
+                    return Some("video-classification".to_string());
+                }
                 _ => {}
             }
         }
@@ -724,6 +745,21 @@ mod tests {
         };
         let converted = HuggingFaceClient::convert_search_result(result);
         assert_eq!(converted.kind, "text-to-speech");
+    }
+
+    #[test]
+    fn test_infer_pipeline_tag_from_tags_detects_depth_and_multimodal_tasks() {
+        let depth_tags = vec!["Depth Estimation".to_string()];
+        assert_eq!(
+            HuggingFaceClient::infer_pipeline_tag_from_tags(&depth_tags).as_deref(),
+            Some("depth-estimation")
+        );
+
+        let vlm_tags = vec!["image-text-to-text".to_string()];
+        assert_eq!(
+            HuggingFaceClient::infer_pipeline_tag_from_tags(&vlm_tags).as_deref(),
+            Some("image-text-to-text")
+        );
     }
 
     #[tokio::test]

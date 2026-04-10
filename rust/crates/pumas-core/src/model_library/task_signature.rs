@@ -39,13 +39,15 @@ impl NormalizedTaskSignature {
     }
 }
 
-pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 15] = [
+pub(crate) const CANONICAL_MODALITY_TOKENS: [&str; 17] = [
     "text",
     "image",
     "audio",
     "video",
     "document",
     "mask",
+    "depth",
+    "bbox",
     "keypoints",
     "action",
     "3d",
@@ -204,6 +206,10 @@ fn normalize_modality_token(token: &str) -> Option<&'static str> {
         "video" | "vid" | "movie" | "movies" | "clip" => Some("video"),
         "document" | "doc" | "docs" | "document-image" | "pdf" => Some("document"),
         "mask" | "segmentation-mask" | "binary-mask" | "instance-mask" => Some("mask"),
+        "depth" | "depth-map" | "disparity" => Some("depth"),
+        "bbox" | "boxes" | "bounding-box" | "bounding-boxes" | "detection" | "detections" => {
+            Some("bbox")
+        }
         "keypoints" | "pose" | "skeleton" | "landmarks" => Some("keypoints"),
         "action" | "action-label" | "activity" => Some("action"),
         "3d" | "mesh" | "pointcloud" | "point-cloud" => Some("3d"),
@@ -237,6 +243,7 @@ fn hf_task_to_signature(input: &str) -> Option<String> {
         "image-to-image" | "image-inpainting" => "image->image",
         "text-image-to-image" => "text+image->image",
         "image-to-text" => "image->text",
+        "image-text-to-text" => "text+image->text",
         "visual-question-answering" => "text+image->text",
         "document-question-answering" => "text+document->text",
         "video-text-to-text" | "video-question-answering" => "text+video->text",
@@ -246,9 +253,9 @@ fn hf_task_to_signature(input: &str) -> Option<String> {
         "audio-classification" => "audio->text",
         "text-to-audio" | "text-to-speech" => "text->audio",
         "image-classification" | "zero-shot-image-classification" => "image->text",
-        "object-detection" | "zero-shot-object-detection" => "image->text",
+        "object-detection" | "zero-shot-object-detection" => "image->bbox",
         "image-segmentation" => "image->mask",
-        "depth-estimation" => "image->image",
+        "depth-estimation" => "image->depth",
         "feature-extraction" => "text->embedding",
         "text-to-3d" => "text->3d",
         "image-to-3d" => "image->3d",
@@ -320,6 +327,18 @@ mod tests {
         assert_eq!(
             normalize_task_signature("text-ranking").signature_key,
             "text+document->text"
+        );
+        assert_eq!(
+            normalize_task_signature("object-detection").signature_key,
+            "image->bbox"
+        );
+        assert_eq!(
+            normalize_task_signature("depth-estimation").signature_key,
+            "image->depth"
+        );
+        assert_eq!(
+            normalize_task_signature("image-text-to-text").signature_key,
+            "text+image->text"
         );
     }
 

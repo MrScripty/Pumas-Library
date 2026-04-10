@@ -20,6 +20,12 @@ import {
 
 function resolveKindIcon(token: string) {
   const normalized = token.toLowerCase();
+  if (normalized.includes('ranking') || normalized.includes('rerank')) return Shapes;
+  if (normalized.includes('segmentation') || normalized.includes('mask')) return Shapes;
+  if (normalized.includes('detection')) return Shapes;
+  if (normalized.includes('depth')) return Image;
+  if (normalized.includes('embedding') || normalized.includes('feature')) return Tag;
+  if (normalized.includes('document')) return Languages;
   if (normalized.includes('classification')) return Shapes;
   if (normalized.includes('text')) return Languages;
   if (normalized.includes('image')) return Image;
@@ -31,6 +37,12 @@ function resolveKindIcon(token: string) {
 
 function resolveKindLabel(token: string) {
   const normalized = token.toLowerCase();
+  if (normalized.includes('ranking') || normalized.includes('rerank')) return 'Ranking';
+  if (normalized.includes('segmentation') || normalized.includes('mask')) return 'Mask';
+  if (normalized.includes('detection')) return 'Detection';
+  if (normalized.includes('depth')) return 'Depth';
+  if (normalized.includes('embedding') || normalized.includes('feature')) return 'Embedding';
+  if (normalized.includes('document')) return 'Document';
   if (normalized.includes('classification')) return 'Classification';
   if (normalized.includes('text')) return 'Text';
   if (normalized.includes('image')) return 'Image';

@@ -76,7 +76,6 @@ impl ModelType {
             | "unconditional-image-generation"
             | "image-inpainting"
             | "text-to-video"
-            | "video-classification"
             | "text-to-3d"
             | "image-to-3d" => ModelType::Diffusion,
 
@@ -92,13 +91,16 @@ impl ModelType {
             "image-classification"
             | "image-segmentation"
             | "object-detection"
+            | "mask-generation"
             | "zero-shot-image-classification"
             | "depth-estimation"
             | "image-feature-extraction"
             | "zero-shot-object-detection"
             | "image-to-text"
+            | "image-text-to-text"
             | "visual-question-answering"
             | "document-question-answering"
+            | "video-classification"
             | "video-text-to-text" => ModelType::Vision,
 
             // Embedding
@@ -793,6 +795,18 @@ mod tests {
         );
         assert_eq!(
             ModelType::from_pipeline_tag("image-to-text"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("image-text-to-text"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("video-classification"),
+            ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("mask-generation"),
             ModelType::Vision
         );
         assert_eq!(

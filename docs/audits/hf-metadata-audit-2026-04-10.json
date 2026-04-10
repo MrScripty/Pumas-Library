@@ -1,0 +1,2290 @@
+{
+  "generated_at": "2026-04-10T23:38:37.311401969+00:00",
+  "summary": {
+    "sample_size": 48,
+    "seed": 20260410,
+    "sampled_repo_ids": [
+      "Nuwaisir/Quran_speech_recognizer",
+      "FoxBaze/Try_On_Qwen_Edit_Lora_Alpha",
+      "autoevaluate/image-multi-class-classification",
+      "Qwen/Qwen3-Reranker-8B",
+      "kp-forks/DepthPro",
+      "keras-io/Image-Classification-using-EANet",
+      "alexgusevski/LLaMA-Mesh-q8-mlx",
+      "Gustav0-Freind/LLaMA-Mesh",
+      "3DTopia/3DTopia",
+      "sil-ai/swh-bible-audio-speecht5",
+      "Violetmae14/audiogen-creators",
+      "naver/trecdl22-crossencoder-rankT53b-repro",
+      "uwantcheats/LLaMA-Mesh",
+      "hakurei/waifu-diffusion",
+      "MarcusLoren/MeshGPT-preview",
+      "meta-llama/Llama-3.2-1B",
+      "declare-lab/tango-full-ft-audiocaps",
+      "areegtarek/siglip-nih-5",
+      "unsloth/Qwen-Image-Edit-2511-GGUF",
+      "alexgusevski/LLaMA-Mesh-q6-mlx",
+      "FormalZz/AudioX",
+      "0xSero/gemma-4-21b-a4b-it-REAP",
+      "areegtarek/siglip-nih-2all",
+      "rwood-97/sam_os_counties",
+      "LiheYoung/depth_anything_vitl14",
+      "FaisaI/tadabur-Whisper-Small",
+      "robbyant/lingbot-depth-pretrain-vitl-14-v0.5",
+      "SenseTime/deformable-detr-single-scale-dc5",
+      "openai/whisper-large-v3-turbo",
+      "jobs-git/Hunyuan3D-1",
+      "Systran/faster-whisper-large-v3",
+      "philschmid/stable-diffusion-2-inpainting-endpoint",
+      "facebook/audio-magnet-small",
+      "samitizerxu/segformer-b0-finetuned-segments-sidewalk-oct-22",
+      "Shakker-Labs/FLUX.1-dev-LoRA-Logo-Design",
+      "sam1120/safety-utcustom-terrain",
+      "samitizerxu/segformer-b0-finetuned-kelp-segments-jan-18-10am",
+      "liuwenhan/RankMistral100",
+      "NicolasG2523/hunyuan3d-dit-v2-0-endpoint",
+      "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2",
+      "trackdr/LLaMA-Mesh-Q4_K_M-GGUF",
+      "mistralai/Mistral-7B-Instruct-v0.2",
+      "Zhengyi/LLaMA-Mesh",
+      "ShinoharaHare/Waifu-Inpaint-XL",
+      "ogkalu/Comic-Diffusion",
+      "kp-forks/InstantMesh",
+      "ibm-granite/granite-speech-3.3-2b",
+      "NhatPham/vit-base-patch16-224-recylce-ft"
+    ],
+    "issue_counts": {
+      "model-type-mismatch-with-task": 4
+    },
+    "task_counts": {
+      "automatic-speech-recognition": 5,
+      "depth-estimation": 3,
+      "image-classification": 5,
+      "image-segmentation": 4,
+      "image-to-3d": 1,
+      "image-to-image": 4,
+      "object-detection": 1,
+      "text-generation": 4,
+      "text-ranking": 3,
+      "text-to-3d": 10,
+      "text-to-audio": 5,
+      "text-to-image": 3
+    },
+    "search_kind_counts": {
+      "automatic-speech-recognition": 5,
+      "depth-estimation": 3,
+      "image-classification": 5,
+      "image-segmentation": 4,
+      "image-to-3d": 1,
+      "image-to-image": 4,
+      "object-detection": 1,
+      "text-generation": 4,
+      "text-ranking": 3,
+      "text-to-3d": 10,
+      "text-to-audio": 5,
+      "text-to-image": 3
+    },
+    "review_count": 0
+  },
+  "samples": [
+    {
+      "repo_id": "Nuwaisir/Quran_speech_recognizer",
+      "owner": "Nuwaisir",
+      "model_name": "Quran_speech_recognizer",
+      "sampled_via": {
+        "plan_label": "automatic-speech-recognition",
+        "query": "speech",
+        "offset": 27,
+        "repo_id": "Nuwaisir/Quran_speech_recognizer",
+        "search_kind": "automatic-speech-recognition"
+      },
+      "search_kind": "automatic-speech-recognition",
+      "effective_pipeline_tag": "automatic-speech-recognition",
+      "hf_pipeline_tag": "automatic-speech-recognition",
+      "raw_config_model_type": "wav2vec2",
+      "raw_architectures": [
+        "Wav2Vec2ForCTC"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "wav2vec2",
+        "automatic-speech-recognition",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/nuwaisir/quran_speech_recognizer",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "automatic-speech-recognition",
+      "sqlite_input_modalities": [
+        "audio"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "FoxBaze/Try_On_Qwen_Edit_Lora_Alpha",
+      "owner": "FoxBaze",
+      "model_name": "Try_On_Qwen_Edit_Lora_Alpha",
+      "sampled_via": {
+        "plan_label": "image-to-image",
+        "query": "edit",
+        "offset": 37,
+        "repo_id": "FoxBaze/Try_On_Qwen_Edit_Lora_Alpha",
+        "search_kind": "image-to-image"
+      },
+      "search_kind": "image-to-image",
+      "effective_pipeline_tag": "image-to-image",
+      "hf_pipeline_tag": "image-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "qwen",
+        "qwen-edit",
+        "qwen-edit-lora",
+        "try-on",
+        "lora",
+        "image-to-image",
+        "base_model:Qwen/Qwen-Image-Edit"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/foxbaze/try_on_qwen_edit_lora_alpha",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "image-to-image",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "autoevaluate/image-multi-class-classification",
+      "owner": "autoevaluate",
+      "model_name": "image-multi-class-classification",
+      "sampled_via": {
+        "plan_label": "image-classification",
+        "query": "classification",
+        "offset": 18,
+        "repo_id": "autoevaluate/image-multi-class-classification",
+        "search_kind": "image-classification"
+      },
+      "search_kind": "image-classification",
+      "effective_pipeline_tag": "image-classification",
+      "hf_pipeline_tag": "image-classification",
+      "raw_config_model_type": "swin",
+      "raw_architectures": [
+        "SwinForImageClassification"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "tensorboard",
+        "swin",
+        "image-classification",
+        "generated_from_trainer",
+        "dataset:mnist",
+        "dataset:autoevaluate/mnist-sample"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "vision/autoevaluate/image-multi-class-classification",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-classification",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "Qwen/Qwen3-Reranker-8B",
+      "owner": "Qwen",
+      "model_name": "Qwen3-Reranker-8B",
+      "sampled_via": {
+        "plan_label": "text-ranking",
+        "query": "reranker",
+        "offset": 0,
+        "repo_id": "Qwen/Qwen3-Reranker-8B",
+        "search_kind": "text-ranking"
+      },
+      "search_kind": "text-ranking",
+      "effective_pipeline_tag": "text-ranking",
+      "hf_pipeline_tag": "text-ranking",
+      "raw_config_model_type": "qwen3",
+      "raw_architectures": [
+        "Qwen3ForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "qwen3",
+        "text-generation",
+        "text-ranking",
+        "arxiv:2506.05176",
+        "base_model:Qwen/Qwen3-8B-Base",
+        "base_model:finetune:Qwen/Qwen3-8B-Base"
+      ],
+      "resolved_model_type": "reranker",
+      "model_type_resolution_source": "model-type-reranker-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "reranker/qwen/qwen3-reranker-8b",
+      "sqlite_model_type": "reranker",
+      "sqlite_task_type_primary": "text-ranking",
+      "sqlite_input_modalities": [
+        "text",
+        "document"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "kp-forks/DepthPro",
+      "owner": "kp-forks",
+      "model_name": "DepthPro",
+      "sampled_via": {
+        "plan_label": "depth-estimation",
+        "query": "depth-pro",
+        "offset": 1,
+        "repo_id": "kp-forks/DepthPro",
+        "search_kind": "depth-estimation"
+      },
+      "search_kind": "depth-estimation",
+      "effective_pipeline_tag": "depth-estimation",
+      "hf_pipeline_tag": "depth-estimation",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "depth-pro",
+        "depth-estimation",
+        "arxiv:2410.02073",
+        "license:apple-amlr",
+        "region:us"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "vision/kp-forks/depthpro",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "depth-estimation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "depth"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "keras-io/Image-Classification-using-EANet",
+      "owner": "keras-io",
+      "model_name": "Image-Classification-using-EANet",
+      "sampled_via": {
+        "plan_label": "image-classification",
+        "query": "classification",
+        "offset": 31,
+        "repo_id": "keras-io/Image-Classification-using-EANet",
+        "search_kind": "image-classification"
+      },
+      "search_kind": "image-classification",
+      "effective_pipeline_tag": "image-classification",
+      "hf_pipeline_tag": "image-classification",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "tf-keras",
+        "tensorboard",
+        "tensorflow",
+        "image-classification",
+        "en",
+        "license:apache-2.0",
+        "model-index",
+        "region:us"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "vision/keras-io/image-classification-using-eanet",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-classification",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "alexgusevski/LLaMA-Mesh-q8-mlx",
+      "owner": "alexgusevski",
+      "model_name": "LLaMA-Mesh-q8-mlx",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 18,
+        "repo_id": "alexgusevski/LLaMA-Mesh-q8-mlx",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "mesh-generation",
+        "mlx",
+        "text-to-3d",
+        "base_model:Zhengyi/LLaMA-Mesh"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.7,
+      "sqlite_model_id": "llm/alexgusevski/llama-mesh-q8-mlx",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": [
+        "model-type-mismatch-with-task"
+      ]
+    },
+    {
+      "repo_id": "Gustav0-Freind/LLaMA-Mesh",
+      "owner": "Gustav0-Freind",
+      "model_name": "LLaMA-Mesh",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 4,
+        "repo_id": "Gustav0-Freind/LLaMA-Mesh",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "mesh-generation",
+        "text-to-3d",
+        "arxiv:2411.09595",
+        "license:llama3.1",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/gustav0-freind/llama-mesh",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "3DTopia/3DTopia",
+      "owner": "3DTopia",
+      "model_name": "3DTopia",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "3d",
+        "offset": 22,
+        "repo_id": "3DTopia/3DTopia",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "safetensors",
+        "Text-to-3D Generation",
+        "3D Diffusion",
+        "text-to-3d",
+        "en",
+        "dataset:allenai/objaverse",
+        "license:apache-2.0",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/3dtopia/3dtopia",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "sil-ai/swh-bible-audio-speecht5",
+      "owner": "sil-ai",
+      "model_name": "swh-bible-audio-speecht5",
+      "sampled_via": {
+        "plan_label": "text-to-audio",
+        "query": "audio",
+        "offset": 28,
+        "repo_id": "sil-ai/swh-bible-audio-speecht5",
+        "search_kind": "text-to-audio"
+      },
+      "search_kind": "text-to-audio",
+      "effective_pipeline_tag": "text-to-audio",
+      "hf_pipeline_tag": "text-to-audio",
+      "raw_config_model_type": "speecht5",
+      "raw_architectures": [
+        "SpeechT5ForTextToSpeech"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "speecht5",
+        "text-to-audio",
+        "generated_from_trainer",
+        "base_model:microsoft/speecht5_tts",
+        "base_model:finetune:microsoft/speecht5_tts",
+        "license:mit"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/sil-ai/swh-bible-audio-speecht5",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "text-to-audio",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "audio"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "Violetmae14/audiogen-creators",
+      "owner": "Violetmae14",
+      "model_name": "audiogen-creators",
+      "sampled_via": {
+        "plan_label": "text-to-audio",
+        "query": "audio",
+        "offset": 22,
+        "repo_id": "Violetmae14/audiogen-creators",
+        "search_kind": "text-to-audio"
+      },
+      "search_kind": "text-to-audio",
+      "effective_pipeline_tag": "text-to-audio",
+      "hf_pipeline_tag": "text-to-audio",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "adapter-transformers",
+        "audio",
+        "text-generation-inference",
+        "text-to-audio-with-videos",
+        "text-to-audio",
+        "dataset:togethercomputer/RedPajama-Data-V2",
+        "dataset:Open-Orca/OpenOrca",
+        "arxiv:1910.09700"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/violetmae14/audiogen-creators",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "text-to-audio",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "audio"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "naver/trecdl22-crossencoder-rankT53b-repro",
+      "owner": "naver",
+      "model_name": "trecdl22-crossencoder-rankT53b-repro",
+      "sampled_via": {
+        "plan_label": "text-ranking",
+        "query": "rank",
+        "offset": 17,
+        "repo_id": "naver/trecdl22-crossencoder-rankT53b-repro",
+        "search_kind": "text-ranking"
+      },
+      "search_kind": "text-ranking",
+      "effective_pipeline_tag": "text-ranking",
+      "hf_pipeline_tag": "text-ranking",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "pytorch",
+        "text-ranking",
+        "arxiv:2210.10634",
+        "license:cc-by-nc-sa-4.0",
+        "region:us"
+      ],
+      "resolved_model_type": "reranker",
+      "model_type_resolution_source": "model-type-reranker-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "reranker/naver/trecdl22-crossencoder-rankt53b-repro",
+      "sqlite_model_type": "reranker",
+      "sqlite_task_type_primary": "text-ranking",
+      "sqlite_input_modalities": [
+        "text",
+        "document"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "uwantcheats/LLaMA-Mesh",
+      "owner": "uwantcheats",
+      "model_name": "LLaMA-Mesh",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 26,
+        "repo_id": "uwantcheats/LLaMA-Mesh",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "mesh-generation",
+        "text-to-3d",
+        "arxiv:2411.09595",
+        "license:llama3.1"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.7,
+      "sqlite_model_id": "llm/uwantcheats/llama-mesh",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": [
+        "model-type-mismatch-with-task"
+      ]
+    },
+    {
+      "repo_id": "hakurei/waifu-diffusion",
+      "owner": "hakurei",
+      "model_name": "waifu-diffusion",
+      "sampled_via": {
+        "plan_label": "text-to-image",
+        "query": "diffusion",
+        "offset": 60,
+        "repo_id": "hakurei/waifu-diffusion",
+        "search_kind": "text-to-image"
+      },
+      "search_kind": "text-to-image",
+      "effective_pipeline_tag": "text-to-image",
+      "hf_pipeline_tag": "text-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "safetensors",
+        "stable-diffusion",
+        "text-to-image",
+        "en",
+        "license:creativeml-openrail-m",
+        "endpoints_compatible",
+        "diffusers:StableDiffusionPipeline"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/hakurei/waifu-diffusion",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-image",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "MarcusLoren/MeshGPT-preview",
+      "owner": "MarcusLoren",
+      "model_name": "MeshGPT-preview",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 0,
+        "repo_id": "MarcusLoren/MeshGPT-preview",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "transformers",
+        "text-to-3d",
+        "arxiv:2311.15475",
+        "license:apache-2.0",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/marcusloren/meshgpt-preview",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "meta-llama/Llama-3.2-1B",
+      "owner": "meta-llama",
+      "model_name": "Llama-3.2-1B",
+      "sampled_via": {
+        "plan_label": "text-generation",
+        "query": "llama",
+        "offset": 86,
+        "repo_id": "meta-llama/Llama-3.2-1B",
+        "search_kind": "text-generation"
+      },
+      "search_kind": "text-generation",
+      "effective_pipeline_tag": "text-generation",
+      "hf_pipeline_tag": "text-generation",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "facebook",
+        "meta",
+        "pytorch",
+        "llama-3"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "llm/meta-llama/llama-3_2-1b",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-generation",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "declare-lab/tango-full-ft-audiocaps",
+      "owner": "declare-lab",
+      "model_name": "tango-full-ft-audiocaps",
+      "sampled_via": {
+        "plan_label": "text-to-audio",
+        "query": "audio",
+        "offset": 10,
+        "repo_id": "declare-lab/tango-full-ft-audiocaps",
+        "search_kind": "text-to-audio"
+      },
+      "search_kind": "text-to-audio",
+      "effective_pipeline_tag": "text-to-audio",
+      "hf_pipeline_tag": "text-to-audio",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "transformers",
+        "music",
+        "text-to-audio",
+        "en",
+        "dataset:declare-lab/TangoPromptBank",
+        "license:cc-by-nc-sa-4.0",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/declare-lab/tango-full-ft-audiocaps",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "text-to-audio",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "audio"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "areegtarek/siglip-nih-5",
+      "owner": "areegtarek",
+      "model_name": "siglip-nih-5",
+      "sampled_via": {
+        "plan_label": "image-classification",
+        "query": "siglip",
+        "offset": 53,
+        "repo_id": "areegtarek/siglip-nih-5",
+        "search_kind": "image-classification"
+      },
+      "search_kind": "image-classification",
+      "effective_pipeline_tag": "image-classification",
+      "hf_pipeline_tag": "image-classification",
+      "raw_config_model_type": "siglip",
+      "raw_architectures": [
+        "SiglipForImageClassification"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "siglip",
+        "image-classification",
+        "arxiv:1910.09700",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "vision/areegtarek/siglip-nih-5",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-classification",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "unsloth/Qwen-Image-Edit-2511-GGUF",
+      "owner": "unsloth",
+      "model_name": "Qwen-Image-Edit-2511-GGUF",
+      "sampled_via": {
+        "plan_label": "image-to-image",
+        "query": "edit",
+        "offset": 35,
+        "repo_id": "unsloth/Qwen-Image-Edit-2511-GGUF",
+        "search_kind": "image-to-image"
+      },
+      "search_kind": "image-to-image",
+      "effective_pipeline_tag": "image-to-image",
+      "hf_pipeline_tag": "image-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "gguf",
+        "quantized",
+        "unsloth",
+        "qwen",
+        "image-to-image",
+        "en",
+        "zh",
+        "arxiv:2508.02324"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/unsloth/qwen-image-edit-2511-gguf",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "image-to-image",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "alexgusevski/LLaMA-Mesh-q6-mlx",
+      "owner": "alexgusevski",
+      "model_name": "LLaMA-Mesh-q6-mlx",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 17,
+        "repo_id": "alexgusevski/LLaMA-Mesh-q6-mlx",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "mesh-generation",
+        "mlx",
+        "text-to-3d",
+        "base_model:Zhengyi/LLaMA-Mesh"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.7,
+      "sqlite_model_id": "llm/alexgusevski/llama-mesh-q6-mlx",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": [
+        "model-type-mismatch-with-task"
+      ]
+    },
+    {
+      "repo_id": "FormalZz/AudioX",
+      "owner": "FormalZz",
+      "model_name": "AudioX",
+      "sampled_via": {
+        "plan_label": "text-to-audio",
+        "query": "audio",
+        "offset": 21,
+        "repo_id": "FormalZz/AudioX",
+        "search_kind": "text-to-audio"
+      },
+      "search_kind": "text-to-audio",
+      "effective_pipeline_tag": "text-to-audio",
+      "hf_pipeline_tag": "text-to-audio",
+      "raw_config_model_type": "diffusion_cond",
+      "raw_architectures": [],
+      "top_tags": [
+        "stable-audio-tools",
+        "diffusion_cond",
+        "text-to-audio",
+        "arxiv:2503.10522",
+        "license:cc-by-nc-4.0",
+        "region:us"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/formalzz/audiox",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "text-to-audio",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "audio"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "0xSero/gemma-4-21b-a4b-it-REAP",
+      "owner": "0xSero",
+      "model_name": "gemma-4-21b-a4b-it-REAP",
+      "sampled_via": {
+        "plan_label": "text-generation",
+        "query": "gemma",
+        "offset": 8,
+        "repo_id": "0xSero/gemma-4-21b-a4b-it-REAP",
+        "search_kind": "text-generation"
+      },
+      "search_kind": "text-generation",
+      "effective_pipeline_tag": "text-generation",
+      "hf_pipeline_tag": "text-generation",
+      "raw_config_model_type": "gemma4",
+      "raw_architectures": [
+        "Gemma4ForConditionalGeneration"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "gemma4",
+        "image-text-to-text",
+        "moe",
+        "pruning",
+        "reap",
+        "cerebras"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-rules",
+      "model_type_resolution_confidence": 0.7999999999999999,
+      "sqlite_model_id": "llm/0xsero/gemma-4-21b-a4b-it-reap",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-generation",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "areegtarek/siglip-nih-2all",
+      "owner": "areegtarek",
+      "model_name": "siglip-nih-2all",
+      "sampled_via": {
+        "plan_label": "image-classification",
+        "query": "siglip",
+        "offset": 3,
+        "repo_id": "areegtarek/siglip-nih-2all",
+        "search_kind": "image-classification"
+      },
+      "search_kind": "image-classification",
+      "effective_pipeline_tag": "image-classification",
+      "hf_pipeline_tag": "image-classification",
+      "raw_config_model_type": "siglip",
+      "raw_architectures": [
+        "SiglipForImageClassification"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "siglip",
+        "image-classification",
+        "arxiv:1910.09700",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "vision/areegtarek/siglip-nih-2all",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-classification",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "rwood-97/sam_os_counties",
+      "owner": "rwood-97",
+      "model_name": "sam_os_counties",
+      "sampled_via": {
+        "plan_label": "image-segmentation",
+        "query": "sam",
+        "offset": 24,
+        "repo_id": "rwood-97/sam_os_counties",
+        "search_kind": "image-segmentation"
+      },
+      "search_kind": "image-segmentation",
+      "effective_pipeline_tag": "image-segmentation",
+      "hf_pipeline_tag": "image-segmentation",
+      "raw_config_model_type": "sam",
+      "raw_architectures": [
+        "SamModel"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "sam",
+        "mask-generation",
+        "maps",
+        "image-segmentation",
+        "dataset:rwood-97/os_counties",
+        "license:apache-2.0"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "vision/rwood-97/sam_os_counties",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-segmentation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "mask"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "LiheYoung/depth_anything_vitl14",
+      "owner": "LiheYoung",
+      "model_name": "depth_anything_vitl14",
+      "sampled_via": {
+        "plan_label": "depth-estimation",
+        "query": "depth-anything",
+        "offset": 13,
+        "repo_id": "LiheYoung/depth_anything_vitl14",
+        "search_kind": "depth-estimation"
+      },
+      "search_kind": "depth-estimation",
+      "effective_pipeline_tag": "depth-estimation",
+      "hf_pipeline_tag": "depth-estimation",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "depth_anything",
+        "depth-estimation",
+        "arxiv:2401.10891",
+        "endpoints_compatible",
+        "region:us"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "vision/liheyoung/depth_anything_vitl14",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "depth-estimation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "depth"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "FaisaI/tadabur-Whisper-Small",
+      "owner": "FaisaI",
+      "model_name": "tadabur-Whisper-Small",
+      "sampled_via": {
+        "plan_label": "automatic-speech-recognition",
+        "query": "whisper",
+        "offset": 8,
+        "repo_id": "FaisaI/tadabur-Whisper-Small",
+        "search_kind": "automatic-speech-recognition"
+      },
+      "search_kind": "automatic-speech-recognition",
+      "effective_pipeline_tag": "automatic-speech-recognition",
+      "hf_pipeline_tag": "automatic-speech-recognition",
+      "raw_config_model_type": "whisper",
+      "raw_architectures": [
+        "WhisperForConditionalGeneration"
+      ],
+      "top_tags": [
+        "safetensors",
+        "whisper",
+        "quran",
+        "asr",
+        "arabic",
+        "speech-recognition",
+        "automatic-speech-recognition",
+        "ar"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/faisai/tadabur-whisper-small",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "automatic-speech-recognition",
+      "sqlite_input_modalities": [
+        "audio"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "robbyant/lingbot-depth-pretrain-vitl-14-v0.5",
+      "owner": "robbyant",
+      "model_name": "lingbot-depth-pretrain-vitl-14-v0.5",
+      "sampled_via": {
+        "plan_label": "depth-estimation",
+        "query": "depth",
+        "offset": 13,
+        "repo_id": "robbyant/lingbot-depth-pretrain-vitl-14-v0.5",
+        "search_kind": "depth-estimation"
+      },
+      "search_kind": "depth-estimation",
+      "effective_pipeline_tag": "depth-estimation",
+      "hf_pipeline_tag": "depth-estimation",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "pytorch",
+        "depth-estimation",
+        "depth-completion",
+        "rgb-d",
+        "computer-vision",
+        "robotics",
+        "3d-vision",
+        "vision-transformer"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "vision/robbyant/lingbot-depth-pretrain-vitl-14-v0_5",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "depth-estimation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "depth"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "SenseTime/deformable-detr-single-scale-dc5",
+      "owner": "SenseTime",
+      "model_name": "deformable-detr-single-scale-dc5",
+      "sampled_via": {
+        "plan_label": "object-detection",
+        "query": "detr",
+        "offset": 34,
+        "repo_id": "SenseTime/deformable-detr-single-scale-dc5",
+        "search_kind": "object-detection"
+      },
+      "search_kind": "object-detection",
+      "effective_pipeline_tag": "object-detection",
+      "hf_pipeline_tag": "object-detection",
+      "raw_config_model_type": "deformable_detr",
+      "raw_architectures": [
+        "DeformableDetrForObjectDetection"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "safetensors",
+        "deformable_detr",
+        "object-detection",
+        "vision",
+        "dataset:coco",
+        "arxiv:2010.04159"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-rules",
+      "model_type_resolution_confidence": 0.7999999999999999,
+      "sqlite_model_id": "vision/sensetime/deformable-detr-single-scale-dc5",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "object-detection",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "bbox"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "openai/whisper-large-v3-turbo",
+      "owner": "openai",
+      "model_name": "whisper-large-v3-turbo",
+      "sampled_via": {
+        "plan_label": "automatic-speech-recognition",
+        "query": "whisper",
+        "offset": 1,
+        "repo_id": "openai/whisper-large-v3-turbo",
+        "search_kind": "automatic-speech-recognition"
+      },
+      "search_kind": "automatic-speech-recognition",
+      "effective_pipeline_tag": "automatic-speech-recognition",
+      "hf_pipeline_tag": "automatic-speech-recognition",
+      "raw_config_model_type": "whisper",
+      "raw_architectures": [
+        "WhisperForConditionalGeneration"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "whisper",
+        "automatic-speech-recognition",
+        "audio",
+        "en",
+        "zh",
+        "de"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/openai/whisper-large-v3-turbo",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "automatic-speech-recognition",
+      "sqlite_input_modalities": [
+        "audio"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "jobs-git/Hunyuan3D-1",
+      "owner": "jobs-git",
+      "model_name": "Hunyuan3D-1",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "hunyuan",
+        "offset": 0,
+        "repo_id": "jobs-git/Hunyuan3D-1",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "hunyuan3d-1.0",
+        "diffusers",
+        "safetensors",
+        "image-to-3d",
+        "text-to-3d",
+        "en",
+        "zh",
+        "arxiv:2411.02293"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/jobs-git/hunyuan3d-1",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "Systran/faster-whisper-large-v3",
+      "owner": "Systran",
+      "model_name": "faster-whisper-large-v3",
+      "sampled_via": {
+        "plan_label": "automatic-speech-recognition",
+        "query": "whisper",
+        "offset": 26,
+        "repo_id": "Systran/faster-whisper-large-v3",
+        "search_kind": "automatic-speech-recognition"
+      },
+      "search_kind": "automatic-speech-recognition",
+      "effective_pipeline_tag": "automatic-speech-recognition",
+      "hf_pipeline_tag": "automatic-speech-recognition",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "ctranslate2",
+        "audio",
+        "automatic-speech-recognition",
+        "en",
+        "zh",
+        "de",
+        "es",
+        "ru"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/systran/faster-whisper-large-v3",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "automatic-speech-recognition",
+      "sqlite_input_modalities": [
+        "audio"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "philschmid/stable-diffusion-2-inpainting-endpoint",
+      "owner": "philschmid",
+      "model_name": "stable-diffusion-2-inpainting-endpoint",
+      "sampled_via": {
+        "plan_label": "image-to-image",
+        "query": "inpaint",
+        "offset": 35,
+        "repo_id": "philschmid/stable-diffusion-2-inpainting-endpoint",
+        "search_kind": "image-to-image"
+      },
+      "search_kind": "image-to-image",
+      "effective_pipeline_tag": "image-to-image",
+      "hf_pipeline_tag": "image-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "stable-diffusion",
+        "stable-diffusion-diffusers",
+        "text-guided-to-image-inpainting",
+        "endpoints-template",
+        "license:openrail++",
+        "endpoints_compatible",
+        "diffusers:StableDiffusionInpaintPipeline"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/philschmid/stable-diffusion-2-inpainting-endpoint",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "image-to-image",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "facebook/audio-magnet-small",
+      "owner": "facebook",
+      "model_name": "audio-magnet-small",
+      "sampled_via": {
+        "plan_label": "text-to-audio",
+        "query": "audio",
+        "offset": 31,
+        "repo_id": "facebook/audio-magnet-small",
+        "search_kind": "text-to-audio"
+      },
+      "search_kind": "text-to-audio",
+      "effective_pipeline_tag": "text-to-audio",
+      "hf_pipeline_tag": "text-to-audio",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "audiocraft",
+        "magnet",
+        "text-to-audio",
+        "arxiv:2401.04577",
+        "license:cc-by-nc-4.0",
+        "region:us"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/facebook/audio-magnet-small",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "text-to-audio",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "audio"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "samitizerxu/segformer-b0-finetuned-segments-sidewalk-oct-22",
+      "owner": "samitizerxu",
+      "model_name": "segformer-b0-finetuned-segments-sidewalk-oct-22",
+      "sampled_via": {
+        "plan_label": "image-segmentation",
+        "query": "sam",
+        "offset": 34,
+        "repo_id": "samitizerxu/segformer-b0-finetuned-segments-sidewalk-oct-22",
+        "search_kind": "image-segmentation"
+      },
+      "search_kind": "image-segmentation",
+      "effective_pipeline_tag": "image-segmentation",
+      "hf_pipeline_tag": "image-segmentation",
+      "raw_config_model_type": "segformer",
+      "raw_architectures": [
+        "SegformerForSemanticSegmentation"
+      ],
+      "top_tags": [
+        "transformers",
+        "tensorboard",
+        "safetensors",
+        "segformer",
+        "vision",
+        "image-segmentation",
+        "generated_from_trainer",
+        "base_model:nvidia/mit-b0"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-rules",
+      "model_type_resolution_confidence": 0.7999999999999999,
+      "sqlite_model_id": "vision/samitizerxu/segformer-b0-finetuned-segments-sidewalk-oct-22",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-segmentation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "mask"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "Shakker-Labs/FLUX.1-dev-LoRA-Logo-Design",
+      "owner": "Shakker-Labs",
+      "model_name": "FLUX.1-dev-LoRA-Logo-Design",
+      "sampled_via": {
+        "plan_label": "text-to-image",
+        "query": "flux",
+        "offset": 24,
+        "repo_id": "Shakker-Labs/FLUX.1-dev-LoRA-Logo-Design",
+        "search_kind": "text-to-image"
+      },
+      "search_kind": "text-to-image",
+      "effective_pipeline_tag": "text-to-image",
+      "hf_pipeline_tag": "text-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "text-to-image",
+        "stable-diffusion",
+        "lora",
+        "image-generation",
+        "flux",
+        "safetensors",
+        "base_model:black-forest-labs/FLUX.1-dev"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/shakker-labs/flux_1-dev-lora-logo-design",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-image",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "sam1120/safety-utcustom-terrain",
+      "owner": "sam1120",
+      "model_name": "safety-utcustom-terrain",
+      "sampled_via": {
+        "plan_label": "image-segmentation",
+        "query": "sam",
+        "offset": 59,
+        "repo_id": "sam1120/safety-utcustom-terrain",
+        "search_kind": "image-segmentation"
+      },
+      "search_kind": "image-segmentation",
+      "effective_pipeline_tag": "image-segmentation",
+      "hf_pipeline_tag": "image-segmentation",
+      "raw_config_model_type": "segformer",
+      "raw_architectures": [
+        "SegformerForSemanticSegmentation"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "tensorboard",
+        "segformer",
+        "vision",
+        "image-segmentation",
+        "generated_from_trainer",
+        "license:other"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-rules",
+      "model_type_resolution_confidence": 0.7999999999999999,
+      "sqlite_model_id": "vision/sam1120/safety-utcustom-terrain",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-segmentation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "mask"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "samitizerxu/segformer-b0-finetuned-kelp-segments-jan-18-10am",
+      "owner": "samitizerxu",
+      "model_name": "segformer-b0-finetuned-kelp-segments-jan-18-10am",
+      "sampled_via": {
+        "plan_label": "image-segmentation",
+        "query": "sam",
+        "offset": 41,
+        "repo_id": "samitizerxu/segformer-b0-finetuned-kelp-segments-jan-18-10am",
+        "search_kind": "image-segmentation"
+      },
+      "search_kind": "image-segmentation",
+      "effective_pipeline_tag": "image-segmentation",
+      "hf_pipeline_tag": "image-segmentation",
+      "raw_config_model_type": "segformer",
+      "raw_architectures": [
+        "SegformerForSemanticSegmentation"
+      ],
+      "top_tags": [
+        "transformers",
+        "tensorboard",
+        "safetensors",
+        "segformer",
+        "vision",
+        "image-segmentation",
+        "generated_from_trainer",
+        "dataset:kelp_data"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-rules",
+      "model_type_resolution_confidence": 0.7999999999999999,
+      "sqlite_model_id": "vision/samitizerxu/segformer-b0-finetuned-kelp-segments-jan-18-10am",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-segmentation",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "mask"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "liuwenhan/RankMistral100",
+      "owner": "liuwenhan",
+      "model_name": "RankMistral100",
+      "sampled_via": {
+        "plan_label": "text-ranking",
+        "query": "rank",
+        "offset": 12,
+        "repo_id": "liuwenhan/RankMistral100",
+        "search_kind": "text-ranking"
+      },
+      "search_kind": "text-ranking",
+      "effective_pipeline_tag": "text-ranking",
+      "hf_pipeline_tag": "text-ranking",
+      "raw_config_model_type": "mistral",
+      "raw_architectures": [
+        "MistralForCausalLM"
+      ],
+      "top_tags": [
+        "safetensors",
+        "mistral",
+        "text-ranking",
+        "en",
+        "arxiv:2412.14574",
+        "base_model:mistralai/Mistral-7B-Instruct-v0.3",
+        "base_model:finetune:mistralai/Mistral-7B-Instruct-v0.3",
+        "license:mit"
+      ],
+      "resolved_model_type": "reranker",
+      "model_type_resolution_source": "model-type-reranker-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "reranker/liuwenhan/rankmistral100",
+      "sqlite_model_type": "reranker",
+      "sqlite_task_type_primary": "text-ranking",
+      "sqlite_input_modalities": [
+        "text",
+        "document"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "NicolasG2523/hunyuan3d-dit-v2-0-endpoint",
+      "owner": "NicolasG2523",
+      "model_name": "hunyuan3d-dit-v2-0-endpoint",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "hunyuan",
+        "offset": 19,
+        "repo_id": "NicolasG2523/hunyuan3d-dit-v2-0-endpoint",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "text-to-3d",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/nicolasg2523/hunyuan3d-dit-v2-0-endpoint",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2",
+      "owner": "Orenguteng",
+      "model_name": "Llama-3.1-8B-Lexi-Uncensored-V2",
+      "sampled_via": {
+        "plan_label": "text-generation",
+        "query": "llama",
+        "offset": 86,
+        "repo_id": "Orenguteng/Llama-3.1-8B-Lexi-Uncensored-V2",
+        "search_kind": "text-generation"
+      },
+      "search_kind": "text-generation",
+      "effective_pipeline_tag": "text-generation",
+      "hf_pipeline_tag": "text-generation",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "conversational",
+        "license:llama3.1",
+        "model-index",
+        "text-generation-inference"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "llm/orenguteng/llama-3_1-8b-lexi-uncensored-v2",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-generation",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "trackdr/LLaMA-Mesh-Q4_K_M-GGUF",
+      "owner": "trackdr",
+      "model_name": "LLaMA-Mesh-Q4_K_M-GGUF",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 29,
+        "repo_id": "trackdr/LLaMA-Mesh-Q4_K_M-GGUF",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "transformers",
+        "gguf",
+        "mesh-generation",
+        "llama-cpp",
+        "gguf-my-repo",
+        "text-to-3d",
+        "base_model:Zhengyi/LLaMA-Mesh",
+        "base_model:quantized:Zhengyi/LLaMA-Mesh"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/trackdr/llama-mesh-q4_k_m-gguf",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "mistralai/Mistral-7B-Instruct-v0.2",
+      "owner": "mistralai",
+      "model_name": "Mistral-7B-Instruct-v0.2",
+      "sampled_via": {
+        "plan_label": "text-generation",
+        "query": "mistral",
+        "offset": 113,
+        "repo_id": "mistralai/Mistral-7B-Instruct-v0.2",
+        "search_kind": "text-generation"
+      },
+      "search_kind": "text-generation",
+      "effective_pipeline_tag": "text-generation",
+      "hf_pipeline_tag": "text-generation",
+      "raw_config_model_type": "mistral",
+      "raw_architectures": [
+        "MistralForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "safetensors",
+        "mistral",
+        "text-generation",
+        "finetuned",
+        "mistral-common",
+        "conversational"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "llm/mistralai/mistral-7b-instruct-v0_2",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-generation",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "Zhengyi/LLaMA-Mesh",
+      "owner": "Zhengyi",
+      "model_name": "LLaMA-Mesh",
+      "sampled_via": {
+        "plan_label": "text-to-3d",
+        "query": "mesh",
+        "offset": 12,
+        "repo_id": "Zhengyi/LLaMA-Mesh",
+        "search_kind": "text-to-3d"
+      },
+      "search_kind": "text-to-3d",
+      "effective_pipeline_tag": "text-to-3d",
+      "hf_pipeline_tag": "text-to-3d",
+      "raw_config_model_type": "llama",
+      "raw_architectures": [
+        "LlamaForCausalLM"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "llama",
+        "text-generation",
+        "mesh-generation",
+        "text-to-3d",
+        "arxiv:2411.09595",
+        "license:llama3.1"
+      ],
+      "resolved_model_type": "llm",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.7,
+      "sqlite_model_id": "llm/zhengyi/llama-mesh",
+      "sqlite_model_type": "llm",
+      "sqlite_task_type_primary": "text-to-3d",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": [
+        "model-type-mismatch-with-task"
+      ]
+    },
+    {
+      "repo_id": "ShinoharaHare/Waifu-Inpaint-XL",
+      "owner": "ShinoharaHare",
+      "model_name": "Waifu-Inpaint-XL",
+      "sampled_via": {
+        "plan_label": "image-to-image",
+        "query": "inpaint",
+        "offset": 0,
+        "repo_id": "ShinoharaHare/Waifu-Inpaint-XL",
+        "search_kind": "image-to-image"
+      },
+      "search_kind": "image-to-image",
+      "effective_pipeline_tag": "image-to-image",
+      "hf_pipeline_tag": "image-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "safetensors",
+        "anime",
+        "art",
+        "inpaint",
+        "inpainting",
+        "stable-diffusion",
+        "stable-diffusion-xl"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/shinoharahare/waifu-inpaint-xl",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "image-to-image",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "ogkalu/Comic-Diffusion",
+      "owner": "ogkalu",
+      "model_name": "Comic-Diffusion",
+      "sampled_via": {
+        "plan_label": "text-to-image",
+        "query": "diffusion",
+        "offset": 115,
+        "repo_id": "ogkalu/Comic-Diffusion",
+        "search_kind": "text-to-image"
+      },
+      "search_kind": "text-to-image",
+      "effective_pipeline_tag": "text-to-image",
+      "hf_pipeline_tag": "text-to-image",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "text-to-image",
+        "license:creativeml-openrail-m",
+        "endpoints_compatible",
+        "diffusers:StableDiffusionPipeline",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/ogkalu/comic-diffusion",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "text-to-image",
+      "sqlite_input_modalities": [
+        "text"
+      ],
+      "sqlite_output_modalities": [
+        "image"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "kp-forks/InstantMesh",
+      "owner": "kp-forks",
+      "model_name": "InstantMesh",
+      "sampled_via": {
+        "plan_label": "image-to-3d",
+        "query": "instantmesh",
+        "offset": 14,
+        "repo_id": "kp-forks/InstantMesh",
+        "search_kind": "image-to-3d"
+      },
+      "search_kind": "image-to-3d",
+      "effective_pipeline_tag": "image-to-3d",
+      "hf_pipeline_tag": "image-to-3d",
+      "raw_config_model_type": null,
+      "raw_architectures": [],
+      "top_tags": [
+        "diffusers",
+        "image-to-3d",
+        "arxiv:2404.07191",
+        "license:apache-2.0",
+        "region:us"
+      ],
+      "resolved_model_type": "diffusion",
+      "model_type_resolution_source": "model-type-resolver-medium-hints",
+      "model_type_resolution_confidence": 0.65,
+      "sqlite_model_id": "diffusion/kp-forks/instantmesh",
+      "sqlite_model_type": "diffusion",
+      "sqlite_task_type_primary": "image-to-3d",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "3d"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [
+        "model-type-low-confidence"
+      ],
+      "issues": []
+    },
+    {
+      "repo_id": "ibm-granite/granite-speech-3.3-2b",
+      "owner": "ibm-granite",
+      "model_name": "granite-speech-3.3-2b",
+      "sampled_via": {
+        "plan_label": "automatic-speech-recognition",
+        "query": "speech",
+        "offset": 6,
+        "repo_id": "ibm-granite/granite-speech-3.3-2b",
+        "search_kind": "automatic-speech-recognition"
+      },
+      "search_kind": "automatic-speech-recognition",
+      "effective_pipeline_tag": "automatic-speech-recognition",
+      "hf_pipeline_tag": "automatic-speech-recognition",
+      "raw_config_model_type": "granite_speech",
+      "raw_architectures": [
+        "GraniteSpeechForConditionalGeneration"
+      ],
+      "top_tags": [
+        "transformers",
+        "safetensors",
+        "granite_speech",
+        "automatic-speech-recognition",
+        "multilingual",
+        "en",
+        "fr",
+        "de"
+      ],
+      "resolved_model_type": "audio",
+      "model_type_resolution_source": "model-type-audio-disambiguation-guard",
+      "model_type_resolution_confidence": 0.9,
+      "sqlite_model_id": "audio/ibm-granite/granite-speech-3_3-2b",
+      "sqlite_model_type": "audio",
+      "sqlite_task_type_primary": "automatic-speech-recognition",
+      "sqlite_input_modalities": [
+        "audio"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    },
+    {
+      "repo_id": "NhatPham/vit-base-patch16-224-recylce-ft",
+      "owner": "NhatPham",
+      "model_name": "vit-base-patch16-224-recylce-ft",
+      "sampled_via": {
+        "plan_label": "image-classification",
+        "query": "vit",
+        "offset": 59,
+        "repo_id": "NhatPham/vit-base-patch16-224-recylce-ft",
+        "search_kind": "image-classification"
+      },
+      "search_kind": "image-classification",
+      "effective_pipeline_tag": "image-classification",
+      "hf_pipeline_tag": "image-classification",
+      "raw_config_model_type": "vit",
+      "raw_architectures": [
+        "ViTForImageClassification"
+      ],
+      "top_tags": [
+        "transformers",
+        "pytorch",
+        "tensorboard",
+        "vit",
+        "image-classification",
+        "generated_from_trainer",
+        "license:apache-2.0",
+        "endpoints_compatible"
+      ],
+      "resolved_model_type": "vision",
+      "model_type_resolution_source": "model-type-resolver-arch-config-rules",
+      "model_type_resolution_confidence": 0.9999999999999999,
+      "sqlite_model_id": "vision/nhatpham/vit-base-patch16-224-recylce-ft",
+      "sqlite_model_type": "vision",
+      "sqlite_task_type_primary": "image-classification",
+      "sqlite_input_modalities": [
+        "image"
+      ],
+      "sqlite_output_modalities": [
+        "text"
+      ],
+      "task_classification_source": "hf-pipeline-tag",
+      "task_classification_confidence": 1.0,
+      "metadata_needs_review": false,
+      "review_reasons": [],
+      "issues": []
+    }
+  ]
+}

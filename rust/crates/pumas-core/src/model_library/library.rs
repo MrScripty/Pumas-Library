@@ -2196,6 +2196,8 @@ impl ModelLibrary {
                 continue;
             };
             let payload_file_count = count_payload_files_in_model_dir(&model_dir);
+            let download_incomplete = metadata.match_source.as_deref() == Some("download_partial")
+                || download_projection_status(&model_dir, &metadata).0;
 
             by_repo
                 .entry(repo_key)
@@ -2211,6 +2213,7 @@ impl ModelLibrary {
                         .to_string(),
                     metadata_type: metadata.model_type.unwrap_or_else(|| "unknown".to_string()),
                     payload_file_count,
+                    download_incomplete,
                 });
         }
 
@@ -2238,6 +2241,8 @@ impl ModelLibrary {
                 }
 
                 let removable = if duplicate.payload_file_count == 0 {
+                    true
+                } else if duplicate.download_incomplete && !preferred.download_incomplete {
                     true
                 } else if preferred.payload_file_count == 0 {
                     // Preferred candidate should normally be payload-bearing due score ordering.
@@ -2522,6 +2527,7 @@ struct DuplicateRepoEntry {
     path_type: String,
     metadata_type: String,
     payload_file_count: usize,
+    download_incomplete: bool,
 }
 
 fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
@@ -2978,9 +2984,11 @@ fn count_payload_files_in_model_dir(model_dir: &Path) -> usize {
 
 fn duplicate_preference_score(entry: &DuplicateRepoEntry) -> i64 {
     let has_payload = usize::from(entry.payload_file_count > 0) as i64;
+    let complete_bonus = usize::from(!entry.download_incomplete) as i64;
     let path_known = usize::from(entry.path_type != "unknown") as i64;
     let metadata_known = usize::from(entry.metadata_type.to_lowercase() != "unknown") as i64;
-    (has_payload * 10_000)
+    (has_payload * 100_000)
+        + (complete_bonus * 10_000)
         + (path_known * 1_000)
         + (metadata_known * 100)
         + entry.payload_file_count as i64
@@ -6028,6 +6036,64 @@ mod tests {
         assert_eq!(report.duplicate_repo_groups, 1);
         assert_eq!(report.removed_duplicate_dirs, 1);
         assert!(!unknown_dir.exists());
+        assert!(canonical_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_duplicate_repo_entries_removes_partial_duplicate_against_complete_copy() {
+        let (_, library) = setup_library().await;
+
+        let canonical_dir = library.build_model_path("audio", "dup-test", "partial-dedupe");
+        let partial_dir = library.build_model_path("unknown", "dup-test", "partial-dedupe");
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&partial_dir).unwrap();
+
+        std::fs::write(canonical_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(canonical_dir.join("model.safetensors"), b"complete-payload").unwrap();
+        std::fs::write(partial_dir.join("config.json"), b"{}").unwrap();
+        std::fs::write(
+            partial_dir.join(".pumas_download"),
+            br#"{"repo_id":"example/partial-dedupe","model_type":"audio","pipeline_tag":"automatic-speech-recognition"}"#,
+        )
+        .unwrap();
+
+        let canonical_metadata = ModelMetadata {
+            model_id: Some("audio/dup-test/partial-dedupe".to_string()),
+            model_type: Some("audio".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("partial-dedupe".to_string()),
+            repo_id: Some("example/partial-dedupe".to_string()),
+            ..Default::default()
+        };
+        let partial_metadata = ModelMetadata {
+            model_id: Some("unknown/dup-test/partial-dedupe".to_string()),
+            model_type: Some("unknown".to_string()),
+            family: Some("dup-test".to_string()),
+            cleaned_name: Some("partial-dedupe".to_string()),
+            repo_id: Some("example/partial-dedupe".to_string()),
+            match_source: Some("download_partial".to_string()),
+            expected_files: Some(vec![
+                "config.json".to_string(),
+                "model.safetensors".to_string(),
+            ]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&canonical_dir, &canonical_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&partial_dir, &partial_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&canonical_dir).await.unwrap();
+        library.index_model_dir(&partial_dir).await.unwrap();
+
+        let report = library.cleanup_duplicate_repo_entries().unwrap();
+        assert_eq!(report.duplicate_repo_groups, 1);
+        assert_eq!(report.removed_duplicate_dirs, 1);
+        assert_eq!(report.unresolved_duplicate_groups, 0);
+        assert!(!partial_dir.exists());
         assert!(canonical_dir.exists());
     }
 

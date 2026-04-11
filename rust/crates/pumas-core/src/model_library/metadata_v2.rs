@@ -509,6 +509,17 @@ mod tests {
     }
 
     #[test]
+    fn validation_accepts_bbox_output_modality() {
+        let mut metadata = metadata_v2_base();
+        metadata.model_type = Some("vision".to_string());
+        metadata.task_type_primary = Some("zero-shot-object-detection".to_string());
+        metadata.input_modalities = Some(vec!["image".to_string()]);
+        metadata.output_modalities = Some(vec!["bbox".to_string()]);
+
+        validate_metadata_v2(&metadata).unwrap();
+    }
+
+    #[test]
     fn validation_rejects_non_canonical_recommended_backend() {
         let mut metadata = metadata_v2_base();
         metadata.recommended_backend = Some("PyTorch".to_string());

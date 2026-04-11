@@ -197,16 +197,6 @@ impl ModelLibrary {
             .and_then(|value| value.cleaned_name.clone())
             .filter(|value| !value.trim().is_empty())
             .unwrap_or_else(|| record.cleaned_name.clone());
-        let pipeline_tag = metadata
-            .as_ref()
-            .and_then(|value| value.pipeline_tag.clone())
-            .or_else(|| {
-                metadata_json
-                    .get("pipeline_tag")
-                    .and_then(Value::as_str)
-                    .map(|value| value.to_string())
-            });
-
         let has_metadata = model_dir.join(METADATA_FILENAME).is_file();
         let is_partial_download = metadata_json
             .get("match_source")
@@ -239,16 +229,21 @@ impl ModelLibrary {
                     .unwrap_or(0.0),
                 review_reasons: extract_string_array(metadata_json, "review_reasons"),
             }
+        } else if let Some(metadata) = metadata.as_ref() {
+            resolve_local_model_type_with_persisted_hints(
+                self.index(),
+                &model_dir,
+                metadata,
+                file_type_info.as_ref(),
+            )?
         } else {
             apply_unresolved_model_type_fallbacks(
                 resolve_model_type_with_rules(
                     self.index(),
                     &model_dir,
-                    pipeline_tag.as_deref(),
+                    metadata_json.get("pipeline_tag").and_then(Value::as_str),
                     None,
-                    metadata
-                        .as_ref()
-                        .and_then(|value| value.huggingface_evidence.as_ref()),
+                    None,
                 )?,
                 &model_dir,
                 file_type_info.as_ref(),

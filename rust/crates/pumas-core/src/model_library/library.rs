@@ -15,21 +15,21 @@ use crate::index::{
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
-    get_diffusers_bundle_lookup_hints, is_diffusers_bundle, is_external_reference,
-    refresh_external_metadata_validation, MODEL_EXECUTION_CONTRACT_VERSION,
+    MODEL_EXECUTION_CONTRACT_VERSION, get_diffusers_bundle_lookup_hints, is_diffusers_bundle,
+    is_external_reference, refresh_external_metadata_validation,
 };
 use crate::model_library::hashing::{verify_blake3, verify_sha256};
-use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
+use crate::model_library::identifier::{ModelTypeInfo, identify_model_type};
 use crate::model_library::importer::detect_dllm_from_config_json;
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::{
-    ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem, ModelType,
-    SubmitModelReviewResult,
+    HuggingFaceEvidence, ModelMetadata, ModelOverrides, ModelReviewFilter, ModelReviewItem,
+    ModelType, SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_recommended_backend, normalize_review_reasons, normalize_task_signature,
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
-    LinkRegistry, ModelTypeResolution, TaskNormalizationStatus,
+    LinkRegistry, ModelTypeResolution, TaskNormalizationStatus, normalize_recommended_backend,
+    normalize_review_reasons, normalize_task_signature, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index,
 };
 use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
 use serde_json::Value;
@@ -1720,17 +1720,12 @@ impl ModelLibrary {
         let type_info = find_primary_model_file(&model_dir)
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
-        let resolved = apply_unresolved_model_type_fallbacks(
-            resolve_model_type_with_rules(
-                self.index(),
-                &model_dir,
-                metadata.pipeline_tag.as_deref(),
-                None,
-                metadata.huggingface_evidence.as_ref(),
-            )?,
+        let resolved = resolve_local_model_type_with_persisted_hints(
+            self.index(),
             &model_dir,
+            &metadata,
             type_info.as_ref(),
-        );
+        )?;
         let new_type = resolved.model_type.as_str().to_string();
 
         let detected_family = type_info
@@ -1977,17 +1972,12 @@ impl ModelLibrary {
         let file_type_info = primary_file
             .as_ref()
             .and_then(|f| identify_model_type(f).ok());
-        let resolved = apply_unresolved_model_type_fallbacks(
-            resolve_model_type_with_rules(
-                self.index(),
-                &model_dir,
-                metadata.pipeline_tag.as_deref(),
-                None,
-                metadata.huggingface_evidence.as_ref(),
-            )?,
+        let resolved = resolve_local_model_type_with_persisted_hints(
+            self.index(),
             &model_dir,
+            &metadata,
             file_type_info.as_ref(),
-        );
+        )?;
         let new_type = resolved.model_type;
         let new_type_str = new_type.as_str().to_string();
 
@@ -2530,6 +2520,13 @@ struct DuplicateRepoEntry {
     metadata_type: String,
     payload_file_count: usize,
     download_incomplete: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+struct DownloadMarkerHints {
+    model_type: Option<String>,
+    pipeline_tag: Option<String>,
+    huggingface_evidence: Option<HuggingFaceEvidence>,
 }
 
 fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
@@ -3662,6 +3659,159 @@ fn find_primary_model_file(model_dir: &Path) -> Option<PathBuf> {
     largest.map(|(path, _)| path)
 }
 
+fn resolve_local_model_type_with_persisted_hints(
+    index: &ModelIndex,
+    model_dir: &Path,
+    metadata: &ModelMetadata,
+    file_type_info: Option<&ModelTypeInfo>,
+) -> Result<ModelTypeResolution> {
+    let (pipeline_tag, spec_model_type, huggingface_evidence) =
+        classification_hints_from_persisted_sources(model_dir, metadata);
+
+    let resolved = resolve_model_type_with_rules(
+        index,
+        model_dir,
+        pipeline_tag.as_deref(),
+        spec_model_type.as_deref(),
+        huggingface_evidence.as_ref(),
+    )?;
+    let resolved = apply_unresolved_model_type_fallbacks(resolved, model_dir, file_type_info);
+
+    Ok(apply_name_token_disambiguation(resolved, model_dir))
+}
+
+fn classification_hints_from_persisted_sources(
+    model_dir: &Path,
+    metadata: &ModelMetadata,
+) -> (Option<String>, Option<String>, Option<HuggingFaceEvidence>) {
+    let marker_hints = load_download_marker_hints(model_dir);
+    let metadata_pipeline_tag = metadata
+        .pipeline_tag
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let marker_pipeline_tag = marker_hints
+        .as_ref()
+        .and_then(|marker| marker.pipeline_tag.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let metadata_huggingface_evidence = metadata.huggingface_evidence.clone();
+    let marker_huggingface_evidence = marker_hints
+        .as_ref()
+        .and_then(|marker| marker.huggingface_evidence.clone());
+    let huggingface_evidence =
+        metadata_huggingface_evidence.or(marker_huggingface_evidence.clone());
+
+    let pipeline_tag = metadata_pipeline_tag
+        .or(marker_pipeline_tag)
+        .or_else(|| {
+            huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.pipeline_tag.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.remote_kind.as_deref())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        });
+
+    let spec_model_type = marker_hints
+        .and_then(|marker| marker.model_type)
+        .map(|value| value.trim().to_lowercase())
+        .filter(|value| !value.is_empty() && value != "unknown" && value != "llm");
+
+    (pipeline_tag, spec_model_type, huggingface_evidence)
+}
+
+fn load_download_marker_hints(model_dir: &Path) -> Option<DownloadMarkerHints> {
+    let marker_path = model_dir.join(".pumas_download");
+    let marker = match atomic_read_json::<Value>(&marker_path) {
+        Ok(Some(value)) => value,
+        Ok(None) => return None,
+        Err(err) => {
+            tracing::warn!(
+                "Failed to read persisted download marker for {}: {}",
+                model_dir.display(),
+                err
+            );
+            return None;
+        }
+    };
+
+    let object = match marker {
+        Value::Object(object) => object,
+        _ => return None,
+    };
+
+    let model_type = object
+        .get("model_type")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let pipeline_tag = object
+        .get("pipeline_tag")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let huggingface_evidence = object
+        .get("huggingface_evidence")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<HuggingFaceEvidence>(value).ok());
+
+    if model_type.is_none() && pipeline_tag.is_none() && huggingface_evidence.is_none() {
+        return None;
+    }
+
+    Some(DownloadMarkerHints {
+        model_type,
+        pipeline_tag,
+        huggingface_evidence,
+    })
+}
+
+fn apply_name_token_disambiguation(
+    mut resolved: ModelTypeResolution,
+    model_dir: &Path,
+) -> ModelTypeResolution {
+    let Some(token_type) = detect_model_type_from_name_tokens(model_dir) else {
+        return resolved;
+    };
+
+    if token_type == ModelType::Unknown || token_type == resolved.model_type {
+        return resolved;
+    }
+
+    let should_override = matches!(
+        (resolved.model_type, token_type),
+        (ModelType::Llm, ModelType::Reranker)
+    ) || matches!(
+        (resolved.model_type, token_type),
+        (ModelType::Llm, ModelType::Diffusion)
+    ) && resolved.confidence <= 0.70;
+
+    if should_override {
+        apply_fallback_resolution(
+            &mut resolved,
+            token_type,
+            "model-type-name-tokens",
+            0.60,
+            "model-type-fallback-name-tokens",
+        );
+    }
+
+    resolved
+}
+
 /// Apply deterministic local fallbacks when rule-based resolver is unresolved.
 fn apply_unresolved_model_type_fallbacks(
     mut resolved: ModelTypeResolution,
@@ -3839,15 +3989,18 @@ fn detect_model_type_from_name_tokens(model_dir: &Path) -> Option<ModelType> {
     if contains_any(&[
         "qwen-image",
         "image-edit",
+        "image-turbo",
+        "image_turbo",
         "flux",
         "stable-diffusion",
         "stable_diffusion",
+        "sd-turbo",
+        "sd_turbo",
         "sdxl",
         "diffusion",
         "inpaint",
         "unblur",
         "upscale",
-        "turbo",
         "glm-image",
     ]) {
         return Some(ModelType::Diffusion);
@@ -5459,10 +5612,12 @@ mod tests {
             Some("model-type-resolver-arch-rules".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.7));
-        assert!(updated
-            .review_reasons
-            .unwrap_or_default()
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            updated
+                .review_reasons
+                .unwrap_or_default()
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[tokio::test]
@@ -5681,10 +5836,12 @@ mod tests {
             Some("model-type-file-signature".to_string())
         );
         assert_eq!(updated.model_type_resolution_confidence, Some(0.65));
-        assert!(updated
-            .review_reasons
-            .unwrap_or_default()
-            .contains(&"model-type-fallback-file-signature".to_string()));
+        assert!(
+            updated
+                .review_reasons
+                .unwrap_or_default()
+                .contains(&"model-type-fallback-file-signature".to_string())
+        );
     }
 
     #[tokio::test]
@@ -5908,6 +6065,144 @@ mod tests {
         let new_dir = library.build_model_path("audio", "openai", "whisper-large-v3-turbo");
         assert!(new_dir.exists());
         assert!(!old_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_redetect_model_type_prefers_persisted_reranker_marker_hint() {
+        let (_, library) = setup_library().await;
+
+        let model_dir = library.build_model_path("llm", "forturne", "qwen3-reranker-4b-nvfp4");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["Qwen3ForCausalLM"],"model_type":"qwen3"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            model_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": "Forturne/Qwen3-Reranker-4B-NVFP4",
+                "model_type": "reranker"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/forturne/qwen3-reranker-4b-nvfp4".to_string()),
+            family: Some("forturne".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-NVFP4".to_string()),
+            cleaned_name: Some("qwen3-reranker-4b-nvfp4".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let changed = library
+            .redetect_model_type("llm/forturne/qwen3-reranker-4b-nvfp4")
+            .await
+            .unwrap();
+        assert_eq!(changed, Some("reranker".to_string()));
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("reranker".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-reranker-disambiguation-guard".to_string())
+        );
+        assert!(updated.review_reasons.unwrap_or_default().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_promotes_qwen_image_name_over_qwen_llm_config() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("llm", "catplusplus", "qwen-image-2512-heretic");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+        std::fs::write(
+            old_dir.join("config.json"),
+            r#"{"architectures":["Qwen2_5_VLForConditionalGeneration"],"model_type":"qwen2_5_vl"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/catplusplus/qwen-image-2512-heretic".to_string()),
+            family: Some("catplusplus".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("Qwen-Image-2512-Heretic".to_string()),
+            cleaned_name: Some("qwen-image-2512-heretic".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("llm/catplusplus/qwen-image-2512-heretic")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("diffusion/catplusplus/qwen-image-2512-heretic".to_string())
+        );
+
+        let new_dir =
+            library.build_model_path("diffusion", "catplusplus", "qwen-image-2512-heretic");
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("diffusion".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-diffusion-disambiguation-guard".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_promotes_image_turbo_name_over_file_signature_llm() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("llm", "nunchaku-ai", "nunchaku-z-image-turbo");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("svdq-int4_r256-z-image-turbo.safetensors"));
+        std::fs::write(
+            old_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": "nunchaku-ai/nunchaku-z-image-turbo",
+                "model_type": "llm"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/nunchaku-ai/nunchaku-z-image-turbo".to_string()),
+            family: Some("nunchaku-ai".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("nunchaku-z-image-turbo".to_string()),
+            cleaned_name: Some("nunchaku-z-image-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("llm/nunchaku-ai/nunchaku-z-image-turbo")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("diffusion/nunchaku-ai/nunchaku-z-image-turbo".to_string())
+        );
+
+        let new_dir =
+            library.build_model_path("diffusion", "nunchaku-ai", "nunchaku-z-image-turbo");
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("diffusion".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-name-tokens".to_string())
+        );
     }
 
     #[tokio::test]
@@ -6545,11 +6840,13 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(library
-            .list_models_needing_review(None)
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            library
+                .list_models_needing_review(None)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         let reset = library
             .reset_model_review("llm/llama/reset-review", "bob", Some("revert"))
@@ -6564,9 +6861,11 @@ mod tests {
             "llm/llama/reset-review"
         );
         assert_eq!(queue_after[0].review_status.as_deref(), Some("pending"));
-        assert!(queue_after[0]
-            .review_reasons
-            .contains(&"unknown-task-signature".to_string()));
+        assert!(
+            queue_after[0]
+                .review_reasons
+                .contains(&"unknown-task-signature".to_string())
+        );
     }
 
     #[tokio::test]
@@ -6662,10 +6961,12 @@ mod tests {
         let report = library.generate_migration_dry_run_report().unwrap();
         assert_eq!(report.total_models, 2);
         assert_eq!(report.collision_count, 1);
-        assert!(report
-            .items
-            .iter()
-            .any(|item| item.action == "blocked_collision"));
+        assert!(
+            report
+                .items
+                .iter()
+                .any(|item| item.action == "blocked_collision")
+        );
     }
 
     #[tokio::test]
@@ -6710,10 +7011,12 @@ mod tests {
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
         assert!(!index.entries.is_empty());
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "dry_run"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "dry_run")
+        );
     }
 
     #[tokio::test]
@@ -6915,10 +7218,12 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "execution"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "execution")
+        );
     }
 
     #[tokio::test]
@@ -6979,10 +7284,12 @@ mod tests {
             .join(MIGRATION_REPORT_INDEX_FILENAME);
         assert!(index_path.exists());
         let index: MigrationReportIndex = atomic_read_json(&index_path).unwrap().unwrap();
-        assert!(index
-            .entries
-            .iter()
-            .any(|entry| entry.report_kind == "execution"));
+        assert!(
+            index
+                .entries
+                .iter()
+                .any(|entry| entry.report_kind == "execution")
+        );
     }
 
     #[tokio::test]
@@ -7025,11 +7332,87 @@ mod tests {
 
         let report = library.execute_migration_with_checkpoint().await.unwrap();
         assert!(!report.referential_integrity_ok);
-        assert!(report
-            .referential_integrity_errors
-            .iter()
-            .any(|error| error.contains("metadata validation failed")));
+        assert!(
+            report
+                .referential_integrity_errors
+                .iter()
+                .any(|error| error.contains("metadata validation failed"))
+        );
         assert!(report.error_count >= 1);
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_keeps_metadata_backed_reranker_with_marker_hint() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("reranker", "qwen3", "qwen3-reranker-4b-gguf");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("qwen3-reranker-4b-q4.gguf"));
+        std::fs::write(
+            model_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": "QuantFactory/Qwen3-Reranker-4B-GGUF",
+                "model_type": "reranker"
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("reranker/qwen3/qwen3-reranker-4b-gguf".to_string()),
+            family: Some("qwen3".to_string()),
+            model_type: Some("reranker".to_string()),
+            cleaned_name: Some("qwen3-reranker-4b-gguf".to_string()),
+            official_name: Some("Qwen3-Reranker-4B-GGUF".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "reranker/qwen3/qwen3-reranker-4b-gguf")
+            .unwrap();
+        assert_eq!(row.action, "keep");
+        assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
+        assert_eq!(
+            row.resolver_source.as_deref(),
+            Some("model-type-reranker-disambiguation-guard")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_keeps_metadata_backed_image_turbo_diffusion() {
+        let (_, library) = setup_library().await;
+        let model_dir =
+            library.build_model_path("diffusion", "nunchaku-ai", "nunchaku-z-image-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("svdq-int4_r256-z-image-turbo.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("diffusion/nunchaku-ai/nunchaku-z-image-turbo".to_string()),
+            family: Some("nunchaku-ai".to_string()),
+            model_type: Some("diffusion".to_string()),
+            cleaned_name: Some("nunchaku-z-image-turbo".to_string()),
+            official_name: Some("nunchaku-z-image-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "diffusion/nunchaku-ai/nunchaku-z-image-turbo")
+            .unwrap();
+        assert_eq!(row.action, "keep");
+        assert_eq!(row.resolved_model_type.as_deref(), Some("diffusion"));
+        assert_eq!(
+            row.resolver_source.as_deref(),
+            Some("model-type-name-tokens")
+        );
     }
 
     #[tokio::test]
@@ -7072,10 +7455,11 @@ mod tests {
         assert_eq!(row.action, "blocked_partial_download");
         assert_eq!(row.current_model_type.as_deref(), Some("reranker"));
         assert_eq!(row.resolved_model_type.as_deref(), Some("reranker"));
-        assert!(row
-            .findings
-            .iter()
-            .any(|finding| finding == "partial_download_blocked_migration_move"));
+        assert!(
+            row.findings
+                .iter()
+                .any(|finding| finding == "partial_download_blocked_migration_move")
+        );
     }
 
     #[tokio::test]
@@ -7109,10 +7493,12 @@ mod tests {
         assert_eq!(report.completed_move_count, 0);
         assert_eq!(report.skipped_move_count, 1);
         assert_eq!(report.error_count, 0);
-        assert!(report
-            .results
-            .iter()
-            .any(|row| row.action == "skipped_partial_download"));
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|row| row.action == "skipped_partial_download")
+        );
     }
 
     #[tokio::test]
@@ -7153,10 +7539,12 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 1);
         assert_eq!(integrity.index_stale_model_count, 0);
-        assert!(!integrity
-            .errors
-            .iter()
-            .any(|error| error.contains("metadata mismatch")));
+        assert!(
+            !integrity
+                .errors
+                .iter()
+                .any(|error| error.contains("metadata mismatch"))
+        );
     }
 
     #[tokio::test]
@@ -7196,10 +7584,12 @@ mod tests {
         assert_eq!(integrity.index_metadata_model_count, 1);
         assert_eq!(integrity.index_partial_download_count, 0);
         assert_eq!(integrity.index_stale_model_count, 1);
-        assert!(integrity
-            .errors
-            .iter()
-            .any(|error| error.contains("stale index rows detected")));
+        assert!(
+            integrity
+                .errors
+                .iter()
+                .any(|error| error.contains("stale index rows detected"))
+        );
     }
 
     #[tokio::test]
@@ -7972,26 +8362,36 @@ mod tests {
         assert_eq!(binding.profile_id, SD_TURBO_PROFILE_ID);
         assert_eq!(binding.profile_version, SD_TURBO_PROFILE_VERSION);
         assert_eq!(binding.backend_key.as_deref(), Some(SD_TURBO_BACKEND_KEY));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1"));
-        assert!(binding
-            .requirements
-            .iter()
-            .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1"));
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "diffusers" && req.exact_pin == "==0.32.0")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "transformers" && req.exact_pin == "==4.41.2")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "accelerate" && req.exact_pin == "==0.31.0")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "safetensors" && req.exact_pin == "==0.3.1")
+        );
+        assert!(
+            binding
+                .requirements
+                .iter()
+                .any(|req| req.name == "torch" && req.exact_pin == "==2.5.1")
+        );
 
         let binding_id = sd_turbo_runtime_binding_id(model_id);
         let initial_binding = library
@@ -8219,11 +8619,13 @@ mod tests {
         library.index_model_dir(&model_dir).await.unwrap();
 
         let loaded = library.load_metadata(&model_dir).unwrap().unwrap();
-        assert!(loaded
-            .dependency_bindings
-            .unwrap_or_default()
-            .iter()
-            .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID)));
+        assert!(
+            loaded
+                .dependency_bindings
+                .unwrap_or_default()
+                .iter()
+                .all(|binding| binding.profile_id.as_deref() != Some(SD_TURBO_PROFILE_ID))
+        );
     }
 
     #[tokio::test]

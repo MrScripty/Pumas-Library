@@ -3,9 +3,9 @@
 //! Uses active SQLite rule tables (`model_type_arch_rules`, `model_type_config_rules`)
 //! and deterministic scoring rules to classify model type from hard source signals.
 
+use crate::Result;
 use crate::index::{ModelIndex, ModelTypeArchRule, ModelTypeConfigRule};
 use crate::model_library::types::{HuggingFaceEvidence, ModelType};
-use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -94,6 +94,15 @@ fn resolve_model_type_from_inputs(
             model_type: ModelType::Audio,
             source: "model-type-audio-disambiguation-guard".to_string(),
             confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
+    if should_apply_diffusion_disambiguation_guard(&hard_types, name_hint, &medium_hints) {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Diffusion,
+            source: "model-type-diffusion-disambiguation-guard".to_string(),
+            confidence: 0.85,
             review_reasons: Vec::new(),
         });
     }
@@ -338,6 +347,27 @@ fn name_looks_like_audio(name_hint: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
+fn name_looks_like_diffusion(name_hint: Option<&str>) -> bool {
+    name_hint
+        .map(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("qwen-image")
+                || lower.contains("image-turbo")
+                || lower.contains("image_turbo")
+                || lower.contains("sd-turbo")
+                || lower.contains("sd_turbo")
+                || lower.contains("stable-diffusion")
+                || lower.contains("stable_diffusion")
+                || lower.contains("sdxl")
+                || lower.contains("flux")
+                || lower.contains("glm-image")
+                || lower.contains("image-edit")
+                || lower.contains("diffusion")
+                || lower.contains("inpaint")
+        })
+        .unwrap_or(false)
+}
+
 fn has_reward_model_architecture(signals: &ConfigSignals) -> bool {
     signals.architectures.iter().any(|arch| {
         let lower = arch.to_lowercase();
@@ -367,6 +397,10 @@ fn should_apply_reranker_disambiguation_guard(
         return true;
     }
 
+    if has_reranker_name && hard_types.len() == 1 && hard_types.contains(&ModelType::Llm) {
+        return true;
+    }
+
     if has_reward_arch
         && (hard_types.contains(&ModelType::Llm)
             || medium_hints.contains(&ModelType::Reranker)
@@ -377,6 +411,27 @@ fn should_apply_reranker_disambiguation_guard(
     }
 
     medium_hints.contains(&ModelType::Reranker) && (has_reranker_name || has_reranker_config)
+}
+
+fn should_apply_diffusion_disambiguation_guard(
+    hard_types: &HashSet<ModelType>,
+    name_hint: Option<&str>,
+    medium_hints: &[ModelType],
+) -> bool {
+    if medium_hints
+        .iter()
+        .any(|hint| *hint != ModelType::Diffusion)
+    {
+        return false;
+    }
+
+    let has_diffusion_name = name_looks_like_diffusion(name_hint);
+
+    if medium_hints.contains(&ModelType::Diffusion) && hard_types.contains(&ModelType::Llm) {
+        return true;
+    }
+
+    hard_types.len() == 1 && hard_types.contains(&ModelType::Llm) && has_diffusion_name
 }
 
 fn has_audio_architecture(signals: &ConfigSignals) -> bool {
@@ -671,9 +726,11 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "model-type-resolver-hard-conflict");
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-conflict".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-conflict".to_string())
+        );
     }
 
     #[test]
@@ -691,9 +748,11 @@ mod tests {
             resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Llm);
         assert!((resolved.confidence - 0.7).abs() < f64::EPSILON);
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[test]
@@ -742,9 +801,11 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "unresolved");
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-unresolved".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-unresolved".to_string())
+        );
     }
 
     #[test]
@@ -789,9 +850,11 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Llm);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[test]
@@ -816,9 +879,11 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Reranker);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[test]
@@ -843,9 +908,11 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Audio);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-low-confidence".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-low-confidence".to_string())
+        );
     }
 
     #[test]
@@ -930,9 +997,11 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
-        assert!(resolved
-            .review_reasons
-            .contains(&"model-type-unresolved".to_string()));
+        assert!(
+            resolved
+                .review_reasons
+                .contains(&"model-type-unresolved".to_string())
+        );
     }
 
     #[test]
@@ -964,5 +1033,50 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.model_type, ModelType::Reranker);
         assert_eq!(resolved.source, "model-type-reranker-disambiguation-guard");
+    }
+
+    #[test]
+    fn reranker_name_guard_overrides_qwen_llm_config_without_medium_hint() {
+        let (_tmp, index) = create_test_index();
+
+        let resolved = resolve_model_type_from_huggingface_evidence(
+            &index,
+            Some("Qwen3-Reranker-4B-NVFP4"),
+            None,
+            None,
+            Some(&HuggingFaceEvidence {
+                repo_id: Some("Forturne/Qwen3-Reranker-4B-NVFP4".to_string()),
+                architectures: Some(vec!["Qwen3ForCausalLM".to_string()]),
+                config_model_type: Some("qwen3".to_string()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model_type, ModelType::Reranker);
+        assert_eq!(resolved.source, "model-type-reranker-disambiguation-guard");
+    }
+
+    #[test]
+    fn diffusion_name_guard_overrides_qwen_llm_config_without_medium_hint() {
+        let (_tmp, index) = create_test_index();
+
+        let resolved = resolve_model_type_from_huggingface_evidence(
+            &index,
+            Some("Qwen-Image-2512-Heretic"),
+            None,
+            None,
+            Some(&HuggingFaceEvidence {
+                repo_id: Some("catplusplus/Qwen-Image-2512-Heretic".to_string()),
+                architectures: Some(vec!["Qwen2_5_VLForConditionalGeneration".to_string()]),
+                config_model_type: Some("qwen2_5_vl".to_string()),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model_type, ModelType::Diffusion);
+        assert_eq!(resolved.source, "model-type-diffusion-disambiguation-guard");
+        assert!(resolved.review_reasons.is_empty());
     }
 }

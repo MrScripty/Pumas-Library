@@ -15,6 +15,7 @@ mod process;
 mod reconciliation;
 mod state;
 mod state_hf;
+mod state_process;
 mod system;
 
 pub use builder::PumasApiBuilder;

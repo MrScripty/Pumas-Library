@@ -3,17 +3,17 @@
 //! Handles direct model info lookups, repository file tree retrieval,
 //! metadata lookup by filename/hash, and candidate verification.
 
-use super::types::{
-    infer_pipeline_tag_from_config, HfFileEntry, HfSearchResult, HF_API_BASE, HF_HUB_BASE,
-    REPO_CACHE_TTL_SECS,
-};
 use super::HuggingFaceClient;
+use super::types::{
+    HF_API_BASE, HF_HUB_BASE, HfFileEntry, HfSearchResult, REPO_CACHE_TTL_SECS,
+    infer_pipeline_tag_from_config,
+};
 use crate::error::{PumasError, Result};
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
     DownloadRequest, HfMetadataResult, HfSearchParams, HuggingFaceEvidence, HuggingFaceModel,
-    LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION,
+    LfsFileInfo, REPO_FILE_TREE_VERSION, RepoFileTree,
 };
 use std::path::Path;
 use std::time::Duration;

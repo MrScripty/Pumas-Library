@@ -1,11 +1,11 @@
 //! Model library methods on PumasApi.
 
-use super::{reconcile_on_demand, ReconcileScope};
+use super::{ReconcileScope, reconcile_on_demand};
+use crate::PumasApi;
 use crate::error::Result;
 use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
 use crate::models;
-use crate::PumasApi;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;

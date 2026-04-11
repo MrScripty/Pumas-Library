@@ -1,6 +1,6 @@
 use super::{ModelIndex, ModelMetadataHistoryRecord, ModelMetadataOverlayRecord};
 use crate::{PumasError, Result};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::{OptionalExtension, params};
 use serde_json::Value;
 
 impl ModelIndex {

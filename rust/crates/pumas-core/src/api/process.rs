@@ -1,9 +1,9 @@
 //! Process management methods on PumasApi.
 
+use crate::PumasApi;
 use crate::error::{PumasError, Result};
 use crate::models;
 use crate::process;
-use crate::PumasApi;
 
 impl PumasApi {
     // ========================================

@@ -3,19 +3,19 @@
 //! Handles multi-file downloads with progress tracking, pause/resume,
 //! cancellation, retry with resume, and crash recovery via persistence.
 
+use super::HuggingFaceClient;
 use super::types::{
     AuxFilesCompleteCallback, AuxFilesCompleteInfo, DownloadCompletionCallback,
     DownloadCompletionInfo, DownloadState, FileToDownload, HF_HUB_BASE,
 };
-use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
 use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
@@ -434,11 +434,7 @@ impl HuggingFaceClient {
         // affect progress accuracy)
         let total_bytes: Option<u64> = {
             let known_sum: u64 = files.iter().filter_map(|f| f.size).sum();
-            if known_sum > 0 {
-                Some(known_sum)
-            } else {
-                None
-            }
+            if known_sum > 0 { Some(known_sum) } else { None }
         };
         let first_filename = files[0].filename.clone();
         let final_filenames: Vec<String> = files.iter().map(|f| f.filename.clone()).collect();
@@ -1594,15 +1590,17 @@ mod tests {
             );
         }
 
-        assert!(client
-            .relocate_download_destination(
-                &download_id,
-                &new_dest,
-                Some("reranker"),
-                Some("forturne"),
-            )
-            .await
-            .unwrap());
+        assert!(
+            client
+                .relocate_download_destination(
+                    &download_id,
+                    &new_dest,
+                    Some("reranker"),
+                    Some("forturne"),
+                )
+                .await
+                .unwrap()
+        );
 
         let status = client.get_download_status(&download_id).await;
         assert_eq!(status, Some(DownloadStatus::Paused));

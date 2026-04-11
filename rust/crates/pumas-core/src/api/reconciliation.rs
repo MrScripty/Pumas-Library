@@ -24,8 +24,8 @@ use crate::error::{PumasError, Result};
 use crate::index::ModelIndex;
 use crate::model_library::download_store::PersistedDownload;
 use crate::model_library::{
-    resolve_model_type_with_rules, InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata,
-    ModelType, RepoFileTree,
+    InPlaceImportSpec, ModelLibraryWatcher, ModelMetadata, ModelType, RepoFileTree,
+    resolve_model_type_with_rules,
 };
 
 use super::state::PrimaryState;
@@ -1442,10 +1442,12 @@ mod tests {
             overridden.source.as_deref(),
             Some("download-partial-reranker-name-override")
         );
-        assert!(overridden
-            .review_reasons
-            .iter()
-            .any(|reason| reason == "model-type-overridden-by-name-hint"));
+        assert!(
+            overridden
+                .review_reasons
+                .iter()
+                .any(|reason| reason == "model-type-overridden-by-name-hint")
+        );
     }
 
     #[test]

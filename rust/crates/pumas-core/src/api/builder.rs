@@ -8,12 +8,12 @@ use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
 use crate::error::{PumasError, Result};
-use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
+use crate::{config, conversion, model_library, network, process, registry, system};
 
 use super::{
-    start_model_library_watcher, ReconciliationCoordinator, WatcherWriteSuppressor,
-    WATCHER_WRITE_SUPPRESSION_TTL,
+    ReconciliationCoordinator, WATCHER_WRITE_SUPPRESSION_TTL, WatcherWriteSuppressor,
+    start_model_library_watcher,
 };
 
 /// Builder for configuring PumasApi initialization.

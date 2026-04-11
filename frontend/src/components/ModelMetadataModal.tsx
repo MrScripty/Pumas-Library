@@ -6,9 +6,11 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, FileText, Database, ChevronDown, ChevronUp, ExternalLink, Loader2, RefreshCw, Settings, Plus, Trash2, PencilLine } from 'lucide-react';
+import { X, FileText, Database, Loader2, RefreshCw, Settings, Plus, Trash2, PencilLine } from 'lucide-react';
 import { modelsAPI } from '../api/models';
 import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
+import { ModelBundleManifestPanel } from './ModelBundleManifestPanel';
+import { ModelMetadataGrid } from './ModelMetadataGrid';
 import { ModelNotesEditor } from './ModelNotesEditor';
 
 interface ModelMetadataModalProps {
@@ -112,78 +114,9 @@ function normalizeStringDefault(raw: unknown): string {
   return raw == null ? '' : String(raw);
 }
 
-function formatBundleComponentState(state: BundleComponentManifestEntry['state']): string {
-  switch (state) {
-    case 'present':
-      return 'Present';
-    case 'missing':
-      return 'Missing';
-    case 'unreadable':
-      return 'Unreadable';
-    case 'path_escape':
-      return 'Invalid Path';
-    default:
-      return state;
-  }
-}
-
 function getStoredNotes(metadata: Record<string, unknown> | null): string {
   const notes = metadata?.['notes'];
   return typeof notes === 'string' ? notes : '';
-}
-
-/** Check whether value is a structured type requiring summary/expand controls */
-function isStructuredValue(value: unknown): boolean {
-  return Array.isArray(value) || isRecordValue(value);
-}
-
-/** Generate a short summary for array/object metadata values */
-function getStructuredValueSummary(key: string, value: unknown): string {
-  const lowerKey = key.toLowerCase();
-
-  if (lowerKey === 'dependency_bindings' && Array.isArray(value)) {
-    return `Dependency bindings (${value.length})`;
-  }
-  if (lowerKey === 'files' && Array.isArray(value)) {
-    return `Files (${value.length})`;
-  }
-  if (lowerKey === 'hashes' && isRecordValue(value)) {
-    const hashKinds = Object.keys(value).filter((k) => value[k] != null && String(value[k]).trim() !== '');
-    if (hashKinds.length === 0) return 'Hashes (empty)';
-    const preview = hashKinds.slice(0, 3).join(', ');
-    return `Hashes (${preview}${hashKinds.length > 3 ? ', ...' : ''})`;
-  }
-
-  if (Array.isArray(value)) {
-    if (value.length === 0) return 'Array (0)';
-    const typedValues = value.filter((item) => item != null);
-    if (typedValues.length > 0 && typedValues.every((item) => typeof item === 'string')) {
-      return `Array of strings (${value.length})`;
-    }
-    if (typedValues.length > 0 && typedValues.every((item) => isRecordValue(item))) {
-      return `Array of objects (${value.length})`;
-    }
-    return `Array (${value.length})`;
-  }
-
-  if (isRecordValue(value)) {
-    const keys = Object.keys(value);
-    if (keys.length === 0) return 'Object (0 keys)';
-    const preview = keys.slice(0, 3).join(', ');
-    return `Object (${keys.length} keys: ${preview}${keys.length > 3 ? ', ...' : ''})`;
-  }
-
-  return String(value ?? '');
-}
-
-/** Stringify metadata values for copy/expanded display */
-function serializeMetadataValue(value: unknown): string {
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
 }
 
 /** Check if a GGUF field is a priority field */
@@ -432,7 +365,9 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const handleCopyFieldValue = async (fieldKey: string, value: unknown) => {
     if (!navigator.clipboard?.writeText) return;
     try {
-      await navigator.clipboard.writeText(serializeMetadataValue(value));
+      const serialized =
+        typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value);
+      await navigator.clipboard.writeText(serialized);
       setCopiedFieldKey(fieldKey);
       setTimeout(() => {
         setCopiedFieldKey((current) => (current === fieldKey ? null : current));
@@ -440,135 +375,6 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     } catch {
       // Clipboard write failures are non-fatal; leave UI unchanged.
     }
-  };
-
-  // ========================================
-  // Metadata grid renderer
-  // ========================================
-
-  const renderMetadataGrid = (metadata: Record<string, unknown>, isGguf: boolean) => {
-    const entries = Object.entries(metadata).filter(([key]) => key !== 'notes');
-
-    // Sort and filter entries
-    let displayEntries = entries;
-    if (isGguf) {
-      // Filter and sort GGUF entries
-      const priorityEntries = entries.filter(([k]) => isPriorityGgufField(k));
-      const otherEntries = entries.filter(
-        ([k, v]) => !isPriorityGgufField(k) && !isHiddenGgufField(k, v)
-      );
-      const hiddenEntries = entries.filter(([k, v]) => isHiddenGgufField(k, v));
-
-      displayEntries = showAllFields
-        ? [...priorityEntries, ...otherEntries, ...hiddenEntries]
-        : [...priorityEntries, ...otherEntries.slice(0, 5)];
-
-      const hiddenCount = hiddenEntries.length + (showAllFields ? 0 : Math.max(0, otherEntries.length - 5));
-
-      return (
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-h-80 overflow-y-auto">
-            {displayEntries.map(([key, value]) => {
-              const linkedUrl = LINKED_GGUF_FIELDS[key.toLowerCase()];
-              const urlValue = linkedUrl ? (metadata[linkedUrl] as string) : null;
-
-              return (
-                <React.Fragment key={key}>
-                  <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
-                    {formatFieldName(key)}
-                  </span>
-                  <span className="text-[hsl(var(--text-secondary))] truncate" title={formatMetadataValue(key, value)}>
-                    {urlValue ? (
-                      <a
-                        href={urlValue}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-[hsl(var(--accent-link))] hover:underline inline-flex items-center gap-1"
-                      >
-                        {formatMetadataValue(key, value)}
-                        <ExternalLink className="w-3 h-3" />
-                      </a>
-                    ) : (
-                      formatMetadataValue(key, value)
-                    )}
-                  </span>
-                </React.Fragment>
-              );
-            })}
-          </div>
-          {hiddenCount > 0 && (
-            <button
-              onClick={() => setShowAllFields(!showAllFields)}
-              className="text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))] flex items-center gap-1"
-            >
-              {showAllFields ? (
-                <>
-                  <ChevronUp className="w-3 h-3" /> Show less
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3 h-3" /> Show {hiddenCount} more fields
-                </>
-              )}
-            </button>
-          )}
-        </div>
-      );
-    }
-
-    // Non-GGUF (stored metadata) - simpler display
-    return (
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm max-h-80 overflow-y-auto">
-        {displayEntries.map(([key, value]) => {
-          const fieldKey = `${activeSource}:${key}`;
-          const isStructured = isStructuredValue(value);
-          const isExpanded = expandedFieldKeys.has(fieldKey);
-          const summaryLabel = isStructured ? getStructuredValueSummary(key, value) : formatMetadataValue(key, value);
-
-          return (
-            <React.Fragment key={key}>
-              <span className="text-[hsl(var(--text-muted))] truncate" title={key}>
-                {formatFieldName(key)}
-              </span>
-              <div className="text-[hsl(var(--text-secondary))]">
-                {!isStructured ? (
-                  <span className="truncate block" title={summaryLabel}>
-                    {summaryLabel}
-                  </span>
-                ) : (
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="truncate" title={summaryLabel}>
-                      {summaryLabel}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => toggleFieldExpanded(fieldKey)}
-                      className="text-xs px-1.5 py-0.5 rounded border border-[hsl(var(--border-default))] hover:bg-[hsl(var(--surface-high))] shrink-0"
-                      title={isExpanded ? 'Collapse value' : 'Expand value'}
-                    >
-                      {isExpanded ? 'Collapse' : 'Expand'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyFieldValue(fieldKey, value)}
-                      className="text-xs px-1.5 py-0.5 rounded border border-[hsl(var(--border-default))] hover:bg-[hsl(var(--surface-high))] shrink-0"
-                      title="Copy full JSON value"
-                    >
-                      {copiedFieldKey === fieldKey ? 'Copied' : 'Copy'}
-                    </button>
-                  </div>
-                )}
-              </div>
-              {isStructured && isExpanded && (
-                <pre className="col-span-2 mt-1 mb-2 p-2 rounded bg-[hsl(var(--surface-high)/0.5)] border border-[hsl(var(--border-default))] text-xs font-mono whitespace-pre-wrap break-all text-[hsl(var(--text-secondary))]">
-                  {serializeMetadataValue(value)}
-                </pre>
-              )}
-            </React.Fragment>
-          );
-        })}
-      </div>
-    );
   };
 
   // ========================================
@@ -821,9 +627,39 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
 
               {/* Content for active tab */}
               {activeSource === 'embedded' && embeddedMetadata ? (
-                renderMetadataGrid(embeddedMetadata, embeddedFileType === 'gguf')
+                <ModelMetadataGrid
+                  metadata={embeddedMetadata}
+                  isGguf={embeddedFileType === 'gguf'}
+                  sourceKey={activeSource}
+                  showAllFields={showAllFields}
+                  expandedFieldKeys={expandedFieldKeys}
+                  copiedFieldKey={copiedFieldKey}
+                  onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
+                  onToggleFieldExpanded={toggleFieldExpanded}
+                  onCopyFieldValue={(fieldKey, value) => void handleCopyFieldValue(fieldKey, value)}
+                  formatFieldName={formatFieldName}
+                  formatMetadataValue={formatMetadataValue}
+                  isPriorityGgufField={isPriorityGgufField}
+                  isHiddenGgufField={isHiddenGgufField}
+                  linkedGgufFields={LINKED_GGUF_FIELDS}
+                />
               ) : activeSource === 'stored' && storedMetadata ? (
-                renderMetadataGrid(storedMetadata, false)
+                <ModelMetadataGrid
+                  metadata={storedMetadata}
+                  isGguf={false}
+                  sourceKey={activeSource}
+                  showAllFields={showAllFields}
+                  expandedFieldKeys={expandedFieldKeys}
+                  copiedFieldKey={copiedFieldKey}
+                  onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
+                  onToggleFieldExpanded={toggleFieldExpanded}
+                  onCopyFieldValue={(fieldKey, value) => void handleCopyFieldValue(fieldKey, value)}
+                  formatFieldName={formatFieldName}
+                  formatMetadataValue={formatMetadataValue}
+                  isPriorityGgufField={isPriorityGgufField}
+                  isHiddenGgufField={isHiddenGgufField}
+                  linkedGgufFields={LINKED_GGUF_FIELDS}
+                />
               ) : activeSource === 'inference' ? (
                 renderInferenceSettings()
               ) : activeSource === 'notes' ? (
@@ -845,60 +681,11 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
                 </div>
               )}
 
-              {componentManifest.length > 0 && (
-                <div className="rounded-lg border border-[hsl(var(--border-default))] bg-[hsl(var(--surface-low))]">
-                  <button
-                    onClick={() => setShowComponents((prev) => !prev)}
-                    className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-[hsl(var(--surface-mid)/0.35)] transition-colors"
-                  >
-                    <div>
-                      <div className="text-sm font-medium text-[hsl(var(--text-primary))]">
-                        Components ({componentManifest.length})
-                      </div>
-                      <div className="text-xs text-[hsl(var(--text-muted))]">
-                        Bundle component list derived from `model_index.json`
-                      </div>
-                    </div>
-                    {showComponents ? (
-                      <ChevronUp className="w-4 h-4 text-[hsl(var(--text-secondary))]" />
-                    ) : (
-                      <ChevronDown className="w-4 h-4 text-[hsl(var(--text-secondary))]" />
-                    )}
-                  </button>
-
-                  {showComponents && (
-                    <div className="border-t border-[hsl(var(--border-default))] px-3 py-3 space-y-2">
-                      {componentManifest.map((component) => (
-                        <div
-                          key={component.name}
-                          className="rounded-md border border-[hsl(var(--border-muted))] bg-[hsl(var(--surface-high)/0.35)] px-3 py-2"
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="text-sm font-medium text-[hsl(var(--text-primary))]">
-                              {component.name}
-                            </div>
-                            <span className={`text-[10px] uppercase tracking-wide px-2 py-0.5 rounded ${
-                              component.state === 'present'
-                                ? 'bg-[hsl(var(--accent-success)/0.15)] text-[hsl(var(--accent-success))]'
-                                : 'bg-[hsl(var(--accent-error)/0.15)] text-[hsl(var(--accent-error))]'
-                            }`}>
-                              {formatBundleComponentState(component.state)}
-                            </span>
-                          </div>
-                          <div className="mt-1 text-xs font-mono text-[hsl(var(--text-secondary))] break-all">
-                            {component.relative_path}
-                          </div>
-                          {(component.class_name || component.source_library) && (
-                            <div className="mt-1 text-xs text-[hsl(var(--text-muted))]">
-                              {[component.class_name, component.source_library].filter(Boolean).join(' · ')}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
+              <ModelBundleManifestPanel
+                componentManifest={componentManifest}
+                showComponents={showComponents}
+                onToggle={() => setShowComponents((prev) => !prev)}
+              />
 
               {/* Primary file path */}
               {primaryFile && (

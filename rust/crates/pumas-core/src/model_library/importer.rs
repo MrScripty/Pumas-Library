@@ -5,12 +5,11 @@
 
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
-    build_diffusers_bundle_metadata, build_external_diffusers_metadata,
-    validate_diffusers_directory_for_import, DiffusersBundleMetadataSpec,
-    DiffusersValidationResult,
+    DiffusersBundleMetadataSpec, DiffusersValidationResult, build_diffusers_bundle_metadata,
+    build_external_diffusers_metadata, validate_diffusers_directory_for_import,
 };
-use crate::model_library::hashing::{compute_dual_hash, DualHash};
-use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
+use crate::model_library::hashing::{DualHash, compute_dual_hash};
+use crate::model_library::identifier::{ModelTypeInfo, identify_model_type};
 use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
@@ -20,13 +19,12 @@ use crate::model_library::types::{
     SecurityTier,
 };
 use crate::model_library::{
+    AuxFilesCompleteInfo, DownloadCompletionInfo, TaskNormalizationStatus,
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, AuxFilesCompleteInfo, DownloadCompletionInfo,
-    TaskNormalizationStatus,
+    validate_metadata_v2_with_index,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -69,6 +67,8 @@ use walkdir::WalkDir;
 
 /// Prefix for temporary import directories.
 const TEMP_IMPORT_PREFIX: &str = ".tmp_import_";
+
+mod recovery;
 
 fn join_validation_errors(errors: &[crate::models::AssetValidationError]) -> String {
     errors
@@ -1389,426 +1389,6 @@ impl ModelImporter {
 
         Ok(files)
     }
-
-    /// Scan the library tree for orphan model directories and adopt them.
-    ///
-    /// An orphan is a directory that contains model files but no `metadata.json`.
-    /// Metadata is inferred from the directory path structure
-    /// (`{library_root}/{model_type}/{family}/{name}/`).
-    pub async fn adopt_orphans(&self, compute_hashes: bool) -> OrphanScanResult {
-        let mut result = OrphanScanResult::default();
-        let library_root = self.library.library_root();
-
-        let orphan_dirs = self.find_orphan_dirs(library_root, false);
-        result.orphans_found = orphan_dirs.len();
-
-        if orphan_dirs.is_empty() {
-            tracing::debug!("No orphan model directories found");
-            return result;
-        }
-
-        tracing::info!("Found {} orphan model directories", orphan_dirs.len());
-
-        for orphan_dir in orphan_dirs {
-            let inferred = match self.infer_spec_from_path(&orphan_dir) {
-                Some(s) => s,
-                None => {
-                    result.errors.push((
-                        orphan_dir.clone(),
-                        "Could not infer metadata from directory path".to_string(),
-                    ));
-                    continue;
-                }
-            };
-
-            let spec = InPlaceImportSpec {
-                model_dir: orphan_dir.clone(),
-                official_name: inferred.official_name,
-                family: inferred.family,
-                model_type: inferred.model_type,
-                repo_id: None,
-                known_sha256: None,
-                compute_hashes,
-                expected_files: None,
-                pipeline_tag: None,
-                huggingface_evidence: None,
-                release_date: None,
-                download_url: None,
-                model_card_json: None,
-                license_status: None,
-            };
-
-            match self.import_in_place(&spec).await {
-                Ok(import_result) => {
-                    if import_result.success {
-                        result.adopted += 1;
-                        tracing::info!(
-                            "Adopted orphan model: {:?} -> {:?}",
-                            orphan_dir,
-                            import_result.model_id
-                        );
-                    } else {
-                        result.errors.push((
-                            orphan_dir,
-                            import_result
-                                .error
-                                .unwrap_or_else(|| "Unknown error".to_string()),
-                        ));
-                    }
-                }
-                Err(e) => {
-                    result.errors.push((orphan_dir, e.to_string()));
-                }
-            }
-        }
-
-        tracing::info!(
-            "Orphan scan complete: {} found, {} adopted, {} errors",
-            result.orphans_found,
-            result.adopted,
-            result.errors.len()
-        );
-
-        result
-    }
-
-    /// Cheap clean-state probe used to avoid spawning startup orphan adoption
-    /// work when the library tree has no orphan candidates.
-    pub fn has_orphan_candidates(&self) -> bool {
-        !self
-            .find_orphan_dirs(self.library.library_root(), true)
-            .is_empty()
-    }
-
-    /// Find directories with model files but no metadata.json.
-    fn find_orphan_dirs(&self, library_root: &Path, stop_after_first: bool) -> Vec<PathBuf> {
-        let mut orphans = Vec::new();
-        let model_extensions: &[&str] =
-            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
-
-        for entry in WalkDir::new(library_root)
-            .min_depth(1)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let dir = entry.path();
-            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            // Skip temp import dirs and hidden dirs
-            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
-                continue;
-            }
-
-            // Skip if metadata.json already exists
-            if dir.join("metadata.json").exists() {
-                continue;
-            }
-
-            // Check directory contents
-            let entries: Vec<_> = match std::fs::read_dir(dir) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-                Err(_) => continue,
-            };
-
-            // Skip if any .part files present (download in progress)
-            let has_part_files = entries
-                .iter()
-                .any(|e| e.file_name().to_string_lossy().ends_with(".part"));
-            if has_part_files {
-                continue;
-            }
-
-            // Check for at least one model file
-            let has_model_files = entries.iter().any(|e| {
-                if !e.file_type().ok().is_some_and(|ft| ft.is_file()) {
-                    return false;
-                }
-                e.path()
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .map(|ext| model_extensions.contains(&ext.to_lowercase().as_str()))
-                    .unwrap_or(false)
-            });
-
-            if has_model_files {
-                orphans.push(dir.to_path_buf());
-                if stop_after_first {
-                    break;
-                }
-            }
-        }
-
-        orphans
-    }
-
-    /// Scan for incomplete sharded models that need recovery downloads.
-    ///
-    /// Finds directories where:
-    /// - No `metadata.json` (shard validation rejected adoption)
-    /// - At least one file matches a shard pattern with a known total (e.g. `-00001-of-00004.`)
-    /// - Fewer files present than the total indicates
-    ///
-    /// Returns a list of recovery descriptors with the reconstructed repo_id
-    /// derived from the directory path (`{family}/{name}` → HF repo).
-    pub fn recover_incomplete_shards(&self) -> Vec<IncompleteShardRecovery> {
-        let library_root = self.library.library_root();
-        let model_extensions: &[&str] =
-            &["gguf", "safetensors", "pt", "pth", "ckpt", "bin", "onnx"];
-        let mut results = Vec::new();
-
-        for entry in WalkDir::new(library_root)
-            .min_depth(1)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let dir = entry.path();
-            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
-                continue;
-            }
-
-            // Only process directories without metadata.json
-            if dir.join("metadata.json").exists() {
-                continue;
-            }
-
-            // Enumerate model files in this directory
-            let file_entries: Vec<_> = match std::fs::read_dir(dir) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-                Err(_) => continue,
-            };
-
-            let model_files: Vec<String> = file_entries
-                .iter()
-                .filter(|e| e.file_type().ok().is_some_and(|ft| ft.is_file()))
-                .filter_map(|e| {
-                    let name = e.file_name().to_string_lossy().to_string();
-                    // Skip .part files and metadata
-                    if name.ends_with(".part")
-                        || name == "metadata.json"
-                        || name == "overrides.json"
-                    {
-                        return None;
-                    }
-                    let ext = e
-                        .path()
-                        .extension()
-                        .and_then(|x| x.to_str())
-                        .unwrap_or("")
-                        .to_lowercase();
-                    if model_extensions.contains(&ext.as_str()) {
-                        Some(name)
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            if model_files.is_empty() {
-                continue;
-            }
-
-            // Check if any file is part of an incomplete shard set
-            for filename in &model_files {
-                if let Some((base_name, _idx, Some(total))) = sharding::extract_shard_info(filename)
-                {
-                    if total > 1 {
-                        let found_count = model_files
-                            .iter()
-                            .filter(|f| {
-                                sharding::extract_shard_info(f)
-                                    .map(|(b, _, _)| b == base_name)
-                                    .unwrap_or(false)
-                            })
-                            .count();
-
-                        if found_count < total {
-                            // Incomplete shard set — try to reconstruct repo_id from path
-                            if let Some(inferred) = self.infer_spec_from_path(dir) {
-                                let repo_id =
-                                    format!("{}/{}", inferred.family, inferred.official_name);
-                                tracing::info!(
-                                    "Found incomplete shard set in {}: {}/{} shards of '{}', \
-                                     candidate repo: {}",
-                                    dir.display(),
-                                    found_count,
-                                    total,
-                                    base_name,
-                                    repo_id,
-                                );
-                                results.push(IncompleteShardRecovery {
-                                    model_dir: dir.to_path_buf(),
-                                    repo_id,
-                                    family: inferred.family,
-                                    official_name: inferred.official_name,
-                                    model_type: inferred.model_type,
-                                    existing_files: model_files.clone(),
-                                });
-                            }
-                            break; // One detection per directory is enough
-                        }
-                    }
-                }
-            }
-        }
-
-        results
-    }
-
-    /// Infer model metadata from a directory path.
-    ///
-    /// Expects `{library_root}/{model_type}/{family}/{name}/`.
-    /// Falls back gracefully with fewer path components.
-    fn infer_spec_from_path(&self, model_dir: &Path) -> Option<InferredSpec> {
-        let rel_path = model_dir.strip_prefix(self.library.library_root()).ok()?;
-        let components: Vec<&str> = rel_path
-            .components()
-            .filter_map(|c| c.as_os_str().to_str())
-            .collect();
-
-        match components.len() {
-            3 => Some(InferredSpec {
-                model_type: Some(components[0].to_string()),
-                family: components[1].to_string(),
-                official_name: components[2].replace('_', " "),
-            }),
-            2 => Some(InferredSpec {
-                model_type: None,
-                family: components[0].to_string(),
-                official_name: components[1].replace('_', " "),
-            }),
-            1 => Some(InferredSpec {
-                model_type: None,
-                family: "unknown".to_string(),
-                official_name: components[0].replace('_', " "),
-            }),
-            _ => None,
-        }
-    }
-
-    /// Find directories with interrupted downloads (`.part` files) that have
-    /// no download persistence entry and no metadata.
-    ///
-    /// These are downloads that were interrupted and lost their tracking state
-    /// (e.g. due to a crash). The user must supply the correct repo_id to
-    /// recover them via `recover_download()`.
-    pub fn find_interrupted_downloads(
-        &self,
-        known_dest_dirs: &HashSet<PathBuf>,
-    ) -> Vec<InterruptedDownload> {
-        let library_root = self.library.library_root();
-        let mut results = Vec::new();
-
-        for entry in WalkDir::new(library_root)
-            .min_depth(1)
-            .max_depth(3)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            if !entry.file_type().is_dir() {
-                continue;
-            }
-
-            let dir = entry.path();
-            let dir_name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-            // Skip temp import dirs and hidden dirs
-            if dir_name.starts_with(TEMP_IMPORT_PREFIX) || dir_name.starts_with('.') {
-                continue;
-            }
-
-            // Skip if metadata.json already exists (model is complete)
-            if dir.join("metadata.json").exists() {
-                continue;
-            }
-
-            // Skip if this directory is already tracked by download persistence
-            if known_dest_dirs.contains(dir) {
-                continue;
-            }
-
-            let entries: Vec<_> = match std::fs::read_dir(dir) {
-                Ok(rd) => rd.filter_map(|e| e.ok()).collect(),
-                Err(_) => continue,
-            };
-
-            // Collect .part files and completed non-metadata files
-            let mut part_files = Vec::new();
-            let mut completed_files = Vec::new();
-            for e in &entries {
-                let name = e.file_name().to_string_lossy().to_string();
-                if name.ends_with(".part") {
-                    part_files.push(name);
-                } else if name != "metadata.json"
-                    && name != "overrides.json"
-                    && name != ".pumas_download"
-                    && e.file_type().ok().is_some_and(|ft| ft.is_file())
-                {
-                    completed_files.push(name);
-                }
-            }
-
-            // Only interested in directories with .part files
-            if part_files.is_empty() {
-                continue;
-            }
-
-            // Try to read repo_id from .pumas_download marker file
-            let marker: Option<serde_json::Value> =
-                std::fs::read_to_string(dir.join(".pumas_download"))
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok());
-
-            if let Some(inferred) = self.infer_spec_from_path(dir) {
-                let (repo_id, family, name, model_type) = if let Some(ref m) = marker {
-                    (
-                        m.get("repo_id").and_then(|v| v.as_str()).map(String::from),
-                        m.get("family")
-                            .and_then(|v| v.as_str())
-                            .map(String::from)
-                            .unwrap_or(inferred.family),
-                        m.get("official_name")
-                            .and_then(|v| v.as_str())
-                            .map(String::from)
-                            .unwrap_or(inferred.official_name),
-                        m.get("model_type")
-                            .and_then(|v| v.as_str())
-                            .map(String::from)
-                            .or(inferred.model_type),
-                    )
-                } else {
-                    (
-                        None,
-                        inferred.family,
-                        inferred.official_name,
-                        inferred.model_type,
-                    )
-                };
-                results.push(InterruptedDownload {
-                    model_dir: dir.to_path_buf(),
-                    repo_id,
-                    model_type,
-                    family,
-                    inferred_name: name,
-                    part_files,
-                    completed_files,
-                });
-            }
-        }
-
-        results
-    }
 }
 
 fn copy_directory_preserving_layout(source: &Path, dest_dir: &Path) -> Result<()> {
@@ -1951,13 +1531,6 @@ pub struct OrphanScanResult {
     pub adopted: usize,
     /// Errors encountered (directory path, error message).
     pub errors: Vec<(PathBuf, String)>,
-}
-
-/// Metadata inferred from directory path components.
-struct InferredSpec {
-    model_type: Option<String>,
-    family: String,
-    official_name: String,
 }
 
 /// Progress update during import.
@@ -2512,10 +2085,12 @@ mod tests {
         let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
         assert!(model_dir.exists());
         assert!(model_dir.join("model_index.json").exists());
-        assert!(model_dir
-            .join("unet")
-            .join("diffusion_pytorch_model.safetensors")
-            .exists());
+        assert!(
+            model_dir
+                .join("unet")
+                .join("diffusion_pytorch_model.safetensors")
+                .exists()
+        );
         assert!(bundle_root.join("model_index.json").exists());
 
         let metadata = library.load_metadata(&model_dir).unwrap().unwrap();

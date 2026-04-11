@@ -15,6 +15,7 @@ full-text search via SQLite FTS5.
 | `library.rs` | `ModelLibrary` - Central registry managing directory structure, metadata, and FTS5 index |
 | `types.rs` | Data structures: `ModelType`, `ModelMetadata`, `ModelOverrides`, re-exports from `models` |
 | `importer.rs` | `ModelImporter` - Import local files with hash verification, in-place import, orphan recovery |
+| `importer/` | Recovery-oriented `ModelImporter` helpers for orphan adoption, interrupted-download discovery, and shard recovery |
 | `directory_import.rs` | Side-effect-free import-path classification for files, bundle roots, single model directories, and multi-model containers |
 | `external_assets.rs` | External diffusers bundle validation, metadata construction, and execution-contract constants |
 | `mapper.rs` | `ModelMapper` - Link models to application directories via symlinks/hardlinks |
@@ -64,6 +65,9 @@ Provide a single backend-owned model registry that can import, classify, validat
   system instead of introducing a second registry or runtime-routing contract.
 - **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
   through the model library before import so bundle/container decisions stay deterministic.
+- **Recovery helper split**: Filesystem repair and recovery scans stay in `importer/` child
+  modules so the main importer keeps the copy/hash/metadata pipeline readable without widening
+  `ModelImporter` visibility.
 
 ## Alternatives Rejected
 - File-first source of truth with SQLite as a cache: rejected because recovery, partial-download handling, and query consistency would depend on repeated filesystem projection.

@@ -24,6 +24,7 @@ const MIN_WINDOW_HEIGHT = 400;
 // Python sidecar bridge
 let pythonBridge: PythonBridge | null = null;
 let mainWindow: BrowserWindow | null = null;
+let backendInitializationPromise: Promise<void> | null = null;
 
 /**
  * Configure Wayland/GTK4 support for Linux
@@ -164,6 +165,10 @@ function registerIPCHandlers(): void {
 
   // Generic API call handler - forwards to Python sidecar
   ipcMain.handle('api:call', async (_event, method: string, params: Record<string, unknown>) => {
+    if (backendInitializationPromise) {
+      await backendInitializationPromise;
+    }
+
     if (!pythonBridge) {
       throw new Error('Python bridge not initialized');
     }
@@ -225,36 +230,51 @@ function registerIPCHandlers(): void {
  * Initialize the Rust backend sidecar process
  */
 async function initializeBackend(): Promise<void> {
-  log.info('Initializing backend bridge...');
-
-  const binaryName = process.platform === 'win32' ? 'pumas-rpc.exe' : 'pumas-rpc';
-
-  const rustBinaryPath = app.isPackaged
-    ? path.join(process.resourcesPath, binaryName)
-    : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
-
-  // Data root: portable (next to AppImage) or project root in dev
-  let launcherRoot: string;
-  if (process.env.APPIMAGE) {
-    // AppImage: store data next to the .AppImage file
-    launcherRoot = path.join(path.dirname(process.env.APPIMAGE), 'pumas-data');
-  } else if (app.isPackaged) {
-    // Other packaged formats (.deb, etc.): use standard user data path
-    launcherRoot = app.getPath('userData');
-  } else {
-    // Development mode: project root
-    launcherRoot = path.join(__dirname, '..', '..');
+  if (backendInitializationPromise) {
+    return await backendInitializationPromise;
   }
 
-  pythonBridge = new PythonBridge({
-    port: 0,
-    debug: process.argv.includes('--dev') || process.argv.includes('--debug'),
-    rustBinaryPath,
-    launcherRoot,
-  });
+  backendInitializationPromise = (async () => {
+    log.info('Initializing backend bridge...');
 
-  await pythonBridge.start();
-  log.info('Backend bridge initialized');
+    const binaryName = process.platform === 'win32' ? 'pumas-rpc.exe' : 'pumas-rpc';
+
+    const rustBinaryPath = app.isPackaged
+      ? path.join(process.resourcesPath, binaryName)
+      : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
+
+    // Data root: portable (next to AppImage) or project root in dev
+    let launcherRoot: string;
+    if (process.env.APPIMAGE) {
+      // AppImage: store data next to the .AppImage file
+      launcherRoot = path.join(path.dirname(process.env.APPIMAGE), 'pumas-data');
+    } else if (app.isPackaged) {
+      // Other packaged formats (.deb, etc.): use standard user data path
+      launcherRoot = app.getPath('userData');
+    } else {
+      // Development mode: project root
+      launcherRoot = path.join(__dirname, '..', '..');
+    }
+
+    pythonBridge = new PythonBridge({
+      port: 0,
+      debug: process.argv.includes('--dev') || process.argv.includes('--debug'),
+      rustBinaryPath,
+      launcherRoot,
+    });
+
+    await pythonBridge.start();
+    log.info('Backend bridge initialized');
+  })();
+
+  try {
+    await backendInitializationPromise;
+  } catch (error) {
+    pythonBridge = null;
+    throw error;
+  } finally {
+    backendInitializationPromise = null;
+  }
 }
 
 /**
@@ -284,14 +304,18 @@ app.whenReady().then(async () => {
   }
 
   try {
-    // Initialize Rust backend first
-    await initializeBackend();
-
     // Register IPC handlers
     registerIPCHandlers();
 
-    // Create the main window
+    const backendInitialization = initializeBackend();
+
+    // Show the window immediately; backend warmup continues in parallel.
     await createWindow();
+
+    void backendInitialization.catch((error) => {
+      log.error('Failed to initialize backend bridge:', error);
+      app.quit();
+    });
   } catch (error) {
     log.error('Failed to initialize app:', error);
     app.quit();

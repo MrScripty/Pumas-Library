@@ -774,7 +774,12 @@ fn apply_stable_partial_metadata_timestamps(
         .unwrap_or_else(|| now.to_string());
 
     let updated_date = existing_metadata
-        .and_then(|existing| existing.updated_date.clone().or_else(|| existing.added_date.clone()))
+        .and_then(|existing| {
+            existing
+                .updated_date
+                .clone()
+                .or_else(|| existing.added_date.clone())
+        })
         .unwrap_or_else(|| added_date.clone());
 
     metadata.added_date = Some(added_date);
@@ -1519,6 +1524,9 @@ mod tests {
             candidate.expected_files,
             vec!["model.gguf".to_string(), "config.json".to_string()]
         );
-        assert_eq!(candidate.pipeline_tag_hint.as_deref(), Some("text-generation"));
+        assert_eq!(
+            candidate.pipeline_tag_hint.as_deref(),
+            Some("text-generation")
+        );
     }
 }

@@ -337,7 +337,6 @@ impl ModelIndex {
         }
 
         tx.commit()?;
-
         Ok(changed)
     }
 

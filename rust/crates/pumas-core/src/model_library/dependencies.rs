@@ -1224,7 +1224,10 @@ mod tests {
         );
         assert!(result.bindings.is_empty());
         assert_eq!(result.validation_errors.len(), 1);
-        assert_eq!(result.validation_errors[0].code, "declared_bindings_unresolved");
+        assert_eq!(
+            result.validation_errors[0].code,
+            "declared_bindings_unresolved"
+        );
     }
 
     #[tokio::test]

@@ -125,11 +125,12 @@ impl ModelLibrary {
     /// * `library_root` - Root directory for the model library
     pub async fn new(library_root: impl Into<PathBuf>) -> Result<Self> {
         let library_root = library_root.into();
-        let db_path = library_root.join(DB_FILENAME);
-        let registry_path = library_root.join("link_registry.json");
 
         // Ensure the library directory exists
         std::fs::create_dir_all(&library_root)?;
+        let library_root = library_root.canonicalize()?;
+        let db_path = library_root.join(DB_FILENAME);
+        let registry_path = library_root.join("link_registry.json");
 
         // Initialize the model index
         let index = ModelIndex::new(&db_path)?;
@@ -4605,6 +4606,17 @@ mod tests {
         (temp_dir, library)
     }
 
+    async fn setup_library_relative_to_cwd() -> (TempDir, ModelLibrary) {
+        let temp_dir = tempfile::Builder::new()
+            .prefix("pumas-library-relative-")
+            .tempdir_in(".")
+            .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let relative_root = temp_dir.path().strip_prefix(&cwd).unwrap().to_path_buf();
+        let library = ModelLibrary::new(relative_root).await.unwrap();
+        (temp_dir, library)
+    }
+
     fn write_min_safetensors(path: &Path) {
         let header = b"{}";
         let header_size: u64 = header.len() as u64;
@@ -5857,6 +5869,45 @@ mod tests {
             updated.model_type_resolution_source.as_deref(),
             Some("model-type-audio-disambiguation-guard")
         );
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_moves_with_relative_library_root() {
+        let (_temp_dir, library) = setup_library_relative_to_cwd().await;
+
+        let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+        std::fs::write(
+            old_dir.join("config.json"),
+            r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/openai/whisper-large-v3-turbo".to_string()),
+            family: Some("openai".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("whisper-large-v3-turbo".to_string()),
+            cleaned_name: Some("whisper-large-v3-turbo".to_string()),
+            repo_id: Some("openai/whisper-large-v3-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("unknown/openai/whisper-large-v3-turbo")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("audio/openai/whisper-large-v3-turbo".to_string())
+        );
+
+        let new_dir = library.build_model_path("audio", "openai", "whisper-large-v3-turbo");
+        assert!(new_dir.exists());
+        assert!(!old_dir.exists());
     }
 
     #[tokio::test]

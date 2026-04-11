@@ -392,11 +392,12 @@ mod tests {
         let (_temp, client) = setup();
 
         let path = client.get_cache_path("TheBloke/Llama-2-7B-GGUF", "files");
-        assert!(path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .contains("TheBloke_Llama-2-7B-GGUF"));
+        assert!(
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .contains("TheBloke_Llama-2-7B-GGUF")
+        );
     }
 
     #[tokio::test]
@@ -416,6 +417,7 @@ mod tests {
             downloads: Some(10000),
             siblings: vec![],
             config: None,
+            card_data: None,
         };
 
         let model = HuggingFaceClient::convert_search_result(mock_result);

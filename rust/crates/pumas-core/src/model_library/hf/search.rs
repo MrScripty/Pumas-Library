@@ -4,8 +4,8 @@
 //! SQLite caching, result enrichment with download options, and
 //! conversion from API response types to internal model types.
 
-use super::types::{infer_pipeline_tag_from_config, HfSearchResult, HfSibling, HF_API_BASE};
 use super::HuggingFaceClient;
+use super::types::{HF_API_BASE, HfSearchResult, HfSibling, infer_pipeline_tag_from_config};
 use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
@@ -743,6 +743,7 @@ mod tests {
             downloads: None,
             siblings: vec![],
             config: None,
+            card_data: None,
         };
         let converted = HuggingFaceClient::convert_search_result(result);
         assert_eq!(converted.kind, "text-ranking");
@@ -767,6 +768,7 @@ mod tests {
             downloads: None,
             siblings: vec![],
             config: None,
+            card_data: None,
         };
         let converted = HuggingFaceClient::convert_search_result(result);
         assert_eq!(converted.kind, "text-to-speech");

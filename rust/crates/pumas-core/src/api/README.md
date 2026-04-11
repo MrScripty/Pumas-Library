@@ -15,6 +15,7 @@ Defines the primary API facade (`PumasApi`) methods that orchestrate core subsys
 | `process.rs` | Process lifecycle/status API methods. |
 | `reconciliation.rs` | Reconcile scheduling, watcher routing, and startup freshness rules. |
 | `state.rs` | Primary-state dispatch and IPC method execution. |
+| `state_hf.rs` | HuggingFace search, download, metadata-refetch, and auth helpers used by primary-state IPC dispatch. |
 
 ## Problem
 Expose a stable host-facing API while keeping runtime ownership, reconciliation, and transport wiring in one backend-owned composition root.
@@ -30,6 +31,8 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 - Split larger API surfaces into focused submodules such as `migration.rs` when
   one feature area starts adding its own lifecycle, reporting, and recovery
   helpers.
+- Keep the primary-state HuggingFace workflow helpers in a dedicated sibling
+  module so `state.rs` stays focused on dispatch and non-HF runtime ownership.
 - Keep link-registry health/cleanup flows and app mapping flows in separate
   modules so `models.rs` stays centered on model-library metadata and import
   behavior.

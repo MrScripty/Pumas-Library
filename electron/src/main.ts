@@ -214,10 +214,6 @@ function registerIPCHandlers(): void {
     await shell.openExternal(parsedUrl.toString());
   });
 
-  ipcMain.handle('shell:openPath', async (_event, filePath: string) => {
-    await shell.openPath(filePath);
-  });
-
   // Theme handler
   ipcMain.handle('theme:get', () => {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';

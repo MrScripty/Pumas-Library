@@ -13,6 +13,8 @@ bridge.
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |
+| `VersionSelectorTrigger.tsx` | Presentational trigger shell for the active-version selector and action buttons. |
+| `VersionSelectorDropdown.tsx` | Presentational dropdown menu and row items for installed/selectable versions. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
 | `ui/` | Small reusable primitives (buttons, tooltips, list items). |

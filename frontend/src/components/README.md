@@ -17,6 +17,7 @@ bridge.
 | `VersionSelectorDropdown.tsx` | Presentational dropdown menu and row items for installed/selectable versions. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
+| `RemoteModelListItem.tsx` | Presentational row for one Hugging Face search result and its download controls. |
 | `ui/` | Small reusable primitives (buttons, tooltips, list items). |
 | `app-panels/` | App-specific panel renderers and sections. |
 

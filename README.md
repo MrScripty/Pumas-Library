@@ -1,7 +1,7 @@
 # Pumas Library
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
-![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)
+![Rust](https://img.shields.io/badge/rust-1.92.0-orange.svg)
 ![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-green.svg)
 ![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
@@ -165,14 +165,14 @@ HuggingFace file downloads automatically retry transient network failures with r
 #### Linux
 
 - **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
-- **Rust**: 1.75+
-- **Node.js**: 22+ LTS
+- **Rust**: Use the pinned toolchain from `rust-toolchain.toml`
+- **Node.js**: Use the pinned version from `.node-version`
 
 #### Windows
 
 - **Operating System**: Windows 11 (x64)
-- **Rust**: 1.75+ (install via [rustup](https://rustup.rs/))
-- **Node.js**: 22+ LTS (install via [nodejs.org](https://nodejs.org/))
+- **Rust**: Install via [rustup](https://rustup.rs/) and let `rust-toolchain.toml` select the repo version
+- **Node.js**: Install the version pinned in `.node-version`
 - **Build Tools**: Visual Studio Build Tools with C++ workload
 
 ---
@@ -263,7 +263,7 @@ pumas-library --help
 
 2. **Install Node.js** from [nodejs.org](https://nodejs.org/):
 
-   - Download the LTS version (22+)
+   - Install the version pinned in `.node-version`
    - Run the installer
 
 3. **Install Visual Studio Build Tools** (if not already installed):

@@ -6,6 +6,7 @@
 - `cargo test --workspace --exclude pumas_rustler` passes locally (from `rust/`)
 - `cargo clippy --workspace --exclude pumas_rustler -- -D warnings` clean
 - `cargo audit` shows no high/critical vulnerabilities
+- Local toolchains match the repo pins in `rust-toolchain.toml`, `.node-version`, and `.python-version`
 
 ## Steps
 
@@ -40,5 +41,13 @@ separately on machines with Erlang/OTP installed.
 | `rust/Cargo.toml` | `[workspace.package] version` |
 | `frontend/package.json` | `version` |
 | `electron/package.json` | `version` |
+
+## Toolchain Pins
+
+| File | Purpose |
+|------|---------|
+| `rust-toolchain.toml` | Rust compiler and component pin used by local builds and CI |
+| `.node-version` | Node.js version pin used by local builds and CI |
+| `.python-version` | Python version pin for local tooling and Python-side helpers |
 
 All three must be updated together before tagging.

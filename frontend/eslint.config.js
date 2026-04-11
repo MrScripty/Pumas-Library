@@ -119,7 +119,7 @@ export default tseslint.config(
 
       // Accessibility rules from jsx-a11y
       'jsx-a11y/mouse-events-have-key-events': 'error',
-      'jsx-a11y/no-static-element-interactions': 'warn',
+      'jsx-a11y/no-static-element-interactions': 'error',
     },
   }
 );

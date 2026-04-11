@@ -96,8 +96,7 @@ describe('AppSidebar', () => {
       expect(plusIcon).toBeInTheDocument();
     });
 
-    // The plus icon is inside a clickable div with role="button"
-    const plusButton = container.querySelector('svg.lucide-plus')?.closest('[role="button"]') as HTMLElement;
+    const plusButton = container.querySelector('button[aria-label="Add app"]') as HTMLElement;
     fireEvent.click(plusButton);
 
     expect(onAddApp).toHaveBeenCalledWith(1);

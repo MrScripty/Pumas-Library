@@ -324,16 +324,15 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
       {/* Plus indicator - show on hover when not dragging */}
       {!draggedId && floatingState === null && mousePos.y > 0 && sidebarRef.current && (
         <Tooltip content="Add app" position="right">
-          <div
-            className="absolute left-1/2 transform -translate-x-1/2 z-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer"
+          <button
+            type="button"
+            className="absolute left-1/2 transform -translate-x-1/2 z-0 opacity-50 hover:opacity-100 transition-opacity cursor-pointer bg-transparent border-0 p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-primary))]"
             style={{ top: `${getNearestIconPosition()}px` }}
             onClick={handlePlusClick}
-            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handlePlusClick(); }}
-            role="button"
-            tabIndex={0}
+            aria-label="Add app"
           >
             <Plus className="w-8 h-8 text-[hsl(var(--accent-primary)/0.5)]" />
-          </div>
+          </button>
         </Tooltip>
       )}
 

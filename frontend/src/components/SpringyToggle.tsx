@@ -17,14 +17,12 @@ export const SpringyToggle: React.FC<SpringyToggleProps> = ({
   disabled = false
 }) => {
   return (
-    <div
-      className={`relative w-[220px] h-[36px] bg-[hsl(var(--surface-interactive))] border border-[hsl(var(--border-control))] overflow-hidden cursor-pointer select-none ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
-      onClick={!disabled ? onToggle : undefined}
-      onKeyDown={!disabled ? (e: React.KeyboardEvent) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
-      role="button"
-      tabIndex={disabled ? -1 : 0}
+    <button
+      type="button"
+      className={`relative w-[220px] h-[36px] bg-[hsl(var(--surface-interactive))] border border-[hsl(var(--border-control))] overflow-hidden cursor-pointer select-none appearance-none outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--launcher-accent-primary))] ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      onClick={onToggle}
+      disabled={disabled}
       aria-pressed={isOn}
-      aria-disabled={disabled}
     >
       {/* Background Labels */}
       <div className="absolute inset-0 flex items-center justify-between px-4 z-0">
@@ -52,6 +50,6 @@ export const SpringyToggle: React.FC<SpringyToggleProps> = ({
           damping: 30
         }}
       />
-    </div>
+    </button>
   );
 };

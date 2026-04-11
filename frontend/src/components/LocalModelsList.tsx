@@ -170,8 +170,9 @@ export function LocalModelsList({
                         size="sm"
                       />
                       <div className="flex-1 min-w-0">
-                        <span
-                          className={`text-sm font-medium block truncate cursor-pointer ${
+                        <button
+                          type="button"
+                          className={`text-sm font-medium flex max-w-full items-center text-left bg-transparent border-0 p-0 cursor-pointer ${
                             isDownloading
                               ? 'text-[hsl(var(--text-muted))]'
                               : isPartialDownload
@@ -181,12 +182,9 @@ export function LocalModelsList({
                               : 'text-[hsl(var(--text-secondary))]'
                           }`}
                           onClick={(e) => handleModelNameClick(e, model.id, model.name)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleModelNameClick(e as unknown as React.MouseEvent, model.id, model.name); }}
-                          role="button"
-                          tabIndex={0}
                           title="Ctrl+click to view metadata"
                         >
-                          {model.name}
+                          <span className="truncate">{model.name}</span>
                           {model.wasDequantized && (
                             <span
                               className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
@@ -217,7 +215,7 @@ export function LocalModelsList({
                               PARTIAL
                             </span>
                           )}
-                        </span>
+                        </button>
                         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[hsl(var(--text-secondary))]">
                           <span className="min-w-0 truncate">
                             {formatModelFormat(model.format)}

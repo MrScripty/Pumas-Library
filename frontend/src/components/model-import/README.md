@@ -1,7 +1,7 @@
 # Model Import Helpers
 
 ## Purpose
-This directory holds the non-visual helpers behind the model import dialog. It keeps import-review state, metadata lookup state, and security-format presentation logic out of the dialog component so the UI can render backend-owned classification results without reimplementing import rules in JSX.
+This directory holds the workflow and extracted support components behind the model import dialog. It keeps import-review state, metadata lookup state, bundle-component disclosure UI, and single-entry lookup rendering out of the main dialog so the UI can render backend-owned classification results without reimplementing import rules in one monolithic JSX file.
 
 ## Contents
 | File/Folder | Description |
@@ -9,9 +9,11 @@ This directory holds the non-visual helpers behind the model import dialog. It k
 | `useModelImportWorkflow.ts` | Owns the import dialog workflow state machine from path classification through metadata lookup and import execution. |
 | `metadataUtils.ts` | Pure helpers for security badges, GGUF metadata display priority, and import-review formatting. |
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
+| `ImportBundleComponents.tsx` | Presentational disclosure for external diffusers bundle component manifests. |
+| `ImportLookupCard.tsx` | Presentational metadata-lookup card for file and directory import entries. |
 
 ## Problem
-The import dialog has to review mixed inputs such as single files, single-model directories, and external diffusers bundles. That review flow needs transient UI state and formatting helpers, but it must still preserve the backend as the source of truth for path classification and import behavior.
+The import dialog has to review mixed inputs such as single files, single-model directories, and external diffusers bundles. That review flow needs transient UI state, formatting helpers, and a few extracted presentational components, but it must still preserve the backend as the source of truth for path classification and import behavior.
 
 ## Constraints
 - Directory/file classification that affects behavior is backend-owned and must not be guessed in the frontend.
@@ -22,10 +24,11 @@ The import dialog has to review mixed inputs such as single files, single-model 
 ## Decision
 - Keep the workflow orchestration in `useModelImportWorkflow.ts` so one hook owns import lifecycle state, lookup retries, and completion callbacks.
 - Keep display-only logic in `metadataUtils.ts` as pure functions so metadata formatting and badge decisions stay easy to test.
+- Extract bundle-manifest and lookup-card rendering into small components so the dialog can focus on step orchestration instead of carrying every import-entry detail inline.
 - Preserve backend terminology such as classification kind, bundle format, and HF metadata result fields instead of inventing frontend-only aliases.
 
 ## Alternatives Rejected
-- Put all import-review state inside `ModelImportDialog.tsx`: rejected because dialog rendering and workflow mutation would become harder to test and reason about.
+- Put all import-review state and per-entry rendering inside `ModelImportDialog.tsx`: rejected because dialog rendering and workflow mutation would become harder to test and reason about.
 - Recompute directory/file classification in the frontend from dropped paths: rejected because it would create a second import classifier that could drift from the Rust model library.
 
 ## Invariants

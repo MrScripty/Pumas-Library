@@ -15,29 +15,16 @@ import {
   AlertCircle,
   AlertTriangle,
   ChevronRight,
-  ChevronDown,
   ShieldCheck,
   Unlink,
   Package2,
-  ExternalLink,
-  FileText,
-  Cloud,
-  ToggleLeft,
-  ToggleRight,
 } from 'lucide-react';
-import type { HFMetadataLookupResult } from '../types/api';
 import {
-  constructQuantUrl,
-  EXCLUDED_FIELDS,
-  formatFieldName,
-  formatMetadataValue,
   getSecurityBadge,
   getTrustBadge,
-  isHiddenGgufField,
-  isPriorityGgufField,
-  LINKED_GGUF_FIELDS,
-  sortMetadataFields,
 } from './model-import/metadataUtils';
+import { ImportBundleComponents } from './model-import/ImportBundleComponents';
+import { ImportLookupCard } from './model-import/ImportLookupCard';
 import { useModelImportWorkflow, type ImportEntryStatus } from './model-import/useModelImportWorkflow';
 
 interface ModelImportDialogProps {
@@ -85,27 +72,11 @@ function EntryBadge({ entry }: { entry: ImportEntryStatus }) {
   );
 }
 
-function formatBundleComponentState(state: NonNullable<ImportEntryStatus['componentManifest']>[number]['state']): string {
-  switch (state) {
-    case 'present':
-      return 'Present';
-    case 'missing':
-      return 'Missing';
-    case 'unreadable':
-      return 'Unreadable';
-    case 'path_escape':
-      return 'Invalid Path';
-    default:
-      return state;
-  }
-}
-
 export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
   importPaths,
   onClose,
   onImportComplete,
 }) => {
-  const [expandedBundleComponents, setExpandedBundleComponents] = React.useState<Set<string>>(new Set());
   const {
     step,
     entries,
@@ -136,379 +107,6 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
     verifiedCount,
     standaloneEntries,
   } = useModelImportWorkflow({ importPaths, onImportComplete });
-
-  const toggleBundleComponents = React.useCallback((path: string) => {
-    setExpandedBundleComponents((prev) => {
-      const next = new Set(prev);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
-      }
-      return next;
-    });
-  }, []);
-
-  const renderBundleComponents = (entry: ImportEntryStatus) => {
-    if (entry.kind !== 'external_diffusers_bundle' || !entry.componentManifest?.length) {
-      return null;
-    }
-
-    const expanded = expandedBundleComponents.has(entry.path);
-    return (
-      <div className="mt-2">
-        <button
-          onClick={() => toggleBundleComponents(entry.path)}
-          className="flex items-center gap-2 text-xs text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
-        >
-          {expanded ? (
-            <ChevronDown className="w-3 h-3" />
-          ) : (
-            <ChevronRight className="w-3 h-3" />
-          )}
-          Components ({entry.componentManifest.length})
-        </button>
-        {expanded && (
-          <div className="mt-2 space-y-1 rounded-md bg-[hsl(var(--launcher-bg-secondary))] p-2">
-            {entry.componentManifest.map((component) => (
-              <div
-                key={`${entry.path}:${component.name}`}
-                className="flex items-start justify-between gap-3 text-xs"
-              >
-                <div className="min-w-0">
-                  <div className="text-[hsl(var(--launcher-text-secondary))]">{component.name}</div>
-                  {component.relative_path !== component.name && (
-                    <div className="font-mono text-[hsl(var(--launcher-text-muted))] break-all">
-                      {component.relative_path}
-                    </div>
-                  )}
-                </div>
-                <span className={`shrink-0 px-2 py-0.5 rounded ${
-                  component.state === 'present'
-                    ? 'bg-[hsl(var(--launcher-accent-success)/0.15)] text-[hsl(var(--launcher-accent-success))]'
-                    : 'bg-[hsl(var(--launcher-accent-warning)/0.15)] text-[hsl(var(--launcher-accent-warning))]'
-                }`}>
-                  {formatBundleComponentState(component.state)}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderLookupCard = (entry: ImportEntryStatus) => {
-    if (entry.kind !== 'single_file') {
-      const trustBadge = getTrustBadge(entry.hfMetadata);
-      return (
-        <div
-          key={entry.path}
-          className="flex items-center gap-3 p-3 rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]"
-        >
-          <EntryIcon entry={entry} />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
-              {entry.filename}
-            </p>
-            {entry.hfMetadata?.repo_id ? (
-              <a
-                href={`https://huggingface.co/${entry.hfMetadata.repo_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline truncate flex items-center gap-1"
-              >
-                {entry.hfMetadata.repo_id}
-                <ExternalLink className="w-3 h-3 flex-shrink-0" />
-              </a>
-            ) : (
-              <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
-                {entry.kind === 'external_diffusers_bundle'
-                  ? `Bundle root${entry.pipelineClass ? ` • ${entry.pipelineClass}` : ''}`
-                  : 'Directory model import'}
-              </p>
-            )}
-            {renderBundleComponents(entry)}
-          </div>
-          {trustBadge ? (
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
-              title={trustBadge.tooltip}
-            >
-              <trustBadge.Icon className="w-3 h-3" />
-              {trustBadge.text}
-            </span>
-          ) : (
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-              entry.metadataStatus === 'error'
-                ? 'bg-[hsl(var(--launcher-accent-error)/0.2)] text-[hsl(var(--launcher-accent-error))]'
-                : entry.metadataStatus === 'not_found'
-                  ? 'bg-[hsl(var(--launcher-accent-warning)/0.2)] text-[hsl(var(--launcher-accent-warning))]'
-                  : 'bg-[hsl(var(--launcher-accent-success)/0.2)] text-[hsl(var(--launcher-accent-success))]'
-            }`}>
-              {entry.metadataStatus === 'error'
-                ? 'Lookup Failed'
-                : entry.metadataStatus === 'not_found'
-                  ? 'No Match'
-                  : entry.metadataStatus === 'found'
-                    ? 'Matched'
-                    : 'Ready'}
-            </span>
-          )}
-        </div>
-      );
-    }
-
-    const trustBadge = getTrustBadge(entry.hfMetadata);
-    const isExpanded = expandedMetadata.has(entry.path);
-    const hasMetadata = entry.hfMetadata && entry.metadataStatus === 'found';
-    const isShowingEmbedded = showEmbeddedMetadata.has(entry.path);
-    const canShowEmbedded = entry.detectedFileType === 'gguf' || entry.detectedFileType === 'safetensors';
-
-    const hfMetadataEntries = hasMetadata
-      ? sortMetadataFields(
-          Object.keys(entry.hfMetadata!).filter(
-            (key) =>
-              !EXCLUDED_FIELDS.has(key) &&
-              entry.hfMetadata![key as keyof HFMetadataLookupResult] != null &&
-              entry.hfMetadata![key as keyof HFMetadataLookupResult] !== ''
-          )
-        ).map((key) => ({
-          key,
-          label: formatFieldName(key),
-          value: formatMetadataValue(
-            key,
-            entry.hfMetadata![key as keyof HFMetadataLookupResult]
-          ),
-        }))
-      : [];
-
-    const isShowingAllEmbedded = showAllEmbeddedMetadata.has(entry.path);
-    const allEmbeddedEntries = entry.embeddedMetadata
-      ? Object.entries(entry.embeddedMetadata)
-          .filter(([, value]) => value != null && value !== '')
-          .map(([key, value]) => ({
-            key,
-            label: formatFieldName(key),
-            value: formatMetadataValue(key, value),
-            isPriority: isPriorityGgufField(key),
-            isHidden: isHiddenGgufField(key, value),
-          }))
-      : [];
-
-    const embeddedMetadataEntries = allEmbeddedEntries
-      .filter((candidate) => isShowingAllEmbedded || (candidate.isPriority && !candidate.isHidden))
-      .sort((left, right) => {
-        if (left.isPriority !== right.isPriority) return left.isPriority ? -1 : 1;
-        return left.key.localeCompare(right.key);
-      });
-
-    const hiddenEmbeddedCount = allEmbeddedEntries.length - embeddedMetadataEntries.length;
-    const metadataEntries = isShowingEmbedded ? embeddedMetadataEntries : hfMetadataEntries;
-
-    return (
-      <div key={entry.path} className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
-        <div
-          className={`flex items-center gap-3 p-3 ${(hasMetadata || canShowEmbedded) ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
-          role={(hasMetadata || canShowEmbedded) ? 'button' : undefined}
-          tabIndex={(hasMetadata || canShowEmbedded) ? 0 : undefined}
-          aria-expanded={(hasMetadata || canShowEmbedded) ? isExpanded : undefined}
-          onClick={(hasMetadata || canShowEmbedded) ? () => toggleMetadataExpand(entry.path) : undefined}
-          onKeyDown={(hasMetadata || canShowEmbedded)
-            ? (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleMetadataExpand(entry.path);
-                }
-              }
-            : undefined}
-        >
-          {(hasMetadata || canShowEmbedded) ? (
-            <button
-              className="w-4 h-4 flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
-              onClick={(event) => {
-                event.stopPropagation();
-                toggleMetadataExpand(entry.path);
-              }}
-            >
-              {isExpanded ? (
-                <ChevronDown className="w-4 h-4" />
-              ) : (
-                <ChevronRight className="w-4 h-4" />
-              )}
-            </button>
-          ) : (
-            <div className="w-4 h-4 flex-shrink-0" />
-          )}
-
-          {entry.metadataStatus === 'pending' && (
-            <div className="w-4 h-4 rounded-full border-2 border-[hsl(var(--launcher-border))] flex-shrink-0" />
-          )}
-          {entry.metadataStatus === 'found' && (
-            <CheckCircle2 className="w-4 h-4 text-[hsl(var(--launcher-accent-success))] flex-shrink-0" />
-          )}
-          {entry.metadataStatus === 'not_found' && (
-            <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))] flex-shrink-0" />
-          )}
-          {entry.metadataStatus === 'error' && (
-            <AlertCircle className="w-4 h-4 text-[hsl(var(--launcher-accent-error))] flex-shrink-0" />
-          )}
-
-          <div className="flex-1 min-w-0">
-            <p className="text-sm text-[hsl(var(--launcher-text-secondary))] truncate">
-              {entry.filename}
-            </p>
-            {entry.hfMetadata?.repo_id ? (
-              <a
-                href={`https://huggingface.co/${entry.hfMetadata.repo_id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline truncate flex items-center gap-1"
-                onClick={(event) => event.stopPropagation()}
-              >
-                {entry.hfMetadata.repo_id}
-                <ExternalLink className="w-3 h-3 flex-shrink-0" />
-              </a>
-            ) : (
-              <p className="text-xs text-[hsl(var(--launcher-text-muted))] truncate">
-                {entry.path}
-              </p>
-            )}
-          </div>
-
-          {trustBadge && (
-            <span
-              className={`px-2 py-0.5 rounded text-xs font-medium flex items-center gap-1 ${trustBadge.className}`}
-              title={trustBadge.tooltip}
-            >
-              <trustBadge.Icon className="w-3 h-3" />
-              {trustBadge.text}
-            </span>
-          )}
-        </div>
-
-        {isExpanded && (
-          <div className="px-3 pb-3 pt-1 ml-8 border-t border-[hsl(var(--launcher-border)/0.5)]">
-            {canShowEmbedded && (
-              <div className="flex items-center justify-between mb-3 pb-2 border-b border-[hsl(var(--launcher-border)/0.3)]">
-                <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Metadata Source</span>
-                <button
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    void toggleMetadataSource(entry.path);
-                  }}
-                  className="flex items-center gap-2 px-2 py-1 rounded-md text-xs font-medium transition-colors hover:bg-[hsl(var(--launcher-bg-tertiary))]"
-                >
-                  {isShowingEmbedded ? (
-                    <>
-                      <FileText className="w-3 h-3 text-[hsl(var(--launcher-accent-warning))]" />
-                      <span className="text-[hsl(var(--launcher-accent-warning))]">Embedded</span>
-                      <ToggleRight className="w-4 h-4 text-[hsl(var(--launcher-accent-warning))]" />
-                    </>
-                  ) : (
-                    <>
-                      <Cloud className="w-3 h-3 text-[hsl(var(--launcher-accent-primary))]" />
-                      <span className="text-[hsl(var(--launcher-accent-primary))]">HuggingFace</span>
-                      <ToggleLeft className="w-4 h-4 text-[hsl(var(--launcher-accent-primary))]" />
-                    </>
-                  )}
-                </button>
-              </div>
-            )}
-
-            {isShowingEmbedded && entry.embeddedMetadataStatus === 'pending' && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="w-5 h-5 text-[hsl(var(--launcher-accent-primary))] animate-spin" />
-                <span className="ml-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-                  Loading embedded metadata...
-                </span>
-              </div>
-            )}
-
-            {isShowingEmbedded && entry.embeddedMetadataStatus === 'error' && (
-              <div className="flex items-center gap-2 py-2 text-xs text-[hsl(var(--launcher-accent-error))]">
-                <AlertCircle className="w-4 h-4" />
-                Failed to load embedded metadata
-              </div>
-            )}
-
-            {isShowingEmbedded && entry.embeddedMetadataStatus === 'unsupported' && (
-              <div className="flex items-center gap-2 py-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-                <AlertCircle className="w-4 h-4" />
-                This file format does not support embedded metadata
-              </div>
-            )}
-
-            {metadataEntries.length > 0 ? (
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs max-h-48 overflow-y-auto">
-                {metadataEntries.map(({ key, label, value }) => {
-                  const lowerKey = key.toLowerCase();
-                  let linkedUrl = '';
-
-                  if (isShowingEmbedded && entry.embeddedMetadata) {
-                    const linkedUrlKey = LINKED_GGUF_FIELDS[lowerKey];
-                    if (linkedUrlKey) {
-                      linkedUrl = String(entry.embeddedMetadata[linkedUrlKey] ?? '');
-                    } else if (lowerKey === 'general.name') {
-                      linkedUrl = constructQuantUrl(entry.embeddedMetadata) ?? '';
-                    }
-                  }
-
-                  return (
-                    <div key={key} className="contents">
-                      <span className="text-[hsl(var(--launcher-text-muted))]">{label}</span>
-                      {linkedUrl ? (
-                        <a
-                          href={linkedUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(event) => event.stopPropagation()}
-                          className="text-[hsl(var(--launcher-accent-primary))] hover:underline truncate"
-                          title={`${value} (${linkedUrl})`}
-                        >
-                          {value}
-                        </a>
-                      ) : (
-                        <span className="text-[hsl(var(--launcher-text-secondary))] truncate" title={value}>
-                          {value}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              !isShowingEmbedded && !hasMetadata && (
-                <div className="text-xs text-[hsl(var(--launcher-text-muted))] py-2">
-                  No metadata available
-                </div>
-              )
-            )}
-
-            {isShowingEmbedded && entry.embeddedMetadataStatus === 'loaded' && hiddenEmbeddedCount > 0 && (
-              <button
-                onClick={(event) => {
-                  event.stopPropagation();
-                  toggleShowAllEmbeddedMetadata(entry.path);
-                }}
-                className="mt-2 text-xs text-[hsl(var(--launcher-accent-primary))] hover:underline"
-              >
-                {isShowingAllEmbedded
-                  ? 'Show less'
-                  : `Show ${hiddenEmbeddedCount} more field${hiddenEmbeddedCount === 1 ? '' : 's'}`}
-              </button>
-            )}
-
-            {isShowingEmbedded && entry.embeddedMetadataStatus === 'loaded' && allEmbeddedEntries.length === 0 && (
-              <div className="text-xs text-[hsl(var(--launcher-text-muted))] py-2">
-                No embedded metadata found in file
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-    );
-  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -729,7 +327,7 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                             Expanded from {entry.containerPath}
                           </p>
                         )}
-                        {renderBundleComponents(entry)}
+                        <ImportBundleComponents entry={entry} />
                       </div>
                       <EntryBadge entry={entry} />
                       {entry.securityTier === 'pickle' && (
@@ -778,7 +376,18 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                   <h3 className="text-sm font-medium text-[hsl(var(--launcher-text-secondary))]">
                     Directory Imports ({nonFileEntries.length})
                   </h3>
-                  {nonFileEntries.map((entry) => renderLookupCard(entry))}
+                  {nonFileEntries.map((entry) => (
+                    <ImportLookupCard
+                      key={entry.path}
+                      entry={entry}
+                      expandedMetadata={expandedMetadata}
+                      showEmbeddedMetadata={showEmbeddedMetadata}
+                      showAllEmbeddedMetadata={showAllEmbeddedMetadata}
+                      toggleMetadataExpand={toggleMetadataExpand}
+                      toggleMetadataSource={toggleMetadataSource}
+                      toggleShowAllEmbeddedMetadata={toggleShowAllEmbeddedMetadata}
+                    />
+                  ))}
                 </div>
               )}
 
@@ -787,7 +396,18 @@ export const ModelImportDialog: React.FC<ModelImportDialogProps> = ({
                   <h3 className="text-sm font-medium text-[hsl(var(--launcher-text-secondary))]">
                     File Imports ({fileEntries.length})
                   </h3>
-                  {fileEntries.map((entry) => renderLookupCard(entry))}
+                  {fileEntries.map((entry) => (
+                    <ImportLookupCard
+                      key={entry.path}
+                      entry={entry}
+                      expandedMetadata={expandedMetadata}
+                      showEmbeddedMetadata={showEmbeddedMetadata}
+                      showAllEmbeddedMetadata={showAllEmbeddedMetadata}
+                      toggleMetadataExpand={toggleMetadataExpand}
+                      toggleMetadataSource={toggleMetadataSource}
+                      toggleShowAllEmbeddedMetadata={toggleShowAllEmbeddedMetadata}
+                    />
+                  ))}
                 </div>
               ) : (
                 <div className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)] p-4 text-sm text-[hsl(var(--launcher-text-muted))]">

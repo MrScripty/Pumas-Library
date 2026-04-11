@@ -2050,10 +2050,10 @@ impl ModelLibrary {
             normalize_name(&cleaned_name)
         );
 
-        metadata.model_id = Some(new_model_id.clone());
-
         if new_dir == model_dir {
             // Path didn't change (directory already correct)
+            metadata.model_id = Some(new_model_id.clone());
+            apply_target_identity_to_metadata(&mut metadata, &new_model_id);
             self.save_metadata(&model_dir, &metadata).await?;
             self.index_model_dir(&model_dir).await?;
             return Ok(Some(new_model_id));
@@ -2089,15 +2089,13 @@ impl ModelLibrary {
             )));
         }
 
-        // Save updated metadata to current location first
-        self.save_metadata(&model_dir, &metadata).await?;
-
-        // Remove from index at old ID
-        let _ = self.index.delete(model_id);
-
         // Move the directory
         std::fs::create_dir_all(new_dir.parent().unwrap())?;
         std::fs::rename(&model_dir, &new_dir)?;
+
+        metadata.model_id = Some(new_model_id.clone());
+        apply_target_identity_to_metadata(&mut metadata, &new_model_id);
+        self.save_metadata(&new_dir, &metadata).await?;
 
         // Clean up empty parent directories left behind
         if let Some(parent) = model_dir.parent() {
@@ -2108,6 +2106,9 @@ impl ModelLibrary {
                 }
             }
         }
+
+        // Remove from index at old ID after the destination metadata is durable.
+        let _ = self.index.delete(model_id);
 
         // Re-index at new location
         self.index_model_dir(&new_dir).await?;
@@ -5802,6 +5803,60 @@ mod tests {
         let new_dir = library.build_model_path("embedding", "test", "stale-path-embedding");
         assert!(new_dir.exists());
         assert!(!old_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_reclassify_model_moves_whisper_style_unknown_dir_to_audio() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("unknown", "openai", "whisper-large-v3-turbo");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+        std::fs::write(
+            old_dir.join("config.json"),
+            r#"{"architectures":["WhisperForConditionalGeneration"],"model_type":"whisper"}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("unknown/openai/whisper-large-v3-turbo".to_string()),
+            family: Some("openai".to_string()),
+            model_type: Some("unknown".to_string()),
+            official_name: Some("whisper-large-v3-turbo".to_string()),
+            cleaned_name: Some("whisper-large-v3-turbo".to_string()),
+            repo_id: Some("openai/whisper-large-v3-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let resolved =
+            resolve_model_type_with_rules(library.index(), &old_dir, None, None, None).unwrap();
+        assert_eq!(resolved.model_type, ModelType::Audio);
+
+        let moved = library
+            .reclassify_model("unknown/openai/whisper-large-v3-turbo")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("audio/openai/whisper-large-v3-turbo".to_string())
+        );
+
+        let new_dir = library.build_model_path("audio", "openai", "whisper-large-v3-turbo");
+        assert!(new_dir.exists());
+        assert!(!old_dir.exists());
+
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(
+            updated.model_id.as_deref(),
+            Some("audio/openai/whisper-large-v3-turbo")
+        );
+        assert_eq!(updated.model_type.as_deref(), Some("audio"));
+        assert_eq!(
+            updated.model_type_resolution_source.as_deref(),
+            Some("model-type-audio-disambiguation-guard")
+        );
     }
 
     #[tokio::test]

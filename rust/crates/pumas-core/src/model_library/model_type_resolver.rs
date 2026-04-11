@@ -25,6 +25,8 @@ struct ConfigSignals {
     config_model_type: Option<String>,
     has_sentence_transformers_config: bool,
     has_sentence_transformers_modules: bool,
+    has_vision_config: bool,
+    has_vision_task_hint: bool,
 }
 
 /// Resolve model type from rule tables using source metadata signals.
@@ -93,6 +95,15 @@ fn resolve_model_type_from_inputs(
         return Ok(ModelTypeResolution {
             model_type: ModelType::Audio,
             source: "model-type-audio-disambiguation-guard".to_string(),
+            confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
+    if should_apply_vision_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints) {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Vision,
+            source: "model-type-vision-disambiguation-guard".to_string(),
             confidence: 0.90,
             review_reasons: Vec::new(),
         });
@@ -242,12 +253,18 @@ fn load_config_signals(
         .join("config_sentence_transformers.json")
         .is_file();
     let has_sentence_transformers_modules = detect_sentence_transformers_modules(model_dir);
+    let has_vision_config = config.get("vision_config").is_some()
+        || config.get("vision_encoder").is_some()
+        || config.get("image_encoder").is_some()
+        || config.get("vision_tower").is_some();
 
     let mut signals = ConfigSignals {
         architectures,
         config_model_type,
         has_sentence_transformers_config,
         has_sentence_transformers_modules,
+        has_vision_config,
+        has_vision_task_hint: false,
     };
     merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
     signals
@@ -292,6 +309,21 @@ fn merge_huggingface_evidence_into_signals(
             .map(|value| value.trim().to_lowercase())
             .filter(|value| !value.is_empty());
     }
+
+    signals.has_vision_task_hint |= evidence
+        .pipeline_tag
+        .as_deref()
+        .is_some_and(is_vision_task_hint)
+        || evidence
+            .remote_kind
+            .as_deref()
+            .is_some_and(is_vision_task_hint)
+        || evidence
+            .tags
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .any(|tag| is_vision_task_hint(tag) || tag.eq_ignore_ascii_case("vision"));
 }
 
 fn detect_sentence_transformers_modules(model_dir: &Path) -> bool {
@@ -343,6 +375,21 @@ fn name_looks_like_audio(name_hint: Option<&str>) -> bool {
                 || lower.contains("wav2vec")
                 || lower.contains("hubert")
                 || lower.contains("canary")
+        })
+        .unwrap_or(false)
+}
+
+fn name_looks_like_vision_language(name_hint: Option<&str>) -> bool {
+    name_hint
+        .map(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("florence")
+                || lower.contains("paligemma")
+                || lower.contains("idefics")
+                || lower.contains("blip")
+                || lower.contains("vision")
+                || lower.contains("-vl")
+                || lower.contains("_vl")
         })
         .unwrap_or(false)
 }
@@ -432,6 +479,58 @@ fn should_apply_diffusion_disambiguation_guard(
     }
 
     hard_types.len() == 1 && hard_types.contains(&ModelType::Llm) && has_diffusion_name
+}
+
+fn has_vision_language_architecture(signals: &ConfigSignals) -> bool {
+    signals.architectures.iter().any(|arch| {
+        let lower = arch.to_lowercase();
+        lower.contains("vision")
+            || lower.contains("florence")
+            || lower.contains("paligemma")
+            || lower.contains("idefics")
+            || lower.contains("blip")
+            || lower.contains("_vl")
+            || lower.contains("visionencoderdecoder")
+    })
+}
+
+fn has_vision_language_config(signals: &ConfigSignals) -> bool {
+    signals.config_model_type.as_deref().is_some_and(|value| {
+        value.contains("vision")
+            || value.contains("florence")
+            || value.contains("paligemma")
+            || value.contains("idefics")
+            || value.contains("blip")
+            || value.contains("_vl")
+            || value.contains("vision-encoder-decoder")
+    })
+}
+
+fn should_apply_vision_disambiguation_guard(
+    hard_types: &HashSet<ModelType>,
+    name_hint: Option<&str>,
+    signals: &ConfigSignals,
+    medium_hints: &[ModelType],
+) -> bool {
+    if medium_hints.iter().any(|hint| *hint != ModelType::Vision) {
+        return false;
+    }
+
+    let has_vision_specific_evidence = signals.has_vision_config
+        || signals.has_vision_task_hint
+        || has_vision_language_architecture(signals)
+        || has_vision_language_config(signals)
+        || name_looks_like_vision_language(name_hint);
+
+    if hard_types.contains(&ModelType::Vision)
+        && hard_types.contains(&ModelType::Llm)
+        && has_vision_specific_evidence
+    {
+        return true;
+    }
+
+    medium_hints.contains(&ModelType::Vision)
+        && (has_vision_specific_evidence || hard_types.contains(&ModelType::Llm))
 }
 
 fn has_audio_architecture(signals: &ConfigSignals) -> bool {
@@ -605,6 +704,23 @@ fn collect_medium_hints(
         }
     }
     Ok(hints.into_iter().collect())
+}
+
+fn is_vision_task_hint(value: &str) -> bool {
+    matches!(
+        value.trim().to_lowercase().as_str(),
+        "image-to-text"
+            | "image-text-to-text"
+            | "visual-question-answering"
+            | "document-question-answering"
+            | "zero-shot-object-detection"
+            | "object-detection"
+            | "image-classification"
+            | "image-segmentation"
+            | "depth-estimation"
+            | "video-text-to-text"
+            | "video-classification"
+    )
 }
 
 fn parse_model_type(value: &str) -> ModelType {
@@ -1077,6 +1193,43 @@ mod tests {
 
         assert_eq!(resolved.model_type, ModelType::Diffusion);
         assert_eq!(resolved.source, "model-type-diffusion-disambiguation-guard");
+        assert!(resolved.review_reasons.is_empty());
+    }
+
+    #[test]
+    fn vision_guard_overrides_conditional_generation_for_florence() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Florence2ForConditionalGeneration"],
+                "model_type": "florence2",
+                "vision_config": {
+                    "model_type": "davit"
+                }
+            }),
+        );
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("image-text-to-text"),
+            None,
+            Some(&HuggingFaceEvidence {
+                repo_id: Some("microsoft/Florence-2-large".to_string()),
+                pipeline_tag: Some("image-text-to-text".to_string()),
+                remote_kind: Some("image-text-to-text".to_string()),
+                architectures: Some(vec!["Florence2ForConditionalGeneration".to_string()]),
+                config_model_type: Some("florence2".to_string()),
+                tags: Some(vec!["vision".to_string(), "image-text-to-text".to_string()]),
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model_type, ModelType::Vision);
+        assert_eq!(resolved.source, "model-type-vision-disambiguation-guard");
         assert!(resolved.review_reasons.is_empty());
     }
 }

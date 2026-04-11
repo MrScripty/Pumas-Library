@@ -6206,6 +6206,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_reclassify_model_moves_florence_to_vision() {
+        let (_, library) = setup_library().await;
+
+        let old_dir = library.build_model_path("embedding", "microsoft", "florence-2-large");
+        std::fs::create_dir_all(&old_dir).unwrap();
+        write_min_safetensors(&old_dir.join("model.safetensors"));
+        std::fs::write(
+            old_dir.join("config.json"),
+            r#"{"architectures":["Florence2ForConditionalGeneration"],"model_type":"florence2","vision_config":{"model_type":"davit"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            old_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": "microsoft/Florence-2-large",
+                "model_type": "llm",
+                "pipeline_tag": "image-text-to-text",
+                "huggingface_evidence": {
+                    "repo_id": "microsoft/Florence-2-large",
+                    "pipeline_tag": "image-text-to-text",
+                    "remote_kind": "image-text-to-text",
+                    "architectures": ["Florence2ForConditionalGeneration"],
+                    "config_model_type": "florence2",
+                    "tags": ["vision", "image-text-to-text"]
+                }
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("embedding/microsoft/florence-2-large".to_string()),
+            family: Some("microsoft".to_string()),
+            model_type: Some("embedding".to_string()),
+            official_name: Some("Florence-2-large".to_string()),
+            cleaned_name: Some("florence-2-large".to_string()),
+            pipeline_tag: Some("image-text-to-text".to_string()),
+            task_type_primary: Some("image-text-to-text".to_string()),
+            input_modalities: Some(vec!["text".to_string(), "image".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            huggingface_evidence: Some(HuggingFaceEvidence {
+                repo_id: Some("microsoft/Florence-2-large".to_string()),
+                pipeline_tag: Some("image-text-to-text".to_string()),
+                remote_kind: Some("image-text-to-text".to_string()),
+                architectures: Some(vec!["Florence2ForConditionalGeneration".to_string()]),
+                config_model_type: Some("florence2".to_string()),
+                tags: Some(vec!["vision".to_string(), "image-text-to-text".to_string()]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        library.save_metadata(&old_dir, &metadata).await.unwrap();
+        library.index_model_dir(&old_dir).await.unwrap();
+
+        let moved = library
+            .reclassify_model("embedding/microsoft/florence-2-large")
+            .await
+            .unwrap();
+        assert_eq!(
+            moved.as_deref().map(normalize_path_separators),
+            Some("vision/microsoft/florence-2-large".to_string())
+        );
+
+        let new_dir = library.build_model_path("vision", "microsoft", "florence-2-large");
+        let updated = library.load_metadata(&new_dir).unwrap().unwrap();
+        assert_eq!(updated.model_type, Some("vision".to_string()));
+        assert_eq!(
+            updated.model_type_resolution_source,
+            Some("model-type-vision-disambiguation-guard".to_string())
+        );
+        assert_eq!(
+            updated.task_type_primary,
+            Some("image-text-to-text".to_string())
+        );
+    }
+
+    #[tokio::test]
     async fn test_reclassify_model_dedupes_identical_collision_and_updates_index() {
         let (_, library) = setup_library().await;
 

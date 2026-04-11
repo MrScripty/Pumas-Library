@@ -131,6 +131,10 @@ mod tests {
             pipeline_tag: None,
             bundle_format: None,
             pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         }
     }
 

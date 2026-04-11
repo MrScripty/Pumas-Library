@@ -113,8 +113,12 @@ impl PumasApi {
             let mut resolved_pipeline_tag =
                 normalized_download_hint(resolved_request.pipeline_tag.as_deref())
                     .map(ToOwned::to_owned);
-            let mut huggingface_evidence = match client.get_model_evidence(&request.repo_id).await {
-                Ok(evidence) => Some(evidence),
+            let mut remote_model = None;
+            let mut huggingface_evidence = match client.get_model_snapshot(&request.repo_id).await {
+                Ok((model, evidence)) => {
+                    remote_model = Some(model);
+                    Some(evidence)
+                }
                 Err(err) => {
                     warn!(
                         "Failed to capture HF evidence for {} before download: {}",
@@ -146,7 +150,10 @@ impl PumasApi {
             if resolved_model_type.is_none() || resolved_pipeline_tag.is_none() {
                 // Fall back to repo metadata only when the request does not already
                 // carry enough information to place the download safely.
-                let model_info = client.get_model_info(&request.repo_id).await?;
+                if remote_model.is_none() {
+                    remote_model = Some(client.get_model_info(&request.repo_id).await?);
+                }
+                let model_info = remote_model.as_ref().expect("remote model must be present");
                 if resolved_pipeline_tag.is_none() {
                     resolved_pipeline_tag =
                         normalized_download_hint(Some(model_info.kind.as_str()))
@@ -162,6 +169,11 @@ impl PumasApi {
                         ],
                     )?;
                 }
+            }
+            if let Some(model_info) = remote_model.as_ref() {
+                apply_remote_model_metadata(&mut resolved_request, model_info);
+            } else if resolved_request.license_status.is_none() {
+                resolved_request.license_status = Some("license_unknown".to_string());
             }
 
             let should_check_bundle = resolved_model_type
@@ -427,6 +439,10 @@ impl PumasApi {
             pipeline_tag: None,
             bundle_format: None,
             pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         client.start_download(&request, dest, None).await
@@ -613,6 +629,11 @@ impl PumasApi {
                 official_name: Some(model.name),
                 model_type,
                 download_url: Some(model.url),
+                release_date: model.release_date,
+                model_card: model.model_card,
+                license_status: model
+                    .license
+                    .or_else(|| Some("license_unknown".to_string())),
                 match_source: Some("hf".to_string()),
                 match_method: Some("repo_id".to_string()),
                 match_confidence: Some(1.0),
@@ -655,6 +676,11 @@ impl PumasApi {
                 tags: vec![],
                 base_model: None,
                 download_url: Some(model.url),
+                release_date: model.release_date,
+                model_card_json: serialize_model_card_json(model.model_card.as_ref()),
+                license_status: model
+                    .license
+                    .or_else(|| Some("license_unknown".to_string())),
                 description: None,
                 match_confidence: 1.0,
                 match_method: "repo_id".to_string(),
@@ -942,6 +968,35 @@ pub(crate) fn normalized_download_hint(hint: Option<&str>) -> Option<&str> {
     })
 }
 
+pub(crate) fn serialize_model_card_json(
+    model_card: Option<&std::collections::HashMap<String, serde_json::Value>>,
+) -> Option<String> {
+    model_card
+        .filter(|card| !card.is_empty())
+        .and_then(|card| serde_json::to_string(card).ok())
+}
+
+pub(crate) fn apply_remote_model_metadata(
+    request: &mut model_library::DownloadRequest,
+    model: &models::HuggingFaceModel,
+) {
+    if request.release_date.is_none() {
+        request.release_date = model.release_date.clone();
+    }
+    if request.download_url.is_none() && !model.url.trim().is_empty() {
+        request.download_url = Some(model.url.clone());
+    }
+    if request.model_card_json.is_none() {
+        request.model_card_json = serialize_model_card_json(model.model_card.as_ref());
+    }
+    if request.license_status.is_none() {
+        request.license_status = model
+            .license
+            .clone()
+            .or_else(|| Some("license_unknown".to_string()));
+    }
+}
+
 pub(crate) fn build_lookup_metadata_from_model(
     index: &crate::index::ModelIndex,
     model: models::HuggingFaceModel,
@@ -961,6 +1016,11 @@ pub(crate) fn build_lookup_metadata_from_model(
         tags: vec![],
         base_model,
         download_url: Some(model.url),
+        release_date: model.release_date,
+        model_card_json: serialize_model_card_json(model.model_card.as_ref()),
+        license_status: model
+            .license
+            .or_else(|| Some("license_unknown".to_string())),
         description: None,
         match_confidence,
         match_method: match_method.to_string(),
@@ -1277,6 +1337,8 @@ mod tests {
             download_options: Vec::new(),
             url: format!("https://huggingface.co/{}", repo_id),
             release_date: None,
+            model_card: None,
+            license: None,
             downloads: Some(downloads),
             total_size_bytes: None,
             quant_sizes: None,

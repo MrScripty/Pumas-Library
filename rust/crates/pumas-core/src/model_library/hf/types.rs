@@ -7,6 +7,8 @@ use crate::model_library::download_store::PersistedDownload;
 use crate::model_library::types::{DownloadRequest, DownloadStatus};
 use crate::models::HuggingFaceEvidence;
 use serde::Deserialize;
+use serde_json::Value;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -215,6 +217,9 @@ pub(crate) struct HfSearchResult {
     /// Model config (available with config=true in search, always in direct endpoint)
     #[serde(default)]
     pub config: Option<HfModelConfig>,
+    /// Model card metadata from HuggingFace when available.
+    #[serde(default, rename = "cardData")]
+    pub card_data: Option<HashMap<String, Value>>,
 }
 
 /// Subset of the HuggingFace model config relevant for type inference.

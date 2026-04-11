@@ -378,6 +378,11 @@ pub async fn import_model_in_place(
         .or_else(|| params.get("pipelineTag"))
         .and_then(|v| v.as_str())
         .map(String::from);
+    let release_date = get_str_param(params, "release_date", "releaseDate").map(String::from);
+    let download_url = get_str_param(params, "download_url", "downloadUrl").map(String::from);
+    let model_card_json =
+        get_str_param(params, "model_card_json", "modelCardJson").map(String::from);
+    let license_status = get_str_param(params, "license_status", "licenseStatus").map(String::from);
     let huggingface_evidence: Option<pumas_library::model_library::HuggingFaceEvidence> = params
         .get("huggingface_evidence")
         .or_else(|| params.get("huggingFaceEvidence"))
@@ -394,6 +399,10 @@ pub async fn import_model_in_place(
         expected_files,
         pipeline_tag,
         huggingface_evidence,
+        release_date,
+        download_url,
+        model_card_json,
+        license_status,
     };
 
     let result = state.api.import_model_in_place(&spec).await?;

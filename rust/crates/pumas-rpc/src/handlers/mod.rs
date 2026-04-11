@@ -246,6 +246,7 @@ async fn dispatch_method(
         // Inference Settings
         "get_inference_settings" => models::get_inference_settings(state, params).await,
         "update_inference_settings" => models::update_inference_settings(state, params).await,
+        "update_model_notes" => models::update_model_notes(state, params).await,
         "resolve_model_dependency_requirements" => {
             models::resolve_model_dependency_requirements(state, params).await
         }

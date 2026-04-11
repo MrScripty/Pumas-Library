@@ -115,6 +115,8 @@ impl From<CachedRepoDetails> for HuggingFaceModel {
             download_options: cached.download_options,
             url: cached.url,
             release_date: cached.last_modified,
+            model_card: None,
+            license: None,
             downloads: cached.downloads,
             total_size_bytes: cached.total_size_bytes,
             quant_sizes: None, // Deprecated field
@@ -893,6 +895,8 @@ mod tests {
             }],
             url: format!("https://huggingface.co/{}", repo_id),
             release_date: Some("2024-01-15T10:00:00Z".to_string()),
+            model_card: None,
+            license: None,
             downloads: Some(1000),
             total_size_bytes: Some(4_000_000_000),
             quant_sizes: None,

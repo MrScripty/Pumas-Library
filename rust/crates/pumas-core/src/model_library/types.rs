@@ -22,6 +22,8 @@ pub use crate::models::{
 pub enum ModelType {
     /// Large Language Model (text generation)
     Llm,
+    /// Vision-language model (image/video + text understanding or generation)
+    Vlm,
     /// Reranker model (text ranking / relevance scoring)
     Reranker,
     /// Diffusion model (image generation)
@@ -41,6 +43,7 @@ impl ModelType {
     pub fn as_str(&self) -> &'static str {
         match self {
             ModelType::Llm => "llm",
+            ModelType::Vlm => "vlm",
             ModelType::Reranker => "reranker",
             ModelType::Diffusion => "diffusion",
             ModelType::Embedding => "embedding",
@@ -96,12 +99,14 @@ impl ModelType {
             | "depth-estimation"
             | "image-feature-extraction"
             | "zero-shot-object-detection"
-            | "image-to-text"
+            | "video-classification" => ModelType::Vision,
+
+            // Vision-language / multimodal
+            "image-to-text"
             | "image-text-to-text"
             | "visual-question-answering"
             | "document-question-answering"
-            | "video-classification"
-            | "video-text-to-text" => ModelType::Vision,
+            | "video-text-to-text" => ModelType::Vlm,
 
             // Embedding
             "feature-extraction" | "sentence-similarity" => ModelType::Embedding,
@@ -117,6 +122,7 @@ impl std::str::FromStr for ModelType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
             "llm" => Ok(ModelType::Llm),
+            "vlm" => Ok(ModelType::Vlm),
             "reranker" => Ok(ModelType::Reranker),
             "diffusion" => Ok(ModelType::Diffusion),
             "embedding" => Ok(ModelType::Embedding),
@@ -275,6 +281,15 @@ pub struct HfMetadataResult {
     /// Direct download URL
     #[serde(default)]
     pub download_url: Option<String>,
+    /// Release or last-modified date from HuggingFace
+    #[serde(default)]
+    pub release_date: Option<String>,
+    /// Serialized HuggingFace cardData JSON payload
+    #[serde(default)]
+    pub model_card_json: Option<String>,
+    /// Resolved license identifier or fallback status
+    #[serde(default)]
+    pub license_status: Option<String>,
     /// Model description
     #[serde(default)]
     pub description: Option<String>,
@@ -536,6 +551,18 @@ pub struct DownloadRequest {
     /// Optional pipeline class derived from remote bundle metadata.
     #[serde(default)]
     pub pipeline_class: Option<String>,
+    /// Release or last-modified date from the original HF search result.
+    #[serde(default)]
+    pub release_date: Option<String>,
+    /// URL to the remote model page.
+    #[serde(default)]
+    pub download_url: Option<String>,
+    /// Serialized HuggingFace cardData JSON payload.
+    #[serde(default)]
+    pub model_card_json: Option<String>,
+    /// Resolved license identifier or fallback status.
+    #[serde(default)]
+    pub license_status: Option<String>,
 }
 
 /// Batch import progress tracking.
@@ -795,15 +822,19 @@ mod tests {
         );
         assert_eq!(
             ModelType::from_pipeline_tag("image-to-text"),
-            ModelType::Vision
+            ModelType::Vlm
         );
         assert_eq!(
             ModelType::from_pipeline_tag("image-text-to-text"),
-            ModelType::Vision
+            ModelType::Vlm
         );
         assert_eq!(
             ModelType::from_pipeline_tag("video-classification"),
             ModelType::Vision
+        );
+        assert_eq!(
+            ModelType::from_pipeline_tag("video-text-to-text"),
+            ModelType::Vlm
         );
         assert_eq!(
             ModelType::from_pipeline_tag("mask-generation"),
@@ -850,11 +881,13 @@ mod tests {
             "image-classification".parse::<ModelType>().unwrap(),
             ModelType::Vision
         );
+        assert_eq!("vlm".parse::<ModelType>().unwrap(), ModelType::Vlm);
     }
 
     #[test]
     fn test_model_type_as_str() {
         assert_eq!(ModelType::Llm.as_str(), "llm");
+        assert_eq!(ModelType::Vlm.as_str(), "vlm");
         assert_eq!(ModelType::Reranker.as_str(), "reranker");
         assert_eq!(ModelType::Diffusion.as_str(), "diffusion");
         assert_eq!(ModelType::Embedding.as_str(), "embedding");

@@ -364,12 +364,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       'depth-estimation': 'vision',
       'image-feature-extraction': 'vision',
       'zero-shot-object-detection': 'vision',
-      'image-to-text': 'vision',
-      'image-text-to-text': 'vision',
-      'visual-question-answering': 'vision',
-      'document-question-answering': 'vision',
+      // Vision-language / multimodal
+      'image-to-text': 'vlm',
+      'image-text-to-text': 'vlm',
+      'visual-question-answering': 'vlm',
+      'document-question-answering': 'vlm',
       'video-classification': 'vision',
-      'video-text-to-text': 'vision',
+      'video-text-to-text': 'vlm',
       // Embedding
       'feature-extraction': 'embedding',
       'sentence-similarity': 'embedding',
@@ -388,6 +389,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     const officialName = model.name || repoId;
     const modelType = resolveDownloadModelType(model.kind || '');
     const pipelineTag = model.kind || '';
+    const releaseDate = model.releaseDate || null;
+    const downloadUrl = model.url || null;
 
     logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant, filenames: filenames?.length });
     // Clear any previous error for this download
@@ -405,6 +408,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         officialName,
         modelType,
         pipelineTag,
+        releaseDate,
+        downloadUrl,
         quant || null,
         filenames || null
       );

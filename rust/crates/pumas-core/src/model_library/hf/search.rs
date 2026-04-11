@@ -10,7 +10,7 @@ use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
 use crate::models::{DownloadOption, FileGroup};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 use tracing::{debug, info, warn};
 
@@ -41,6 +41,27 @@ fn quant_tag_regex() -> Option<&'static regex::Regex> {
 
 fn quant_option_size_sum(download_options: &[DownloadOption]) -> u64 {
     download_options.iter().filter_map(|o| o.size_bytes).sum()
+}
+
+fn extract_license(
+    tags: &[String],
+    model_card: Option<&HashMap<String, serde_json::Value>>,
+) -> Option<String> {
+    if let Some(license) = model_card
+        .and_then(|card| card.get("license"))
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Some(license.to_string());
+    }
+
+    tags.iter().find_map(|tag| {
+        tag.strip_prefix("license:")
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToOwned::to_owned)
+    })
 }
 
 fn likely_missing_quant_variants(
@@ -455,6 +476,8 @@ impl HuggingFaceClient {
 
         // Build URL for the model page
         let url = format!("https://huggingface.co/{}", result.model_id);
+        let model_card = result.card_data.filter(|card| !card.is_empty());
+        let license = extract_license(&result.tags, model_card.as_ref());
 
         // Detect compatible inference engines based on formats
         let compatible_engines = crate::models::detect_compatible_engines(&formats);
@@ -469,6 +492,8 @@ impl HuggingFaceClient {
             download_options: vec![], // Populated by get_download_options
             url,
             release_date: result.last_modified,
+            model_card,
+            license,
             downloads: result.downloads,
             total_size_bytes: None,
             quant_sizes: None,
@@ -779,6 +804,8 @@ mod tests {
             download_options: vec![],
             url: "https://huggingface.co/test/model".to_string(),
             release_date: Some("2026-01-01T00:00:00Z".to_string()),
+            model_card: None,
+            license: None,
             downloads: Some(1),
             total_size_bytes: None,
             quant_sizes: None,

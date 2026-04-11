@@ -1538,6 +1538,10 @@ mod tests {
             pipeline_tag: Some("text-generation".to_string()),
             bundle_format: None,
             pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         persistence
@@ -1635,6 +1639,10 @@ mod tests {
             pipeline_tag: Some("text-ranking".to_string()),
             bundle_format: None,
             pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         {

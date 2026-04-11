@@ -11,6 +11,7 @@ import type {
   InferenceParamSchema,
   InferenceSettingsResponse,
   ModelExecutionDescriptor,
+  UpdateModelNotesResponse,
   UpdateInferenceSettingsResponse,
 } from '../types/api';
 
@@ -58,6 +59,8 @@ class ModelsAPI {
     officialName: string,
     modelType?: string | null,
     pipelineTag?: string | null,
+    releaseDate?: string | null,
+    downloadUrl?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) {
@@ -68,6 +71,8 @@ class ModelsAPI {
       officialName,
       modelType,
       pipelineTag,
+      releaseDate,
+      downloadUrl,
       quant,
       filenames
     );
@@ -149,6 +154,14 @@ class ModelsAPI {
   ): Promise<UpdateInferenceSettingsResponse> {
     const api = this.getAPI();
     return await api.update_inference_settings(modelId, inferenceSettings);
+  }
+
+  async updateModelNotes(
+    modelId: string,
+    notes?: string | null
+  ): Promise<UpdateModelNotesResponse> {
+    const api = this.getAPI();
+    return await api.update_model_notes(modelId, notes);
   }
 }
 

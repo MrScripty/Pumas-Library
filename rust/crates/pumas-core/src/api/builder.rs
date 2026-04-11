@@ -105,6 +105,10 @@ fn start_primary_background_work(
                     pipeline_tag: None,
                     bundle_format: None,
                     pipeline_class: None,
+                    release_date: None,
+                    download_url: None,
+                    model_card_json: None,
+                    license_status: None,
                 };
                 match client
                     .start_download(&request, &recovery.model_dir, None)
@@ -166,6 +170,10 @@ fn start_primary_background_work(
                     pipeline_tag: None,
                     bundle_format: None,
                     pipeline_class: None,
+                    release_date: None,
+                    download_url: None,
+                    model_card_json: None,
+                    license_status: None,
                 };
                 match client.start_download(&request, &item.model_dir, None).await {
                     Ok(id) => {

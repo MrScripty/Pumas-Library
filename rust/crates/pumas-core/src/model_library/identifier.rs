@@ -251,17 +251,16 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
         // Vision architectures
         if matches!(
             arch_lower.as_str(),
-            "clip"
-                | "vit"
-                | "siglip"
-                | "dinov2"
-                | "swin"
-                | "convnext"
-                | "deit"
-                | "beit"
-                | "mobilevlm"
+            "clip" | "vit" | "siglip" | "dinov2" | "swin" | "convnext" | "deit" | "beit"
         ) {
             return ModelType::Vision;
+        }
+
+        if matches!(
+            arch_lower.as_str(),
+            "mobilevlm" | "llava" | "paligemma" | "idefics" | "florence"
+        ) {
+            return ModelType::Vlm;
         }
 
         // Diffusion architectures
@@ -308,6 +307,17 @@ fn detect_model_type_from_gguf_metadata(metadata: &GgufMetadata) -> ModelType {
             || lower.contains("encodec")
         {
             return Some(ModelType::Audio);
+        }
+        // Vision-language / multimodal
+        if lower.contains("vlm")
+            || lower.contains("-vl")
+            || lower.contains("_vl")
+            || lower.contains("llava")
+            || lower.contains("florence")
+            || lower.contains("paligemma")
+            || lower.contains("idefics")
+        {
+            return Some(ModelType::Vlm);
         }
         // Vision
         if lower.contains("vision")
@@ -520,10 +530,10 @@ fn identify_safetensors<R: Read + Seek>(file: &mut R, path: &Path) -> Result<Mod
         model_type = ModelType::Audio;
     }
 
-    // Check directory context for vision indicators.
-    // Only override Unknown/Diffusion to avoid false positives on VLMs (e.g. LLaVA)
-    // that have vision_config but are fundamentally LLMs with lm_head.
-    if (model_type == ModelType::Unknown || model_type == ModelType::Diffusion)
+    // Promote LLM-like tensor layouts with explicit multimodal config into VLM.
+    if model_type == ModelType::Llm && is_vlm_from_context(path) {
+        model_type = ModelType::Vlm;
+    } else if (model_type == ModelType::Unknown || model_type == ModelType::Diffusion)
         && is_vision_from_context(path)
     {
         model_type = ModelType::Vision;
@@ -622,6 +632,54 @@ fn is_audio_from_context(path: &Path) -> bool {
     }
 
     false
+}
+
+/// Check directory context for vision model indicators.
+///
+/// This supplements tensor analysis by checking the parent directory's
+/// `config.json` for vision-specific metadata fields.
+fn is_vlm_from_context(path: &Path) -> bool {
+    let Some(parent) = path.parent() else {
+        return false;
+    };
+
+    let config_path = parent.join("config.json");
+    let config_str = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+
+    let config: serde_json::Value = match serde_json::from_str(&config_str) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    let has_multimodal_tokens = config.get("image_token_id").is_some()
+        || config.get("video_token_id").is_some()
+        || config.get("vision_start_token_id").is_some()
+        || config.get("vision_end_token_id").is_some();
+    let has_dual_config =
+        config.get("vision_config").is_some() && config.get("text_config").is_some();
+
+    let architecture_looks_vlm = config
+        .get("architectures")
+        .and_then(|value| value.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| value.as_str())
+        .any(|value| {
+            let lower = value.to_lowercase();
+            lower.contains("florence")
+                || lower.contains("paligemma")
+                || lower.contains("idefics")
+                || lower.contains("blip")
+                || lower.contains("llava")
+                || lower.contains("vlm")
+                || lower.contains("_vl")
+                || lower.contains("visionencoderdecoder")
+        });
+
+    has_multimodal_tokens || has_dual_config || architecture_looks_vlm
 }
 
 /// Check directory context for vision model indicators.
@@ -783,11 +841,13 @@ fn analyze_tensor_names(header: &serde_json::Value) -> (ModelType, Option<ModelF
     }
 
     // Determine type based on indicators.
-    // Priority: audio > vision > diffusion > embedding > llm > unknown.
-    // Audio and vision take higher priority because these models often
+    // Priority: audio > vlm > vision > diffusion > embedding > llm > unknown.
+    // Audio, VLM, and vision take higher priority because these models often
     // reuse transformer layers that would otherwise trigger LLM detection.
     let model_type = if audio_indicators > 3 {
         ModelType::Audio
+    } else if vision_indicators > 3 && has_lm_head {
+        ModelType::Vlm
     } else if vision_indicators > 3 {
         ModelType::Vision
     } else if diffusion_indicators > llm_indicators && diffusion_indicators > 5 {
@@ -819,7 +879,7 @@ fn detect_family_from_tensors(tensor_names: &[&str], model_type: ModelType) -> O
     let names_str = tensor_names.join(" ").to_lowercase();
 
     match model_type {
-        ModelType::Llm | ModelType::Embedding => {
+        ModelType::Llm | ModelType::Embedding | ModelType::Vlm => {
             // Check for specific LLM/embedding architectures
             // These patterns work for both LLMs and embedding models based on the same architecture
             if names_str.contains("mistral") {

@@ -19,6 +19,16 @@ use std::path::Path;
 use std::time::Duration;
 
 impl HuggingFaceClient {
+    pub(crate) async fn get_model_snapshot(
+        &self,
+        repo_id: &str,
+    ) -> Result<(HuggingFaceModel, HuggingFaceEvidence)> {
+        let result = self.fetch_model_info_response(repo_id).await?;
+        let evidence = Self::build_huggingface_evidence(repo_id, &result);
+        let model = Self::convert_search_result(result);
+        Ok((model, evidence))
+    }
+
     async fn fetch_model_info_response(&self, repo_id: &str) -> Result<HfSearchResult> {
         let url = format!("{}/models/{}", HF_API_BASE, repo_id);
 
@@ -94,11 +104,6 @@ impl HuggingFaceClient {
         }
     }
 
-    pub(crate) async fn get_model_evidence(&self, repo_id: &str) -> Result<HuggingFaceEvidence> {
-        let result = self.fetch_model_info_response(repo_id).await?;
-        Ok(Self::build_huggingface_evidence(repo_id, &result))
-    }
-
     pub(crate) fn enrich_huggingface_evidence_for_download(
         evidence: &mut HuggingFaceEvidence,
         tree: &RepoFileTree,
@@ -124,8 +129,8 @@ impl HuggingFaceClient {
     /// Uses `GET /api/models/{repo_id}` which returns the exact model
     /// without any search or cache involvement.
     pub async fn get_model_info(&self, repo_id: &str) -> Result<HuggingFaceModel> {
-        let result = self.fetch_model_info_response(repo_id).await?;
-        Ok(Self::convert_search_result(result))
+        let (model, _) = self.get_model_snapshot(repo_id).await?;
+        Ok(model)
     }
 
     /// Get repository file tree with LFS information.
@@ -279,6 +284,15 @@ impl HuggingFaceClient {
                 "{}/{}/resolve/main/{}",
                 HF_HUB_BASE, best_match.repo_id, filename
             )),
+            release_date: best_match.release_date.clone(),
+            model_card_json: best_match
+                .model_card
+                .as_ref()
+                .and_then(|card| serde_json::to_string(card).ok()),
+            license_status: best_match
+                .license
+                .clone()
+                .or_else(|| Some("license_unknown".to_string())),
             description: None,
             match_confidence: confidence,
             match_method: if confidence > 0.9 {
@@ -333,6 +347,9 @@ impl HuggingFaceClient {
                     "{}/{}/resolve/main/{}",
                     HF_HUB_BASE, repo_id, lfs_file.filename
                 )),
+                release_date: None,
+                model_card_json: None,
+                license_status: Some("license_unknown".to_string()),
                 description: None,
                 match_confidence: 0.8, // High confidence from LFS match
                 match_method: "lfs_match".to_string(),

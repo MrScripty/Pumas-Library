@@ -397,6 +397,8 @@ export interface HuggingFaceModel {
   }>;
   url: string;
   releaseDate?: string;
+  modelCard?: Record<string, unknown> | null;
+  license?: string | null;
   downloads?: number | null;
   totalSizeBytes?: number | null;
   quantSizes?: Record<string, number>;
@@ -449,6 +451,11 @@ export interface InferenceSettingsResponse extends BaseResponse {
  */
 export interface UpdateInferenceSettingsResponse extends BaseResponse {
   model_id: string;
+}
+
+export interface UpdateModelNotesResponse extends BaseResponse {
+  model_id: string;
+  notes?: string | null;
 }
 
 export interface SearchHFModelsResponse extends BaseResponse {
@@ -1696,6 +1703,8 @@ export interface PyWebViewAPI {
     officialName: string,
     modelType?: string | null,
     pipelineTag?: string | null,
+    releaseDate?: string | null,
+    downloadUrl?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;
@@ -1705,6 +1714,8 @@ export interface PyWebViewAPI {
     officialName: string,
     modelType?: string | null,
     pipelineTag?: string | null,
+    releaseDate?: string | null,
+    downloadUrl?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ): Promise<ModelDownloadResponse>;
@@ -1737,6 +1748,14 @@ export interface PyWebViewAPI {
     modelId: string,
     inferenceSettings: InferenceParamSchema[]
   ): Promise<UpdateInferenceSettingsResponse>;
+
+  /**
+   * Update user-authored markdown notes for a model.
+   */
+  update_model_notes(
+    modelId: string,
+    notes?: string | null
+  ): Promise<UpdateModelNotesResponse>;
 
   /**
    * Get metadata for a library model (both stored and embedded)

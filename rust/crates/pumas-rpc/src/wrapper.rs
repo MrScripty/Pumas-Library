@@ -148,6 +148,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_supported_quant_types"
         | "get_inference_settings"
         | "update_inference_settings"
+        | "update_model_notes"
         | "list_models_needing_review"
         | "submit_model_review"
         | "reset_model_review"

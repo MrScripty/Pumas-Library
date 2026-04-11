@@ -552,6 +552,12 @@ pub struct HuggingFaceModel {
     /// Release/last modified date
     #[serde(default)]
     pub release_date: Option<String>,
+    /// Parsed HuggingFace cardData payload when available
+    #[serde(default)]
+    pub model_card: Option<HashMap<String, serde_json::Value>>,
+    /// License identifier resolved from HuggingFace metadata
+    #[serde(default)]
+    pub license: Option<String>,
     /// Total download count
     #[serde(default)]
     pub downloads: Option<u64>,

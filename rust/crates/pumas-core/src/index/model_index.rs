@@ -302,7 +302,7 @@ impl ModelIndex {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               pattern TEXT NOT NULL,
               match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -321,7 +321,7 @@ impl ModelIndex {
             CREATE TABLE IF NOT EXISTS model_type_config_rules (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -458,10 +458,10 @@ impl ModelIndex {
                 |row| row.get(0),
             )
             .optional()?;
-        if arch_sql
-            .as_deref()
-            .is_some_and(|sql| !sql.to_lowercase().contains("'reranker'"))
-        {
+        if arch_sql.as_deref().is_some_and(|sql| {
+            let sql = sql.to_lowercase();
+            !sql.contains("'reranker'") || !sql.contains("'vlm'")
+        }) {
             Self::rebuild_model_type_arch_rules_table(conn)?;
         }
 
@@ -473,11 +473,31 @@ impl ModelIndex {
                 |row| row.get(0),
             )
             .optional()?;
-        if config_sql
-            .as_deref()
-            .is_some_and(|sql| !sql.to_lowercase().contains("'reranker'"))
-        {
+        if config_sql.as_deref().is_some_and(|sql| {
+            let sql = sql.to_lowercase();
+            !sql.contains("'reranker'") || !sql.contains("'vlm'")
+        }) {
             Self::rebuild_model_type_config_rules_table(conn)?;
+        }
+
+        if config_sql.is_some() {
+            let stale_multimodal_hint_rules: i64 = conn.query_row(
+                "SELECT COUNT(*)
+                 FROM model_type_config_rules
+                 WHERE status = 'active'
+                   AND (
+                     (lower(config_model_type) = 'image-to-text' AND lower(model_type) != 'vlm')
+                     OR (lower(config_model_type) = 'image-text-to-text' AND lower(model_type) != 'vlm')
+                     OR (lower(config_model_type) = 'visual-question-answering' AND lower(model_type) != 'vlm')
+                     OR (lower(config_model_type) = 'document-question-answering' AND lower(model_type) != 'vlm')
+                     OR (lower(config_model_type) = 'video-text-to-text' AND lower(model_type) != 'vlm')
+                   )",
+                [],
+                |row| row.get(0),
+            )?;
+            if stale_multimodal_hint_rules > 0 {
+                Self::repair_multimodal_hint_rule_rows(conn)?;
+            }
         }
 
         Ok(())
@@ -492,7 +512,7 @@ impl ModelIndex {
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               pattern TEXT NOT NULL,
               match_style TEXT NOT NULL CHECK (match_style IN ('exact', 'prefix', 'suffix', 'wildcard')),
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -541,7 +561,7 @@ impl ModelIndex {
             CREATE TABLE model_type_config_rules (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               config_model_type TEXT NOT NULL,
-              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
+              model_type TEXT NOT NULL CHECK (model_type IN ('llm', 'vlm', 'reranker', 'diffusion', 'audio', 'vision', 'embedding', 'unknown')),
               priority INTEGER NOT NULL DEFAULT 100,
               status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'pending', 'deprecated')),
               source TEXT NOT NULL DEFAULT 'system',
@@ -574,6 +594,34 @@ impl ModelIndex {
             FROM model_type_config_rules_legacy;
 
             DROP TABLE model_type_config_rules_legacy;
+            ",
+        )?;
+
+        Ok(())
+    }
+
+    fn repair_multimodal_hint_rule_rows(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            UPDATE model_type_config_rules
+            SET model_type = 'vlm',
+                priority = 60,
+                status = 'active',
+                source = 'system'
+            WHERE lower(config_model_type) IN (
+              'image-to-text',
+              'image-text-to-text',
+              'visual-question-answering',
+              'document-question-answering',
+              'video-text-to-text'
+            );
+
+            INSERT OR IGNORE INTO model_type_config_rules (config_model_type, model_type, priority, status, source) VALUES
+              ('image-to-text', 'vlm', 60, 'active', 'system'),
+              ('image-text-to-text', 'vlm', 60, 'active', 'system'),
+              ('visual-question-answering', 'vlm', 60, 'active', 'system'),
+              ('document-question-answering', 'vlm', 60, 'active', 'system'),
+              ('video-text-to-text', 'vlm', 60, 'active', 'system');
             ",
         )?;
 
@@ -626,6 +674,12 @@ impl ModelIndex {
               ('ForSemanticSegmentation', 'suffix', 'vision', 100, 'active', 'system'),
               ('ForImageSegmentation', 'suffix', 'vision', 100, 'active', 'system'),
               ('CLIPVisionModel', 'prefix', 'vision', 100, 'active', 'system'),
+              ('VisionEncoderDecoderModel', 'exact', 'vlm', 90, 'active', 'system'),
+              ('Florence', 'prefix', 'vlm', 90, 'active', 'system'),
+              ('PaliGemma', 'prefix', 'vlm', 90, 'active', 'system'),
+              ('Idefics', 'prefix', 'vlm', 90, 'active', 'system'),
+              ('BLIP', 'prefix', 'vlm', 90, 'active', 'system'),
+              ('Llava', 'prefix', 'vlm', 90, 'active', 'system'),
               ('UNet2DConditionModel', 'exact', 'diffusion', 100, 'active', 'system'),
               ('UNet2DModel', 'exact', 'diffusion', 100, 'active', 'system'),
               ('AutoencoderKL', 'exact', 'diffusion', 100, 'active', 'system'),
@@ -635,6 +689,7 @@ impl ModelIndex {
 
             INSERT OR IGNORE INTO model_type_config_rules (config_model_type, model_type, priority, status, source) VALUES
               ('llm', 'llm', 50, 'active', 'system'),
+              ('vlm', 'vlm', 50, 'active', 'system'),
               ('reranker', 'reranker', 50, 'active', 'system'),
               ('diffusion', 'diffusion', 50, 'active', 'system'),
               ('embedding', 'embedding', 50, 'active', 'system'),
@@ -657,7 +712,7 @@ impl ModelIndex {
               ('image-inpainting', 'diffusion', 60, 'active', 'system'),
               ('text-to-video', 'diffusion', 60, 'active', 'system'),
               ('video-classification', 'vision', 60, 'active', 'system'),
-              ('image-text-to-text', 'vision', 60, 'active', 'system'),
+              ('image-text-to-text', 'vlm', 60, 'active', 'system'),
               ('mask-generation', 'vision', 60, 'active', 'system'),
               ('text-to-3d', 'diffusion', 60, 'active', 'system'),
               ('image-to-3d', 'diffusion', 60, 'active', 'system'),
@@ -674,10 +729,10 @@ impl ModelIndex {
               ('depth-estimation', 'vision', 60, 'active', 'system'),
               ('image-feature-extraction', 'vision', 60, 'active', 'system'),
               ('zero-shot-object-detection', 'vision', 60, 'active', 'system'),
-              ('image-to-text', 'vision', 60, 'active', 'system'),
-              ('visual-question-answering', 'vision', 60, 'active', 'system'),
-              ('document-question-answering', 'vision', 60, 'active', 'system'),
-              ('video-text-to-text', 'vision', 60, 'active', 'system'),
+              ('image-to-text', 'vlm', 60, 'active', 'system'),
+              ('visual-question-answering', 'vlm', 60, 'active', 'system'),
+              ('document-question-answering', 'vlm', 60, 'active', 'system'),
+              ('video-text-to-text', 'vlm', 60, 'active', 'system'),
               ('feature-extraction', 'embedding', 60, 'active', 'system'),
               ('sentence-similarity', 'embedding', 60, 'active', 'system'),
               ('llama', 'llm', 100, 'active', 'system'),
@@ -690,10 +745,18 @@ impl ModelIndex {
               ('phi', 'llm', 100, 'active', 'system'),
               ('phi3', 'llm', 100, 'active', 'system'),
               ('qwen2', 'llm', 100, 'active', 'system'),
+              ('qwen2_vl', 'vlm', 95, 'active', 'system'),
+              ('qwen2_5_vl', 'vlm', 95, 'active', 'system'),
               ('qwen3', 'llm', 100, 'active', 'system'),
+              ('qwen3_vl', 'vlm', 95, 'active', 'system'),
+              ('qwen3_5_vl', 'vlm', 95, 'active', 'system'),
+              ('florence2', 'vlm', 95, 'active', 'system'),
+              ('paligemma', 'vlm', 95, 'active', 'system'),
+              ('idefics', 'vlm', 95, 'active', 'system'),
               ('gemma', 'llm', 100, 'active', 'system'),
               ('gemma2', 'llm', 100, 'active', 'system'),
               ('gemma3', 'llm', 100, 'active', 'system'),
+              ('gemma3n', 'vlm', 95, 'active', 'system'),
               ('deepseek_v2', 'llm', 100, 'active', 'system'),
               ('deepseek_v3', 'llm', 100, 'active', 'system'),
               ('falcon', 'llm', 100, 'active', 'system'),
@@ -733,8 +796,8 @@ impl ModelIndex {
               ('dinov2', 'vision', 100, 'active', 'system'),
               ('clip', 'vision', 100, 'active', 'system'),
               ('siglip', 'vision', 100, 'active', 'system'),
-              ('blip', 'vision', 100, 'active', 'system'),
-              ('blip2', 'vision', 100, 'active', 'system'),
+              ('blip', 'vlm', 95, 'active', 'system'),
+              ('blip2', 'vlm', 95, 'active', 'system'),
               ('sentence-transformers', 'embedding', 100, 'active', 'system'),
               ('bge', 'embedding', 100, 'active', 'system'),
               ('e5', 'embedding', 100, 'active', 'system'),
@@ -1876,6 +1939,7 @@ mod tests {
         assert!(config_rules
             .iter()
             .any(|r| r.config_model_type == "text-ranking"));
+        assert!(config_rules.iter().any(|r| r.config_model_type == "vlm"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llm"));
         assert!(config_rules
             .iter()
@@ -1901,6 +1965,13 @@ mod tests {
             Some("vision")
         );
         assert_eq!(
+            index
+                .resolve_model_type_hint("image-text-to-text")
+                .unwrap()
+                .as_deref(),
+            Some("vlm")
+        );
+        assert_eq!(
             index.resolve_model_type_hint("llm").unwrap().as_deref(),
             Some("llm")
         );
@@ -1921,6 +1992,48 @@ mod tests {
         assert_eq!(
             index.resolve_model_type_hint("not-a-known-type").unwrap(),
             None
+        );
+    }
+
+    #[test]
+    fn test_reopen_repairs_stale_multimodal_hint_rules() {
+        let temp_dir = TempDir::new().unwrap();
+        let db_path = temp_dir.path().join("models.db");
+        let index = ModelIndex::new(&db_path).unwrap();
+
+        {
+            let conn = index.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE model_type_config_rules
+                 SET model_type = 'vision'
+                 WHERE config_model_type IN (
+                   'image-to-text',
+                   'image-text-to-text',
+                   'visual-question-answering',
+                   'document-question-answering',
+                   'video-text-to-text'
+                 )",
+                [],
+            )
+            .unwrap();
+        }
+
+        drop(index);
+
+        let repaired = ModelIndex::new(&db_path).unwrap();
+        assert_eq!(
+            repaired
+                .resolve_model_type_hint("image-text-to-text")
+                .unwrap()
+                .as_deref(),
+            Some("vlm")
+        );
+        assert_eq!(
+            repaired
+                .resolve_model_type_hint("image-to-text")
+                .unwrap()
+                .as_deref(),
+            Some("vlm")
         );
     }
 

@@ -196,14 +196,30 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "model_id is required".to_string(),
                         })?;
+                let settings_value = if !params["settings"].is_null() {
+                    params["settings"].clone()
+                } else {
+                    params["inference_settings"].clone()
+                };
                 let settings: Vec<models::InferenceParamSchema> =
-                    serde_json::from_value(params["settings"].clone()).map_err(|e| {
+                    serde_json::from_value(settings_value).map_err(|e| {
                         PumasError::InvalidParams {
                             message: format!("Invalid inference settings: {e}"),
                         }
                     })?;
                 store_inference_settings(self, model_id, settings).await?;
                 Ok(serde_json::json!({ "success": true }))
+            }
+            "update_model_notes" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let notes = params["notes"].as_str().map(ToOwned::to_owned);
+                let response = store_model_notes(self, model_id, notes).await?;
+                Ok(serde_json::to_value(response)?)
             }
             "get_library_status" => {
                 let _ =
@@ -1029,6 +1045,45 @@ async fn store_inference_settings(
     Ok(())
 }
 
+async fn store_model_notes(
+    primary: &PrimaryState,
+    model_id: &str,
+    notes: Option<String>,
+) -> std::result::Result<models::UpdateModelNotesResponse, PumasError> {
+    let library = &primary.model_library;
+    let model_dir = library.library_root().join(model_id);
+
+    if !model_dir.exists() {
+        return Ok(models::UpdateModelNotesResponse {
+            success: false,
+            error: Some(format!("Model not found: {}", model_id)),
+            model_id: model_id.to_string(),
+            notes: None,
+        });
+    }
+
+    let mut metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+    let normalized_notes = notes.and_then(|value| {
+        if value.trim().is_empty() {
+            None
+        } else {
+            Some(value)
+        }
+    });
+    metadata.notes = normalized_notes.clone();
+    metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+    library.save_metadata(&model_dir, &metadata).await?;
+    library.index_model_dir(&model_dir).await?;
+
+    Ok(models::UpdateModelNotesResponse {
+        success: true,
+        error: None,
+        model_id: model_id.to_string(),
+        notes: normalized_notes,
+    })
+}
+
 async fn search_hf_models(
     primary: &PrimaryState,
     query: &str,
@@ -1077,7 +1132,9 @@ async fn start_hf_download(
     primary: &PrimaryState,
     request: &model_library::DownloadRequest,
 ) -> std::result::Result<String, PumasError> {
-    use crate::api::hf::{normalized_download_hint, resolve_model_type_from_hints};
+    use crate::api::hf::{
+        apply_remote_model_metadata, normalized_download_hint, resolve_model_type_from_hints,
+    };
     use tracing::{info, warn};
 
     let client = primary
@@ -1090,8 +1147,12 @@ async fn start_hf_download(
     let mut resolved_request = request.clone();
     let mut resolved_pipeline_tag =
         normalized_download_hint(resolved_request.pipeline_tag.as_deref()).map(ToOwned::to_owned);
-    let mut huggingface_evidence = match client.get_model_evidence(&request.repo_id).await {
-        Ok(evidence) => Some(evidence),
+    let mut remote_model = None;
+    let mut huggingface_evidence = match client.get_model_snapshot(&request.repo_id).await {
+        Ok((model, evidence)) => {
+            remote_model = Some(model);
+            Some(evidence)
+        }
         Err(err) => {
             warn!(
                 "Failed to capture HF evidence for {} before download: {}",
@@ -1121,7 +1182,10 @@ async fn start_hf_download(
     };
 
     if resolved_model_type.is_none() || resolved_pipeline_tag.is_none() {
-        let model_info = client.get_model_info(&request.repo_id).await?;
+        if remote_model.is_none() {
+            remote_model = Some(client.get_model_info(&request.repo_id).await?);
+        }
+        let model_info = remote_model.as_ref().expect("remote model must be present");
         if resolved_pipeline_tag.is_none() {
             resolved_pipeline_tag =
                 normalized_download_hint(Some(model_info.kind.as_str())).map(ToOwned::to_owned);
@@ -1136,6 +1200,11 @@ async fn start_hf_download(
                 ],
             )?;
         }
+    }
+    if let Some(model_info) = remote_model.as_ref() {
+        apply_remote_model_metadata(&mut resolved_request, model_info);
+    } else if resolved_request.license_status.is_none() {
+        resolved_request.license_status = Some("license_unknown".to_string());
     }
 
     let should_check_bundle = resolved_model_type
@@ -1320,6 +1389,10 @@ async fn recover_download(
         pipeline_tag: None,
         bundle_format: None,
         pipeline_class: None,
+        release_date: None,
+        download_url: None,
+        model_card_json: None,
+        license_status: None,
     };
 
     client.start_download(&request, dest, None).await
@@ -1452,6 +1525,8 @@ async fn refetch_metadata_from_hf(
     primary: &PrimaryState,
     model_id: &str,
 ) -> std::result::Result<models::ModelMetadata, PumasError> {
+    use crate::api::hf::serialize_model_card_json;
+
     let hf_client = primary
         .hf_client
         .as_ref()
@@ -1471,6 +1546,11 @@ async fn refetch_metadata_from_hf(
             official_name: Some(model.name),
             model_type,
             download_url: Some(model.url),
+            release_date: model.release_date,
+            model_card: model.model_card,
+            license_status: model
+                .license
+                .or_else(|| Some("license_unknown".to_string())),
             match_source: Some("hf".to_string()),
             match_method: Some("repo_id".to_string()),
             match_confidence: Some(1.0),
@@ -1510,6 +1590,11 @@ async fn refetch_metadata_from_hf(
             tags: vec![],
             base_model: None,
             download_url: Some(model.url),
+            release_date: model.release_date,
+            model_card_json: serialize_model_card_json(model.model_card.as_ref()),
+            license_status: model
+                .license
+                .or_else(|| Some("license_unknown".to_string())),
             description: None,
             match_confidence: 1.0,
             match_method: "repo_id".to_string(),

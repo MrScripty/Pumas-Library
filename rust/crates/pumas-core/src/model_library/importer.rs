@@ -78,6 +78,24 @@ fn join_validation_errors(errors: &[crate::models::AssetValidationError]) -> Str
         .join("; ")
 }
 
+fn parse_model_card_json(
+    model_card_json: Option<&str>,
+) -> Option<std::collections::HashMap<String, serde_json::Value>> {
+    let raw = model_card_json?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    match serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(raw) {
+        Ok(card) if !card.is_empty() => Some(card),
+        Ok(_) => None,
+        Err(err) => {
+            tracing::warn!("Failed to parse stored model card JSON: {}", err);
+            None
+        }
+    }
+}
+
 /// Model importer for bringing local files into the library.
 ///
 /// Features:
@@ -330,6 +348,10 @@ impl ModelImporter {
             expected_files: Some(collect_relative_file_paths(target_dir)?),
             pipeline_tag: Some("text-to-image".to_string()),
             huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         let import_result = self.import_in_place(&in_place_spec).await?;
@@ -430,6 +452,10 @@ impl ModelImporter {
             expected_files: Some(info.filenames.clone()),
             pipeline_tag: info.download_request.pipeline_tag.clone(),
             huggingface_evidence: info.huggingface_evidence.clone(),
+            release_date: info.download_request.release_date.clone(),
+            download_url: info.download_request.download_url.clone(),
+            model_card_json: info.download_request.model_card_json.clone(),
+            license_status: info.download_request.license_status.clone(),
         };
         self.import_in_place(&spec).await
     }
@@ -462,6 +488,10 @@ impl ModelImporter {
         metadata.expected_files = Some(info.filenames.clone());
         metadata.pipeline_tag = info.download_request.pipeline_tag.clone();
         metadata.huggingface_evidence = info.huggingface_evidence.clone();
+        metadata.release_date = info.download_request.release_date.clone();
+        metadata.download_url = info.download_request.download_url.clone();
+        metadata.model_card =
+            parse_model_card_json(info.download_request.model_card_json.as_deref());
         metadata.size_bytes = info.total_bytes;
         metadata.match_source = Some("download_partial".to_string());
         metadata.match_method = Some("repo_id".to_string());
@@ -496,9 +526,12 @@ impl ModelImporter {
             reasons.push("model-type-unresolved".to_string());
         }
         metadata.review_reasons = Some(reasons);
-        metadata
+        metadata.license_status = info
+            .download_request
             .license_status
-            .get_or_insert_with(|| "license_unknown".to_string());
+            .clone()
+            .or_else(|| metadata.license_status.clone())
+            .or_else(|| Some("license_unknown".to_string()));
 
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
         self.library.save_metadata(model_dir, &metadata).await?;
@@ -1175,6 +1208,13 @@ impl ModelImporter {
         metadata.expected_files = spec.expected_files.clone();
         metadata.pipeline_tag = spec.pipeline_tag.clone();
         metadata.huggingface_evidence = spec.huggingface_evidence.clone();
+        metadata.release_date = spec.release_date.clone();
+        metadata.download_url = spec.download_url.clone();
+        metadata.model_card = parse_model_card_json(spec.model_card_json.as_deref());
+        metadata.license_status = spec
+            .license_status
+            .clone()
+            .or_else(|| Some("license_unknown".to_string()));
         metadata.model_type_resolution_source = Some(resolved_model_type.source.clone());
         metadata.model_type_resolution_confidence = Some(resolved_model_type.confidence);
         metadata.metadata_needs_review = Some(false);
@@ -1392,6 +1432,10 @@ impl ModelImporter {
                 expected_files: None,
                 pipeline_tag: None,
                 huggingface_evidence: None,
+                release_date: None,
+                download_url: None,
+                model_card_json: None,
+                license_status: None,
             };
 
             match self.import_in_place(&spec).await {
@@ -1849,6 +1893,14 @@ pub struct InPlaceImportSpec {
     pub pipeline_tag: Option<String>,
     /// Normalized HuggingFace evidence captured during download preflight.
     pub huggingface_evidence: Option<HuggingFaceEvidence>,
+    /// Release or last-modified date from HuggingFace.
+    pub release_date: Option<String>,
+    /// URL to the remote model page.
+    pub download_url: Option<String>,
+    /// Serialized HuggingFace cardData JSON payload.
+    pub model_card_json: Option<String>,
+    /// Resolved license identifier or fallback status.
+    pub license_status: Option<String>,
 }
 
 /// Descriptor for an incomplete sharded model that needs recovery download.
@@ -2127,6 +2179,14 @@ mod tests {
                 pipeline_tag: Some("text-ranking".to_string()),
                 bundle_format: None,
                 pipeline_class: None,
+                release_date: Some("2026-02-02T00:00:00Z".to_string()),
+                download_url: Some(
+                    "https://huggingface.co/QuantFactory/Qwen3-Reranker-4B-GGUF".to_string(),
+                ),
+                model_card_json: Some(
+                    r#"{"license":"apache-2.0","tags":["reranker"]}"#.to_string(),
+                ),
+                license_status: Some("apache-2.0".to_string()),
             },
             total_bytes: Some(1024),
             huggingface_evidence: Some(HuggingFaceEvidence {
@@ -2200,6 +2260,10 @@ mod tests {
             ]),
             pipeline_tag: None,
             huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         let result = importer.import_in_place(&spec).await.unwrap();
@@ -2349,6 +2413,10 @@ mod tests {
             ]),
             pipeline_tag: Some("text-to-image".to_string()),
             huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         let result = importer.import_in_place(&spec).await.unwrap();
@@ -2394,6 +2462,10 @@ mod tests {
             expected_files: Some(vec!["detector.onnx".to_string()]),
             pipeline_tag: Some("zero-shot-object-detection".to_string()),
             huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         };
 
         let result = importer.import_in_place(&spec).await.unwrap();

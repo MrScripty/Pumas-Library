@@ -20,6 +20,11 @@ pub async fn download_model_from_hf(
     let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
         .or_else(|| get_str_param(params, "subtype", "subtype"))
         .map(String::from);
+    let release_date = get_str_param(params, "release_date", "releaseDate").map(String::from);
+    let download_url = get_str_param(params, "download_url", "downloadUrl").map(String::from);
+    let model_card_json =
+        get_str_param(params, "model_card_json", "modelCardJson").map(String::from);
+    let license_status = get_str_param(params, "license_status", "licenseStatus").map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,
@@ -32,6 +37,10 @@ pub async fn download_model_from_hf(
         pipeline_tag,
         bundle_format: None,
         pipeline_class: None,
+        release_date,
+        download_url,
+        model_card_json,
+        license_status,
     };
 
     match state.api.start_hf_download(&request).await {
@@ -62,6 +71,11 @@ pub async fn start_model_download_from_hf(
     let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
         .or_else(|| get_str_param(params, "subtype", "subtype"))
         .map(String::from);
+    let release_date = get_str_param(params, "release_date", "releaseDate").map(String::from);
+    let download_url = get_str_param(params, "download_url", "downloadUrl").map(String::from);
+    let model_card_json =
+        get_str_param(params, "model_card_json", "modelCardJson").map(String::from);
+    let license_status = get_str_param(params, "license_status", "licenseStatus").map(String::from);
 
     let request = pumas_library::DownloadRequest {
         repo_id,
@@ -74,6 +88,10 @@ pub async fn start_model_download_from_hf(
         pipeline_tag,
         bundle_format: None,
         pipeline_class: None,
+        release_date,
+        download_url,
+        model_card_json,
+        license_status,
     };
 
     match state.api.start_hf_download(&request).await {

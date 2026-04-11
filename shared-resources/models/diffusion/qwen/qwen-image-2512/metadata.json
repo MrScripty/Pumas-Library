@@ -17,7 +17,7 @@
   "hashes": null,
   "notes": null,
   "added_date": "2026-02-25T20:20:08.030953660+00:00",
-  "updated_date": "2026-03-08T08:44:45.216999099+00:00",
+  "updated_date": "2026-04-11T19:52:22.809034397+00:00",
   "size_bytes": 57699249390,
   "files": null,
   "match_source": "hf",
@@ -64,6 +64,7 @@
   "validation_state": null,
   "validation_errors": null,
   "pipeline_tag": "text-to-image",
+  "huggingface_evidence": null,
   "task_type_primary": "text-to-image",
   "task_type_secondary": null,
   "input_modalities": [
@@ -72,10 +73,10 @@
   "output_modalities": [
     "image"
   ],
-  "task_classification_source": "manual-review",
+  "task_classification_source": "hf-pipeline-tag",
   "task_classification_confidence": 1.0,
-  "model_type_resolution_source": "model-type-directory-layout",
-  "model_type_resolution_confidence": 0.75,
+  "model_type_resolution_source": "model-type-resolver-medium-hints",
+  "model_type_resolution_confidence": 0.65,
   "recommended_backend": "pytorch",
   "runtime_engine_hints": null,
   "dependency_bindings": null,

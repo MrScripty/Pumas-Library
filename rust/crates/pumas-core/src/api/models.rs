@@ -290,6 +290,58 @@ impl PumasApi {
         Ok(())
     }
 
+    /// Update user-authored markdown notes for a model.
+    pub async fn update_model_notes(
+        &self,
+        model_id: &str,
+        notes: Option<String>,
+    ) -> Result<models::UpdateModelNotesResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "update_model_notes",
+                    serde_json::json!({
+                        "model_id": model_id,
+                        "notes": notes,
+                    }),
+                )
+                .await;
+        }
+
+        let library = &self.primary().model_library;
+        let model_dir = library.library_root().join(model_id);
+
+        if !model_dir.exists() {
+            return Ok(models::UpdateModelNotesResponse {
+                success: false,
+                error: Some(format!("Model not found: {}", model_id)),
+                model_id: model_id.to_string(),
+                notes: None,
+            });
+        }
+
+        let mut metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let normalized_notes = notes.and_then(|value| {
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        });
+        metadata.notes = normalized_notes.clone();
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        library.save_metadata(&model_dir, &metadata).await?;
+        library.index_model_dir(&model_dir).await?;
+
+        Ok(models::UpdateModelNotesResponse {
+            success: true,
+            error: None,
+            model_id: model_id.to_string(),
+            notes: normalized_notes,
+        })
+    }
+
     /// Resolve deterministic dependency requirements for a model in a specific runtime context.
     pub async fn resolve_model_dependency_requirements(
         &self,

@@ -3,9 +3,9 @@
 //! Uses active SQLite rule tables (`model_type_arch_rules`, `model_type_config_rules`)
 //! and deterministic scoring rules to classify model type from hard source signals.
 
-use crate::Result;
 use crate::index::{ModelIndex, ModelTypeArchRule, ModelTypeConfigRule};
 use crate::model_library::types::{HuggingFaceEvidence, ModelType};
+use crate::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::Path;
@@ -26,6 +26,7 @@ struct ConfigSignals {
     has_sentence_transformers_config: bool,
     has_sentence_transformers_modules: bool,
     has_vision_config: bool,
+    has_vlm_task_hint: bool,
     has_vision_task_hint: bool,
 }
 
@@ -100,6 +101,15 @@ fn resolve_model_type_from_inputs(
         });
     }
 
+    if should_apply_vlm_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints) {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Vlm,
+            source: "model-type-vlm-disambiguation-guard".to_string(),
+            confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
     if should_apply_vision_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints) {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Vision,
@@ -118,6 +128,16 @@ fn resolve_model_type_from_inputs(
         });
     }
 
+    if should_apply_embedding_disambiguation_guard(&hard_types, name_hint, &signals, &medium_hints)
+    {
+        return Ok(ModelTypeResolution {
+            model_type: ModelType::Embedding,
+            source: "model-type-embedding-disambiguation-guard".to_string(),
+            confidence: 0.90,
+            review_reasons: Vec::new(),
+        });
+    }
+
     if hard_types.len() > 1 {
         return Ok(ModelTypeResolution {
             model_type: ModelType::Unknown,
@@ -127,7 +147,7 @@ fn resolve_model_type_from_inputs(
         });
     }
 
-    let Some(mut resolved_type) = hard_types.into_iter().next() else {
+    let Some(resolved_type) = hard_types.into_iter().next() else {
         if let Some(hint_resolved) = resolve_hint_only_model_type(&medium_hints) {
             return Ok(ModelTypeResolution {
                 model_type: hint_resolved,
@@ -160,26 +180,13 @@ fn resolve_model_type_from_inputs(
     }
     score = score.clamp(0.0, 1.0);
 
-    let mut source = if !arch_votes.is_empty() && config_vote.is_some() {
+    let source = if !arch_votes.is_empty() && config_vote.is_some() {
         "model-type-resolver-arch-config-rules".to_string()
     } else if !arch_votes.is_empty() {
         "model-type-resolver-arch-rules".to_string()
     } else {
         "model-type-resolver-config-rules".to_string()
     };
-
-    // Guardrail: some embedding models reuse causal-LM architecture/config hints.
-    // When strong local embedding evidence is present, prefer `embedding`.
-    if should_apply_embedding_disambiguation_guard(
-        resolved_type,
-        name_hint,
-        &signals,
-        &medium_hints,
-    ) {
-        resolved_type = ModelType::Embedding;
-        score = score.max(0.90);
-        source = "model-type-embedding-disambiguation-guard".to_string();
-    }
 
     if score < 0.60 {
         return Ok(ModelTypeResolution {
@@ -264,6 +271,7 @@ fn load_config_signals(
         has_sentence_transformers_config,
         has_sentence_transformers_modules,
         has_vision_config,
+        has_vlm_task_hint: false,
         has_vision_task_hint: false,
     };
     merge_huggingface_evidence_into_signals(&mut signals, huggingface_evidence);
@@ -309,6 +317,21 @@ fn merge_huggingface_evidence_into_signals(
             .map(|value| value.trim().to_lowercase())
             .filter(|value| !value.is_empty());
     }
+
+    signals.has_vlm_task_hint |= evidence
+        .pipeline_tag
+        .as_deref()
+        .is_some_and(is_vlm_task_hint)
+        || evidence
+            .remote_kind
+            .as_deref()
+            .is_some_and(is_vlm_task_hint)
+        || evidence
+            .tags
+            .as_ref()
+            .into_iter()
+            .flatten()
+            .any(|tag| is_vlm_task_hint(tag));
 
     signals.has_vision_task_hint |= evidence
         .pipeline_tag
@@ -379,7 +402,7 @@ fn name_looks_like_audio(name_hint: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-fn name_looks_like_vision_language(name_hint: Option<&str>) -> bool {
+fn name_looks_like_vlm(name_hint: Option<&str>) -> bool {
     name_hint
         .map(|name| {
             let lower = name.to_lowercase();
@@ -387,7 +410,9 @@ fn name_looks_like_vision_language(name_hint: Option<&str>) -> bool {
                 || lower.contains("paligemma")
                 || lower.contains("idefics")
                 || lower.contains("blip")
-                || lower.contains("vision")
+                || lower.contains("llava")
+                || lower.contains("vlm")
+                || lower.contains("qwen-vl")
                 || lower.contains("-vl")
                 || lower.contains("_vl")
         })
@@ -474,41 +499,82 @@ fn should_apply_diffusion_disambiguation_guard(
 
     let has_diffusion_name = name_looks_like_diffusion(name_hint);
 
-    if medium_hints.contains(&ModelType::Diffusion) && hard_types.contains(&ModelType::Llm) {
+    if medium_hints.contains(&ModelType::Diffusion)
+        && (hard_types.contains(&ModelType::Llm) || hard_types.contains(&ModelType::Vlm))
+    {
         return true;
     }
 
-    hard_types.len() == 1 && hard_types.contains(&ModelType::Llm) && has_diffusion_name
+    !hard_types.is_empty()
+        && hard_types
+            .iter()
+            .all(|model_type| matches!(model_type, ModelType::Llm | ModelType::Vlm))
+        && has_diffusion_name
 }
 
-fn has_vision_language_architecture(signals: &ConfigSignals) -> bool {
+fn has_vlm_architecture(signals: &ConfigSignals) -> bool {
     signals.architectures.iter().any(|arch| {
         let lower = arch.to_lowercase();
-        lower.contains("vision")
-            || lower.contains("florence")
+        lower.contains("florence")
             || lower.contains("paligemma")
             || lower.contains("idefics")
             || lower.contains("blip")
+            || lower.contains("llava")
+            || lower.contains("vlm")
             || lower.contains("_vl")
             || lower.contains("visionencoderdecoder")
     })
 }
 
-fn has_vision_language_config(signals: &ConfigSignals) -> bool {
+fn has_vlm_config(signals: &ConfigSignals) -> bool {
     signals.config_model_type.as_deref().is_some_and(|value| {
-        value.contains("vision")
-            || value.contains("florence")
+        value.contains("florence")
             || value.contains("paligemma")
             || value.contains("idefics")
             || value.contains("blip")
+            || value.contains("llava")
+            || value.contains("vlm")
             || value.contains("_vl")
             || value.contains("vision-encoder-decoder")
     })
 }
 
-fn should_apply_vision_disambiguation_guard(
+fn should_apply_vlm_disambiguation_guard(
     hard_types: &HashSet<ModelType>,
     name_hint: Option<&str>,
+    signals: &ConfigSignals,
+    medium_hints: &[ModelType],
+) -> bool {
+    if medium_hints.iter().any(|hint| *hint != ModelType::Vlm) {
+        let hard_conflict =
+            hard_types.contains(&ModelType::Vision) && hard_types.contains(&ModelType::Llm);
+        if !hard_conflict {
+            return false;
+        }
+    }
+
+    let has_vlm_specific_evidence = signals.has_vlm_task_hint
+        || has_vlm_architecture(signals)
+        || has_vlm_config(signals)
+        || name_looks_like_vlm(name_hint);
+
+    if hard_types.contains(&ModelType::Vision)
+        && hard_types.contains(&ModelType::Llm)
+        && has_vlm_specific_evidence
+    {
+        return true;
+    }
+
+    medium_hints.contains(&ModelType::Vlm)
+        && (has_vlm_specific_evidence
+            || signals.has_vision_config
+            || hard_types.contains(&ModelType::Llm)
+            || hard_types.contains(&ModelType::Vision))
+}
+
+fn should_apply_vision_disambiguation_guard(
+    hard_types: &HashSet<ModelType>,
+    _name_hint: Option<&str>,
     signals: &ConfigSignals,
     medium_hints: &[ModelType],
 ) -> bool {
@@ -518,9 +584,14 @@ fn should_apply_vision_disambiguation_guard(
 
     let has_vision_specific_evidence = signals.has_vision_config
         || signals.has_vision_task_hint
-        || has_vision_language_architecture(signals)
-        || has_vision_language_config(signals)
-        || name_looks_like_vision_language(name_hint);
+        || signals
+            .architectures
+            .iter()
+            .any(|arch| arch.to_lowercase().contains("vision"))
+        || signals
+            .config_model_type
+            .as_deref()
+            .is_some_and(|value| value.contains("vision"));
 
     if hard_types.contains(&ModelType::Vision)
         && hard_types.contains(&ModelType::Llm)
@@ -584,12 +655,16 @@ fn should_apply_audio_disambiguation_guard(
 }
 
 fn should_apply_embedding_disambiguation_guard(
-    resolved_type: ModelType,
+    hard_types: &HashSet<ModelType>,
     name_hint: Option<&str>,
     signals: &ConfigSignals,
     medium_hints: &[ModelType],
 ) -> bool {
-    if resolved_type != ModelType::Llm {
+    if hard_types.is_empty()
+        || !hard_types
+            .iter()
+            .all(|model_type| matches!(model_type, ModelType::Llm | ModelType::Vlm))
+    {
         return false;
     }
 
@@ -696,6 +771,12 @@ fn collect_medium_hints(
     }
 
     for raw_hint in raw_hints {
+        let direct = raw_hint.parse::<ModelType>().unwrap_or(ModelType::Unknown);
+        if direct != ModelType::Unknown {
+            hints.insert(direct);
+            continue;
+        }
+
         if let Some(mapped) = index.resolve_model_type_hint(raw_hint)? {
             let mt = parse_model_type(&mapped);
             if mt != ModelType::Unknown {
@@ -706,20 +787,27 @@ fn collect_medium_hints(
     Ok(hints.into_iter().collect())
 }
 
-fn is_vision_task_hint(value: &str) -> bool {
+fn is_vlm_task_hint(value: &str) -> bool {
     matches!(
         value.trim().to_lowercase().as_str(),
         "image-to-text"
             | "image-text-to-text"
             | "visual-question-answering"
             | "document-question-answering"
-            | "zero-shot-object-detection"
+            | "video-text-to-text"
+    )
+}
+
+fn is_vision_task_hint(value: &str) -> bool {
+    matches!(
+        value.trim().to_lowercase().as_str(),
+        "zero-shot-object-detection"
             | "object-detection"
             | "image-classification"
             | "image-segmentation"
             | "depth-estimation"
-            | "video-text-to-text"
             | "video-classification"
+            | "zero-shot-image-classification"
     )
 }
 
@@ -842,11 +930,9 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "model-type-resolver-hard-conflict");
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-conflict".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-conflict".to_string()));
     }
 
     #[test]
@@ -864,11 +950,9 @@ mod tests {
             resolve_model_type_with_rules(&index, model_dir.path(), None, None, None).unwrap();
         assert_eq!(resolved.model_type, ModelType::Llm);
         assert!((resolved.confidence - 0.7).abs() < f64::EPSILON);
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-low-confidence".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[test]
@@ -902,6 +986,74 @@ mod tests {
     }
 
     #[test]
+    fn embedding_disambiguation_guard_overrides_vlm_backbone_for_feature_extraction() {
+        let (_tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Qwen3VLForConditionalGeneration"],
+                "model_type": "qwen3_vl",
+                "vision_config": {
+                    "model_type": "qwen3_vl"
+                }
+            }),
+        );
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("feature-extraction"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model_type, ModelType::Embedding);
+        assert_eq!(resolved.source, "model-type-embedding-disambiguation-guard");
+        assert!(resolved.confidence >= 0.9);
+        assert!(resolved.review_reasons.is_empty());
+    }
+
+    #[test]
+    fn direct_pipeline_tag_mapping_beats_stale_db_hint_for_vlm_tasks() {
+        let (tmp, index) = create_test_index();
+        let model_dir = TempDir::new().unwrap();
+        write_config(
+            model_dir.path(),
+            serde_json::json!({
+                "architectures": ["Qwen3_5MoeForConditionalGeneration"],
+                "model_type": "qwen3_5_moe",
+                "vision_config": {
+                    "model_type": "qwen3_5_moe"
+                }
+            }),
+        );
+
+        let conn = rusqlite::Connection::open(tmp.path().join("models.db")).unwrap();
+        conn.execute(
+            "UPDATE model_type_config_rules
+             SET model_type = 'vision'
+             WHERE config_model_type = 'image-text-to-text'",
+            [],
+        )
+        .unwrap();
+
+        let resolved = resolve_model_type_with_rules(
+            &index,
+            model_dir.path(),
+            Some("image-text-to-text"),
+            None,
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.model_type, ModelType::Vlm);
+        assert_eq!(resolved.source, "model-type-vlm-disambiguation-guard");
+        assert!(resolved.confidence >= 0.9);
+    }
+
+    #[test]
     fn unresolved_when_no_hard_signals() {
         let (_tmp, index) = create_test_index();
         let model_dir = TempDir::new().unwrap();
@@ -917,11 +1069,9 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
         assert_eq!(resolved.source, "unresolved");
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-unresolved".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-unresolved".to_string()));
     }
 
     #[test]
@@ -966,11 +1116,9 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Llm);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-low-confidence".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[test]
@@ -995,11 +1143,9 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Reranker);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-low-confidence".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[test]
@@ -1024,11 +1170,9 @@ mod tests {
         assert_eq!(resolved.model_type, ModelType::Audio);
         assert_eq!(resolved.source, "model-type-resolver-medium-hints");
         assert_eq!(resolved.confidence, 0.65);
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-low-confidence".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-low-confidence".to_string()));
     }
 
     #[test]
@@ -1113,11 +1257,9 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.model_type, ModelType::Unknown);
         assert_eq!(resolved.confidence, 0.0);
-        assert!(
-            resolved
-                .review_reasons
-                .contains(&"model-type-unresolved".to_string())
-        );
+        assert!(resolved
+            .review_reasons
+            .contains(&"model-type-unresolved".to_string()));
     }
 
     #[test]
@@ -1197,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn vision_guard_overrides_conditional_generation_for_florence() {
+    fn vlm_guard_overrides_conditional_generation_for_florence() {
         let (_tmp, index) = create_test_index();
         let model_dir = TempDir::new().unwrap();
         write_config(
@@ -1228,8 +1370,8 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(resolved.model_type, ModelType::Vision);
-        assert_eq!(resolved.source, "model-type-vision-disambiguation-guard");
+        assert_eq!(resolved.model_type, ModelType::Vlm);
+        assert_eq!(resolved.source, "model-type-vlm-disambiguation-guard");
         assert!(resolved.review_reasons.is_empty());
     }
 }

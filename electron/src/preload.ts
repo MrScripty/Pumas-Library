@@ -169,6 +169,8 @@ const electronAPI = {
     officialName: string,
     modelType?: string | null,
     pipelineTag?: string | null,
+    releaseDate?: string | null,
+    downloadUrl?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) =>
@@ -178,6 +180,8 @@ const electronAPI = {
       official_name: officialName,
       model_type: modelType,
       pipeline_tag: pipelineTag,
+      release_date: releaseDate,
+      download_url: downloadUrl,
       quant,
       filenames,
     }),
@@ -187,6 +191,8 @@ const electronAPI = {
     officialName: string,
     modelType?: string | null,
     pipelineTag?: string | null,
+    releaseDate?: string | null,
+    downloadUrl?: string | null,
     quant?: string | null,
     filenames?: string[] | null
   ) =>
@@ -196,6 +202,8 @@ const electronAPI = {
       official_name: officialName,
       model_type: modelType,
       pipeline_tag: pipelineTag,
+      release_date: releaseDate,
+      download_url: downloadUrl,
       quant,
       filenames,
     }),
@@ -224,7 +232,9 @@ const electronAPI = {
   get_inference_settings: (modelId: string) =>
     apiCall('get_inference_settings', { model_id: modelId }),
   update_inference_settings: (modelId: string, inferenceSettings: Record<string, unknown>[]) =>
-    apiCall('update_inference_settings', { model_id: modelId, inference_settings: inferenceSettings }),
+    apiCall('update_inference_settings', { model_id: modelId, settings: inferenceSettings }),
+  update_model_notes: (modelId: string, notes?: string | null) =>
+    apiCall('update_model_notes', { model_id: modelId, notes }),
 
   // HuggingFace Authentication
   set_hf_token: (token: string) => apiCall('set_hf_token', { token }),

@@ -20,6 +20,7 @@ import {
 
 function resolveKindIcon(token: string) {
   const normalized = token.toLowerCase();
+  if (normalized === 'vlm') return Image;
   if (normalized.includes('ranking') || normalized.includes('rerank')) return Shapes;
   if (normalized.includes('segmentation') || normalized.includes('mask')) return Shapes;
   if (normalized.includes('detection')) return Shapes;
@@ -37,6 +38,7 @@ function resolveKindIcon(token: string) {
 
 function resolveKindLabel(token: string) {
   const normalized = token.toLowerCase();
+  if (normalized === 'vlm') return 'VLM';
   if (normalized.includes('ranking') || normalized.includes('rerank')) return 'Ranking';
   if (normalized.includes('segmentation') || normalized.includes('mask')) return 'Mask';
   if (normalized.includes('detection')) return 'Detection';

@@ -459,6 +459,10 @@ fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec 
         expected_files: None,
         pipeline_tag: None,
         huggingface_evidence: None,
+        release_date: None,
+        download_url: None,
+        model_card_json: None,
+        license_status: None,
     }
 }
 

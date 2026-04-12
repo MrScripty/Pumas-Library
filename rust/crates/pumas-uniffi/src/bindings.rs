@@ -693,6 +693,12 @@ impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest 
             pipeline_tag: r.pipeline_tag,
             bundle_format: None,
             pipeline_class: None,
+            // Preserve the existing foreign-language request shape for now.
+            // These fields are derived or looked up elsewhere in the current flow.
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
         }
     }
 }
@@ -1815,6 +1821,8 @@ mod tests {
             download_options: vec![],
             url: "https://example.com".to_string(),
             release_date: None,
+            model_card: None,
+            license: None,
             downloads: None,
             total_size_bytes: None,
             quant_sizes: Some(quant_sizes),
@@ -1841,6 +1849,8 @@ mod tests {
             download_options: vec![],
             url: "https://example.com".to_string(),
             release_date: None,
+            model_card: None,
+            license: None,
             downloads: None,
             total_size_bytes: None,
             quant_sizes: None,
@@ -1849,5 +1859,33 @@ mod tests {
 
         let ffi_model = FfiHuggingFaceModel::from(model);
         assert!(ffi_model.quant_sizes.is_empty());
+    }
+
+    #[test]
+    fn test_ffi_download_request_conversion_defaults_unexposed_hf_metadata() {
+        let ffi_request = FfiDownloadRequest {
+            repo_id: "repo/model".to_string(),
+            family: "diffusion".to_string(),
+            official_name: "Model".to_string(),
+            model_type: Some("diffusion".to_string()),
+            quant: None,
+            filename: Some("model.safetensors".to_string()),
+            filenames: None,
+            pipeline_tag: Some("text-to-image".to_string()),
+        };
+
+        let request = pumas_library::model_library::DownloadRequest::from(ffi_request);
+        assert_eq!(request.repo_id, "repo/model");
+        assert_eq!(request.family, "diffusion");
+        assert_eq!(request.official_name, "Model");
+        assert_eq!(request.model_type.as_deref(), Some("diffusion"));
+        assert_eq!(request.filename.as_deref(), Some("model.safetensors"));
+        assert_eq!(request.pipeline_tag.as_deref(), Some("text-to-image"));
+        assert!(request.bundle_format.is_none());
+        assert!(request.pipeline_class.is_none());
+        assert!(request.release_date.is_none());
+        assert!(request.download_url.is_none());
+        assert!(request.model_card_json.is_none());
+        assert!(request.license_status.is_none());
     }
 }

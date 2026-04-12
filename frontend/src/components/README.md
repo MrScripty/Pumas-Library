@@ -24,6 +24,7 @@ bridge.
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
 | `RemoteModelListItem.tsx` | Presentational row for one Hugging Face search result and its download controls. |
 | `RemoteModelDownloadMenu.tsx` | Extracted remote-download option menu for grouped file and quantized model selections. |
+| `RemoteModelDownloadMenu.test.tsx` | Interaction coverage for grouped-file and quantized remote download menu actions. |
 | `ui/` | Small reusable primitives (buttons, tooltips, list items). |
 | `app-panels/` | App-specific panel renderers and sections. |
 

@@ -10,6 +10,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useModelDownloads.ts` | Download state and operation controls. |
 | `useStatus.ts` | Launcher/app status polling and refresh behavior. |
 | `useVersions.ts` | Version list and version operations state flow. |
+| `useVersionFetching.ts` | Fetches installed, active, default, status, and available version state for one app. |
+| `useVersionFetching.test.ts` | Hook coverage for refresh orchestration, default-version updates, and available-version fetch errors. |
 | `useAppImportDialog.ts` | App-level drag-and-drop import dialog state and completion handlers. |
 | `useAppImportDialog.test.ts` | Hook coverage for app-level import dialog open/close and completion behavior. |
 | `useAppProcessActions.ts` | Shared launch/stop/log handlers for app process controls at the root shell level. |

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useHover } from '@react-aria/interactions';
 import { Anchor, Check, CircleX, Link2 } from 'lucide-react';

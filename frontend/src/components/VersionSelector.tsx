@@ -343,7 +343,7 @@ export function VersionSelector({
         isLoading={isLoading}
         isSwitching={isSwitching}
         activeVersion={activeVersion}
-        defaultVersion={defaultVersion}
+        defaultVersion={defaultVersion ?? null}
         displayVersion={displayVersion}
         showOpenedIndicator={showOpenedIndicator}
         isOpeningPath={isOpeningPath}
@@ -373,7 +373,7 @@ export function VersionSelector({
         installingVersion={installingVersion}
         installedVersions={installedVersions}
         isInstallComplete={isInstallComplete}
-        defaultVersion={defaultVersion}
+        defaultVersion={defaultVersion ?? null}
         isSwitching={isSwitching}
         isLoading={isLoading}
         onMakeDefault={onMakeDefault}

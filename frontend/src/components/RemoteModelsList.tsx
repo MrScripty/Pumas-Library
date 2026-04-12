@@ -5,7 +5,7 @@
  * Extracted from ModelManager.tsx
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Search } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/useModelDownloads';

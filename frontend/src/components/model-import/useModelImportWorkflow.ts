@@ -1,226 +1,35 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { importAPI } from '../../api/import';
-import type {
-  BundleComponentManifestEntry,
-  BundleFormat,
-  HFMetadataLookupResult,
-  ImportPathCandidate,
-  ImportPathClassification,
-  ImportPathClassificationKind,
-  ModelImportSpec,
-  SecurityTier,
-} from '../../types/api';
 import { getLogger } from '../../utils/logger';
-import { getFilename, getSecurityTier } from './metadataUtils';
+import {
+  buildEmbeddedMetadataMatch,
+  buildEntries,
+  buildImportBatchSpecs,
+  buildReviewFindings,
+  buildShardedSetState,
+  extractEmbeddedRepoId,
+} from './modelImportWorkflowHelpers';
+import type {
+  DirectoryReviewFinding,
+  ImportEntryStatus,
+  ImportStep,
+  ShardedSetInfo,
+} from './modelImportWorkflowTypes';
+
+export type {
+  DirectoryReviewFinding,
+  ImportEntryKind,
+  ImportEntryStatus,
+  ImportStep,
+  MetadataStatus,
+  ShardedSetInfo,
+} from './modelImportWorkflowTypes';
 
 const logger = getLogger('ModelImportDialog');
-
-export type ImportStep = 'classifying' | 'review' | 'lookup' | 'importing' | 'complete';
-export type MetadataStatus = 'pending' | 'found' | 'not_found' | 'error' | 'manual';
-export type ImportEntryKind = 'single_file' | 'directory_model' | 'external_diffusers_bundle';
-
-export interface ImportEntryStatus {
-  path: string;
-  originPath: string;
-  filename: string;
-  kind: ImportEntryKind;
-  status: 'pending' | 'importing' | 'success' | 'error';
-  error?: string;
-  securityTier?: SecurityTier;
-  securityAcknowledged?: boolean;
-  hfMetadata?: HFMetadataLookupResult;
-  metadataStatus?: MetadataStatus;
-  shardedSetKey?: string;
-  validFileType?: boolean;
-  detectedFileType?: string;
-  embeddedMetadata?: Record<string, unknown>;
-  embeddedMetadataStatus?: 'pending' | 'loaded' | 'error' | 'unsupported';
-  suggestedFamily: string;
-  suggestedOfficialName: string;
-  modelType?: string;
-  bundleFormat?: BundleFormat;
-  pipelineClass?: string;
-  componentManifest?: BundleComponentManifestEntry[];
-  containerPath?: string;
-}
-
-export interface ShardedSetInfo {
-  key: string;
-  files: string[];
-  complete: boolean;
-  missingShards: number[];
-  expanded: boolean;
-}
-
-export interface DirectoryReviewFinding {
-  path: string;
-  kind: Extract<
-    ImportPathClassificationKind,
-    'multi_model_container' | 'ambiguous' | 'unsupported'
-  >;
-  reasons: string[];
-  candidates: ImportPathCandidate[];
-}
 
 interface UseModelImportWorkflowOptions {
   importPaths: string[];
   onImportComplete: () => void;
-}
-
-function pathStem(name: string): string {
-  return name.replace(/\.[^.]+$/, '');
-}
-
-function preferredBundleFamily(entry: ImportEntryStatus): string {
-  const repoOwner = entry.hfMetadata?.repo_id?.split('/')[0]?.trim();
-  if (repoOwner) {
-    return repoOwner;
-  }
-  return entry.hfMetadata?.family || entry.suggestedFamily;
-}
-
-function createEntry(
-  path: string,
-  originPath: string,
-  kind: ImportEntryKind,
-  filename: string,
-  suggestedFamily: string,
-  suggestedOfficialName: string,
-  modelType?: string,
-  bundleFormat?: BundleFormat,
-  pipelineClass?: string,
-  componentManifest?: BundleComponentManifestEntry[],
-  containerPath?: string
-): ImportEntryStatus {
-  const securityTier = kind === 'single_file' ? getSecurityTier(filename) : 'unknown';
-  return {
-    path,
-    originPath,
-    filename,
-    kind,
-    status: 'pending',
-    securityTier,
-    securityAcknowledged: securityTier !== 'pickle',
-    metadataStatus:
-      kind === 'single_file' || kind === 'external_diffusers_bundle' ? 'pending' : 'manual',
-    suggestedFamily,
-    suggestedOfficialName,
-    modelType,
-    bundleFormat,
-    pipelineClass,
-    componentManifest,
-    containerPath,
-  };
-}
-
-function buildEntries(results: ImportPathClassification[]): ImportEntryStatus[] {
-  const entries: ImportEntryStatus[] = [];
-  const seenPaths = new Set<string>();
-
-  const pushEntry = (entry: ImportEntryStatus) => {
-    if (seenPaths.has(entry.path)) return;
-    seenPaths.add(entry.path);
-    entries.push(entry);
-  };
-
-  for (const result of results) {
-    const suggestedFamily = result.suggested_family || 'imported';
-    const suggestedOfficialName = result.suggested_official_name || pathStem(getFilename(result.path));
-
-    if (result.kind === 'single_file') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'single_file',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined
-        )
-      );
-      continue;
-    }
-
-    if (result.kind === 'single_model_directory') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'directory_model',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined
-        )
-      );
-      continue;
-    }
-
-    if (result.kind === 'single_bundle') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'external_diffusers_bundle',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined,
-          result.bundle_format || undefined,
-          result.pipeline_class || undefined,
-          result.component_manifest || undefined
-        )
-      );
-      continue;
-    }
-
-    if (result.kind !== 'multi_model_container') {
-      continue;
-    }
-
-    for (const candidate of result.candidates) {
-      const candidateKind: ImportEntryKind =
-        candidate.kind === 'external_diffusers_bundle'
-          ? 'external_diffusers_bundle'
-          : candidate.kind === 'directory_model'
-            ? 'directory_model'
-            : 'single_file';
-      const candidateFilename = candidate.display_name || getFilename(candidate.path);
-      pushEntry(
-        createEntry(
-          candidate.path,
-          result.path,
-          candidateKind,
-          candidateFilename,
-          'imported',
-          pathStem(candidateFilename),
-          candidate.model_type || undefined,
-          candidate.bundle_format || undefined,
-          candidate.pipeline_class || undefined,
-          candidate.component_manifest || undefined,
-          result.path
-        )
-      );
-    }
-  }
-
-  return entries;
-}
-
-function buildReviewFindings(results: ImportPathClassification[]): DirectoryReviewFinding[] {
-  return results
-    .filter((result): result is ImportPathClassification & { kind: DirectoryReviewFinding['kind'] } => (
-      result.kind === 'multi_model_container'
-      || result.kind === 'ambiguous'
-      || result.kind === 'unsupported'
-    ))
-    .map((result) => ({
-      path: result.path,
-      kind: result.kind,
-      reasons: result.reasons,
-      candidates: result.candidates,
-    }));
 }
 
 export function useModelImportWorkflow({
@@ -393,24 +202,7 @@ export function useModelImportWorkflow({
         const result = await importAPI.detectShardedSets(paths);
 
         if (result.success && result.groups) {
-          const sets: ShardedSetInfo[] = [];
-          const fileToSetMap: Record<string, string> = {};
-
-          Object.entries(result.groups).forEach(([key, group]) => {
-            if (group.files.length > 1) {
-              sets.push({
-                key,
-                files: group.files,
-                complete: group.validation.complete,
-                missingShards: group.validation.missing_shards,
-                expanded: false,
-              });
-              group.files.forEach((file) => {
-                fileToSetMap[file] = key;
-              });
-            }
-          });
-
+          const { fileToSetMap, sets } = buildShardedSetState(result.groups);
           setShardedSets(sets);
           setEntries((prev) => prev.map((entry) => ({
             ...entry,
@@ -518,23 +310,9 @@ export function useModelImportWorkflow({
                   embeddedMetadataStatus: 'loaded',
                 };
               }));
-
-              const repoUrl = embeddedResult.metadata['general.repo_url'];
-              if (repoUrl && typeof repoUrl === 'string') {
-                const match = repoUrl.match(/huggingface\.co\/([^/]+\/[^/]+)/);
-                if (match && match[1]) {
-                  embeddedRepoId = match[1];
-                  skipHfSearch = true;
-                }
-              }
-
-              if (!skipHfSearch) {
-                const quantizedBy = embeddedResult.metadata['general.quantized_by'];
-                const name = embeddedResult.metadata['general.name'];
-                if (quantizedBy && name) {
-                  embeddedRepoId = `${String(quantizedBy)}/${String(name)}`;
-                  skipHfSearch = true;
-                }
+              embeddedRepoId = extractEmbeddedRepoId(metadata);
+              if (embeddedRepoId) {
+                skipHfSearch = true;
               }
             }
           } catch (error) {
@@ -547,14 +325,7 @@ export function useModelImportWorkflow({
             if (candidate.path !== entry.path) return candidate;
             return {
               ...candidate,
-              hfMetadata: {
-                repo_id: embeddedRepoId,
-                official_name: candidate.suggestedOfficialName,
-                family: candidate.suggestedFamily,
-                match_method: 'filename_exact',
-                match_confidence: 0.9,
-                requires_confirmation: false,
-              },
+              hfMetadata: buildEmbeddedMetadataMatch(candidate, embeddedRepoId),
               metadataStatus: 'found',
             };
           }));
@@ -598,22 +369,7 @@ export function useModelImportWorkflow({
       (entry) => !(entry.kind === 'single_file' && entry.validFileType === false)
     );
 
-    const batchSpecs: ModelImportSpec[] = batchEntries.map((entry) => ({
-      path: entry.path,
-      family:
-        entry.kind === 'external_diffusers_bundle'
-          ? preferredBundleFamily(entry)
-          : entry.hfMetadata?.family || entry.suggestedFamily,
-      official_name: entry.hfMetadata?.official_name || entry.suggestedOfficialName,
-      repo_id: entry.hfMetadata?.repo_id,
-      model_type:
-        entry.kind === 'external_diffusers_bundle'
-          ? 'diffusion'
-          : entry.hfMetadata?.model_type || entry.modelType,
-      subtype: entry.hfMetadata?.subtype,
-      tags: entry.hfMetadata?.tags,
-      security_acknowledged: entry.securityAcknowledged,
-    }));
+    const batchSpecs = buildImportBatchSpecs(batchEntries);
 
     try {
       setEntries((prev) => prev.map((entry) => {

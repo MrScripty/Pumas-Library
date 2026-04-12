@@ -77,6 +77,7 @@ Provide a single backend-owned model registry that can import, classify, validat
 - SQLite remains canonical for persisted model state and query behavior.
 - `metadata.json` is a derived projection that should change only when derived model content changes.
 - `dependency_bindings` in `metadata.json` are projected from active SQLite binding rows and must never be used as dependency-resolution authority.
+- Library-owned diffusers bundles must project `source_path` and `entry_path` back to the canonical library model directory.
 - Watcher-triggered reconcile must not loop on Pumas-owned derived writes.
 - Duplicate cleanup, reclassification, and index rebuild must be idempotent on unchanged libraries.
 - Saved Hugging Face evidence must remain available for future backfill and
@@ -126,6 +127,7 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Dependency resolution and runtime autobind repair must read authoritative binding state from SQLite plus canonical bundle filesystem facts, not from projected `metadata.json` fields.
 - External-reference assets extend persisted metadata with `source_path`, `entry_path`,
   `storage_kind`, `bundle_format`, `pipeline_class`, `import_state`, and asset validation fields.
+- Execution descriptors for `storage_kind=library_owned` diffusers bundles must resolve to the canonical library model directory even when projected path fields are stale.
 - Download flows may create a preliminary metadata record with `match_source = download_partial`
   before weight files complete so recovery/reclassification can reuse persisted HF evidence.
 - `huggingface_evidence` stores normalized remote facts and selected-file context. Resolved
@@ -138,6 +140,8 @@ Provide a single backend-owned model registry that can import, classify, validat
   are refreshed only when underlying derived content changes.
 - Regeneration rule for `dependency_bindings`: after index/rebuild/runtime-autobind changes active
   SQLite bindings, rewrite projected binding refs from SQLite before treating the projection as current.
+- Regeneration rule for library-owned diffusers paths: after index/rebuild, rewrite `source_path`
+  and `entry_path` to the canonical library model directory when the projected values drift.
 - Regeneration rule: when SQLite-backed model state changes, regenerate `metadata.json` only if the
   projected content differs.
 - Compatibility expectation for milestone one is append-only: new optional fields may be added,

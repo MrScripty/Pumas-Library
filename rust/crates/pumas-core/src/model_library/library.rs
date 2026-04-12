@@ -772,12 +772,19 @@ impl ModelLibrary {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
 
+                    let mut metadata_changed =
+                        normalize_library_owned_bundle_paths(&model_dir, &mut metadata);
                     if is_external_reference(&metadata)
                         && refresh_external_metadata_validation(&mut metadata)
                     {
+                        metadata_changed = true;
+                    }
+                    metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
+
+                    if metadata_changed {
                         if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
                             tracing::warn!(
-                                "Failed to persist external asset validation refresh for {}: {}",
+                                "Failed to persist metadata projection refresh for {}: {}",
                                 model_id,
                                 err
                             );
@@ -1909,13 +1916,15 @@ impl ModelLibrary {
         }
 
         let entry_path = if is_diffusers_bundle(&metadata) {
-            metadata
-                .entry_path
-                .clone()
-                .ok_or_else(|| PumasError::Validation {
-                    field: "entry_path".to_string(),
-                    message: "bundle metadata is missing entry_path".to_string(),
-                })?
+            match storage_kind {
+                StorageKind::LibraryOwned => model_dir.display().to_string(),
+                StorageKind::ExternalReference => {
+                    metadata.entry_path.clone().ok_or_else(|| PumasError::Validation {
+                        field: "entry_path".to_string(),
+                        message: "bundle metadata is missing entry_path".to_string(),
+                    })?
+                }
+            }
         } else if let Some(primary_file) = self.get_primary_model_file(model_id) {
             primary_file.display().to_string()
         } else {
@@ -2332,7 +2341,8 @@ impl ModelLibrary {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
         })?;
 
-        let mut metadata_changed =
+        let mut metadata_changed = normalize_library_owned_bundle_paths(model_dir, &mut metadata);
+        metadata_changed |=
             is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata);
         metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
 
@@ -2799,6 +2809,28 @@ fn is_sd_turbo_runtime_candidate(model_dir: &Path, metadata: &ModelMetadata) -> 
 
     hints.name_or_path.as_deref() == Some(SD_TURBO_BASE_MODEL_ID)
         && hints.diffusers_version.as_deref() == Some(SD_TURBO_DIFFUSERS_VERSION)
+}
+
+fn normalize_library_owned_bundle_paths(model_dir: &Path, metadata: &mut ModelMetadata) -> bool {
+    if metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned) != StorageKind::LibraryOwned {
+        return false;
+    }
+    if !is_diffusers_bundle(metadata) {
+        return false;
+    }
+
+    let canonical_path = model_dir.display().to_string();
+    let mut changed = false;
+    if metadata.source_path.as_deref() != Some(canonical_path.as_str()) {
+        metadata.source_path = Some(canonical_path.clone());
+        changed = true;
+    }
+    if metadata.entry_path.as_deref() != Some(canonical_path.as_str()) {
+        metadata.entry_path = Some(canonical_path);
+        changed = true;
+    }
+
+    changed
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8005,6 +8037,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_resolve_model_execution_descriptor_ignores_stale_library_owned_entry_path() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_sd_turbo_bundle(temp_dir.path());
+        let stale_root = temp_dir.path().join("stale-entry-path");
+        std::fs::create_dir_all(&stale_root).unwrap();
+        let model_id = "diffusion/cc-nms/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("cc-nms".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(stale_root.display().to_string()),
+            entry_path: Some(stale_root.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let descriptor = library
+            .resolve_model_execution_descriptor(model_id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            normalize_path_separators(&canonicalize_display_path(&descriptor.entry_path)),
+            normalize_path_separators(&canonicalize_display_path(&model_dir.display().to_string()))
+        );
+    }
+
+    #[tokio::test]
     async fn test_index_model_dir_autobinds_sd_turbo_runtime_dependencies() {
         let (temp_dir, library) = setup_library().await;
         let bundle_root = create_sd_turbo_bundle(temp_dir.path());
@@ -8172,6 +8254,52 @@ mod tests {
         );
         assert_eq!(requirements.bindings.len(), 1);
         assert_eq!(requirements.bindings[0].profile_id, SD_TURBO_PROFILE_ID);
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_reprojects_library_owned_bundle_paths() {
+        let (temp_dir, library) = setup_library().await;
+        let bundle_root = create_sd_turbo_bundle(temp_dir.path());
+        let stale_root = temp_dir.path().join("stale-entry-path");
+        std::fs::create_dir_all(&stale_root).unwrap();
+        let model_id = "diffusion/cc-nms/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
+        std::fs::create_dir_all(model_dir.parent().unwrap()).unwrap();
+        std::fs::rename(&bundle_root, &model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("cc-nms".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(stale_root.display().to_string()),
+            entry_path: Some(stale_root.display().to_string()),
+            storage_kind: Some(StorageKind::LibraryOwned),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            repo_id: Some("cc-nms/tiny-sd-turbo".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let repaired = library.load_metadata(&model_dir).unwrap().unwrap();
+        let canonical_path = model_dir.display().to_string();
+        assert_eq!(repaired.source_path.as_deref(), Some(canonical_path.as_str()));
+        assert_eq!(repaired.entry_path.as_deref(), Some(canonical_path.as_str()));
     }
 
     #[tokio::test]

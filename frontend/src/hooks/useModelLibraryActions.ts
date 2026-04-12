@@ -69,25 +69,18 @@ export function useModelLibraryActions({
   }, []);
 
   const fetchRelatedModels = useCallback(async (modelId: string) => {
-    let shouldFetch = false;
-    setRelatedModelsById((prev) => {
-      const current = prev[modelId];
-      if (current && (current.status === 'loading' || current.status === 'loaded')) {
-        return prev;
-      }
-      shouldFetch = true;
-      return {
-        ...prev,
-        [modelId]: {
-          status: 'loading',
-          models: [],
-        },
-      };
-    });
-
-    if (!shouldFetch) {
+    const current = relatedModelsById[modelId];
+    if (current && (current.status === 'loading' || current.status === 'loaded')) {
       return;
     }
+
+    setRelatedModelsById((prev) => ({
+      ...prev,
+      [modelId]: {
+        status: 'loading',
+        models: [],
+      },
+    }));
 
     if (!isAPIAvailable()) {
       setRelatedModelsById((prev) => ({
@@ -143,7 +136,7 @@ export function useModelLibraryActions({
         },
       }));
     }
-  }, []);
+  }, [relatedModelsById]);
 
   const handleToggleRelated = useCallback(
     (modelId: string) => {

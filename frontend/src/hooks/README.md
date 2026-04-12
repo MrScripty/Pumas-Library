@@ -14,6 +14,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useActiveModelDownload.test.ts` | Hook coverage for active download prioritization, polling refreshes, API-unavailable resets, and empty-download clearing. |
 | `useRemoteModelSearch.ts` | Debounced Hugging Face search, kind derivation, and follow-up download-detail hydration for remote model discovery. |
 | `useRemoteModelSearch.test.ts` | Hook coverage for debounced search flow, blank-query resets, API-unavailable errors, hydration dedupe, and stale-generation protection. |
+| `useModelLibraryActions.ts` | Related-model expansion, partial-download recovery, delete orchestration, and remote URL handling for the library UI. |
+| `useModelLibraryActions.test.ts` | Hook coverage for related-model fetch caching, offline errors, partial-download recovery flows, delete-side cancellation, and remote URL opening. |
 | `useStatus.ts` | Launcher/app status polling and refresh behavior. |
 | `useVersions.ts` | Version list and version operations state flow. |
 | `useVersions.test.ts` | Hook coverage for API-gated refresh startup, installing-tag merge behavior, and install-refresh wiring. |

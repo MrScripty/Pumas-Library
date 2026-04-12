@@ -15,6 +15,10 @@ bridge.
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |
 | `InstallDialogContent.tsx` | Presentational install-dialog body for banners, progress details, and version rows. |
 | `InstallDialogContent.test.tsx` | Interaction coverage for install-dialog notices, detail-view routing, and version-row action wiring. |
+| `ProgressDetailsView.tsx` | Detailed install-progress view for stage, speed, package, completed-item, and failure summaries. |
+| `ProgressDetailsView.test.tsx` | Interaction coverage for progress details actions plus cancellation and success summary rendering. |
+| `VersionListItem.tsx` | Presentational install-version row with install, uninstall, cancel, release-note, and log affordances. |
+| `VersionListItem.test.tsx` | Interaction coverage for installable, installed, and in-progress version row behaviors. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |

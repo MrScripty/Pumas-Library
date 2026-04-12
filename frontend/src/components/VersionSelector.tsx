@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
 import { APIError } from '../errors';
+import { useVersionShortcutState } from '../hooks/useVersionShortcutState';
 import type { InstallationProgress } from '../hooks/useVersions';
 import { getLogger } from '../utils/logger';
 import { VersionSelectorDropdown } from './VersionSelectorDropdown';
@@ -50,39 +50,13 @@ export function VersionSelector({
   const [isOpeningPath, setIsOpeningPath] = useState(false);
   const [showOpenedIndicator, setShowOpenedIndicator] = useState(false);
   const openedIndicatorTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [shortcutState, setShortcutState] = useState<Record<string, { menu: boolean; desktop: boolean }>>({});
   const containerRef = useRef<HTMLDivElement | null>(null);
-
-  const refreshShortcutStates = useCallback(async () => {
-    if (!isAPIAvailable() || !supportsShortcuts) {
-      return;
-    }
-
-    try {
-      const result = await api.get_all_shortcut_states();
-      const states = result?.states?.states;
-      if (result.success && states) {
-        const mapped: Record<string, { menu: boolean; desktop: boolean }> = {};
-        Object.entries(states).forEach(([tag, state]) => {
-          const typedState = state as { menu: boolean; desktop: boolean; tag?: string };
-          mapped[tag] = {
-            menu: Boolean(typedState.menu),
-            desktop: Boolean(typedState.desktop),
-          };
-        });
-        setShortcutState(mapped);
-        logger.debug('Shortcut states refreshed', { stateCount: Object.keys(mapped).length });
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error fetching shortcut states', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Failed to fetch shortcut states', { error: error.message });
-      } else {
-        logger.error('Unknown error fetching shortcut states', { error });
-      }
-    }
-  }, [supportsShortcuts]);
+  const { shortcutState, toggleShortcuts } = useVersionShortcutState({
+    activeShortcutState,
+    activeVersion,
+    installedVersions,
+    supportsShortcuts,
+  });
 
   const handleVersionSwitch = async (tag: string) => {
     if (tag === activeVersion) {
@@ -106,49 +80,6 @@ export function VersionSelector({
       }
     } finally {
       setIsSwitching(false);
-    }
-  };
-
-  const handleToggleShortcuts = async (version: string, next: boolean) => {
-    if (!isAPIAvailable() || !supportsShortcuts) {
-      logger.warn('Shortcut API not available');
-      return;
-    }
-
-    logger.info('Toggling shortcuts', { version, enabled: next });
-    setShortcutState((prev) => ({
-      ...prev,
-      [version]: { menu: next, desktop: next },
-    }));
-
-    try {
-      if (isAPIAvailable()) {
-        const result = await api.set_version_shortcuts(version, next);
-        if (result?.state) {
-          setShortcutState((prev) => ({
-            ...prev,
-            [version]: {
-              menu: Boolean(result.state.menu),
-              desktop: Boolean(result.state.desktop),
-            },
-          }));
-          logger.info('Shortcuts toggled successfully', { version, state: result.state });
-        }
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error toggling shortcuts', { error: error.message, endpoint: error.endpoint, version });
-      } else if (error instanceof Error) {
-        logger.error('Failed to toggle shortcuts', { error: error.message, version });
-      } else {
-        logger.error('Unknown error toggling shortcuts', { error, version });
-      }
-      // revert on failure
-      const isEnabled = !next;
-      setShortcutState((prev) => ({
-        ...prev,
-        [version]: { menu: isEnabled, desktop: isEnabled },
-      }));
     }
   };
 
@@ -287,35 +218,6 @@ export function VersionSelector({
     };
   }, []);
 
-  // Refresh shortcut states when installed versions change
-  useEffect(() => {
-    if (!supportsShortcuts) {
-      setShortcutState({});
-      return;
-    }
-    if (!installedVersions.length) {
-      setShortcutState({});
-      return;
-    }
-    void refreshShortcutStates();
-  }, [installedVersions, refreshShortcutStates, supportsShortcuts]);
-
-  // Keep active version shortcut in sync with main toggle state
-  useEffect(() => {
-    if (!supportsShortcuts) {
-      return;
-    }
-    if (activeVersion && activeShortcutState) {
-      setShortcutState((prev) => ({
-        ...prev,
-        [activeVersion]: {
-          menu: activeShortcutState.menu,
-          desktop: activeShortcutState.desktop,
-        },
-      }));
-    }
-  }, [activeVersion, activeShortcutState?.menu, activeShortcutState?.desktop, supportsShortcuts]);
-
   // Close dropdown on outside click
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent | TouchEvent) => {
@@ -378,7 +280,7 @@ export function VersionSelector({
         isLoading={isLoading}
         onMakeDefault={onMakeDefault}
         onSwitchVersion={handleVersionSwitch}
-        onToggleShortcuts={handleToggleShortcuts}
+        onToggleShortcuts={toggleShortcuts}
       />
     </div>
   );

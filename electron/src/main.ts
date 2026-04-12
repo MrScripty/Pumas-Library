@@ -16,8 +16,8 @@ log.transports.file.level = 'info';
 log.transports.console.level = 'debug';
 
 // Window dimensions (matching PyWebView config from backend/config.py)
-const WINDOW_WIDTH = 400;
-const WINDOW_HEIGHT = 520;
+const WINDOW_WIDTH = 800;
+const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 

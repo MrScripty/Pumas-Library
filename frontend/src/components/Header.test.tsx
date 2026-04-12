@@ -31,9 +31,19 @@ describe('Header Component', () => {
     activeModelDownloadCount: 0,
   };
 
-  it('renders AI Manager title', () => {
+  it('does not render the AI Manager title text', () => {
     render(<Header {...defaultProps} />);
-    expect(screen.getByText('AI Manager')).toBeInTheDocument();
+    expect(screen.queryByText('AI Manager')).not.toBeInTheDocument();
+  });
+
+  it('keeps the header draggable while leaving buttons non-draggable', () => {
+    const { container } = render(<Header {...defaultProps} />);
+
+    const dragRegion = container.querySelector('.app-region-drag');
+    const noDragControls = container.querySelectorAll('.app-region-no-drag');
+
+    expect(dragRegion).toBeInTheDocument();
+    expect(noDragControls).toHaveLength(3);
   });
 
   it('displays resource icons with tooltips on hover', () => {

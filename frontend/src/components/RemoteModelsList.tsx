@@ -8,7 +8,7 @@
 import { useState } from 'react';
 import { Search } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
-import type { DownloadStatus } from '../hooks/useModelDownloads';
+import type { DownloadStatus } from '../hooks/modelDownloadState';
 import { RemoteModelListItem } from './RemoteModelListItem';
 import { EmptyState } from './ui';
 

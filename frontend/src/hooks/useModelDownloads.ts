@@ -9,127 +9,17 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
+import {
+  selectDownloadsByRepo,
+  type DownloadStatus,
+} from './modelDownloadState';
 
 const logger = getLogger('useModelDownloads');
 
-export interface DownloadStatus {
-  downloadId: string;
-  status: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'completed' | 'cancelled' | 'error';
-  progress: number;
-  downloadedBytes?: number;
-  totalBytes?: number;
-  speed?: number;
-  etaSeconds?: number;
-  modelName?: string;
-  modelType?: string;
-  retryAttempt?: number;
-  retryLimit?: number;
-  retrying?: boolean;
-  nextRetryDelaySeconds?: number;
-}
-
 const ACTIVE_STATUSES = ['queued', 'downloading', 'cancelling', 'pausing'] as const;
-const TRACKED_STATUSES = ['queued', 'downloading', 'pausing', 'paused', 'cancelling', 'error'] as const;
-const STATUS_PRIORITY: Record<DownloadStatus['status'], number> = {
-  downloading: 0,
-  pausing: 1,
-  cancelling: 2,
-  queued: 3,
-  paused: 4,
-  error: 5,
-  completed: 99,
-  cancelled: 99,
-};
 
 function isActiveStatus(status: string): boolean {
   return (ACTIVE_STATUSES as readonly string[]).includes(status);
-}
-
-function isTrackedStatus(status: string): status is DownloadStatus['status'] {
-  return (TRACKED_STATUSES as readonly string[]).includes(status);
-}
-
-interface RepoDownloadSelection {
-  status: DownloadStatus;
-  error?: string;
-}
-
-function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStatus): boolean {
-  const currentPriority = STATUS_PRIORITY[current.status] ?? 999;
-  const candidatePriority = STATUS_PRIORITY[candidate.status] ?? 999;
-  if (candidatePriority !== currentPriority) return candidatePriority < currentPriority;
-
-  const currentBytes = current.downloadedBytes ?? 0;
-  const candidateBytes = candidate.downloadedBytes ?? 0;
-  if (candidateBytes !== currentBytes) return candidateBytes > currentBytes;
-
-  const currentProgress = current.progress ?? 0;
-  const candidateProgress = candidate.progress ?? 0;
-  return candidateProgress > currentProgress;
-}
-
-function selectDownloadsByRepo(downloads: Array<{
-  repoId?: string;
-  downloadId?: string;
-  status?: string;
-  progress?: number;
-  downloadedBytes?: number;
-  totalBytes?: number;
-  speed?: number;
-  etaSeconds?: number;
-  modelName?: string;
-  modelType?: string;
-  retryAttempt?: number;
-  retryLimit?: number;
-  retrying?: boolean;
-  nextRetryDelaySeconds?: number;
-  error?: string;
-}>): {
-  statuses: Record<string, DownloadStatus>;
-  errors: Record<string, string>;
-} {
-  const selected: Record<string, RepoDownloadSelection> = {};
-
-  for (const dl of downloads) {
-    const repoId = dl.repoId;
-    const status = dl.status;
-    if (!repoId || !status || !isTrackedStatus(status) || !dl.downloadId) continue;
-
-    const candidate: DownloadStatus = {
-      downloadId: dl.downloadId,
-      status,
-      progress: typeof dl.progress === 'number' ? dl.progress : 0,
-      downloadedBytes: typeof dl.downloadedBytes === 'number' ? dl.downloadedBytes : undefined,
-      totalBytes: typeof dl.totalBytes === 'number' ? dl.totalBytes : undefined,
-      speed: typeof dl.speed === 'number' ? dl.speed : undefined,
-      etaSeconds: typeof dl.etaSeconds === 'number' ? dl.etaSeconds : undefined,
-      modelName: dl.modelName,
-      modelType: dl.modelType,
-      retryAttempt: typeof dl.retryAttempt === 'number' ? dl.retryAttempt : undefined,
-      retryLimit: typeof dl.retryLimit === 'number' ? dl.retryLimit : undefined,
-      retrying: typeof dl.retrying === 'boolean' ? dl.retrying : undefined,
-      nextRetryDelaySeconds:
-        typeof dl.nextRetryDelaySeconds === 'number' ? dl.nextRetryDelaySeconds : undefined,
-    };
-
-    const current = selected[repoId]?.status;
-    if (!current || shouldReplaceSelection(current, candidate)) {
-      selected[repoId] = {
-        status: candidate,
-        error: dl.error,
-      };
-    }
-  }
-
-  const statuses: Record<string, DownloadStatus> = {};
-  const errors: Record<string, string> = {};
-  for (const [repoId, selectedDownload] of Object.entries(selected)) {
-    statuses[repoId] = selectedDownload.status;
-    if (selectedDownload.status.status === 'error' && selectedDownload.error) {
-      errors[repoId] = selectedDownload.error;
-    }
-  }
-  return { statuses, errors };
 }
 
 export function useModelDownloads() {

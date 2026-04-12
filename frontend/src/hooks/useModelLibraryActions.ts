@@ -4,7 +4,7 @@ import { modelsAPI } from '../api/models';
 import { APIError } from '../errors';
 import type { ModelInfo, RelatedModelsState } from '../types/apps';
 import { getLogger } from '../utils/logger';
-import type { DownloadStatus } from './useModelDownloads';
+import type { DownloadStatus } from './modelDownloadState';
 
 const logger = getLogger('useModelLibraryActions');
 

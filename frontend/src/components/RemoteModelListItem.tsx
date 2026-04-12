@@ -13,7 +13,7 @@ import {
   X,
 } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
-import type { DownloadStatus } from '../hooks/useModelDownloads';
+import type { DownloadStatus } from '../hooks/modelDownloadState';
 import { ModelKindIcon } from './ModelKindIcon';
 import {
   formatDownloadSize,

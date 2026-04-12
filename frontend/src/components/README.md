@@ -14,6 +14,7 @@ bridge.
 | `ModelManagerUtils.test.ts` | Unit coverage for model-manager helper behavior such as download overlay merging and remote-kind mapping. |
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |
 | `InstallDialogContent.tsx` | Presentational install-dialog body for banners, progress details, and version rows. |
+| `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |

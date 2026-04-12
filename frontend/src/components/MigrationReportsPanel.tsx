@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type {
   MigrationDryRunReport,
@@ -7,18 +7,14 @@ import type {
 } from '../types/api';
 import { getLogger } from '../utils/logger';
 import {
-  AlertTriangle,
-  CheckCircle2,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
   FileText,
   Loader2,
-  PlayCircle,
-  RefreshCw,
-  Scissors,
-  Trash2,
 } from 'lucide-react';
+import { MigrationReportArtifactList } from './MigrationReportArtifactList';
+import { MigrationReportControls } from './MigrationReportControls';
+import { MigrationReportSummaries } from './MigrationReportSummaries';
 
 const logger = getLogger('MigrationReportsPanel');
 
@@ -33,21 +29,6 @@ function formatTimestamp(value: string): string {
     return value;
   }
   return parsed.toLocaleString();
-}
-
-function shortenPath(value: string): string {
-  const normalized = value.replaceAll('\\', '/');
-  const parts = normalized.split('/');
-  if (parts.length <= 3) {
-    return value;
-  }
-  return `.../${parts.slice(-3).join('/')}`;
-}
-
-function reportKindLabel(kind: string): string {
-  if (kind === 'dry_run') return 'Dry Run';
-  if (kind === 'execution') return 'Execution';
-  return kind;
 }
 
 export const MigrationReportsPanel: React.FC = () => {
@@ -234,14 +215,6 @@ export const MigrationReportsPanel: React.FC = () => {
     }
   }, []);
 
-  const statusIcon = useMemo(() => {
-    if (lastExecutionReport === null) return null;
-    if (lastExecutionReport.referential_integrity_ok) {
-      return <CheckCircle2 className="w-4 h-4 text-[hsl(var(--accent-success))]" />;
-    }
-    return <AlertTriangle className="w-4 h-4 text-[hsl(var(--accent-error))]" />;
-  }, [lastExecutionReport]);
-
   if (!isAPIAvailable()) {
     return null;
   }
@@ -273,187 +246,36 @@ export const MigrationReportsPanel: React.FC = () => {
 
       {isExpanded && (
         <div className="px-4 pb-4 space-y-3">
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="px-3 py-1.5 text-xs rounded bg-[hsl(var(--accent-info)/0.2)] text-[hsl(var(--launcher-text-primary))] border border-[hsl(var(--accent-info)/0.35)] hover:bg-[hsl(var(--accent-info)/0.3)] disabled:opacity-60 disabled:cursor-not-allowed"
-              onClick={() => void handleGenerateDryRun()}
-              disabled={isGeneratingDryRun || isExecutingMigration}
-            >
-              {isGeneratingDryRun ? 'Generating...' : 'Generate Dry Run'}
-            </button>
-            <button
-              className="px-3 py-1.5 text-xs rounded bg-[hsl(var(--accent-warning)/0.2)] text-[hsl(var(--launcher-text-primary))] border border-[hsl(var(--accent-warning)/0.35)] hover:bg-[hsl(var(--accent-warning)/0.3)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-              onClick={() => void handleExecuteMigration()}
-              disabled={isExecutingMigration || isGeneratingDryRun}
-            >
-              <PlayCircle className="w-3 h-3" />
-              {isExecutingMigration ? 'Executing...' : 'Execute Migration'}
-            </button>
-            <button
-              className="px-3 py-1.5 text-xs rounded bg-[hsl(var(--launcher-bg-secondary)/0.8)] text-[hsl(var(--launcher-text-primary))] border border-[hsl(var(--launcher-border)/0.7)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-              onClick={() => void fetchReports()}
-              disabled={isLoadingReports}
-            >
-              <RefreshCw className="w-3 h-3" />
-              Refresh
-            </button>
-          </div>
+          <MigrationReportControls
+            isExecutingMigration={isExecutingMigration}
+            isGeneratingDryRun={isGeneratingDryRun}
+            isLoadingReports={isLoadingReports}
+            isPruning={isPruning}
+            keepLatest={keepLatest}
+            message={message}
+            onExecuteMigration={() => void handleExecuteMigration()}
+            onGenerateDryRun={() => void handleGenerateDryRun()}
+            onKeepLatestChange={setKeepLatest}
+            onPruneReports={() => void handlePruneReports()}
+            onRefresh={() => void fetchReports()}
+          />
 
-          <div className="flex flex-wrap items-center gap-2">
-            <label
-              className="text-xs text-[hsl(var(--launcher-text-secondary))]"
-              htmlFor="migration-prune-keep-latest"
-            >
-              Keep latest
-            </label>
-            <input
-              id="migration-prune-keep-latest"
-              type="number"
-              min={0}
-              step={1}
-              value={keepLatest}
-              onChange={(event) => setKeepLatest(event.target.value)}
-              className="w-24 px-2 py-1 text-xs rounded bg-[hsl(var(--launcher-bg-secondary)/0.7)] border border-[hsl(var(--launcher-border)/0.7)] text-[hsl(var(--launcher-text-primary))]"
-            />
-            <button
-              className="px-3 py-1.5 text-xs rounded bg-[hsl(var(--launcher-bg-secondary)/0.8)] text-[hsl(var(--launcher-text-primary))] border border-[hsl(var(--launcher-border)/0.7)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-              onClick={() => void handlePruneReports()}
-              disabled={isPruning}
-            >
-              <Scissors className="w-3 h-3" />
-              {isPruning ? 'Pruning...' : 'Prune'}
-            </button>
-          </div>
-
-          {message && (
-            <div
-              className={`text-xs p-2 rounded border ${
-                message.type === 'success'
-                  ? 'bg-[hsl(var(--accent-success)/0.12)] border-[hsl(var(--accent-success)/0.35)] text-[hsl(var(--launcher-text-primary))]'
-                  : message.type === 'error'
-                    ? 'bg-[hsl(var(--accent-error)/0.12)] border-[hsl(var(--accent-error)/0.35)] text-[hsl(var(--launcher-text-primary))]'
-                    : 'bg-[hsl(var(--launcher-bg-secondary)/0.6)] border-[hsl(var(--launcher-border)/0.7)] text-[hsl(var(--launcher-text-secondary))]'
-              }`}
-            >
-              {message.text}
-            </div>
-          )}
-
-          {lastDryRunReport && (
-            <div className="p-3 rounded border border-[hsl(var(--launcher-border)/0.7)] bg-[hsl(var(--launcher-bg-secondary)/0.45)]">
-              <div className="text-xs font-medium text-[hsl(var(--launcher-text-primary))]">
-                Last Dry Run
-              </div>
-              <div className="mt-1 text-xs text-[hsl(var(--launcher-text-secondary))]">
-                {lastDryRunReport.move_candidates} moves, {lastDryRunReport.keep_candidates} keep,{' '}
-                {lastDryRunReport.collision_count} collisions, {lastDryRunReport.blocked_partial_count} blocked partial,{' '}
-                {lastDryRunReport.error_count} errors
-              </div>
-            </div>
-          )}
-
-          {lastExecutionReport && (
-            <div className="p-3 rounded border border-[hsl(var(--launcher-border)/0.7)] bg-[hsl(var(--launcher-bg-secondary)/0.45)] space-y-2">
-              {(() => {
-                const metadataDirCount = lastExecutionReport.metadata_dir_count ?? 0;
-                const metadataIndexCount =
-                  lastExecutionReport.index_metadata_model_count ?? lastExecutionReport.index_model_count;
-                const partialIndexCount = lastExecutionReport.index_partial_download_count ?? 0;
-                const staleIndexCount = lastExecutionReport.index_stale_model_count ?? 0;
-                return (
-                  <>
-              <div className="flex items-center gap-2 text-xs font-medium text-[hsl(var(--launcher-text-primary))]">
-                <span>Last Execution</span>
-                {statusIcon}
-              </div>
-              <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
-                {lastExecutionReport.completed_move_count} completed, {lastExecutionReport.skipped_move_count} skipped,{' '}
-                {lastExecutionReport.error_count} errors
-              </div>
-              <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
-                Reindexed {lastExecutionReport.reindexed_model_count} models, metadata dirs {metadataDirCount}, metadata index {metadataIndexCount}
-              </div>
-              <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
-                Partial index rows {partialIndexCount}, stale index rows {staleIndexCount}
-              </div>
-              <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">
-                Referential integrity: {lastExecutionReport.referential_integrity_ok ? 'OK' : 'FAILED'}
-              </div>
-              {lastExecutionReport.referential_integrity_errors.length > 0 && (
-                <div className="space-y-1">
-                  <div className="text-xs text-[hsl(var(--accent-error))]">Integrity Errors</div>
-                  <div className="max-h-28 overflow-y-auto space-y-1">
-                    {lastExecutionReport.referential_integrity_errors.map((error, index) => (
-                      <div
-                        key={`${index}-${error}`}
-                        className="text-xs font-mono p-2 rounded bg-[hsl(var(--accent-error)/0.1)] border border-[hsl(var(--accent-error)/0.25)] text-[hsl(var(--launcher-text-primary))]"
-                      >
-                        {error}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-                  </>
-                );
-              })()}
-            </div>
-          )}
+          <MigrationReportSummaries
+            lastDryRunReport={lastDryRunReport}
+            lastExecutionReport={lastExecutionReport}
+          />
 
           <div className="space-y-2">
-            {reports.length === 0 ? (
-              <div className="text-xs text-[hsl(var(--launcher-text-tertiary))]">
-                No migration reports yet.
-              </div>
-            ) : (
-              reports.map((report) => (
-                <div
-                  key={`${report.generated_at}-${report.json_report_path}`}
-                  className="p-2 rounded border border-[hsl(var(--launcher-border)/0.65)] bg-[hsl(var(--launcher-bg-secondary)/0.35)]"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-[hsl(var(--launcher-bg-tertiary)/0.85)] text-[hsl(var(--launcher-text-secondary))] uppercase tracking-wide">
-                        {reportKindLabel(report.report_kind)}
-                      </span>
-                      <span className="text-xs text-[hsl(var(--launcher-text-primary))] truncate">
-                        {formatTimestamp(report.generated_at)}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button
-                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--launcher-border)/0.8)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--launcher-bg-secondary)/0.8)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-                        onClick={() => void handleOpenPath(report.json_report_path, 'JSON')}
-                        disabled={openingPath === report.json_report_path}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        {openingPath === report.json_report_path ? 'Opening...' : 'Open JSON'}
-                      </button>
-                      <button
-                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--launcher-border)/0.8)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--launcher-bg-secondary)/0.8)] hover:bg-[hsl(var(--launcher-bg-secondary))] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-                        onClick={() => void handleOpenPath(report.markdown_report_path, 'Markdown')}
-                        disabled={openingPath === report.markdown_report_path}
-                      >
-                        <ExternalLink className="w-3 h-3" />
-                        {openingPath === report.markdown_report_path ? 'Opening...' : 'Open MD'}
-                      </button>
-                      <button
-                        className="px-2 py-1 text-xs rounded border border-[hsl(var(--accent-error)/0.35)] text-[hsl(var(--launcher-text-primary))] bg-[hsl(var(--accent-error)/0.12)] hover:bg-[hsl(var(--accent-error)/0.2)] disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-1"
-                        onClick={() => void handleDeleteReport(report.json_report_path)}
-                        disabled={deletingReportPath === report.json_report_path}
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        {deletingReportPath === report.json_report_path ? 'Deleting...' : 'Delete'}
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2 space-y-1 text-[11px] text-[hsl(var(--launcher-text-tertiary))]">
-                    <div title={report.json_report_path}>JSON: {shortenPath(report.json_report_path)}</div>
-                    <div title={report.markdown_report_path}>MD: {shortenPath(report.markdown_report_path)}</div>
-                  </div>
-                </div>
-              ))
-            )}
+            <MigrationReportArtifactList
+              deletingReportPath={deletingReportPath}
+              openingPath={openingPath}
+              reports={reports.map((report) => ({
+                ...report,
+                generated_at: formatTimestamp(report.generated_at),
+              }))}
+              onDeleteReport={(reportPath) => void handleDeleteReport(reportPath)}
+              onOpenPath={(path, label) => void handleOpenPath(path, label)}
+            />
           </div>
         </div>
       )}

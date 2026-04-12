@@ -11,7 +11,9 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useStatus.ts` | Launcher/app status polling and refresh behavior. |
 | `useVersions.ts` | Version list and version operations state flow. |
 | `useAppImportDialog.ts` | App-level drag-and-drop import dialog state and completion handlers. |
+| `useAppImportDialog.test.ts` | Hook coverage for app-level import dialog open/close and completion behavior. |
 | `useAppProcessActions.ts` | Shared launch/stop/log handlers for app process controls at the root shell level. |
+| `useAppProcessActions.test.ts` | Hook coverage for app-process launch/stop routing and delayed refresh behavior. |
 | `useAppWindowActions.ts` | Root-shell helpers for window controls and shared filesystem open actions. |
 | `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
 | `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |

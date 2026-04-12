@@ -6,7 +6,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 ## Contents
 | File/Folder | Description |
 | ----------- | ----------- |
-| `useModels.ts` | Model list/search data lifecycle. |
+| `useModels.ts` | Model list fetching, shared-storage rescans, and stale-while-revalidate FTS search state. |
+| `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, cached FTS revalidation, stale search suppression, and new-results notifications. |
 | `useModelDownloads.ts` | Download state and operation controls. |
 | `useModelDownloads.test.ts` | Hook coverage for startup download recovery, active polling updates, duplicate-start protection, and pause/cancel/resume transitions. |
 | `useActiveModelDownload.ts` | Top-level polling for the most relevant active model download and active download count. |

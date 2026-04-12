@@ -40,7 +40,6 @@ export function useModels() {
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
   const [hasNewResults, setHasNewResults] = useState(false);
   const searchSequenceRef = useRef(0);
-  const lastRenderedSequenceRef = useRef(0);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchCacheRef = useRef<Map<string, CacheEntry>>(new Map());
 
@@ -135,6 +134,10 @@ export function useModels() {
         clearTimeout(searchTimeoutRef.current);
       }
 
+      // Increment sequence for every search invocation, including resets,
+      // so in-flight responses from older queries cannot overwrite newer UI state.
+      const currentSequence = ++searchSequenceRef.current;
+
       // Reset new results notification
       setHasNewResults(false);
 
@@ -164,24 +167,19 @@ export function useModels() {
         setIsRevalidating(false);
       }
 
-      // Increment sequence for this search
-      const currentSequence = ++searchSequenceRef.current;
-
       // Debounce the search (revalidation happens in background)
       searchTimeoutRef.current = setTimeout(async () => {
         try {
           const result = await importAPI.searchModelsFTS(query, 100, 0, modelType, tags);
 
           // Sequence guard: discard stale responses
-          if (currentSequence < lastRenderedSequenceRef.current) {
+          if (currentSequence !== searchSequenceRef.current) {
             logger.debug('Discarding stale search response', {
               currentSequence,
-              lastRendered: lastRenderedSequenceRef.current,
+              latestSequence: searchSequenceRef.current,
             });
             return;
           }
-
-          lastRenderedSequenceRef.current = currentSequence;
 
           if (result.success && result.models) {
             const categorizedModels = transformFTSResults(result.models);
@@ -222,8 +220,10 @@ export function useModels() {
             logger.error('Unknown error in FTS search', { error });
           }
         } finally {
-          setIsSearching(false);
-          setIsRevalidating(false);
+          if (currentSequence === searchSequenceRef.current) {
+            setIsSearching(false);
+            setIsRevalidating(false);
+          }
         }
       }, SEARCH_DEBOUNCE_MS);
     },

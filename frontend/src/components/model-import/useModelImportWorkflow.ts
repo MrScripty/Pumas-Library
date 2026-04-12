@@ -204,10 +204,25 @@ export function useModelImportWorkflow({
         if (result.success && result.groups) {
           const { fileToSetMap, sets } = buildShardedSetState(result.groups);
           setShardedSets(sets);
-          setEntries((prev) => prev.map((entry) => ({
-            ...entry,
-            shardedSetKey: entry.kind === 'single_file' ? fileToSetMap[entry.path] : undefined,
-          })));
+          setEntries((prev) => {
+            let changed = false;
+            const next = prev.map((entry) => {
+              const shardedSetKey =
+                entry.kind === 'single_file' ? fileToSetMap[entry.path] : undefined;
+
+              if (entry.shardedSetKey === shardedSetKey) {
+                return entry;
+              }
+
+              changed = true;
+              return {
+                ...entry,
+                shardedSetKey,
+              };
+            });
+
+            return changed ? next : prev;
+          });
         }
       } catch (error) {
         logger.error('Failed to detect sharded sets', { error });
@@ -290,6 +305,7 @@ export function useModelImportWorkflow({
         }));
 
         if (!typeResult.valid) {
+          setLookupProgress({ current: index + 1, total: entriesToProcess.length });
           continue;
         }
 
@@ -329,6 +345,7 @@ export function useModelImportWorkflow({
               metadataStatus: 'found',
             };
           }));
+          setLookupProgress({ current: index + 1, total: entriesToProcess.length });
           continue;
         }
 

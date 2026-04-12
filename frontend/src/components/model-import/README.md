@@ -9,6 +9,7 @@ This directory holds the workflow and extracted support components behind the mo
 | `modelImportWorkflowHelpers.ts` | Pure helpers that normalize backend import classifications into review entries, directory findings, shard state, embedded metadata matches, and final import specs. |
 | `modelImportWorkflowHelpers.test.ts` | Unit coverage for the extracted import workflow helper transformations and repo-id inference rules. |
 | `useModelImportWorkflow.ts` | Owns the import dialog workflow state machine from path classification through metadata lookup and import execution. |
+| `useModelImportWorkflow.test.ts` | Hook coverage for classification orchestration, embedded-metadata lookup flow, shard grouping, and import completion state. |
 | `metadataUtils.ts` | Pure helpers for security badges, GGUF metadata display priority, and import-review formatting. |
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
 | `ImportBundleComponents.tsx` | Presentational disclosure for external diffusers bundle component manifests. |

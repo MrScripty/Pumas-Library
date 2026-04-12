@@ -119,7 +119,7 @@ export function reorderAppsAtIndices(
 }
 
 export function isEditableElement(activeElement: HTMLElement | null) {
-  return (
+  return Boolean(
     activeElement?.tagName === 'INPUT'
     || activeElement?.tagName === 'TEXTAREA'
     || activeElement?.isContentEditable

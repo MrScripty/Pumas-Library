@@ -18,6 +18,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useAppWindowActions.test.ts` | Hook coverage for backend/window routing of models-root and window control actions. |
 | `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
 | `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |
+| `physicsDragUtils.test.ts` | Unit coverage for drag selection fallback, anchor hysteresis, reorder helpers, and delete-zone math. |
 
 ## Design Decisions
 - Hooks encapsulate async side effects and state transitions outside UI components.

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Header } from './components/Header';
 import { AppSidebar } from './components/AppSidebar';
 import { ModelImportDropZone } from './components/ModelImportDropZone';
@@ -14,9 +14,12 @@ import { useOllamaProcess } from './hooks/useOllamaProcess';
 import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
 import { useActiveModelDownload } from './hooks/useActiveModelDownload';
+import { useAppImportDialog } from './hooks/useAppImportDialog';
 import { useAppPanelState } from './hooks/useAppPanelState';
+import { useAppProcessActions } from './hooks/useAppProcessActions';
+import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useManagedApps } from './hooks/useManagedApps';
-import { api, isAPIAvailable, windowAPI } from './api/adapter';
+import { api, isAPIAvailable } from './api/adapter';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
 import { getAppVersionState } from './utils/appVersionState';
@@ -36,10 +39,6 @@ export default function App() {
   // Model Manager State
   const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
   const [excludedModels, setExcludedModels] = useState<Set<string>>(new Set());
-
-  // Model Import State (for app-level drag-drop)
-  const [importPaths, setImportPaths] = useState<string[]>([]);
-  const [showImportDialog, setShowImportDialog] = useState(false);
 
   // --- Custom Hooks ---
   const {
@@ -173,6 +172,42 @@ export default function App() {
   const panelState = getPanelState(selectedAppId);
   const activeShortcutState =
     selectedAppId === 'comfyui' ? { menu: menuShortcut, desktop: desktopShortcut } : undefined;
+  const {
+    closeWindow,
+    minimizeWindow,
+    openModelsRoot,
+  } = useAppWindowActions();
+  const {
+    handleImportComplete,
+    handleImportDialogClose,
+    handlePathsDropped,
+    importPaths,
+    showImportDialog,
+  } = useAppImportDialog({
+    onImportComplete: fetchModels,
+  });
+  const {
+    handleLaunchApp,
+    handleOpenLog,
+    handleStopApp,
+  } = useAppProcessActions({
+    comfyUIRunning,
+    launchComfyUI,
+    stopComfyUI,
+    launchLogPath,
+    openLogPath,
+    ollamaRunning,
+    launchOllama,
+    stopOllama,
+    ollamaLaunchLogPath,
+    openOllamaLogPath,
+    torchRunning,
+    launchTorch,
+    stopTorch,
+    torchLaunchLogPath,
+    openTorchLogPath,
+    refetchStatus,
+  });
 
   // Load link exclusions from backend on mount and when app changes
   useEffect(() => {
@@ -273,69 +308,6 @@ export default function App() {
     }
   };
 
-  const handleLaunchComfyUI = async () => {
-    if (comfyUIRunning) {
-      await stopComfyUI();
-      await refetchStatus(false, true);
-    } else {
-      await launchComfyUI();
-      await refetchStatus(false, true);
-    }
-    setTimeout(() => void refetchStatus(false, true), 1200);
-  };
-
-  const handleLaunchOllama = async () => {
-    if (ollamaRunning) {
-      await stopOllama();
-      await refetchStatus(false, true);
-    } else {
-      await launchOllama();
-      await refetchStatus(false, true);
-    }
-    setTimeout(() => void refetchStatus(false, true), 1200);
-  };
-
-  const handleLaunchTorch = async () => {
-    if (torchRunning) {
-      await stopTorch();
-      await refetchStatus(false, true);
-    } else {
-      await launchTorch();
-      await refetchStatus(false, true);
-    }
-    setTimeout(() => void refetchStatus(false, true), 1200);
-  };
-
-  const handleLaunchApp = async (appId: string) => {
-    if (appId === 'comfyui' && !comfyUIRunning) {
-      await handleLaunchComfyUI();
-    } else if (appId === 'ollama' && !ollamaRunning) {
-      await handleLaunchOllama();
-    } else if (appId === 'torch' && !torchRunning) {
-      await handleLaunchTorch();
-    }
-  };
-
-  const handleStopApp = async (appId: string) => {
-    if (appId === 'comfyui' && comfyUIRunning) {
-      await handleLaunchComfyUI();
-    } else if (appId === 'ollama' && ollamaRunning) {
-      await handleLaunchOllama();
-    } else if (appId === 'torch' && torchRunning) {
-      await handleLaunchTorch();
-    }
-  };
-
-  const handleOpenLog = async (appId: string) => {
-    if (appId === 'comfyui' && launchLogPath) {
-      await openLogPath(launchLogPath);
-    } else if (appId === 'ollama' && ollamaLaunchLogPath) {
-      await openOllamaLogPath(ollamaLaunchLogPath);
-    } else if (appId === 'torch' && torchLaunchLogPath) {
-      await openTorchLogPath(torchLaunchLogPath);
-    }
-  };
-
   const handleDeleteApp = (appId: string) => {
     if (appId === 'comfyui') {
       logger.warn('Attempt to delete ComfyUI app prevented', { appId });
@@ -399,58 +371,11 @@ export default function App() {
     }
   };
 
-  // Model import handlers (app-level drag-drop)
-  const handlePathsDropped = useCallback((paths: string[]) => {
-    logger.info('Paths dropped for import', { count: paths.length });
-    setImportPaths(paths);
-    setShowImportDialog(true);
-  }, []);
-
-  const handleImportDialogClose = useCallback(() => {
-    setShowImportDialog(false);
-    setImportPaths([]);
-  }, []);
-
-  const handleImportComplete = useCallback(() => {
-    logger.info('Import complete, refreshing model list');
-    void fetchModels();
-  }, [fetchModels]);
-
   const handleShowVersionManager = (show: boolean) => {
     if (!selectedAppId) {
       return;
     }
     setShowVersionManager(selectedAppId, show);
-  };
-
-  const openModelsRoot = async () => {
-    if (!isAPIAvailable()) return;
-    try {
-      const result = await api.open_path('shared-resources/models');
-      if (!result.success) {
-        throw new APIError(result.error || 'Failed to open models folder', 'open_path');
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error opening models folder', { error: error.message, endpoint: error.endpoint, path: 'shared-resources/models' });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error opening models folder', { error: error.message, path: 'shared-resources/models' });
-      } else {
-        logger.error('Unknown error opening models folder', { error, path: 'shared-resources/models' });
-      }
-    }
-  };
-
-  const minimizeWindow = () => {
-    void windowAPI.minimize();
-  };
-
-  const closeWindow = () => {
-    if (isAPIAvailable()) {
-      void api.close_window();
-    } else {
-      window.close();
-    }
   };
 
   // Computed display values

@@ -360,6 +360,12 @@ impl PumasApi {
                     commits_behind: 0,
                     commits: vec![],
                     branch: String::new(),
+                    current_version: env!("CARGO_PKG_VERSION").to_string(),
+                    latest_version: None,
+                    release_name: None,
+                    release_url: None,
+                    download_url: None,
+                    published_at: None,
                     error: Some(err.to_string()),
                 });
         }

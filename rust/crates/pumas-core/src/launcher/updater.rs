@@ -1,11 +1,14 @@
 //! Launcher auto-updater functionality.
 //!
-//! Manages launcher updates via git, checking for new commits and applying updates.
+//! Manages launcher updates by comparing the packaged launcher version against
+//! the latest GitHub release while still supporting git-based self-update flows
+//! for developer checkouts.
 
-use crate::config::NetworkConfig;
 use crate::error::{PumasError, Result};
 use crate::models::CommitInfo;
+use crate::network::{GitHubAsset, GitHubClient, GitHubRelease};
 use chrono::{DateTime, Duration, Utc};
+use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -27,6 +30,23 @@ pub struct UpdateCheckResult {
     pub commits: Vec<CommitInfo>,
     /// Current branch name.
     pub branch: String,
+    /// Current packaged launcher version.
+    pub current_version: String,
+    /// Latest available release version/tag.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latest_version: Option<String>,
+    /// Latest release display name.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_name: Option<String>,
+    /// GitHub release page URL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub release_url: Option<String>,
+    /// Best-matching direct download URL for the current platform.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub download_url: Option<String>,
+    /// Release publish timestamp.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published_at: Option<String>,
     /// Error message if check failed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -149,6 +169,10 @@ impl LauncherUpdater {
         }
     }
 
+    fn current_version(&self) -> String {
+        env!("CARGO_PKG_VERSION").to_string()
+    }
+
     /// Get the launcher version information.
     pub fn get_version_info(&self) -> serde_json::Value {
         let current_commit = self.get_current_commit().unwrap_or_default();
@@ -217,23 +241,13 @@ impl LauncherUpdater {
     ///
     /// * `force_refresh` - If true, bypass cache and fetch fresh data
     pub async fn check_for_updates(&self, force_refresh: bool) -> UpdateCheckResult {
-        // Get current commit
-        let current_commit = match self.get_current_commit() {
-            Some(c) => c,
-            None => {
-                return UpdateCheckResult {
-                    has_update: false,
-                    current_commit: String::new(),
-                    latest_commit: String::new(),
-                    commits_behind: 0,
-                    commits: vec![],
-                    branch: self.get_current_branch(),
-                    error: Some("Not a git repository".to_string()),
-                };
-            }
+        let current_commit = self.get_current_commit().unwrap_or_default();
+        let branch = if self.is_git_repo() {
+            self.get_current_branch()
+        } else {
+            String::new()
         };
-
-        let branch = self.get_current_branch();
+        let current_version = self.current_version();
 
         // Check cache first (unless force refresh)
         if !force_refresh {
@@ -246,92 +260,61 @@ impl LauncherUpdater {
             }
         }
 
-        // Fetch from GitHub API
-        let api_url = format!(
-            "https://api.github.com/repos/{}/{}/commits?sha={}&per_page=10",
-            self.repo_owner, self.repo_name, branch
-        );
-
-        debug!("Fetching commits from {}", api_url);
-
-        let client = match reqwest::Client::builder()
-            .user_agent("pumas-launcher")
-            .timeout(NetworkConfig::LAUNCHER_UPDATE_TIMEOUT)
-            .build()
-        {
-            Ok(c) => c,
-            Err(e) => {
-                return self.return_cached_or_error(format!("Failed to create HTTP client: {}", e));
+        let github_client = match GitHubClient::new(self.cache_dir()) {
+            Ok(client) => client,
+            Err(err) => {
+                return self.return_cached_or_error(
+                    current_commit,
+                    branch,
+                    current_version,
+                    format!("Failed to initialize GitHub client: {}", err),
+                );
             }
         };
 
-        let response = match client.get(&api_url).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                debug!("Network unavailable during update check: {}", e);
-                return self.return_cached_or_error("Network unavailable".to_string());
+        let repo = format!("{}/{}", self.repo_owner, self.repo_name);
+        let release = match github_client.get_latest_release(&repo, force_refresh).await {
+            Ok(Some(release)) => release,
+            Ok(None) => {
+                return self.return_cached_or_error(
+                    current_commit,
+                    branch,
+                    current_version,
+                    "No GitHub releases found".to_string(),
+                );
+            }
+            Err(err) => {
+                debug!("GitHub release check failed: {}", err);
+                return self.return_cached_or_error(
+                    current_commit,
+                    branch,
+                    current_version,
+                    format!("GitHub release check failed: {}", err),
+                );
             }
         };
 
-        if !response.status().is_success() {
-            let status = response.status();
-            return self.return_cached_or_error(format!("GitHub API error: {}", status));
-        }
-
-        let commits: Vec<GitHubCommit> = match response.json().await {
-            Ok(c) => c,
-            Err(e) => {
-                return self.return_cached_or_error(format!("Failed to parse response: {}", e));
-            }
+        let latest_version = release.tag_name.clone();
+        let has_update = is_newer_version(&current_version, &latest_version);
+        let latest_commit = if self.is_git_repo() {
+            current_commit.clone()
+        } else {
+            String::new()
         };
-
-        if commits.is_empty() {
-            return UpdateCheckResult {
-                has_update: false,
-                current_commit,
-                latest_commit: String::new(),
-                commits_behind: 0,
-                commits: vec![],
-                branch,
-                error: Some("No commits found".to_string()),
-            };
-        }
-
-        let latest_commit = commits[0].sha[..7].to_string();
-        let has_update = latest_commit != current_commit;
-
-        // Count commits behind and collect commit info
-        let mut commits_behind = 0;
-        let mut commit_list = Vec::new();
-
-        for commit in &commits {
-            let short_hash = commit.sha[..7].to_string();
-            commit_list.push(CommitInfo {
-                hash: short_hash.clone(),
-                message: commit
-                    .commit
-                    .message
-                    .lines()
-                    .next()
-                    .unwrap_or("")
-                    .to_string(),
-                author: commit.commit.author.name.clone(),
-                date: commit.commit.author.date.clone(),
-            });
-
-            if short_hash == current_commit {
-                break;
-            }
-            commits_behind += 1;
-        }
 
         let result = UpdateCheckResult {
             has_update,
             current_commit,
             latest_commit,
-            commits_behind,
-            commits: commit_list,
+            commits_behind: 0,
+            commits: vec![],
             branch,
+            current_version,
+            latest_version: Some(latest_version),
+            release_name: Some(release.name.clone()),
+            release_url: Some(release.html_url.clone()),
+            download_url: select_download_url(&release),
+            published_at: Some(release.published_at.clone()),
             error: None,
         };
 
@@ -339,15 +322,23 @@ impl LauncherUpdater {
         self.cache_update_info(&result);
 
         info!(
-            "Update check complete: hasUpdate={}, behind={}",
-            has_update, commits_behind
+            "Update check complete: hasUpdate={}, currentVersion={}, latestVersion={}",
+            result.has_update,
+            result.current_version,
+            result.latest_version.as_deref().unwrap_or("unknown")
         );
 
         result
     }
 
     /// Return cached result if available, or an error result.
-    fn return_cached_or_error(&self, error_msg: String) -> UpdateCheckResult {
+    fn return_cached_or_error(
+        &self,
+        current_commit: String,
+        branch: String,
+        current_version: String,
+        error_msg: String,
+    ) -> UpdateCheckResult {
         if let Some(cached) = self.get_cached_update_info() {
             debug!("Using cached update info (offline mode)");
             return cached.result;
@@ -355,13 +346,23 @@ impl LauncherUpdater {
 
         UpdateCheckResult {
             has_update: false,
-            current_commit: self.get_current_commit().unwrap_or_default(),
+            current_commit,
             latest_commit: String::new(),
             commits_behind: 0,
             commits: vec![],
-            branch: self.get_current_branch(),
+            branch,
+            current_version,
+            latest_version: None,
+            release_name: None,
+            release_url: None,
+            download_url: None,
+            published_at: None,
             error: Some(error_msg),
         }
+    }
+
+    fn cache_dir(&self) -> PathBuf {
+        self.launcher_root.join("launcher-data").join("cache")
     }
 
     /// Apply launcher update by pulling latest changes and rebuilding.
@@ -589,23 +590,40 @@ impl LauncherUpdater {
     }
 }
 
-/// GitHub commit structure from API.
-#[derive(Debug, Deserialize)]
-struct GitHubCommit {
-    sha: String,
-    commit: GitHubCommitInfo,
+fn is_newer_version(current_version: &str, latest_version: &str) -> bool {
+    let current = normalize_version(current_version);
+    let latest = normalize_version(latest_version);
+
+    match (Version::parse(&current), Version::parse(&latest)) {
+        (Ok(current), Ok(latest)) => latest > current,
+        _ => latest != current,
+    }
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubCommitInfo {
-    message: String,
-    author: GitHubAuthor,
+fn normalize_version(version: &str) -> String {
+    version.trim().trim_start_matches(['v', 'V']).to_string()
 }
 
-#[derive(Debug, Deserialize)]
-struct GitHubAuthor {
-    name: String,
-    date: String,
+fn select_download_url(release: &GitHubRelease) -> Option<String> {
+    select_download_asset(&release.assets).map(|asset| asset.download_url.clone())
+}
+
+fn select_download_asset(assets: &[GitHubAsset]) -> Option<&GitHubAsset> {
+    let preferred_patterns: &[&str] = match std::env::consts::OS {
+        "linux" => &["appimage", "amd64.deb", ".deb", ".tar.gz", ".zip"],
+        "windows" => &[".exe", ".msi", ".zip"],
+        "macos" => &[".dmg", ".pkg", ".zip"],
+        _ => &[".zip", ".tar.gz"],
+    };
+
+    preferred_patterns
+        .iter()
+        .find_map(|pattern| {
+            assets
+                .iter()
+                .find(|asset| asset.name.to_ascii_lowercase().contains(pattern))
+        })
+        .or_else(|| assets.first())
 }
 
 #[cfg(test)]
@@ -634,5 +652,37 @@ mod tests {
         let info = updater.get_version_info();
         assert!(info["success"].as_bool().unwrap());
         assert!(info["version"].as_str().is_some());
+    }
+
+    #[test]
+    fn test_is_newer_version_handles_v_prefix() {
+        assert!(is_newer_version("0.3.0", "v0.3.1"));
+        assert!(!is_newer_version("0.3.1", "v0.3.1"));
+    }
+
+    #[test]
+    fn test_select_download_asset_prefers_platform_installer() {
+        let assets = vec![
+            GitHubAsset {
+                name: "pumas-library-electron_0.3.0_amd64.deb".into(),
+                size: 1,
+                download_url: "https://example.com/pumas.deb".into(),
+                content_type: None,
+            },
+            GitHubAsset {
+                name: "Pumas Library-0.3.0.AppImage".into(),
+                size: 1,
+                download_url: "https://example.com/pumas.appimage".into(),
+                content_type: None,
+            },
+        ];
+
+        let selected = select_download_asset(&assets).unwrap();
+
+        if cfg!(target_os = "linux") {
+            assert_eq!(selected.name, "Pumas Library-0.3.0.AppImage");
+        } else {
+            assert_eq!(selected.name, "pumas-library-electron_0.3.0_amd64.deb");
+        }
     }
 }

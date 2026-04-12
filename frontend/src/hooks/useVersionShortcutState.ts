@@ -24,6 +24,9 @@ export function useVersionShortcutState({
   supportsShortcuts,
 }: UseVersionShortcutStateOptions) {
   const [shortcutState, setShortcutState] = useState<Record<string, VersionShortcutState>>({});
+  const activeShortcutMenu = activeShortcutState?.menu;
+  const activeShortcutDesktop = activeShortcutState?.desktop;
+  const installedVersionsKey = installedVersions.join('\0');
 
   const refreshShortcutStates = useCallback(async () => {
     if (!isAPIAvailable() || !supportsShortcuts) {
@@ -42,6 +45,14 @@ export function useVersionShortcutState({
             desktop: Boolean(typedState.desktop),
           };
         });
+
+        if (activeVersion && activeShortcutMenu !== undefined && activeShortcutDesktop !== undefined) {
+          mapped[activeVersion] = {
+            menu: activeShortcutMenu,
+            desktop: activeShortcutDesktop,
+          };
+        }
+
         setShortcutState(mapped);
         logger.debug('Shortcut states refreshed', { stateCount: Object.keys(mapped).length });
       }
@@ -57,7 +68,12 @@ export function useVersionShortcutState({
         logger.error('Unknown error fetching shortcut states', { error });
       }
     }
-  }, [supportsShortcuts]);
+  }, [
+    activeShortcutDesktop,
+    activeShortcutMenu,
+    activeVersion,
+    supportsShortcuts,
+  ]);
 
   const toggleShortcuts = useCallback(async (version: string, next: boolean) => {
     if (!isAPIAvailable() || !supportsShortcuts) {
@@ -66,8 +82,12 @@ export function useVersionShortcutState({
     }
 
     logger.info('Toggling shortcuts', { version, enabled: next });
+    let previousState: VersionShortcutState = { menu: !next, desktop: !next };
     setShortcutState((prev) => ({
-      ...prev,
+      ...(() => {
+        previousState = prev[version] ?? previousState;
+        return prev;
+      })(),
       [version]: { menu: next, desktop: next },
     }));
 
@@ -96,10 +116,9 @@ export function useVersionShortcutState({
         logger.error('Unknown error toggling shortcuts', { error, version });
       }
 
-      const isEnabled = !next;
       setShortcutState((prev) => ({
         ...prev,
-        [version]: { menu: isEnabled, desktop: isEnabled },
+        [version]: previousState,
       }));
     }
   }, [supportsShortcuts]);
@@ -110,7 +129,7 @@ export function useVersionShortcutState({
       return;
     }
     void refreshShortcutStates();
-  }, [installedVersions, refreshShortcutStates, supportsShortcuts]);
+  }, [installedVersionsKey, refreshShortcutStates, supportsShortcuts]);
 
   useEffect(() => {
     if (!supportsShortcuts || !activeVersion || !activeShortcutState) {

@@ -10,6 +10,7 @@ bridge.
 | File/Folder | Description |
 | ----------- | ----------- |
 | `ModelManager.tsx` | Main model management screen and interactions. |
+| `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |

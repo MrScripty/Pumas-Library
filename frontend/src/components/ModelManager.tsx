@@ -7,7 +7,7 @@
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
-import type { ModelCategory, ModelInfo, RemoteModelInfo } from '../types/apps';
+import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useModelLibraryActions } from '../hooks/useModelLibraryActions';
@@ -20,16 +20,18 @@ import { LinkHealthStatus } from './LinkHealthStatus';
 import { MigrationReportsPanel } from './MigrationReportsPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
-import { getReleaseTimestamp } from '../utils/modelFormatters';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
+import {
+  buildDownloadingModels,
+  filterLocalModelGroups,
+  isAuthRequiredError,
+  mergeLocalModelGroups,
+  resolveDownloadModelType,
+  sortAndFilterRemoteResults,
+} from './ModelManagerUtils';
 
 const logger = getLogger('ModelManager');
-
-/** Detect HTTP 401 Unauthorized errors that indicate missing HF authentication. */
-function isAuthRequiredError(errorMessage: string): boolean {
-  return /\b401\b/.test(errorMessage);
-}
 
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
@@ -157,90 +159,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Computed Values
   const downloadingModels = useMemo(() => {
-    return Object.entries(downloadStatusByRepo)
-      .filter(([, status]) => ['queued', 'downloading', 'cancelling', 'pausing', 'paused', 'error'].includes(status.status))
-      .map(([repoId, status]) => {
-        const name = status.modelName || repoId.split('/').pop() || repoId;
-        return {
-          id: `download:${repoId}`,
-          name,
-          category: status.modelType || 'llm',
-          path: repoId,
-          size: status.totalBytes,
-          isDownloading: true,
-          downloadProgress: status.progress,
-          downloadStatus: status.status as ModelInfo['downloadStatus'],
-          downloadRepoId: repoId,
-          downloadTotalBytes: status.totalBytes,
-        } as ModelInfo;
-      });
+    return buildDownloadingModels(downloadStatusByRepo);
   }, [downloadStatusByRepo]);
 
   const localModelGroups = useMemo(() => {
-    if (downloadingModels.length === 0) {
-      return modelGroups;
-    }
-
-    // Build lookup of active downloads by lowercase repoId for case-insensitive merging
-    const downloadByRepoId = new Map<string, ModelInfo>();
-    for (const dl of downloadingModels) {
-      if (dl.downloadRepoId) {
-        const key = dl.downloadRepoId.toLowerCase();
-        // Keep the first entry when duplicates exist (same repo, different casing)
-        if (!downloadByRepoId.has(key)) {
-          downloadByRepoId.set(key, dl);
-        }
-      }
-    }
-
-    const mergedRepoKeys = new Set<string>();
-    const groupMap = new Map<string, ModelInfo[]>();
-
-    // Merge download state onto library models that match by repoId (case-insensitive)
-    modelGroups.forEach((group) => {
-      const models = group.models.map((model) => {
-        const key = model.repoId?.toLowerCase();
-        if (key && downloadByRepoId.has(key)) {
-          const dl = downloadByRepoId.get(key)!;
-          mergedRepoKeys.add(key);
-          return {
-            ...model,
-            isDownloading: true,
-            downloadProgress: dl.downloadProgress,
-            downloadStatus: dl.downloadStatus,
-            downloadRepoId: dl.downloadRepoId,
-            downloadTotalBytes: dl.downloadTotalBytes,
-          };
-        }
-        return model;
-      });
-      groupMap.set(group.category, models);
-    });
-
-    // Add download-only entries (no matching library model, deduplicated)
-    const orphanDownloads = downloadingModels.filter(
-      (dl) => !dl.downloadRepoId || !mergedRepoKeys.has(dl.downloadRepoId.toLowerCase())
-    );
-    orphanDownloads.forEach((model) => {
-      const existing = groupMap.get(model.category);
-      if (existing) {
-        groupMap.set(model.category, [model, ...existing]);
-      } else {
-        groupMap.set(model.category, [model]);
-      }
-    });
-
-    const orderedCategories = Array.from(
-      new Set([
-        ...modelGroups.map((group) => group.category),
-        ...orphanDownloads.map((model) => model.category),
-      ])
-    );
-
-    return orderedCategories.map((category) => ({
-      category,
-      models: groupMap.get(category) || [],
-    }));
+    return mergeLocalModelGroups(modelGroups, downloadingModels);
   }, [modelGroups, downloadingModels]);
 
   const categories = useMemo(() => {
@@ -263,40 +186,12 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Filter local models
   const filteredGroups = useMemo(() => {
-    let groups = localModelGroups;
-
-    // Filter by category
-    if (selectedCategory !== 'all') {
-      groups = groups.filter((g: ModelCategory) => g.category === selectedCategory);
-    }
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      groups = groups
-        .map((group: ModelCategory) => ({
-          ...group,
-          models: group.models.filter(
-            (model) =>
-              model.name.toLowerCase().includes(query) || model.path?.toLowerCase().includes(query)
-          ),
-        }))
-        .filter((group: ModelCategory) => group.models.length > 0);
-    }
-
-    return groups;
+    return filterLocalModelGroups(localModelGroups, searchQuery, selectedCategory);
   }, [localModelGroups, searchQuery, selectedCategory]);
 
   // Filter remote results
   const filteredRemoteResults = useMemo(() => {
-    const filtered =
-      selectedKind === 'all'
-        ? remoteResults
-        : remoteResults.filter((model) => model.kind === selectedKind);
-
-    return [...filtered].sort(
-      (a, b) => getReleaseTimestamp(b.releaseDate) - getReleaseTimestamp(a.releaseDate)
-    );
+    return sortAndFilterRemoteResults(remoteResults, selectedKind);
   }, [remoteResults, selectedKind]);
 
   // Handlers
@@ -308,58 +203,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const handleClearRemoteFilters = () => {
     setSearchQuery('');
     setSelectedKind('all');
-  };
-
-  const resolveDownloadModelType = (kind: string): string => {
-    const PIPELINE_TAG_TO_MODEL_TYPE: Record<string, string> = {
-      // Text generation (LLMs)
-      'text-generation': 'llm',
-      'text2text-generation': 'llm',
-      'question-answering': 'llm',
-      'token-classification': 'llm',
-      'text-classification': 'llm',
-      'fill-mask': 'llm',
-      'translation': 'llm',
-      'summarization': 'llm',
-      'conversational': 'llm',
-      // Reranker
-      'text-ranking': 'reranker',
-      // Diffusion / image & video generation
-      'text-to-image': 'diffusion',
-      'image-to-image': 'diffusion',
-      'unconditional-image-generation': 'diffusion',
-      'image-inpainting': 'diffusion',
-      'text-to-video': 'diffusion',
-      'text-to-3d': 'diffusion',
-      'image-to-3d': 'diffusion',
-      // Audio
-      'text-to-audio': 'audio',
-      'text-to-speech': 'audio',
-      'automatic-speech-recognition': 'audio',
-      'audio-classification': 'audio',
-      'audio-to-audio': 'audio',
-      'voice-activity-detection': 'audio',
-      // Vision
-      'image-classification': 'vision',
-      'image-segmentation': 'vision',
-      'object-detection': 'vision',
-      'mask-generation': 'vision',
-      'zero-shot-image-classification': 'vision',
-      'depth-estimation': 'vision',
-      'image-feature-extraction': 'vision',
-      'zero-shot-object-detection': 'vision',
-      // Vision-language / multimodal
-      'image-to-text': 'vlm',
-      'image-text-to-text': 'vlm',
-      'visual-question-answering': 'vlm',
-      'document-question-answering': 'vlm',
-      'video-classification': 'vision',
-      'video-text-to-text': 'vlm',
-      // Embedding
-      'feature-extraction': 'embedding',
-      'sentence-similarity': 'embedding',
-    };
-    return PIPELINE_TAG_TO_MODEL_TYPE[kind.toLowerCase()] ?? 'unknown';
   };
 
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => {

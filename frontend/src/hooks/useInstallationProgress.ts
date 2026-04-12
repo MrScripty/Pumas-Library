@@ -50,15 +50,22 @@ export function useInstallationProgress({
 
       const isCancelled = externalProgress.error?.toLowerCase().includes('cancel');
       if (externalProgress.completed_at && !externalProgress.success && externalProgress.tag && !isCancelled) {
-        setFailedInstall({
+        const nextFailedInstall = {
           tag: externalProgress.tag,
           log: externalProgress.log_path || null,
-        });
-      } else if (externalProgress.completed_at && externalProgress.success && externalProgress.tag && failedInstall?.tag === externalProgress.tag) {
-        setFailedInstall(null);
+        };
+        setFailedInstall((current) => (
+          current?.tag === nextFailedInstall.tag && current?.log === nextFailedInstall.log
+            ? current
+            : nextFailedInstall
+        ));
+      } else if (externalProgress.completed_at && externalProgress.success && externalProgress.tag) {
+        setFailedInstall((current) => (
+          current?.tag === externalProgress.tag ? null : current
+        ));
       }
     }
-  }, [externalProgress, failedInstall]);
+  }, [externalProgress]);
 
   // Show cancellation notice
   const showCancellationNotice = () => {

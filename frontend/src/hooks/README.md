@@ -15,6 +15,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useAppProcessActions.ts` | Shared launch/stop/log handlers for app process controls at the root shell level. |
 | `useAppProcessActions.test.ts` | Hook coverage for app-process launch/stop routing and delayed refresh behavior. |
 | `useAppWindowActions.ts` | Root-shell helpers for window controls and shared filesystem open actions. |
+| `useAppWindowActions.test.ts` | Hook coverage for backend/window routing of models-root and window control actions. |
 | `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
 | `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |
 

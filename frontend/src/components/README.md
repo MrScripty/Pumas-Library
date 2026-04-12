@@ -15,6 +15,8 @@ bridge.
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |
 | `InstallDialogContent.tsx` | Presentational install-dialog body for banners, progress details, and version rows. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
+| `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
+| `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |

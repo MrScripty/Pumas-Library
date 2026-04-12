@@ -8,6 +8,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | ----------- | ----------- |
 | `useModels.ts` | Model list/search data lifecycle. |
 | `useModelDownloads.ts` | Download state and operation controls. |
+| `useModelDownloads.test.ts` | Hook coverage for startup download recovery, active polling updates, duplicate-start protection, and pause/cancel/resume transitions. |
 | `useStatus.ts` | Launcher/app status polling and refresh behavior. |
 | `useVersions.ts` | Version list and version operations state flow. |
 | `useVersions.test.ts` | Hook coverage for API-gated refresh startup, installing-tag merge behavior, and install-refresh wiring. |

@@ -6,145 +6,17 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { X, FileText, Database, Loader2, RefreshCw, Settings, Plus, Trash2, PencilLine } from 'lucide-react';
+import { Loader2, RefreshCw, X } from 'lucide-react';
 import { modelsAPI } from '../api/models';
 import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
-import { ModelBundleManifestPanel } from './ModelBundleManifestPanel';
-import { ModelMetadataGrid } from './ModelMetadataGrid';
-import { ModelNotesEditor } from './ModelNotesEditor';
+import { getStoredNotes, type MetadataSource } from './ModelMetadataFieldConfig';
+import { ModelMetadataModalContent } from './ModelMetadataModalContent';
 
 interface ModelMetadataModalProps {
   modelId: string;
   modelName: string;
   onClose: () => void;
 }
-
-/** Priority GGUF fields to show in compact view */
-const PRIORITY_GGUF_FIELDS = [
-  'general.name',
-  'general.basename',
-  'general.architecture',
-  'general.size_label',
-  'general.finetune',
-  'general.tags',
-  'general.license',
-  'general.quantized_by',
-];
-
-/** Patterns for architecture-specific priority fields */
-const PRIORITY_ARCH_PATTERNS = ['.context_length', '.embedding_length'];
-
-/** Field pairs: display field -> URL field */
-const LINKED_GGUF_FIELDS: Record<string, string> = {
-  'general.basename': 'general.base_model.0.repo_url',
-  'general.license': 'general.license.link',
-  'general.quantized_by': 'general.repo_url',
-};
-
-/** URL fields that are used as link targets */
-const URL_TARGET_FIELDS = new Set(Object.values(LINKED_GGUF_FIELDS));
-
-/** Fields to always hide unless "Show all" */
-const HIDDEN_GGUF_FIELDS = new Set([
-  'tokenizer.chat_template',
-  'tokenizer.ggml.merges',
-  'tokenizer.ggml.tokens',
-  'tokenizer.ggml.token_type',
-  'tokenizer.ggml.scores',
-]);
-
-/** Format field name for display */
-function formatFieldName(key: string): string {
-  return key
-    .replace(/^general\./, '')
-    .replace(/\./g, ' ')
-    .replace(/_/g, ' ')
-    .split(' ')
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ');
-}
-
-/** Format metadata value for display */
-function formatMetadataValue(key: string, value: unknown): string {
-  if (value == null) return '';
-  if (Array.isArray(value)) return value.join(', ');
-  if (key === 'match_confidence' && typeof value === 'number') {
-    return `${Math.round(value * 100)}%`;
-  }
-  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  return String(value);
-}
-
-/** Check whether value is a plain object-like record */
-function isRecordValue(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-interface SelectAllowedOption {
-  label: string;
-  value: string;
-}
-
-function normalizeAllowedOption(raw: unknown): SelectAllowedOption | null {
-  if (typeof raw === 'string') {
-    return { label: raw, value: raw };
-  }
-  if (!isRecordValue(raw)) {
-    return null;
-  }
-
-  const value = typeof raw['value'] === 'string' ? raw['value'] : null;
-  if (!value) {
-    return null;
-  }
-
-  const label = typeof raw['label'] === 'string' && raw['label'].trim() !== ''
-    ? raw['label']
-    : value;
-  return { label, value };
-}
-
-function normalizeStringDefault(raw: unknown): string {
-  if (typeof raw === 'string') {
-    return raw;
-  }
-  if (isRecordValue(raw) && typeof raw['value'] === 'string') {
-    return raw['value'];
-  }
-  return raw == null ? '' : String(raw);
-}
-
-function getStoredNotes(metadata: Record<string, unknown> | null): string {
-  const notes = metadata?.['notes'];
-  return typeof notes === 'string' ? notes : '';
-}
-
-/** Check if a GGUF field is a priority field */
-function isPriorityGgufField(key: string): boolean {
-  const lowerKey = key.toLowerCase();
-  if (PRIORITY_GGUF_FIELDS.some((f) => lowerKey === f)) return true;
-  if (PRIORITY_ARCH_PATTERNS.some((p) => lowerKey.endsWith(p))) return true;
-  return false;
-}
-
-/** Check if a GGUF field should be hidden by default */
-function isHiddenGgufField(key: string, value: unknown): boolean {
-  const lowerKey = key.toLowerCase();
-  if (HIDDEN_GGUF_FIELDS.has(lowerKey)) return true;
-  if (URL_TARGET_FIELDS.has(lowerKey)) return true;
-  const strValue = String(value ?? '');
-  if (strValue.length > 500) return true;
-  return false;
-}
-
-type MetadataSource = 'stored' | 'embedded' | 'inference' | 'notes';
-
-const PARAM_TYPE_OPTIONS: { value: InferenceParamSchema['param_type']; label: string }[] = [
-  { value: 'Integer', label: 'Integer' },
-  { value: 'Number', label: 'Number' },
-  { value: 'String', label: 'String' },
-  { value: 'Boolean', label: 'Boolean' },
-];
 
 export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   modelId,
@@ -377,155 +249,6 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     }
   };
 
-  // ========================================
-  // Inference settings panel renderer
-  // ========================================
-
-  const renderInferenceSettings = () => (
-    <div className="space-y-4 max-h-80 overflow-y-auto">
-      {inferenceSettings.length === 0 ? (
-        <div className="text-center py-4 text-[hsl(var(--text-muted))] text-sm">
-          No inference settings configured for this model.
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {inferenceSettings.map((param, index) => (
-            (() => {
-              const allowedOptions = (param.constraints?.allowed_values ?? [])
-                .map(normalizeAllowedOption)
-                .filter((option): option is SelectAllowedOption => option !== null);
-              return (
-                <div key={param.key} className="flex items-center gap-2">
-                  <div className="flex-1 min-w-0">
-                    <label
-                      className="block text-xs text-[hsl(var(--text-muted))] truncate"
-                      title={param.description || param.key}
-                    >
-                      {param.label}
-                      <span className="ml-1 opacity-50">({param.param_type})</span>
-                    </label>
-                    {param.param_type === 'Boolean' ? (
-                      <select
-                        value={String(param.default)}
-                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-                      >
-                        <option value="true">true</option>
-                        <option value="false">false</option>
-                      </select>
-                    ) : param.param_type === 'String' && allowedOptions.length > 0 ? (
-                      <select
-                        value={normalizeStringDefault(param.default)}
-                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-                      >
-                        {allowedOptions.map((option) => (
-                          <option key={`${option.label}:${option.value}`} value={option.value}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        type={param.param_type === 'String' ? 'text' : 'number'}
-                        value={param.default == null ? '' : String(param.default)}
-                        onChange={(e) => handleParamDefaultChange(index, e.target.value)}
-                        placeholder={param.description || param.key}
-                        min={param.constraints?.min ?? undefined}
-                        max={param.constraints?.max ?? undefined}
-                        step={param.param_type === 'Integer' ? 1 : 'any'}
-                        className="w-full px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-                      />
-                    )}
-                  </div>
-                  <button
-                    onClick={() => handleRemoveParam(index)}
-                    className="p-1 mt-4 text-[hsl(var(--text-muted))] hover:text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.1)] rounded"
-                    title="Remove parameter"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })()
-          ))}
-        </div>
-      )}
-
-      {/* Add parameter form */}
-      {addingParam ? (
-        <div className="space-y-2 p-3 bg-[hsl(var(--surface-high)/0.5)] rounded border border-[hsl(var(--border-default))]">
-          <div className="grid grid-cols-3 gap-2">
-            <input
-              type="text"
-              value={newParam.key}
-              onChange={(e) => setNewParam((p) => ({ ...p, key: e.target.value }))}
-              placeholder="key"
-              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-            />
-            <input
-              type="text"
-              value={newParam.label}
-              onChange={(e) => setNewParam((p) => ({ ...p, label: e.target.value }))}
-              placeholder="Label"
-              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-            />
-            <select
-              value={newParam.param_type}
-              onChange={(e) => setNewParam((p) => ({ ...p, param_type: e.target.value as InferenceParamSchema['param_type'] }))}
-              className="px-2 py-1 text-sm bg-[hsl(var(--surface-high))] border border-[hsl(var(--border-default))] rounded text-[hsl(var(--text-primary))]"
-            >
-              {PARAM_TYPE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handleAddParam}
-              disabled={!newParam.key.trim() || !newParam.label.trim()}
-              className="px-3 py-1 text-xs bg-[hsl(var(--launcher-accent-primary))] text-white rounded hover:opacity-90 disabled:opacity-40"
-            >
-              Add
-            </button>
-            <button
-              onClick={() => setAddingParam(false)}
-              className="px-3 py-1 text-xs bg-[hsl(var(--surface-high))] text-[hsl(var(--text-secondary))] rounded hover:bg-[hsl(var(--surface-mid))]"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          onClick={() => setAddingParam(true)}
-          className="flex items-center gap-1 text-xs text-[hsl(var(--text-muted))] hover:text-[hsl(var(--text-primary))]"
-        >
-          <Plus className="w-3 h-3" /> Add Parameter
-        </button>
-      )}
-
-      {/* Save button and status */}
-      <div className="flex items-center gap-3 pt-2 border-t border-[hsl(var(--border-default))]">
-        <button
-          onClick={handleSaveInferenceSettings}
-          disabled={saving}
-          className="px-4 py-1.5 text-sm bg-[hsl(var(--launcher-accent-primary))] text-white rounded hover:opacity-90 disabled:opacity-50"
-        >
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
-        {saveSuccess && (
-          <span className="text-xs text-[hsl(var(--accent-success))]">Saved</span>
-        )}
-        {saveError && (
-          <span className="text-xs text-[hsl(var(--accent-error))]">{saveError}</span>
-        )}
-      </div>
-    </div>
-  );
-
   return (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- modal backdrop dismiss
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
@@ -567,134 +290,46 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
           ) : error ? (
             <div className="text-center py-8 text-[hsl(var(--accent-error))]">{error}</div>
           ) : (
-            <div className="space-y-4">
-              {/* Refetch error */}
-              {refetchError && (
-                <div className="text-xs text-[hsl(var(--accent-error))] bg-[hsl(var(--accent-error)/0.1)] px-3 py-1.5 rounded">
-                  {refetchError}
-                </div>
-              )}
-
-              {/* Source toggle */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setActiveSource('embedded')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                    activeSource === 'embedded'
-                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-                  }`}
-                  disabled={!embeddedMetadata}
-                >
-                  <FileText className="w-4 h-4" />
-                  Embedded ({embeddedFileType || 'N/A'})
-                </button>
-                <button
-                  onClick={() => setActiveSource('stored')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                    activeSource === 'stored'
-                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-                  }`}
-                  disabled={!storedMetadata}
-                >
-                  <Database className="w-4 h-4" />
-                  Stored
-                </button>
-                <button
-                  onClick={() => setActiveSource('inference')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                    activeSource === 'inference'
-                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-                  }`}
-                >
-                  <Settings className="w-4 h-4" />
-                  Inference
-                </button>
-                <button
-                  onClick={() => setActiveSource('notes')}
-                  className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
-                    activeSource === 'notes'
-                      ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
-                      : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
-                  }`}
-                >
-                  <PencilLine className="w-4 h-4" />
-                  Notes
-                </button>
-              </div>
-
-              {/* Content for active tab */}
-              {activeSource === 'embedded' && embeddedMetadata ? (
-                <ModelMetadataGrid
-                  metadata={embeddedMetadata}
-                  isGguf={embeddedFileType === 'gguf'}
-                  sourceKey={activeSource}
-                  showAllFields={showAllFields}
-                  expandedFieldKeys={expandedFieldKeys}
-                  copiedFieldKey={copiedFieldKey}
-                  onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
-                  onToggleFieldExpanded={toggleFieldExpanded}
-                  onCopyFieldValue={(fieldKey, value) => void handleCopyFieldValue(fieldKey, value)}
-                  formatFieldName={formatFieldName}
-                  formatMetadataValue={formatMetadataValue}
-                  isPriorityGgufField={isPriorityGgufField}
-                  isHiddenGgufField={isHiddenGgufField}
-                  linkedGgufFields={LINKED_GGUF_FIELDS}
-                />
-              ) : activeSource === 'stored' && storedMetadata ? (
-                <ModelMetadataGrid
-                  metadata={storedMetadata}
-                  isGguf={false}
-                  sourceKey={activeSource}
-                  showAllFields={showAllFields}
-                  expandedFieldKeys={expandedFieldKeys}
-                  copiedFieldKey={copiedFieldKey}
-                  onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
-                  onToggleFieldExpanded={toggleFieldExpanded}
-                  onCopyFieldValue={(fieldKey, value) => void handleCopyFieldValue(fieldKey, value)}
-                  formatFieldName={formatFieldName}
-                  formatMetadataValue={formatMetadataValue}
-                  isPriorityGgufField={isPriorityGgufField}
-                  isHiddenGgufField={isHiddenGgufField}
-                  linkedGgufFields={LINKED_GGUF_FIELDS}
-                />
-              ) : activeSource === 'inference' ? (
-                renderInferenceSettings()
-              ) : activeSource === 'notes' ? (
-                <ModelNotesEditor
-                  notesDraft={notesDraft}
-                  notesPreview={notesPreview}
-                  notesSaving={notesSaving}
-                  notesDirty={notesDirty}
-                  notesSaveError={notesSaveError}
-                  notesSaveSuccess={notesSaveSuccess}
-                  onNotesDraftChange={setNotesDraft}
-                  onNotesPreviewChange={setNotesPreview}
-                  onSaveNotes={handleSaveNotes}
-                  onRevertNotes={() => setNotesDraft(savedNotes)}
-                />
-              ) : (
-                <div className="text-center py-4 text-[hsl(var(--text-muted))]">
-                  No {activeSource} metadata available
-                </div>
-              )}
-
-              <ModelBundleManifestPanel
-                componentManifest={componentManifest}
-                showComponents={showComponents}
-                onToggle={() => setShowComponents((prev) => !prev)}
-              />
-
-              {/* Primary file path */}
-              {primaryFile && (
-                <div className="pt-2 border-t border-[hsl(var(--border-default))]">
-                  <span className="text-xs text-[hsl(var(--text-muted))]">File: </span>
-                  <span className="text-xs font-mono truncate text-[hsl(var(--text-secondary))]">{primaryFile}</span>
-                </div>
-              )}
-            </div>
+            <ModelMetadataModalContent
+              activeSource={activeSource}
+              addingParam={addingParam}
+              componentManifest={componentManifest}
+              copiedFieldKey={copiedFieldKey}
+              embeddedFileType={embeddedFileType}
+              embeddedMetadata={embeddedMetadata}
+              expandedFieldKeys={expandedFieldKeys}
+              inferenceSettings={inferenceSettings}
+              newParam={newParam}
+              notesDirty={notesDirty}
+              notesDraft={notesDraft}
+              notesPreview={notesPreview}
+              notesSaveError={notesSaveError}
+              notesSaveSuccess={notesSaveSuccess}
+              notesSaving={notesSaving}
+              primaryFile={primaryFile}
+              refetchError={refetchError}
+              saveError={saveError}
+              saveSuccess={saveSuccess}
+              saving={saving}
+              showAllFields={showAllFields}
+              showComponents={showComponents}
+              storedMetadata={storedMetadata}
+              onActiveSourceChange={setActiveSource}
+              onAddParam={handleAddParam}
+              onCopyFieldValue={(fieldKey, value) => void handleCopyFieldValue(fieldKey, value)}
+              onNewParamChange={setNewParam}
+              onNotesDraftChange={setNotesDraft}
+              onNotesPreviewChange={setNotesPreview}
+              onParamDefaultChange={handleParamDefaultChange}
+              onRemoveParam={handleRemoveParam}
+              onRevertNotes={() => setNotesDraft(savedNotes)}
+              onSaveInferenceSettings={handleSaveInferenceSettings}
+              onSaveNotes={handleSaveNotes}
+              onSetAddingParam={setAddingParam}
+              onToggleComponents={() => setShowComponents((prev) => !prev)}
+              onToggleFieldExpanded={toggleFieldExpanded}
+              onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
+            />
           )}
         </div>
       </div>

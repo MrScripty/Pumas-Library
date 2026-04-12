@@ -11,6 +11,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useStatus.ts` | Launcher/app status polling and refresh behavior. |
 | `useVersions.ts` | Version list and version operations state flow. |
 | `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
+| `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |
 
 ## Design Decisions
 - Hooks encapsulate async side effects and state transitions outside UI components.

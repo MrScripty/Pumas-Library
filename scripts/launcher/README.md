@@ -10,7 +10,7 @@ logic, or runtime orchestration.
 | File/Folder | Description |
 | ----------- | ----------- |
 | `cli.mjs` | Node entrypoint that parses launcher args, builds context, and dispatches actions. |
-| `actions.mjs` | Action orchestration for install, build, run, run-release, and test flows. |
+| `actions.mjs` | Action orchestration for install, build, run, run-release, test, and release-smoke flows. |
 | `dependencies.mjs` | Dependency checks, per-dependency install behavior, and runtime prerequisite enforcement. |
 | `parse-args.mjs` | Canonical CLI parsing and validation for launcher flags and forwarded args. |
 | `platform-*.mjs` | Platform-specific command-name and artifact conventions selected by the factory. |
@@ -71,6 +71,7 @@ the Rust/frontend/Electron build outputs.
 node scripts/launcher/cli.mjs --help
 node scripts/launcher/cli.mjs --build-release
 node scripts/launcher/cli.mjs --run -- --devtools
+node scripts/launcher/cli.mjs --release-smoke
 node --test scripts/launcher/*.test.mjs
 ```
 
@@ -78,7 +79,7 @@ node --test scripts/launcher/*.test.mjs
 - Consumers are the root platform wrappers and developers invoking the launcher
   core directly for debugging.
 - Supported actions are `--help`, `--install`, `--build`, `--build-release`,
-  `--run`, `--run-release`, and `--test`.
+  `--run`, `--run-release`, `--test`, and `--release-smoke`.
 - Only `--run` and `--run-release` accept forwarded args after `--`.
 - Errors return stable exit codes for usage, missing dependencies, missing
   release artifacts, and general operation failure.
@@ -90,5 +91,7 @@ node --test scripts/launcher/*.test.mjs
   consumed by action handlers.
 - Dependency install output keeps the `[ok]`, `[install]`, `[done]`, and
   `[error]` message prefixes expected by callers and docs.
+- `--release-smoke` remains a bounded startup check rather than an open-ended
+  runtime launcher.
 - If action names, exit codes, or help text examples change, wrappers, tests,
   and README documentation must be updated in the same slice.

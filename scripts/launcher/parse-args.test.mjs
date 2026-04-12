@@ -9,6 +9,11 @@ test('parseArgs accepts install action without forwarded args', () => {
   assert.deepEqual(result, { action: '--install', forwardedArgs: [] });
 });
 
+test('parseArgs accepts release smoke action without forwarded args', () => {
+  const result = parseArgs(['--release-smoke']);
+  assert.deepEqual(result, { action: '--release-smoke', forwardedArgs: [] });
+});
+
 test('parseArgs preserves forwarded args for run action', () => {
   const result = parseArgs(['--run', '--', '--devtools', 'value with spaces']);
   assert.deepEqual(result, {
@@ -43,6 +48,7 @@ test('buildUsage advertises the shared launcher contract', () => {
   assert.match(usage, /--build-release/);
   assert.match(usage, /--run-release/);
   assert.match(usage, /--test/);
+  assert.match(usage, /--release-smoke/);
 });
 
 test('platform factory resolves the Windows npm command separately', () => {

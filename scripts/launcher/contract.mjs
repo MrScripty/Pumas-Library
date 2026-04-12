@@ -14,6 +14,7 @@ export const ACTION_FLAGS = Object.freeze({
   RUN: '--run',
   RUN_RELEASE: '--run-release',
   TEST: '--test',
+  RELEASE_SMOKE: '--release-smoke',
 });
 
 export const ACTION_NAMES = new Set(Object.values(ACTION_FLAGS));
@@ -33,6 +34,7 @@ Usage:
   ${displayName} --run [-- <app args...>]
   ${displayName} --run-release [-- <app args...>]
   ${displayName} --test
+  ${displayName} --release-smoke
 
 Examples:
   ${displayName} --install
@@ -41,6 +43,7 @@ Examples:
   ${displayName} --run -- --devtools
   ${displayName} --run-release -- --debug
   ${displayName} --test
+  ${displayName} --release-smoke
 
 Exit codes:
   0 success

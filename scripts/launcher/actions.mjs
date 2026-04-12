@@ -3,7 +3,11 @@ import { ACTION_FLAGS, EXIT_CODES, buildUsage } from './contract.mjs';
 import { LauncherError } from './errors.mjs';
 import { installDependencies, ensureRuntimeDependencies } from './dependencies.mjs';
 import { log } from './logger.mjs';
-import { runCommand } from './commands.mjs';
+import { runBoundedCommand, runCommand } from './commands.mjs';
+
+const RELEASE_SMOKE_MIN_UPTIME_MS = 2_000;
+const RELEASE_SMOKE_MAX_UPTIME_MS = 20_000;
+const RELEASE_SMOKE_EXIT_DELAY_MS = 1_500;
 
 export async function executeAction(parsedArgs, runtime) {
   const { action, forwardedArgs } = parsedArgs;
@@ -29,6 +33,9 @@ export async function executeAction(parsedArgs, runtime) {
       return EXIT_CODES.SUCCESS;
     case ACTION_FLAGS.TEST:
       await runTestSuite(runtime);
+      return EXIT_CODES.SUCCESS;
+    case ACTION_FLAGS.RELEASE_SMOKE:
+      await runReleaseSmoke(runtime);
       return EXIT_CODES.SUCCESS;
     default:
       throw new LauncherError(`invalid action: ${action}`, {
@@ -154,6 +161,31 @@ async function runTestSuite(runtime) {
   await runCommand(platformService.npmCommand, ['run', '-w', 'electron', 'validate'], {
     cwd: context.repoRoot,
   });
+}
+
+async function runReleaseSmoke(runtime) {
+  const { context, platformService } = runtime;
+
+  ensureRuntimeDependencies(runtime);
+  ensureReleaseArtifacts(runtime);
+
+  log('[release-smoke] launching bounded release startup check');
+  await runBoundedCommand(
+    platformService.npmCommand,
+    ['--workspace', 'electron', 'run', 'run:launcher-release'],
+    {
+      cwd: context.repoRoot,
+      env: {
+        PUMAS_RUST_BACKEND: '1',
+        PUMAS_RELEASE_SMOKE: '1',
+        PUMAS_RELEASE_SMOKE_EXIT_MS: String(RELEASE_SMOKE_EXIT_DELAY_MS),
+      },
+      minUptimeMs: RELEASE_SMOKE_MIN_UPTIME_MS,
+      maxUptimeMs: RELEASE_SMOKE_MAX_UPTIME_MS,
+    }
+  );
+
+  log('[done] release smoke completed');
 }
 
 function ensureDevRuntimeArtifacts(runtime) {

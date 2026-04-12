@@ -53,6 +53,86 @@ export async function runCommand(command, args, options = {}) {
   });
 }
 
+export async function runBoundedCommand(command, args, options = {}) {
+  const env = { ...process.env, ...options.env };
+  const minUptimeMs = options.minUptimeMs ?? 0;
+  const maxUptimeMs = options.maxUptimeMs ?? 30_000;
+
+  await new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    let timedOut = false;
+
+    const child = spawn(command, args, {
+      cwd: options.cwd,
+      env,
+      stdio: 'inherit',
+      shell: false,
+    });
+
+    const killTimer = setTimeout(() => {
+      timedOut = true;
+      child.kill();
+    }, maxUptimeMs);
+
+    child.on('error', (error) => {
+      clearTimeout(killTimer);
+      reject(
+        new LauncherError(
+          `failed to run ${formatCommand(command, args)}: ${error.message}`,
+          { exitCode: EXIT_CODES.OPERATION_FAILED }
+        )
+      );
+    });
+
+    child.on('close', (code, signal) => {
+      clearTimeout(killTimer);
+      const elapsedMs = Date.now() - startedAt;
+
+      if (timedOut) {
+        reject(
+          new LauncherError(
+            `${formatCommand(command, args)} exceeded smoke window (${maxUptimeMs}ms)`,
+            { exitCode: EXIT_CODES.OPERATION_FAILED }
+          )
+        );
+        return;
+      }
+
+      if (signal) {
+        reject(
+          new LauncherError(
+            `${formatCommand(command, args)} terminated by signal ${signal}`,
+            { exitCode: EXIT_CODES.OPERATION_FAILED }
+          )
+        );
+        return;
+      }
+
+      if (code !== 0) {
+        reject(
+          new LauncherError(
+            `${formatCommand(command, args)} exited with code ${code}`,
+            { exitCode: EXIT_CODES.OPERATION_FAILED }
+          )
+        );
+        return;
+      }
+
+      if (elapsedMs < minUptimeMs) {
+        reject(
+          new LauncherError(
+            `${formatCommand(command, args)} exited before the minimum smoke window (${elapsedMs}ms < ${minUptimeMs}ms)`,
+            { exitCode: EXIT_CODES.OPERATION_FAILED }
+          )
+        );
+        return;
+      }
+
+      resolve();
+    });
+  });
+}
+
 function formatCommand(command, args) {
   return [command, ...args].join(' ');
 }

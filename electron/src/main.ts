@@ -26,6 +26,20 @@ let pythonBridge: PythonBridge | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendInitializationPromise: Promise<void> | null = null;
 
+function isReleaseSmokeMode(): boolean {
+  return process.env.PUMAS_RELEASE_SMOKE === '1';
+}
+
+function getReleaseSmokeExitDelayMs(): number {
+  const parsed = Number.parseInt(process.env.PUMAS_RELEASE_SMOKE_EXIT_MS ?? '', 10);
+
+  if (Number.isNaN(parsed) || parsed <= 0) {
+    return 1_500;
+  }
+
+  return parsed;
+}
+
 /**
  * Configure Wayland/GTK4 support for Linux
  * Must be called before app.whenReady()
@@ -95,6 +109,7 @@ function getRuntimeIconPath(): string | undefined {
 async function createWindow(): Promise<void> {
   log.info('Creating main window...');
   const windowIconPath = getRuntimeIconPath();
+  const releaseSmokeMode = isReleaseSmokeMode();
 
   mainWindow = new BrowserWindow({
     width: WINDOW_WIDTH,
@@ -116,9 +131,12 @@ async function createWindow(): Promise<void> {
   });
 
   // Show window when ready - must be set up BEFORE loading content
-  mainWindow.once('ready-to-show', () => {
-    mainWindow?.show();
-    log.info('Window shown');
+  const readyToShowPromise = new Promise<void>((resolve) => {
+    mainWindow?.once('ready-to-show', () => {
+      mainWindow?.show();
+      log.info('Window shown');
+      resolve();
+    });
   });
 
   // Load frontend content
@@ -153,6 +171,10 @@ async function createWindow(): Promise<void> {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  if (releaseSmokeMode) {
+    await readyToShowPromise;
+  }
 
   log.info('Main window created');
 }
@@ -294,6 +316,7 @@ configureLinuxDisplay();
 app.whenReady().then(async () => {
   log.info('App ready');
   const runtimeIconPath = getRuntimeIconPath();
+  const releaseSmokeMode = isReleaseSmokeMode();
 
   if (process.platform === 'darwin' && runtimeIconPath && app.dock) {
     app.dock.setIcon(runtimeIconPath);
@@ -307,6 +330,17 @@ app.whenReady().then(async () => {
 
     // Show the window immediately; backend warmup continues in parallel.
     await createWindow();
+
+    if (releaseSmokeMode) {
+      await backendInitialization;
+
+      const exitDelayMs = getReleaseSmokeExitDelayMs();
+      log.info(`Release smoke startup succeeded; exiting in ${exitDelayMs}ms`);
+      setTimeout(() => {
+        app.quit();
+      }, exitDelayMs);
+      return;
+    }
 
     void backendInitialization.catch((error) => {
       log.error('Failed to initialize backend bridge:', error);

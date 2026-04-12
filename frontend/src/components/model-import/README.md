@@ -6,6 +6,8 @@ This directory holds the workflow and extracted support components behind the mo
 ## Contents
 | File/Folder | Description |
 |-------------|-------------|
+| `modelImportWorkflowHelpers.ts` | Pure helpers that normalize backend import classifications into review entries, directory findings, shard state, embedded metadata matches, and final import specs. |
+| `modelImportWorkflowHelpers.test.ts` | Unit coverage for the extracted import workflow helper transformations and repo-id inference rules. |
 | `useModelImportWorkflow.ts` | Owns the import dialog workflow state machine from path classification through metadata lookup and import execution. |
 | `metadataUtils.ts` | Pure helpers for security badges, GGUF metadata display priority, and import-review formatting. |
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
@@ -23,6 +25,7 @@ The import dialog has to review mixed inputs such as single files, single-model 
 
 ## Decision
 - Keep the workflow orchestration in `useModelImportWorkflow.ts` so one hook owns import lifecycle state, lookup retries, and completion callbacks.
+- Keep classification-to-entry shaping and import spec assembly in `modelImportWorkflowHelpers.ts` so the transformation rules stay pure, testable, and separate from React state mutation.
 - Keep display-only logic in `metadataUtils.ts` as pure functions so metadata formatting and badge decisions stay easy to test.
 - Extract bundle-manifest and lookup-card rendering into small components so the dialog can focus on step orchestration instead of carrying every import-entry detail inline.
 - Preserve backend terminology such as classification kind, bundle format, and HF metadata result fields instead of inventing frontend-only aliases.

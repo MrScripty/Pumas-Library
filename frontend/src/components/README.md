@@ -11,6 +11,7 @@ bridge.
 | ----------- | ----------- |
 | `ModelManager.tsx` | Main model management screen and interactions. |
 | `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
+| `ModelManagerUtils.test.ts` | Unit coverage for model-manager helper behavior such as download overlay merging and remote-kind mapping. |
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |
 | `InstallDialogContent.tsx` | Presentational install-dialog body for banners, progress details, and version rows. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |

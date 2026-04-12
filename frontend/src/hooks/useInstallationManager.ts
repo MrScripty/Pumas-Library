@@ -194,6 +194,12 @@ export function useInstallationManager({
         throw new APIError(result.error || 'Failed to install version', 'install_version');
       }
     } catch (error) {
+      if (installPollRef.current) {
+        clearInterval(installPollRef.current);
+        installPollRef.current = null;
+      }
+      resetInstallState();
+
       if (error instanceof APIError) {
         logger.error('API error installing version', { error: error.message, endpoint: error.endpoint, tag });
       } else if (error instanceof Error) {
@@ -203,7 +209,7 @@ export function useInstallationManager({
       }
       throw error;
     }
-  }, [fetchInstallationProgress, isEnabled, onRefreshVersions, resolvedAppId]);
+  }, [fetchInstallationProgress, isEnabled, onRefreshVersions, resetInstallState, resolvedAppId]);
 
   // Remove a version
   const removeVersion = useCallback(async (tag: string) => {

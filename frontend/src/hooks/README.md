@@ -21,6 +21,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `physicsDragUtils.test.ts` | Unit coverage for drag selection fallback, anchor hysteresis, reorder helpers, and delete-zone math. |
 | `useInstallationProgress.ts` | Installation-progress polling, cancellation notices, and failed-install tracking for the install dialog. |
 | `useInstallationProgress.test.ts` | Hook coverage for external progress sync, local polling, cancellation notices, and completion-stop behavior. |
+| `useInstallationManager.ts` | Version install, switch, remove, progress polling, and install-access orchestration. |
+| `useInstallationManager.test.ts` | Hook coverage for install progress normalization, completion reset, install failure cleanup, and polling startup. |
 | `useInstallationState.ts` | Install-dialog UI state for filters, hover state, completed-item disclosure, and list/details routing. |
 | `useInstallationState.test.ts` | Hook coverage for dialog-open resets and detail-view fallback when progress state disappears. |
 

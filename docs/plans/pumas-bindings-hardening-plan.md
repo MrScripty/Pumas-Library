@@ -163,7 +163,7 @@ the current core contract and locking in the intended facade behavior.
 - Targeted Rust tests for `pumas-uniffi` conversion behavior
 - Optional: `cargo test --manifest-path rust/Cargo.toml -p pumas-uniffi`
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 2: Add Binding Surface Verification
 
@@ -187,7 +187,7 @@ surface still exports the expected contract.
 - Manual review against `LANGUAGE-BINDINGS-STANDARDS.md` three-layer and
   generated-artifact rules
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 3: Add Minimal Generated-C# Smoke Coverage
 
@@ -215,7 +215,7 @@ library for a tiny stable call path.
   Rust producer contract -> generated binding -> compiled host harness ->
   native call success
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 4: Add Packaging and Release Documentation
 
@@ -243,7 +243,7 @@ compatibility and release expectations.
 - Manual doc review against `DOCUMENTATION-STANDARDS.md` host-facing and
   structured-producer contract requirements
 
-**Status:** Not started
+**Status:** Complete
 
 ## Execution Notes
 
@@ -251,6 +251,14 @@ Update during implementation:
 - 2026-04-12: Plan created after comparing `Pumas-Library` bindings against
   `Pantograph` and confirming `pumas-uniffi` currently fails to compile because
   `FfiDownloadRequest` drifted from `DownloadRequest`.
+- 2026-04-12: Milestone 1 completed by restoring `pumas-uniffi` build
+  compatibility and adding a focused conversion regression test.
+- 2026-04-12: Milestone 2 completed by adding a UniFFI metadata verification
+  script and binding-surface documentation.
+- 2026-04-12: Milestone 3 completed by adding generated-C# smoke coverage and
+  correcting the stale C# namespace example in the root README.
+- 2026-04-12: Milestone 4 completed by adding local packaging for separate
+  native/C# artifacts, manifests, checksums, and release documentation.
 
 ## Commit Cadence Notes
 
@@ -299,29 +307,44 @@ Update during implementation:
 
 ### Completed
 
-- None yet. Plan only.
+- Milestone 1: `FfiDownloadRequest` drift fixed and `pumas-uniffi` now builds
+  and tests successfully.
+- Milestone 2: UniFFI metadata verification script added and documented.
+- Milestone 3: Generated-C# compile/runtime smoke added and verified.
+- Milestone 4: Native/C# packaging script, manifests, checksums, and release
+  docs added and verified.
 
 ### Deviations
 
-- None yet.
+- The default C# runtime smoke was intentionally narrowed to a pure native
+  function call plus generated-record construction instead of constructing a
+  live `FfiPumasApi`. The object-construction path currently depends on local
+  writable state and produced a readonly-database failure in the smoke
+  environment. The narrower smoke still validates generated C# compilation and
+  native-library loading deterministically.
 
 ### Follow-Ups
 
-- CI wiring for the new scripts may be handled in this implementation if small,
-  or as an immediate follow-up if repo CI changes materially expand scope.
+- CI wiring for the new verification and packaging scripts can be added as a
+  follow-up once the repo's release pipeline is ready to publish the new
+  artifacts.
 - Additional host-language smoke coverage can be evaluated after C# is stable.
 
 ### Verification Summary
 
-- Comparison review completed against Pantograph binding workflow.
-- `cargo check --manifest-path rust/Cargo.toml -p pumas-uniffi` currently fails
-  on `FfiDownloadRequest` drift and serves as the baseline defect.
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-uniffi`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-uniffi -- --nocapture`
+- `./scripts/check-uniffi-surface.sh`
+- `./scripts/check-uniffi-csharp-smoke.sh`
+- `./scripts/package-uniffi-csharp-artifacts.sh`
 
 ### Traceability Links
 
-- Module README updated: N/A yet
-- ADR added/updated: N/A yet
-- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A yet
+- Module README updated: `rust/crates/pumas-uniffi/src/README.md`,
+  `scripts/README.md`, `bindings/csharp/README.md`
+- ADR added/updated: N/A
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A in local
+  implementation context
 
 ## Brevity Note
 

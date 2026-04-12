@@ -34,6 +34,27 @@
 workspace validation because it requires the BEAM runtime to link. Validate it
 separately on machines with Erlang/OTP installed.
 
+## Native Binding Packaging
+
+For local release prep or future CI wiring, package the C# and native binding
+artifacts with:
+
+```bash
+./scripts/check-uniffi-surface.sh
+./scripts/check-uniffi-csharp-smoke.sh
+./scripts/package-uniffi-csharp-artifacts.sh
+```
+
+The packaging script writes:
+
+- `rust/target/bindings-package/artifacts/pumas-csharp-bindings.zip`
+- `rust/target/bindings-package/artifacts/pumas-library-native-<platform>.zip`
+- `rust/target/bindings-package/artifacts/checksums-sha256.txt`
+
+These are additive release-prep artifacts. If CI is updated to publish them,
+keep the generated C# package and native package version-matched from the same
+build.
+
 ## Version Locations
 
 | File | Field |

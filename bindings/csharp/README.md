@@ -64,6 +64,7 @@ generated files under `rust/target/uniffi/csharp/`.
 ## Usage Examples
 ```bash
 ./scripts/check-uniffi-csharp-smoke.sh
+./scripts/package-uniffi-csharp-artifacts.sh
 ```
 
 ## API Consumer Contract
@@ -78,5 +79,6 @@ generated files under `rust/target/uniffi/csharp/`.
 - This directory does not publish generated bindings itself; it provides a
   stable harness for validating generated outputs produced elsewhere.
 - Generated files consumed by this harness live under `rust/target/uniffi/csharp/`.
+- Packaging artifacts are staged under `rust/target/bindings-package/`.
 - If generated namespace/type names change, the smoke harness and root binding
   docs must be updated in the same change.

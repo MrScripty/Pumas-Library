@@ -501,6 +501,12 @@ git, run:
 ./scripts/check-uniffi-csharp-smoke.sh
 ```
 
+To produce separate native and C# artifact zips locally, run:
+
+```bash
+./scripts/package-uniffi-csharp-artifacts.sh
+```
+
 ### Elixir
 
 Elixir bindings use Rustler, which compiles the NIF as part of the Mix build rather than generating source files. Add Rustler as a dependency and create a NIF module:

@@ -91,6 +91,7 @@ bindings/*
 !bindings/csharp/
 bindings/csharp/*
 !bindings/csharp/README.md
+!bindings/csharp/PACKAGE-README.md
 !bindings/csharp/Pumas.NativeSmoke/
 bindings/csharp/Pumas.NativeSmoke/*
 !bindings/csharp/Pumas.NativeSmoke/Program.cs

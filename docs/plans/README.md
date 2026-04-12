@@ -11,6 +11,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | `external-reference-diffusers-implementation-plan.md` | Backend-first implementation plan for external-reference diffusers bundles, including schema, validation, execution descriptor, and regression controls. |
 | `directory-import-disambiguation-implementation-plan.md` | Plan for GUI/backend directory import classification so bundle roots and multi-model containers are imported safely and distinctly. |
 | `hf-classification-and-library-repair-remediation-plan.md` | Plan for standards remediation, saved HF/local-library evidence, and non-model-specific fixes for model classification and organization drift. |
+| `cross-platform-desktop-launcher-facade-plan.md` | Plan for moving desktop launcher behavior behind a shared cross-platform core with thin Unix and Windows wrappers plus README contract updates. |
 
 ## Problem
 Large model-library changes touch persisted metadata, reconciliation, runtime resolution, and UI/API contracts at the same time. Without a written plan, it is easy to create competing paths for import, validation, or execution that weaken reliability.

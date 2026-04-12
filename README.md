@@ -8,98 +8,120 @@
 
 ![banner](https://github.com/user-attachments/assets/be18cffc-b4fe-418b-a3b4-034ee0b35060)
 
+Pumas Library is a shared AI asset library for people and applications that need one dependable place to store model files, track metadata, and manage downloads. It is available both as a desktop application and as a headless Rust library with cross-language bindings.
 
-Available as a desktop GUI for end-users, and as a headless Rust crate with language bindings for embeddable API use.
+The core idea is simple: stop treating model storage as app-by-app glue code. Pumas gives you a single library that can be searched, repaired, linked into downstream tools, and embedded into other software without rebuilding the same filesystem, networking, and metadata logic over and over.
 
-Pumas Library is an easy to use AI model library that downloads, organizes, and serves AI model weights and metadata to other apps. Instead of having models duplicated or scattered across applications, Pumas Library provides a standardized central source that is automatically maintained. When integrated into other software via the Rust crate, it eliminates the need for a slew of file, network, and remote API boilerplate and smart logic.
+## Why Pumas
 
-## Features
+- Centralize model weights and metadata instead of duplicating them across tools
+- Keep downloads resumable and library state repairable after interruptions
+- Search and inspect a large local library with structured metadata and full-text indexing
+- Embed the same core behavior into desktop apps, services, and language bindings
+- Package a desktop experience and a reusable backend from the same codebase
 
-### Core Library
+## What This Repository Contains
 
-- Single portable model library with rich metadata and full-text search (SQLite FTS5)
-- HuggingFace integration — search, download with progress tracking, metadata lookup, cached search (24hr TTL)
-- Model import with automatic type detection and dual-hash verification (SHA256 + BLAKE3)
-- Model mapping — symlink/hardlink models into app directories with health tracking
-- Instance convergence — multiple processes share a single primary via local TCP IPC
-- Cross-process library discovery via global SQLite registry
-- Resilient networking — per-domain circuit breaker, exponential backoff, rate limit handling
-- Library merging with hash-based deduplication
-- Torch inference server — Python backend for running models with GPU slot management
+- `rust/crates/pumas-core`: the core headless library
+- `rust/crates/pumas-rpc`: the Rust sidecar/backend used by the desktop shell
+- `rust/crates/pumas-uniffi`: UniFFI bindings surface
+- `rust/crates/pumas-rustler`: Rustler bindings for Elixir/Erlang
+- `frontend/`: the React UI
+- `electron/`: the desktop shell and packaging configuration
+- `bindings/`: generated binding artifacts and packaging outputs
 
-**Supported Model Types**: LLM, Reranker, Diffusion, Embedding, Audio, Vision
-**Supported Subtypes**: Checkpoints, LoRAs, VAE, ControlNet, Embeddings, Upscale, CLIP, T5
-**Compatible Engines**: Ollama, llama.cpp, Candle, Transformers, Diffusers, ONNX Runtime, TensorRT
+## Core Capabilities
 
-### Desktop GUI (Electron)
+- Shared model library with SQLite-backed metadata and FTS5 search
+- Hugging Face search, metadata fetch, and resumable download support
+- Model import with hashing and type detection
+- Library reconciliation and repair flows for drifted on-disk state
+- Link and mapping support so consumer tools can reference a central library
+- Cross-process discovery and primary/client coordination over local IPC
+- Network resilience with caching, retries, and circuit breaking
+- Cross-language access through Rust, Python, C#, Kotlin, Swift, Ruby, and Elixir/Erlang
 
-- Link your apps to your library, no manual setup required
-- System and per-app resource monitoring
-- Install and run different app versions (currently ComfyUI, Ollama, Torch)
-- Smart system shortcuts that don't require the launcher to work
-- Plugin system for JSON-based app definitions
+Supported model families include text, diffusion, embedding, audio, and vision workloads, with metadata and indexing designed for mixed libraries rather than a single runtime.
 
-## Architecture
+## Architecture At A Glance
 
-### Core Library
+The Rust API runs in one of two transparent modes:
 
-The Rust crate (`pumas-library`) operates in one of two transparent modes:
+- `Primary`: owns the local state, runs the IPC server, and manages the library directly
+- `Client`: discovers an existing primary instance and proxies requests to it
 
-- **Primary** — owns the full state and runs a local IPC server. Holds all subsystems: model library, network manager, process manager, HuggingFace client, model importer, model mapper, IPC server, and registry.
-- **Client** — discovers a running primary via the global registry and proxies calls over TCP IPC. The public API is identical in both modes.
+That design lets multiple processes share one library safely while presenting the same public API either way.
 
-Key internals:
+Key implementation pieces:
 
-- **Registry**: SQLite database at `~/.config/pumas/registry.db` for cross-process library and instance discovery
-- **IPC Protocol**: JSON-RPC 2.0 over length-prefixed TCP frames on localhost
-- **Search Index**: SQLite FTS5 for model metadata full-text search
-- **Best-effort design**: registry and IPC failures never block API initialization
-- **Feature flags**: `full` (default), `hf-client`, `process-manager`, `gpu-monitor`, `uniffi`
+- SQLite for metadata storage and full-text search
+- Local JSON-RPC over TCP for cross-process API access
+- A global registry for instance and library discovery
+- Best-effort startup behavior so registry or IPC failures do not block initialization
 
-### Desktop Application
+## Quick Start
 
-- **Frontend**: React 19 + Vite (rendered in Electron's Chromium)
-- **Desktop Shell**: Electron 38+ (with native Wayland support on Linux)
-- **Backend**: Rust `pumas-rpc` binary running as a sidecar (Axum HTTP server, JSON-RPC)
-- **IPC**: JSON-RPC communication between Electron and the Rust backend
+### Desktop App
 
-## Quick Start (Rust Crate)
+The desktop launcher has one shared CLI contract with thin platform wrappers:
 
-Add the dependency:
+```bash
+# Linux / macOS
+./launcher.sh --install
+./launcher.sh --build-release
+./launcher.sh --run
+```
+
+```powershell
+# Windows PowerShell
+./launcher.ps1 --install
+./launcher.ps1 --build-release
+./launcher.ps1 --run
+```
+
+If PowerShell blocks local scripts on Windows, use:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\launcher.ps1 --help
+```
+
+Use the same lifecycle flags on both wrappers:
+
+| Flag | Purpose |
+| ---- | ------- |
+| `--install` | Install workspace dependencies |
+| `--build` | Build debug artifacts |
+| `--build-release` | Build release artifacts |
+| `--run` | Run the desktop app in development mode |
+| `--run-release` | Run the built desktop runtime |
+| `--test` | Run the canonical launcher-facing verification flow |
+| `--release-smoke` | Launch the release runtime briefly and fail if startup is not healthy |
+| `--help` | Show launcher usage |
+
+Note: `--run` expects the release backend binary to exist, so build first with
+`--build-release`.
+
+### Rust Crate
+
+Add the core crate:
 
 ```toml
 [dependencies]
 pumas-library = { path = "rust/crates/pumas-core" }
-
-# Or with specific features only
-pumas-library = { path = "rust/crates/pumas-core", features = ["hf-client"] }
 ```
 
-Basic usage:
+Minimal example:
 
 ```rust
 use pumas_library::PumasApi;
 
 #[tokio::main]
 async fn main() -> pumas_library::Result<()> {
-    // Standard initialization
     let api = PumasApi::new("/path/to/pumas").await?;
 
-    // Or use the builder for more control
-    let api = PumasApi::builder("./my-models")
-        .auto_create_dirs(true)
-        .with_hf_client(false)
-        .build()
-        .await?;
-
-    // Or discover an existing instance from the global registry
-    let api = PumasApi::discover().await?;
-
-    // List models in the library
     let models = api.list_models().await?;
     println!("Found {} models", models.len());
 
-    // Search for models
     let search = api.search_models("llama", 10, 0).await?;
     println!("Search found {} results", search.total_count);
 
@@ -107,352 +129,27 @@ async fn main() -> pumas_library::Result<()> {
 }
 ```
 
-## Library Refresh and Partial Downloads
+Alternative initialization styles are also available through `PumasApi::builder(...)` and `PumasApi::discover()`.
 
-Use full reconciliation when the on-disk library and SQLite index drift (for example after interrupted downloads):
+## Repairing a Drifted Library
+
+When the filesystem and SQLite metadata drift apart, run the integrity repair example:
 
 ```bash
 cd rust
 cargo run --package pumas-library --example repair_library_integrity -- /path/to/shared-resources/models
 ```
 
-This maintenance flow performs duplicate cleanup, reclassification, and index rebuild in one pass.
-Migration reports now distinguish:
-- metadata-backed index rows
-- partial-download index rows
-- stale index rows
-
-Partial downloads (`.part` files) remain resumable and are tracked as partial rows until completed.
-Migration execution can now safely relocate partial-download directories to canonical paths by pausing tracked downloads, moving the directory, updating persistence/index paths, and resuming when appropriate.
-
-## Current Reliability Milestone
-
-Current focus is making library reads and download staging safe enough for dependent apps to trust by default.
-
-Done for this milestone means:
-
-- Read-heavy flows such as list, search, and status checks stay side-effect free.
-- Partial downloads remain resumable after restart or path reconciliation.
-- Reconciliation can restage partial downloads into canonical paths without leaving duplicate or stale index rows behind.
-- Startup does not trigger avoidable background write churn before the library is actually being used.
-
-Current known limitation:
-
-- The recent stabilization work is spread across multiple fixes, so the release story is clearer in commit history than in the README.
-
-### HuggingFace Download Retry Tuning
-
-HuggingFace file downloads automatically retry transient network failures with resume support.
-
-- Default max attempts: unlimited (`0`)
-- Default max retry elapsed budget per file: `43200` seconds (12 hours)
-- Override with environment variables:
-  - `PUMAS_HF_DOWNLOAD_MAX_RETRIES` (`0` = unlimited)
-  - `PUMAS_HF_DOWNLOAD_MAX_RETRY_ELAPSED_SECS` (`0` = disable elapsed cap)
-
-## Supported Platforms
-
-| Platform      | Status       | Notes                                                 |
-| ------------- | ------------ | ----------------------------------------------------- |
-| Linux (x64)   | Full support | Debian/Ubuntu recommended, AppImage and .deb packages |
-| Windows (x64) | Full support | NSIS installer and portable versions                  |
-| macOS (ARM)   | Best-effort  | ARM builds via CI, not regularly tested               |
-
-## Installation
-
-### System Requirements
-
-#### Linux
-
-- **Operating System**: Linux (Debian/Ubuntu-based distros recommended)
-- **Rust**: Use the pinned toolchain from `rust-toolchain.toml`
-- **Node.js**: Use the pinned version from `.node-version`
-
-#### Windows
-
-- **Operating System**: Windows 11 (x64)
-- **Rust**: Install via [rustup](https://rustup.rs/) and let `rust-toolchain.toml` select the repo version
-- **Node.js**: Install the version pinned in `.node-version`
-- **Build Tools**: Visual Studio Build Tools with C++ workload
-
----
-
-## Linux Installation
-
-### Launcher Setup (Recommended)
-
-Use the root launcher script:
-
-```bash
-chmod +x launcher.sh
-./launcher.sh --install
-./launcher.sh --build-release
-./launcher.sh --run
-```
-
-The launcher-managed flow:
-1. Verifies local tool/runtime dependencies (`cargo`, `node`, `npm`, workspace `node_modules`)
-2. Builds Rust backend + frontend + Electron artifacts
-3. Starts Electron with the Rust sidecar backend
-
-### Manual Installation (Linux)
-
-1. **Install system dependencies** (Debian/Ubuntu):
-
-   ```bash
-   sudo apt update
-   sudo apt install nodejs npm cargo
-   ```
-
-2. **Build Rust backend**:
-
-   ```bash
-   cd rust
-   cargo build --release
-   cd ..
-   ```
-
-3. **Install and build frontend**:
-
-   ```bash
-   cd frontend
-   npm ci
-   npm run build
-   cd ..
-   ```
-
-4. **Install Electron dependencies**:
-
-   ```bash
-   cd electron
-   npm ci
-   npm run build
-   cd ..
-   ```
-
-5. **Make launcher executable** (should already be executable):
-
-   ```bash
-   chmod +x launcher.sh
-   ```
-
-### Optional: Add to PATH (Linux)
-
-For system-wide access:
-
-```bash
-ln -s $(pwd)/launcher.sh ~/.local/bin/pumas-library
-```
-
-Then run from anywhere:
-
-```bash
-pumas-library --help
-```
-
----
-
-## Windows Installation
-
-### Prerequisites
-
-1. **Install Rust** via [rustup](https://rustup.rs/):
-
-   - Download and run `rustup-init.exe`
-   - Follow the prompts to install
-
-2. **Install Node.js** from [nodejs.org](https://nodejs.org/):
-
-   - Install the version pinned in `.node-version`
-   - Run the installer
-
-3. **Install Visual Studio Build Tools** (if not already installed):
-
-   - Download from [Visual Studio Downloads](https://visualstudio.microsoft.com/downloads/)
-   - Select "Desktop development with C++" workload
-
-### Manual Installation (Windows)
-
-Open PowerShell and run:
-
-1. **Build Rust backend**:
-
-   ```powershell
-   cd rust
-   cargo build --release
-   cd ..
-   ```
-
-2. **Install and build frontend**:
-
-   ```powershell
-   cd frontend
-   npm ci
-   npm run build
-   cd ..
-   ```
-
-3. **Install and build Electron**:
-
-   ```powershell
-   cd electron
-   npm ci
-   npm run build
-   cd ..
-   ```
-
-4. **Run the application**:
-
-   ```powershell
-   cd electron
-   npm start
-   ```
-
-### Building Windows Installer
-
-To create a distributable Windows installer:
-
-```powershell
-cd electron
-npm run package:win
-```
-
-This creates:
-
-- NSIS installer (`.exe`) in `electron/release/`
-- Portable version (`.exe`) in `electron/release/`
-
----
-
-## Usage
-
-### Linux Launcher Commands
-
-Run the launcher with different modes:
-
-| Command | Description |
-| ------- | ----------- |
-| `./launcher.sh --install` | Install launcher dependencies (cargo/node/npm + workspace deps) |
-| `./launcher.sh --build` | Build debug backend + frontend + electron |
-| `./launcher.sh --build-release` | Build release backend + frontend + electron |
-| `./launcher.sh --run` | Run Electron in development mode |
-| `./launcher.sh --run -- --devtools` | Run development mode with app flags |
-| `./launcher.sh --run-release` | Run packaged artifacts directly |
-| `./launcher.sh --help` | Display usage information |
-
-Note: `--run` currently expects the release Rust backend binary (`rust/target/release/pumas-rpc`), so run `./launcher.sh --build-release` first.
-
-### Windows Commands
-
-On Windows, use npm scripts directly:
-
-| Command                              | Description                      |
-| ------------------------------------ | -------------------------------- |
-| `npm start` (in electron/)           | Launch the application           |
-| `npm run dev` (in electron/)         | Launch with developer tools      |
-| `npm run package:win` (in electron/) | Package for Windows distribution |
-
----
-
-## Building from Source
-
-### All Platforms
-
-```bash
-# Build Rust backend
-cd rust
-cargo build --release
-
-# Build frontend
-cd ../frontend
-npm ci
-npm run build
-
-# Build and run Electron
-cd ../electron
-npm ci
-npm run build
-npm start
-```
-
-### Creating Distribution Packages
-
-| Platform | Command                 | Output                   |
-| -------- | ----------------------- | ------------------------ |
-| Linux    | `npm run package:linux` | AppImage, .deb           |
-| Windows  | `npm run package:win`   | NSIS installer, portable |
-| macOS    | `npm run package:mac`   | DMG                      |
-
----
-
-## Release Validation
-
-Before cutting a release, run:
-
-```bash
-cd rust
-cargo test --workspace --exclude pumas_rustler
-cargo clippy --workspace --exclude pumas_rustler -- -D warnings
-cargo build --workspace --exclude pumas_rustler
-cd ..
-npm run -w frontend test:run
-npm run -w frontend check:types
-npm run -w frontend build
-npm run -w electron validate
-npm run -w electron build
-```
-
-For `pumas_rustler`, run tests separately on a machine with Erlang/OTP installed.
-
----
-
-## Development
-
-### Project Structure
-
-```text
-Pumas-Library/
-├── rust/                       # Rust workspace
-│   └── crates/
-│       ├── pumas-core/         # Core headless library (model library, IPC, registry, networking)
-│       ├── pumas-app-manager/  # App version and extension management (ComfyUI, Ollama, Torch)
-│       ├── pumas-rpc/          # Axum JSON-RPC server (Electron backend)
-│       ├── pumas-uniffi/       # Python, C#, Kotlin, Swift, Ruby bindings (UniFFI)
-│       └── pumas-rustler/      # Elixir/Erlang NIFs (Rustler)
-├── frontend/                   # React 19 + Vite frontend
-├── electron/                   # Electron 38+ shell
-├── bindings/                   # Generated language bindings and artifacts
-└── .github/workflows/          # CI/CD
-```
-
-### Platform-Specific Code
-
-All platform-specific code is centralized in `rust/crates/pumas-core/src/platform/`:
-
-- `paths.rs` - Platform-specific directories
-- `permissions.rs` - File permission handling
-- `process.rs` - Process management
-
-### Managed Applications
-
-Process management, version installation, and model mapping are supported for:
-
-ComfyUI, Ollama, and Torch.
-
-Additional apps can be defined via the JSON plugin system without code changes.
-
----
+This flow is intended for recovery scenarios such as interrupted downloads, stale index rows, and partial content that needs to be reconciled back into canonical library state.
 
 ## Language Bindings
 
-Pumas Library's core Rust crate can be used from other languages via cross-language bindings. Two binding systems are available:
+Two binding paths are supported:
 
-- **UniFFI** (Python, C#, Kotlin, Swift, Ruby) — Mozilla's cross-language bindings generator
-- **Rustler** (Elixir/Erlang) — Native Implemented Functions for the BEAM VM
+- `UniFFI` for Python, C#, Kotlin, Swift, and Ruby
+- `Rustler` for Elixir/Erlang
 
-### Generating Bindings
-
-Use the standalone script:
+Generate bindings with:
 
 ```bash
 ./scripts/generate-bindings.sh python
@@ -461,82 +158,101 @@ Use the standalone script:
 ./scripts/generate-bindings.sh all
 ```
 
-Generated bindings are written to `bindings/` and can be regenerated with `scripts/generate-bindings.sh`.
-
-### Prerequisites
-
-| Language | Tool | Install Command |
-| -------- | ---- | --------------- |
-| Python | uniffi-bindgen | `cargo install uniffi-bindgen-cli` |
-| C# | uniffi-bindgen-cs | `cargo install uniffi-bindgen-cs --git https://github.com/NordSecurity/uniffi-bindgen-cs --tag v0.9.0+v0.28.3` |
-| Elixir | Rustler | Add `{:rustler, "~> 0.34"}` to `mix.exs` |
-
-### Python
-
-After generating, the bindings are in `bindings/python/`. The native shared library is copied alongside the Python module.
-
-```python
-import sys
-sys.path.insert(0, "bindings/python")
-from pumas_uniffi import version
-print(version())
-```
-
-### C#
-
-After generating, add the generated `.cs` files to your .NET project and ensure
-the matching native library (`libpumas_uniffi.so` / `.dll` / `.dylib`) is in
-the output directory or native loader path. The generated namespace is
-`uniffi.pumas_uniffi`.
-
-```csharp
-using uniffi.pumas_uniffi;
-Console.WriteLine(PumasUniffiMethods.Version());
-```
-
-To verify the generated C# surface locally without checking generated files into
-git, run:
+Useful binding validation and packaging helpers:
 
 ```bash
 ./scripts/check-uniffi-csharp-smoke.sh
-```
-
-To produce separate native and C# artifact zips locally, run:
-
-```bash
 ./scripts/package-uniffi-csharp-artifacts.sh
 ```
 
-### Elixir
+Generated outputs are written under `bindings/`.
 
-Elixir bindings use Rustler, which compiles the NIF as part of the Mix build rather than generating source files. Add Rustler as a dependency and create a NIF module:
+## Build and Package
 
-```elixir
-# mix.exs
-defp deps do
-  [{:rustler, "~> 0.34"}]
-end
+### Build From Source
+
+```bash
+cd rust
+cargo build --release
+
+cd ../frontend
+npm ci
+npm run build
+
+cd ../electron
+npm ci
+npm run build
 ```
 
-```elixir
-# lib/pumas/native.ex
-defmodule Pumas.Native do
-  use Rustler, otp_app: :pumas, crate: "pumas_rustler"
+### Package Desktop Releases
 
-  def version(), do: :erlang.nif_error(:nif_not_loaded)
-  def parse_model_type(_type), do: :erlang.nif_error(:nif_not_loaded)
-  def validate_json(_json), do: :erlang.nif_error(:nif_not_loaded)
-end
+From `electron/`:
+
+| Command | Output |
+| ------- | ------ |
+| `npm run package:linux` | AppImage and `.deb` |
+| `npm run package:win` | Windows installer and portable executable |
+| `npm run package:mac` | DMG |
+
+## Supported Platforms
+
+| Platform | Status | Notes |
+| -------- | ------ | ----- |
+| Linux (x64) | Full support | Primary packaging target |
+| Windows (x64) | Full support | Installer and portable outputs |
+| macOS (ARM) | Best-effort | Build support exists, regular testing is lighter |
+
+## Release Validation
+
+Before cutting a release, run:
+
+```bash
+./launcher.sh --test
+./launcher.sh --release-smoke
+
+cd rust
+cargo test --workspace --exclude pumas_rustler
+cargo clippy --workspace --exclude pumas_rustler -- -D warnings
+cargo build --workspace --exclude pumas_rustler
+
+cd ..
+npm run -w frontend test:run
+npm run -w frontend check:types
+npm run -w frontend build
+npm run -w electron validate
+npm run -w electron build
 ```
 
-### UniFFI Feature Flag
+Use the same launcher flags with `./launcher.ps1` on Windows. The underlying
+`cargo` and `npm` validation commands are the same there.
 
-The `uniffi` feature on `pumas-core` is optional and only adds derive annotations. It has zero overhead when disabled:
+For `pumas_rustler`, run its checks on a machine with Erlang/OTP installed.
 
-```toml
-# Use pumas-core without FFI (default)
-pumas-library = { path = "rust/crates/pumas-core" }
+## Development Notes
 
-# Use pumas-core with UniFFI derives enabled
-pumas-library = { path = "rust/crates/pumas-core", features = ["uniffi"] }
+- Rust and Node versions are pinned in `rust-toolchain.toml` and `.node-version`
+- The desktop app is built from the React frontend plus the Electron shell plus the Rust `pumas-rpc` sidecar
+- The canonical desktop workflow is the shared launcher contract exposed by
+  `launcher.sh` on Unix and `launcher.ps1` on Windows
+- The repository contains both reusable library code and end-user application packaging
+
+## Repository Layout
+
+```text
+Pumas-Library/
+├── rust/
+│   └── crates/
+│       ├── pumas-core/
+│       ├── pumas-rpc/
+│       ├── pumas-uniffi/
+│       └── pumas-rustler/
+├── frontend/
+├── electron/
+├── bindings/
+├── scripts/
+└── .github/workflows/
 ```
+
+## License
+
+MIT

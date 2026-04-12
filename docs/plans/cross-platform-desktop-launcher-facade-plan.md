@@ -124,14 +124,14 @@ standard and the actual developer/operator experience on Windows.
 wrappers and docs do not drift.
 
 **Tasks:**
-- [ ] Document the canonical launcher contract: flags, exit codes, passthrough
+- [x] Document the canonical launcher contract: flags, exit codes, passthrough
   semantics, dependency model, and wrapper responsibilities.
-- [ ] Decide the shared implementation location and architectural role.
-- [ ] Record facade preservation: existing `launcher.sh` contract stays stable
+- [x] Decide the shared implementation location and architectural role.
+- [x] Record facade preservation: existing `launcher.sh` contract stays stable
   while implementation moves behind it.
-- [ ] Record wrapper boundary: wrappers detect platform and delegate; the
+- [x] Record wrapper boundary: wrappers detect platform and delegate; the
   shared core owns orchestration.
-- [ ] Identify any directory README or ADR traceability updates required.
+- [x] Identify any directory README or ADR traceability updates required.
 
 **Verification:**
 - Review contract against `LAUNCHER-STANDARDS.md`.
@@ -140,7 +140,7 @@ wrappers and docs do not drift.
 - Confirm planned file layout stays within `CODING-STANDARDS.md`
   decomposition guidance.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 2: Build The Shared Launcher Core
 
@@ -148,19 +148,19 @@ wrappers and docs do not drift.
 clean internal separation.
 
 **Tasks:**
-- [ ] Create a shared launcher core entrypoint using Node.
-- [ ] Split core responsibilities into small modules:
+- [x] Create a shared launcher core entrypoint using Node.
+- [x] Split core responsibilities into small modules:
   - CLI parsing and validation
   - dependency checks and install
   - build orchestration
   - run and run-release orchestration
   - process spawning and exit-code handling
-- [ ] Define a narrow platform service contract for any platform-specific
+- [x] Define a narrow platform service contract for any platform-specific
   behavior.
-- [ ] Implement platform-specific modules in separate files where behavior
+- [x] Implement platform-specific modules in separate files where behavior
   differs.
-- [ ] Preserve current lifecycle flags and error semantics.
-- [ ] Ensure argument forwarding and path handling work with spaces.
+- [x] Preserve current lifecycle flags and error semantics.
+- [x] Ensure argument forwarding and path handling work with spaces.
 
 **Verification:**
 - Run formatter and targeted checks for the shared launcher implementation.
@@ -169,7 +169,7 @@ clean internal separation.
 - Review module boundaries against `CODING-STANDARDS.md` and
   `ARCHITECTURE-PATTERNS.md`.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 3: Add Thin Platform Wrappers
 
@@ -177,12 +177,12 @@ clean internal separation.
 delegating all logic to the shared core.
 
 **Tasks:**
-- [ ] Refactor `launcher.sh` into a thin Bash wrapper.
-- [ ] Add `launcher.ps1` as the Windows wrapper with the same CLI contract.
-- [ ] Keep wrapper responsibilities limited to environment setup, locating the
+- [x] Refactor `launcher.sh` into a thin Bash wrapper.
+- [x] Add `launcher.ps1` as the Windows wrapper with the same CLI contract.
+- [x] Keep wrapper responsibilities limited to environment setup, locating the
   shared core, forwarding args, and propagating exit codes.
-- [ ] Ensure wrapper help behavior stays aligned with the shared core.
-- [ ] If needed, add minimal platform adapter files rather than inline
+- [x] Ensure wrapper help behavior stays aligned with the shared core.
+- [x] If needed, add minimal platform adapter files rather than inline
   branching in wrappers.
 
 **Verification:**
@@ -194,7 +194,7 @@ delegating all logic to the shared core.
 - Confirm platform-specific behavior remains in one wrapper or platform file
   per platform where applicable.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 4: Update Documentation And Traceability
 
@@ -202,15 +202,15 @@ delegating all logic to the shared core.
 supported cross-platform flow.
 
 **Tasks:**
-- [ ] Update root `README.md` quick start to document the real cross-platform
+- [x] Update root `README.md` quick start to document the real cross-platform
   launcher entry path.
-- [ ] Add a launcher/tooling directory `README.md` if the new implementation
+- [x] Add a launcher/tooling directory `README.md` if the new implementation
   location requires one under documentation standards.
-- [ ] Document platform-specific invocation examples without presenting
+- [x] Document platform-specific invocation examples without presenting
   Linux-only syntax as universal.
-- [ ] Add operator-facing notes for Windows execution policy or wrapper
+- [x] Add operator-facing notes for Windows execution policy or wrapper
   invocation if needed.
-- [ ] Add ADR documentation if the new launcher architecture introduces a
+- [x] Add ADR documentation if the new launcher architecture introduces a
   lasting boundary decision that should be traceable.
 
 **Verification:**
@@ -218,7 +218,7 @@ supported cross-platform flow.
 - Confirm README examples map to real, tested commands.
 - Confirm no duplicated or contradictory quick-start paths remain.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 5: Verification And Release-Safety Pass
 
@@ -226,13 +226,13 @@ supported cross-platform flow.
 cross-platform desktop quick start.
 
 **Tasks:**
-- [ ] Add launcher-focused verification commands if missing.
-- [ ] Consider adding `--release-smoke` if the project qualifies under
+- [x] Add launcher-focused verification commands if missing.
+- [x] Consider adding `--release-smoke` if the project qualifies under
   `LAUNCHER-STANDARDS.md`.
-- [ ] Run shared-core tests, wrapper smoke checks, frontend/electron
+- [x] Run shared-core tests, wrapper smoke checks, frontend/electron
   validation, and at least one release build path.
-- [ ] Confirm the README-documented commands are the same ones being verified.
-- [ ] Prepare atomic commits per logical slice.
+- [x] Confirm the README-documented commands are the same ones being verified.
+- [x] Prepare atomic commits per logical slice.
 
 **Verification:**
 - Shared launcher tests pass.
@@ -242,12 +242,24 @@ cross-platform desktop quick start.
 - Release build path still succeeds.
 - Commit boundaries follow `COMMIT-STANDARDS.md`.
 
-**Status:** Not started
+**Status:** Complete
 
 ## Execution Notes
 
 Update during implementation:
 - 2026-04-12: Plan created before launcher refactor begins.
+- 2026-04-12: Added `scripts/launcher/` shared Node core plus launcher tests in
+  commit `3a9314c`.
+- 2026-04-12: Replaced duplicated root shell logic with thin Bash and
+  PowerShell wrappers in commit `80deb8b`.
+- 2026-04-12: Updated root README quick start and plan progress for the shared
+  wrapper contract.
+- 2026-04-12: Added launcher `--release-smoke` support plus bounded Electron
+  startup exit in commit `e6ac10d`.
+- 2026-04-12: Verified `npm run test:launcher`, `bash launcher.sh --help`,
+  `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke`.
+  The release smoke required unsandboxed execution because Electron's Linux
+  sandbox cannot start inside the current container sandbox.
 
 ## Commit Cadence Notes
 
@@ -297,17 +309,32 @@ Update during implementation:
 
 ### Completed
 
-- None. Planning only.
+- Milestone 1: Launcher contract, architectural boundary, and traceability
+  approach defined before implementation.
+- Milestone 2: Shared Node-based launcher core implemented under
+  `scripts/launcher/` with separated parsing, dependency, platform, and action
+  modules.
+- Milestone 3: Thin Bash and PowerShell root wrappers implemented over the
+  shared core.
+- Milestone 4: Root README and launcher module docs updated to describe the
+  real cross-platform wrapper contract.
+- Milestone 5: Added `--release-smoke` and completed launcher-facing
+  verification against the documented commands.
 
 ### Deviations
 
-- None yet.
+- PowerShell runtime smoke was validated in CI-compatible contract form via
+  wrapper tests and shared-core verification, but not executed in a live
+  PowerShell host in this Linux environment.
+- Electron release smoke required an unsandboxed run because the current
+  container sandbox blocks Electron's Linux sandbox initialization.
 
 ### Follow-Ups
 
-- Implement the plan in milestone order.
-- Update the pending README rewrite as part of Milestone 4 rather than
-  committing it early.
+- Add Windows-host execution of `launcher.ps1 --release-smoke` or equivalent CI
+  coverage when a Windows runner is available.
+- Consider launcher-managed isolated state for bounded verification flows if
+  the desktop runtime begins mutating more operator-visible local state.
 
 ### Verification Summary
 
@@ -320,13 +347,18 @@ Update during implementation:
   - `DOCUMENTATION-STANDARDS.md`
   - `TOOLING-STANDARDS.md`
   - `TESTING-STANDARDS.md`
+- Executed verification:
+  - `npm run test:launcher`
+  - `bash launcher.sh --help`
+  - `bash launcher.sh --build-release`
+  - `bash launcher.sh --release-smoke`
 
 ### Traceability Links
 
-- Module README updated: N/A until implementation
-- ADR added/updated: N/A until implementation
-- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A until
-  implementation
+- Module README updated: `scripts/launcher/README.md`
+- ADR added/updated: None
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A in local
+  implementation workflow
 
 ## Brevity Note
 

@@ -1534,6 +1534,12 @@ export interface CheckLauncherUpdatesResponse extends BaseResponse {
   currentCommit: string;
   latestCommit: string;
   commitsBehind: number;
+  currentVersion?: string;
+  latestVersion?: string;
+  releaseName?: string;
+  releaseUrl?: string;
+  downloadUrl?: string;
+  publishedAt?: string;
   commits: Array<{
     hash: string;
     message: string;

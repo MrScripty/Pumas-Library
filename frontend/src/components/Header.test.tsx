@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { Header } from './Header';
 import type { SystemResources } from '../types/apps';
 
@@ -22,6 +22,10 @@ describe('Header Component', () => {
   const defaultProps = {
     systemResources: mockSystemResources,
     launcherUpdateAvailable: false,
+    launcherLatestVersion: null,
+    isCheckingLauncherUpdates: false,
+    onCheckLauncherUpdates: vi.fn(),
+    onDownloadLauncherUpdate: vi.fn(),
     onMinimize: vi.fn(),
     onClose: vi.fn(),
     networkAvailable: true,
@@ -75,8 +79,10 @@ describe('Header Component', () => {
 
   it('shows update button when update is available', () => {
     const { container } = render(<Header {...defaultProps} launcherUpdateAvailable={true} />);
-    // Verify green up arrow is displayed
-    const updateIcon = container.querySelector('.lucide-arrow-up');
+    const refreshIcon = container.querySelector('.lucide-refresh-cw');
+    const updateIcon = container.querySelector('.lucide-download');
+
+    expect(refreshIcon).toBeInTheDocument();
     expect(updateIcon).toBeInTheDocument();
   });
 
@@ -85,6 +91,33 @@ describe('Header Component', () => {
     // Verify refresh icon is displayed
     const checkIcon = container.querySelector('.lucide-refresh-cw');
     expect(checkIcon).toBeInTheDocument();
+  });
+
+  it('checks GitHub releases when the refresh button is clicked', () => {
+    const onCheckLauncherUpdates = vi.fn();
+
+    render(<Header {...defaultProps} onCheckLauncherUpdates={onCheckLauncherUpdates} />);
+
+    fireEvent.click(screen.getByLabelText('Check GitHub releases for updates'));
+
+    expect(onCheckLauncherUpdates).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the download action when an update is available', () => {
+    const onDownloadLauncherUpdate = vi.fn();
+
+    render(
+      <Header
+        {...defaultProps}
+        launcherUpdateAvailable={true}
+        launcherLatestVersion="v0.3.1"
+        onDownloadLauncherUpdate={onDownloadLauncherUpdate}
+      />
+    );
+
+    fireEvent.click(screen.getByLabelText('Download v0.3.1 from GitHub'));
+
+    expect(onDownloadLauncherUpdate).toHaveBeenCalledTimes(1);
   });
 
   it('displays installation progress when installing', () => {

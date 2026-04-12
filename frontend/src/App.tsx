@@ -23,8 +23,15 @@ import { api, isAPIAvailable } from './api/adapter';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
 import { getAppVersionState } from './utils/appVersionState';
+import type { CheckLauncherUpdatesResponse } from './types/api';
 
 const logger = getLogger('App');
+
+type LauncherUpdateState = {
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  downloadUrl: string | null;
+};
 
 
 export default function App() {
@@ -35,6 +42,8 @@ export default function App() {
   // --- UI State ---
   const [isInstalling, setIsInstalling] = useState(false);
   const [launcherUpdateAvailable, setLauncherUpdateAvailable] = useState(false);
+  const [launcherUpdateState, setLauncherUpdateState] = useState<LauncherUpdateState | null>(null);
+  const [isCheckingLauncherUpdates, setIsCheckingLauncherUpdates] = useState(false);
 
   // Model Manager State
   const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
@@ -223,6 +232,21 @@ export default function App() {
   }, [selectedAppId]);
 
   // --- API Helpers ---
+  const setLauncherUpdateResult = (updateResult: CheckLauncherUpdatesResponse) => {
+    setLauncherUpdateAvailable(updateResult.hasUpdate);
+
+    if (updateResult.hasUpdate) {
+      setLauncherUpdateState({
+        latestVersion: updateResult.latestVersion ?? null,
+        releaseUrl: updateResult.releaseUrl ?? null,
+        downloadUrl: updateResult.downloadUrl ?? null,
+      });
+      return;
+    }
+
+    setLauncherUpdateState(null);
+  };
+
   const checkLauncherVersion = async (forceRefresh = false) => {
     try {
       if (!isAPIAvailable()) return;
@@ -231,7 +255,7 @@ export default function App() {
 
       const updateResult = await api.check_launcher_updates(forceRefresh);
       if (updateResult.success) {
-        setLauncherUpdateAvailable(updateResult.hasUpdate);
+        setLauncherUpdateResult(updateResult);
       }
       return updateResult;
     } catch (error) {
@@ -242,7 +266,44 @@ export default function App() {
       } else {
         logger.error('Unknown error checking launcher version', { error });
       }
-      return { success: false, hasUpdate: false };
+      return {
+        success: false,
+        hasUpdate: false,
+        currentCommit: '',
+        latestCommit: '',
+        commitsBehind: 0,
+        commits: [],
+      };
+    }
+  };
+
+  const handleCheckLauncherUpdates = async () => {
+    if (!isAPIAvailable()) return;
+
+    setIsCheckingLauncherUpdates(true);
+    try {
+      await checkLauncherVersion(true);
+    } finally {
+      setIsCheckingLauncherUpdates(false);
+    }
+  };
+
+  const handleDownloadLauncherUpdate = async () => {
+    if (!isAPIAvailable()) return;
+
+    const targetUrl = launcherUpdateState?.downloadUrl ?? launcherUpdateState?.releaseUrl;
+    if (!targetUrl) return;
+
+    try {
+      await api.open_url(targetUrl);
+    } catch (error) {
+      if (error instanceof APIError) {
+        logger.error('API error opening launcher update URL', { error: error.message, endpoint: error.endpoint, targetUrl });
+      } else if (error instanceof Error) {
+        logger.error('Unexpected error opening launcher update URL', { error: error.message, targetUrl });
+      } else {
+        logger.error('Unknown error opening launcher update URL', { error, targetUrl });
+      }
     }
   };
 
@@ -414,6 +475,14 @@ export default function App() {
         systemResources={systemResources}
         appResources={status?.app_resources?.comfyui}
         launcherUpdateAvailable={launcherUpdateAvailable}
+        launcherLatestVersion={launcherUpdateState?.latestVersion ?? null}
+        isCheckingLauncherUpdates={isCheckingLauncherUpdates}
+        onCheckLauncherUpdates={() => {
+          void handleCheckLauncherUpdates();
+        }}
+        onDownloadLauncherUpdate={() => {
+          void handleDownloadLauncherUpdate();
+        }}
         onMinimize={minimizeWindow}
         onClose={closeWindow}
         networkAvailable={networkAvailable}

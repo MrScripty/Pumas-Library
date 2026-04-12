@@ -1,5 +1,5 @@
 import React from 'react';
-import { X, Minus, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, Download, Package, ArrowUp } from 'lucide-react';
+import { X, Minus, Cpu, Gpu, BicepsFlexed, RefreshCw, WifiOff, Clock, Database, Download, Package } from 'lucide-react';
 import type { SystemResources } from '../types/apps';
 import { formatSpeed, formatBytes } from '../utils/formatters';
 import { Tooltip, IconButton } from './ui';
@@ -37,6 +37,10 @@ interface HeaderProps {
     ram_memory?: number;
   };
   launcherUpdateAvailable: boolean;
+  launcherLatestVersion?: string | null;
+  isCheckingLauncherUpdates?: boolean;
+  onCheckLauncherUpdates?: () => void;
+  onDownloadLauncherUpdate?: () => void;
   onMinimize: () => void;
   onClose: () => void;
   networkAvailable?: boolean | null;
@@ -58,6 +62,10 @@ export const Header: React.FC<HeaderProps> = ({
   systemResources,
   appResources,
   launcherUpdateAvailable,
+  launcherLatestVersion,
+  isCheckingLauncherUpdates = false,
+  onCheckLauncherUpdates,
+  onDownloadLauncherUpdate,
   onMinimize,
   onClose,
   networkAvailable,
@@ -214,18 +222,23 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="h-8 px-3 pt-1 flex items-center justify-between gap-3">
         {/* Left: App name with update button */}
         <div className="flex items-center gap-2 flex-shrink-0">
-          {launcherUpdateAvailable ? (
+          <IconButton
+            icon={<RefreshCw className={isCheckingLauncherUpdates ? 'animate-spin' : ''} />}
+            tooltip={isCheckingLauncherUpdates ? 'Checking GitHub releases...' : 'Check GitHub releases for updates'}
+            onClick={onCheckLauncherUpdates}
+            size="sm"
+            disabled={isCheckingLauncherUpdates || !onCheckLauncherUpdates}
+            className="app-region-no-drag"
+          />
+          {launcherUpdateAvailable && (
             <IconButton
-              icon={<ArrowUp className="text-[hsl(var(--accent-success))]" />}
-              tooltip="Update available"
+              icon={<Download className="text-[hsl(var(--accent-success))]" />}
+              tooltip={launcherLatestVersion
+                ? `Download ${launcherLatestVersion} from GitHub`
+                : 'Download update from GitHub'}
+              onClick={onDownloadLauncherUpdate}
               size="sm"
-              className="app-region-no-drag"
-            />
-          ) : (
-            <IconButton
-              icon={<RefreshCw />}
-              tooltip="Check for updates"
-              size="sm"
+              disabled={!onDownloadLauncherUpdate}
               className="app-region-no-drag"
             />
           )}

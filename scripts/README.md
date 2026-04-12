@@ -11,6 +11,7 @@ local environment setup, and system validation.
 | `check-uniffi-surface.sh` | Builds `pumas-uniffi`, dumps UniFFI metadata, and asserts that core exported binding items are still present. |
 | `check-uniffi-csharp-smoke.sh` | Generates Pumas C# bindings into build output, compiles the checked-in smoke harness, and runs it against the native library. |
 | `package-uniffi-csharp-artifacts.sh` | Builds the native library, generates C# artifacts, and writes zip packages plus checksums for release use. |
+| `launcher/` | Shared cross-platform launcher core used by the root Unix and Windows entry wrappers. |
 | `contract-tests.ts` | Runs repo-specific contract checks for JavaScript/TypeScript-facing integration paths. |
 | `system-check.sh` | Verifies required local tools and runtime prerequisites for common development workflows. |
 | `dev/` | Developer setup, build, and local-run helpers that support day-to-day iteration. |
@@ -74,6 +75,7 @@ such as `.NET` or bindgen CLIs depending on the script.
 ./scripts/check-uniffi-csharp-smoke.sh
 ./scripts/package-uniffi-csharp-artifacts.sh
 ./scripts/generate-bindings.sh csharp
+node scripts/launcher/cli.mjs --help
 ```
 
 ## API Consumer Contract

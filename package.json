@@ -6,6 +6,9 @@
     "frontend",
     "electron"
   ],
+  "scripts": {
+    "test:launcher": "node --test scripts/launcher/*.test.mjs"
+  },
   "devDependencies": {
     "typescript": "~5.8.2",
     "@types/node": "^22.14.0"

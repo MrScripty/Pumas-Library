@@ -23,6 +23,13 @@ bridge.
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
+| `MigrationReportsPanel.test.tsx` | Integration coverage for migration report loading, action dispatch, validation, and operator feedback. |
+| `MigrationReportControls.tsx` | Migration action buttons, prune controls, and flash-message presentation for the report panel. |
+| `MigrationReportControls.test.tsx` | Interaction coverage for migration control actions, busy-state disabling, and message rendering. |
+| `MigrationReportSummaries.tsx` | Summaries for the latest dry-run and execution reports, including integrity status details. |
+| `MigrationReportSummaries.test.tsx` | Rendering coverage for dry-run counts, execution summaries, and integrity error disclosure. |
+| `MigrationReportArtifactList.tsx` | Report artifact rows with open and delete affordances for JSON and Markdown outputs. |
+| `MigrationReportArtifactList.test.tsx` | Interaction coverage for empty state, artifact actions, busy labels, and path shortening. |
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |
 | `VersionSelectorTrigger.tsx` | Presentational trigger shell for the active-version selector and action buttons. |

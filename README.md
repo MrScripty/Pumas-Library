@@ -484,11 +484,21 @@ print(version())
 
 ### C#
 
-After generating, add the `.cs` files from `bindings/csharp/` to your .NET project and ensure the native library (`libpumas_uniffi.so` / `.dll` / `.dylib`) is in the output directory.
+After generating, add the generated `.cs` files to your .NET project and ensure
+the matching native library (`libpumas_uniffi.so` / `.dll` / `.dylib`) is in
+the output directory or native loader path. The generated namespace is
+`uniffi.pumas_uniffi`.
 
 ```csharp
-using PumasUniFFI;
+using uniffi.pumas_uniffi;
 Console.WriteLine(PumasUniffiMethods.Version());
+```
+
+To verify the generated C# surface locally without checking generated files into
+git, run:
+
+```bash
+./scripts/check-uniffi-csharp-smoke.sh
 ```
 
 ### Elixir

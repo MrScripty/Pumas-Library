@@ -86,6 +86,14 @@ security-audit-*.json
 
 # Generated language bindings
 bindings/
+!bindings/
+bindings/*
+!bindings/csharp/
+bindings/csharp/*
+!bindings/csharp/README.md
+!bindings/csharp/Pumas.NativeSmoke/
+bindings/csharp/Pumas.NativeSmoke/*
+!bindings/csharp/Pumas.NativeSmoke/Program.cs
 
 # Rust
 rust/target/

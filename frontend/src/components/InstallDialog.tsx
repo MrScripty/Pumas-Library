@@ -13,12 +13,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Loader2, AlertCircle } from 'lucide-react';
+import { X } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { useInstallationProgress } from '../hooks/useInstallationProgress';
 import { useInstallationState } from '../hooks/useInstallationState';
-import { ProgressDetailsView } from './ProgressDetailsView';
-import { VersionListItem } from './VersionListItem';
+import { InstallDialogContent } from './InstallDialogContent';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
 
@@ -345,6 +344,16 @@ export function InstallDialog({
     ? 'w-full h-full flex flex-col'
     : 'w-full max-w-3xl max-h-[80vh] flex flex-col';
 
+  const reportRemoveError = (tag: string, error: unknown) => {
+    if (error instanceof APIError) {
+      logger.error('API error removing version', { error: error.message, endpoint: error.endpoint, tag });
+    } else if (error instanceof Error) {
+      logger.error('Failed to remove version', { error: error.message, tag });
+    } else {
+      logger.error('Unknown error removing version', { error: String(error), tag });
+    }
+  };
+
   const dialogContent = (
     // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- modal content wrapper
     <div className={containerClasses} onClick={(e) => !isPageMode && e.stopPropagation()}>
@@ -367,112 +376,37 @@ export function InstallDialog({
         </div>
       )}
 
-      {/* Version List or Installation Progress */}
-      <div className="flex-1 overflow-y-auto py-4 px-0">
-        <AnimatePresence>
-          {cancellationNotice && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-3 mx-4 rounded border border-[hsl(var(--accent-warning))]/30 bg-[hsl(var(--accent-warning))]/10 px-3 py-2 text-sm text-[hsl(var(--accent-warning))]"
-            >
-              <div className="flex items-center gap-2">
-                <AlertCircle size={14} />
-                <span>{cancellationNotice}</span>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Rate limit banner */}
-        <AnimatePresence>
-          {isRateLimited && (
-            <motion.div
-              initial={{ opacity: 0, y: -6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              className="mb-3 mx-4 rounded border border-[hsl(var(--accent-warning))]/30 bg-[hsl(var(--accent-warning))]/10 px-3 py-2 text-sm text-[hsl(var(--accent-warning))]"
-            >
-              <div className="flex flex-col gap-1">
-                <div className="flex items-center gap-2 font-medium">
-                  <AlertCircle size={14} />
-                  <span>GitHub Rate Limit Reached</span>
-                </div>
-                <p className="text-xs opacity-80 ml-5">
-                  Showing cached version data.
-                  {rateLimitRetryAfter != null && rateLimitRetryAfter > 0 && (
-                    <> Rate limit resets in {Math.ceil(rateLimitRetryAfter / 60)} minute{Math.ceil(rateLimitRetryAfter / 60) !== 1 ? 's' : ''}.</>
-                  )}
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {showProgressDetails ? (
-          <ProgressDetailsView
-            progress={progress!}
-            installingVersion={installingVersion}
-            showCompletedItems={showCompletedItems}
-            onToggleCompletedItems={() => setShowCompletedItems(!showCompletedItems)}
-            onBackToList={() => setViewMode('list')}
-            onOpenLogPath={openLogPath}
-          />
-        ) : isLoading ? (
-          <div className="flex items-center justify-center py-12 px-4">
-            <Loader2 size={32} className="text-[hsl(var(--text-muted))] animate-spin" />
-          </div>
-        ) : filteredVersions.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-[hsl(var(--text-muted))]">
-            <AlertCircle size={48} className="mb-3" />
-            <p>No versions available</p>
-            <p className="text-sm mt-1">Try adjusting the filters above</p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {filteredVersions.map((release) => {
-              const isInstalled = installedVersions.includes(release.tagName);
-              const isInstalling = installingVersion === release.tagName;
-              const currentProgress = isInstalling ? progress : null;
-              const hasError = errorVersion === release.tagName;
-
-              return (
-                <VersionListItem
-                  key={release.tagName}
-                  release={release}
-                  isInstalled={isInstalled}
-                  isInstalling={isInstalling}
-                  progress={currentProgress}
-                  hasError={hasError}
-                  errorMessage={errorMessage}
-                  isHovered={hoveredTag === release.tagName}
-                  isCancelHovered={isInstalling && cancelHoverTag === release.tagName}
-                  installNetworkStatus={installNetworkStatus}
-                  failedLogPath={stickyFailedTag === release.tagName ? stickyFailedLogPath : null}
-                  onInstall={() => handleInstall(release.tagName)}
-                  onRemove={() => onRemoveVersion(release.tagName).catch((error: unknown) => {
-                    if (error instanceof APIError) {
-                      logger.error('API error removing version', { error: error.message, endpoint: error.endpoint, tag: release.tagName });
-                    } else if (error instanceof Error) {
-                      logger.error('Failed to remove version', { error: error.message, tag: release.tagName });
-                    } else {
-                      logger.error('Unknown error removing version', { error: String(error), tag: release.tagName });
-                    }
-                  })}
-                  onCancel={handleCancelInstallation}
-                  onOpenUrl={openReleaseLink}
-                  onOpenLogPath={openLogPath}
-                  onHoverStart={() => setHoveredTag(release.tagName)}
-                  onHoverEnd={() => setHoveredTag(null)}
-                  onCancelMouseEnter={() => setCancelHoverTag(release.tagName)}
-                  onCancelMouseLeave={() => setCancelHoverTag(null)}
-                />
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <InstallDialogContent
+        cancellationNotice={cancellationNotice}
+        cancelHoverTag={cancelHoverTag}
+        errorMessage={errorMessage}
+        errorVersion={errorVersion}
+        filteredVersions={filteredVersions}
+        hoveredTag={hoveredTag}
+        installNetworkStatus={installNetworkStatus}
+        installedVersions={installedVersions}
+        installingVersion={installingVersion}
+        isLoading={isLoading}
+        isRateLimited={isRateLimited}
+        progress={progress}
+        rateLimitRetryAfter={rateLimitRetryAfter}
+        showCompletedItems={showCompletedItems}
+        showProgressDetails={showProgressDetails}
+        stickyFailedLogPath={stickyFailedLogPath}
+        stickyFailedTag={stickyFailedTag}
+        onCancelInstallation={handleCancelInstallation}
+        onOpenLogPath={openLogPath}
+        onOpenReleaseLink={openReleaseLink}
+        onRemoveVersion={onRemoveVersion}
+        onSetCancelHoverTag={setCancelHoverTag}
+        onSetHoveredTag={setHoveredTag}
+        onToggleCompletedItems={() => setShowCompletedItems(!showCompletedItems)}
+        onBackToList={() => setViewMode('list')}
+        onInstallVersion={(tag) => {
+          void handleInstall(tag);
+        }}
+        onReportRemoveError={reportRemoveError}
+      />
     </div>
   );
 

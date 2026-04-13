@@ -57,7 +57,8 @@ behavioral logic into small modules under this directory.
 ## Dependencies
 **Internal:** Root `package.json`, `electron/package.json`, `launcher.sh`, and
 the Rust/frontend/Electron build outputs.
-**External:** Node runtime, npm, and shell hosts that invoke the wrappers.
+**External:** Node runtime with Corepack available, the pinned pnpm package
+manager resolved through Corepack, and shell hosts that invoke the wrappers.
 
 ## Related ADRs
 - None identified as of 2026-04-12.

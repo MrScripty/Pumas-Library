@@ -206,7 +206,7 @@ package-manager refactor constraints before changing tooling behavior.
 - Review the command-preservation approach against `TOOLING-STANDARDS.md`.
 - Confirm the proposed scope still preserves the current facade contract.
 
-**Status:** Not started
+**Status:** Completed
 
 ### Milestone 2: Refactor Frontend Test Tool Ownership
 
@@ -231,7 +231,7 @@ without breaking the current frontend command facade.
 - One ownership-specific check that proves the frontend test path no longer
   depends on root-owned `jsdom`
 
-**Status:** Not started
+**Status:** Completed
 
 ### Milestone 3: Verification and Tooling Closure
 
@@ -259,7 +259,13 @@ works through the repo’s existing release-oriented paths.
 - `bash launcher.sh --release-smoke`
 - `git log --format='%h %s%n%b%n---' origin/main..HEAD`
 
-**Status:** Not started
+**Status:** Completed
+
+## Implementation Traceability
+
+- `636b640` `build(workspace): migrate Node installs to pnpm ownership`
+- `6734e67` `refactor(launcher): route workspace tooling through corepack pnpm`
+- `c5aa899` `refactor(updater): align self-update rebuilds with pnpm`
 
 ## Execution Notes
 

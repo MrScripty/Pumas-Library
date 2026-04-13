@@ -172,16 +172,14 @@ Generated outputs are written under `bindings/`.
 ### Build From Source
 
 ```bash
+corepack pnpm install --frozen-lockfile
+
 cd rust
 cargo build --release
 
-cd ../frontend
-npm ci
-npm run build
-
-cd ../electron
-npm ci
-npm run build
+cd ..
+npm run -w frontend build
+npm run -w electron build
 ```
 
 ### Package Desktop Releases
@@ -207,6 +205,7 @@ From `electron/`:
 Before cutting a release, run:
 
 ```bash
+corepack pnpm install --frozen-lockfile
 ./launcher.sh --test
 ./launcher.sh --release-smoke
 
@@ -230,7 +229,7 @@ For `pumas_rustler`, run its checks on a machine with Erlang/OTP installed.
 
 ## Development Notes
 
-- Rust and Node versions are pinned in `rust-toolchain.toml` and `.node-version`
+- Rust, Node, and the workspace package manager are pinned in `rust-toolchain.toml`, `.node-version`, and the root `package.json`
 - The desktop app is built from the React frontend plus the Electron shell plus the Rust `pumas-rpc` sidecar
 - The canonical desktop workflow is the shared launcher contract exposed by
   `launcher.sh` on Unix and `launcher.ps1` on Windows

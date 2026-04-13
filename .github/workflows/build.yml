@@ -93,16 +93,10 @@ jobs:
         include:
           - os: ubuntu-latest
             upload_dist: true
-            rollup_native_base: linux-x64-gnu
-            lightningcss_native_base: linux-x64-gnu
           - os: windows-latest
             upload_dist: false
-            rollup_native_base: win32-x64-msvc
-            lightningcss_native_base: win32-x64-msvc
           - os: macos-14
             upload_dist: false
-            rollup_native_base: darwin-arm64
-            lightningcss_native_base: darwin-arm64
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -112,26 +106,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
-          cache: npm
-          cache-dependency-path: package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install dependencies
-        run: npm ci --include=optional
+      - name: Enable Corepack
+        run: corepack enable
 
-      - name: Ensure Rollup native package is present
-        # Workaround for npm optional dependency bug in cross-platform CI:
-        # https://github.com/npm/cli/issues/4828
-        shell: bash
-        run: |
-          ROLLUP_VERSION="$(node -p "require('./node_modules/rollup/package.json').version")"
-          npm install --no-save "@rollup/rollup-${{ matrix.rollup_native_base }}@${ROLLUP_VERSION}"
-
-      - name: Ensure Lightning CSS native package is present
-        # Same npm optional dependency bug can skip Lightning CSS binaries too.
-        shell: bash
-        run: |
-          LIGHTNINGCSS_VERSION="$(node -p "require('./node_modules/lightningcss/package.json').version")"
-          npm install --no-save "lightningcss-${{ matrix.lightningcss_native_base }}@${LIGHTNINGCSS_VERSION}"
+      - name: Install workspace dependencies
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Lint
         run: npm run -w frontend lint
@@ -166,8 +148,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
-          cache: npm
-          cache-dependency-path: package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -180,7 +165,7 @@ jobs:
           workspaces: rust -> target
 
       - name: Install workspace dependencies
-        run: npm ci --include=optional
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Install Xvfb
         run: sudo apt-get update && sudo apt-get install -y xvfb
@@ -314,8 +299,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version-file: '.node-version'
-          cache: npm
-          cache-dependency-path: electron/package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Download pumas-rpc binary
         uses: actions/download-artifact@v4
@@ -338,9 +326,8 @@ jobs:
             chmod +x "electron/resources/bin/${{ matrix.binary-name }}"
           }
 
-      - name: Install Electron dependencies
-        working-directory: ./electron
-        run: npm ci --include=optional
+      - name: Install workspace dependencies
+        run: corepack pnpm install --frozen-lockfile
 
       - name: Verify app icon assets
         shell: pwsh
@@ -356,18 +343,11 @@ jobs:
             }
           }
 
-      - name: Install dmg-license (macOS only)
-        if: matrix.platform == 'mac'
-        working-directory: ./electron
-        run: npm install dmg-license
-
       - name: Build Electron TypeScript
-        working-directory: ./electron
-        run: npm run build
+        run: npm run -w electron build
 
       - name: Package Electron app
-        working-directory: ./electron
-        run: npx electron-builder --${{ matrix.platform }} --publish never
+        run: corepack pnpm --filter ./electron exec electron-builder --${{ matrix.platform }} --publish never
 
       - name: Upload Electron artifact
         uses: actions/upload-artifact@v4

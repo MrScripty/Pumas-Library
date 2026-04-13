@@ -39,7 +39,7 @@ check_version_prefix() {
 check_command cargo
 check_command rustc
 check_command node
-check_command npm
+check_command corepack
 check_command python3
 
 if [[ "$missing_tools" -eq 0 ]]; then
@@ -51,6 +51,7 @@ fi
 
 echo ""
 echo "Recommended verification commands:"
+echo "  corepack pnpm install --frozen-lockfile"
 echo "  bash ./launcher.sh --install"
 echo "  npm run test:launcher"
 echo "  cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler"

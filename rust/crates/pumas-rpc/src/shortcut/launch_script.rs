@@ -104,10 +104,22 @@ impl LaunchScriptGenerator {
         slug: &str,
         profile_dir: &Path,
     ) -> String {
-        let version_dir_string = version_dir.display().to_string();
-        let profile_dir_string = profile_dir.display().to_string();
-        let version_dir_str = Self::escape_bash_double_quoted(&version_dir_string);
-        let profile_dir_str = Self::escape_bash_double_quoted(&profile_dir_string);
+        let version_parent = version_dir
+            .parent()
+            .and_then(Path::file_name)
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "comfyui-versions".to_string());
+        let version_leaf = version_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| tag.to_string());
+        let profile_leaf = profile_dir
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| slug.to_string());
+        let version_parent = Self::escape_bash_double_quoted(&version_parent);
+        let version_leaf = Self::escape_bash_double_quoted(&version_leaf);
+        let profile_leaf = Self::escape_bash_double_quoted(&profile_leaf);
         let comfyui_url = Self::escape_bash_double_quoted(AppId::ComfyUI.default_base_url());
         let window_class = Self::escape_bash_double_quoted(&format!("ComfyUI-{}", slug));
         let escaped_tag = Self::escape_bash_double_quoted(tag);
@@ -116,13 +128,15 @@ impl LaunchScriptGenerator {
             r#"#!/bin/bash
 set -euo pipefail
 
-VERSION_DIR="{version_dir_str}"
+SCRIPT_DIR="$(cd "$(dirname "${{BASH_SOURCE[0]}}")" && pwd)"
+LAUNCHER_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+VERSION_DIR="$LAUNCHER_ROOT/{version_parent}/{version_leaf}"
 VENV_PATH="$VERSION_DIR/venv"
 MAIN_PY="$VERSION_DIR/main.py"
 PID_FILE="$VERSION_DIR/comfyui.pid"
 URL="{comfyui_url}"
 WINDOW_CLASS="{window_class}"
-PROFILE_DIR="{profile_dir_str}"
+PROFILE_DIR="$LAUNCHER_ROOT/launcher-data/profiles/{profile_leaf}"
 SERVER_START_DELAY={delay}
 SERVER_PID=""
 
@@ -200,8 +214,9 @@ open_app
 
 wait $SERVER_PID
 "#,
-            version_dir_str = version_dir_str,
-            profile_dir_str = profile_dir_str,
+            version_parent = version_parent,
+            version_leaf = version_leaf,
+            profile_leaf = profile_leaf,
             delay = self.server_start_delay,
             tag = escaped_tag,
             window_class = window_class,
@@ -251,6 +266,10 @@ mod tests {
         assert!(content.contains("#!/bin/bash"));
         assert!(content.contains("ComfyUI v1.0.0"));
         assert!(content.contains("SERVER_START_DELAY=5"));
+        assert!(content.contains("LAUNCHER_ROOT=\"$(cd \"$SCRIPT_DIR/../..\" && pwd)\""));
+        assert!(content.contains("VERSION_DIR=\"$LAUNCHER_ROOT/versions/v1.0.0\""));
+        assert!(content.contains("PROFILE_DIR=\"$LAUNCHER_ROOT/launcher-data/profiles/v1-0-0\""));
+        assert!(!content.contains(&temp_dir.path().display().to_string()));
 
         // Check permissions (Unix only)
         #[cfg(unix)]

@@ -46,6 +46,20 @@ pub struct ShortcutManager {
 }
 
 impl ShortcutManager {
+    fn resolve_scripts_dir(launcher_data: &Path) -> PathBuf {
+        let current_dir = launcher_data.join("shortcut-scripts");
+        if current_dir.exists() {
+            return current_dir;
+        }
+
+        let legacy_dir = launcher_data.join("shortcuts");
+        if legacy_dir.exists() {
+            return legacy_dir;
+        }
+
+        current_dir
+    }
+
     /// Quote a single argument for .desktop Exec syntax.
     ///
     /// Desktop entries are not shell-evaluated, but quoted args still need
@@ -69,7 +83,7 @@ impl ShortcutManager {
         let generated_icons_dir = launcher_data.join("generated-icons");
 
         // Script and profile paths
-        let scripts_dir = launcher_data.join("shortcut-scripts");
+        let scripts_dir = Self::resolve_scripts_dir(&launcher_data);
         let profiles_dir = launcher_data.join("profiles");
 
         // Platform-specific directories (uses centralized platform module)
@@ -409,6 +423,36 @@ mod tests {
         let quoted =
             ShortcutManager::quote_desktop_exec_arg(r#"/tmp/some "quoted" path\with\slashes"#);
         assert_eq!(quoted, r#""/tmp/some \"quoted\" path\\with\\slashes""#);
+    }
+
+    #[test]
+    fn test_resolve_scripts_dir_prefers_current_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let launcher_data = temp_dir.path().join("launcher-data");
+        let current_dir = launcher_data.join("shortcut-scripts");
+        let legacy_dir = launcher_data.join("shortcuts");
+
+        fs::create_dir_all(&current_dir).unwrap();
+        fs::create_dir_all(&legacy_dir).unwrap();
+
+        assert_eq!(
+            ShortcutManager::resolve_scripts_dir(&launcher_data),
+            current_dir
+        );
+    }
+
+    #[test]
+    fn test_resolve_scripts_dir_falls_back_to_legacy_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let launcher_data = temp_dir.path().join("launcher-data");
+        let legacy_dir = launcher_data.join("shortcuts");
+
+        fs::create_dir_all(&legacy_dir).unwrap();
+
+        assert_eq!(
+            ShortcutManager::resolve_scripts_dir(&launcher_data),
+            legacy_dir
+        );
     }
 
     #[test]

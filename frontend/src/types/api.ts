@@ -1583,7 +1583,6 @@ export interface CloseWindowResponse extends BaseResponse {
 
 /**
  * Canonical renderer bridge contract exposed by the Electron desktop shell.
- * Legacy PyWebView naming is kept below only as a deprecated type alias.
  */
 export interface DesktopBridgeAPI {
   // ========================================
@@ -2155,14 +2154,6 @@ export interface ElectronWindowAPI {
   getTheme(): Promise<'dark' | 'light'>;
 }
 
-/**
- * Backwards-compatible alias for older callers that still import the legacy
- * bridge name during the migration away from PyWebView-first terminology.
- *
- * @deprecated Use DesktopBridgeAPI.
- */
-export type PyWebViewAPI = DesktopBridgeAPI;
-
 export type ElectronAPI = DesktopBridgeAPI & ElectronWindowAPI;
 
 // ============================================================================
@@ -2171,12 +2162,6 @@ export type ElectronAPI = DesktopBridgeAPI & ElectronWindowAPI;
 
 declare global {
   interface Window {
-    /**
-     * @deprecated Legacy compatibility alias. Use window.electronAPI.
-     */
-    pywebview?: {
-      api: PyWebViewAPI;
-    };
     /** Canonical Electron desktop bridge. */
     electronAPI?: ElectronAPI;
   }

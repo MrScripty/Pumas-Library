@@ -169,4 +169,4 @@ export const windowAPI = {
 };
 
 // Export types
-export type { DesktopBridgeAPI, PyWebViewAPI } from '../types/api';
+export type { DesktopBridgeAPI } from '../types/api';

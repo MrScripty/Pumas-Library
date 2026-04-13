@@ -21,8 +21,7 @@ every hook or component.
 - Components should not talk directly to preload globals.
 - The adapter must preserve backend-owned response semantics instead of
   inventing local business state.
-- `window.electronAPI` is the canonical bridge; any `pywebview` naming is
-  compatibility-only.
+- `window.electronAPI` is the canonical bridge.
 
 ## Decision
 - Keep bridge access centralized in `adapter.ts`.
@@ -68,7 +67,6 @@ if (!res.success) throw new Error(res.error || 'Failed');
   globals directly.
 - `adapter.ts` returns the canonical desktop bridge contract and treats missing
   bridge access as a boundary error.
-- New code should use desktop-bridge naming, not PyWebView-first naming.
 - Compatibility expectation: wrappers may grow additively, but existing method
   semantics should remain aligned with the shared type contracts.
 

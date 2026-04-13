@@ -46,8 +46,7 @@ declare global {
 - **Separation**: UI logic separate from backend business logic
 
 See [src/types/api.ts](src/types/api.ts) for the canonical bridge type
-definitions. `window.pywebview.api` may remain as a deprecated compatibility
-alias, but new code should target `window.electronAPI` or the shared adapter.
+definitions. New code should target `window.electronAPI` or the shared adapter.
 
 ### 2. Component Architecture
 

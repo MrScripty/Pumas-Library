@@ -1246,6 +1246,7 @@ mod tests {
         assert!(!should_run(&scope, Duration::from_secs(5), false));
 
         scope.last_dirty_instant = Some(Instant::now());
+        scope.last_checked_instant = Some(Instant::now() - Duration::from_secs(1));
         assert!(should_run(&scope, Duration::from_secs(5), false));
     }
 

@@ -250,7 +250,10 @@ impl ModelLibrary {
 
     /// Get the relative path from library root for a model directory.
     pub fn get_relative_path(&self, model_dir: &Path) -> Option<PathBuf> {
-        model_dir
+        let normalized_model_dir = model_dir
+            .canonicalize()
+            .unwrap_or_else(|_| model_dir.to_path_buf());
+        normalized_model_dir
             .strip_prefix(&self.library_root)
             .ok()
             .map(|p| p.to_path_buf())
@@ -779,7 +782,8 @@ impl ModelLibrary {
                     {
                         metadata_changed = true;
                     }
-                    metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
+                    metadata_changed |=
+                        apply_task_projection_from_persisted_evidence(&mut metadata);
 
                     if metadata_changed {
                         if let Err(err) = self.save_metadata(&model_dir, &metadata).await {
@@ -1919,10 +1923,13 @@ impl ModelLibrary {
             match storage_kind {
                 StorageKind::LibraryOwned => model_dir.display().to_string(),
                 StorageKind::ExternalReference => {
-                    metadata.entry_path.clone().ok_or_else(|| PumasError::Validation {
-                        field: "entry_path".to_string(),
-                        message: "bundle metadata is missing entry_path".to_string(),
-                    })?
+                    metadata
+                        .entry_path
+                        .clone()
+                        .ok_or_else(|| PumasError::Validation {
+                            field: "entry_path".to_string(),
+                            message: "bundle metadata is missing entry_path".to_string(),
+                        })?
                 }
             }
         } else if let Some(primary_file) = self.get_primary_model_file(model_id) {
@@ -8298,8 +8305,14 @@ mod tests {
 
         let repaired = library.load_metadata(&model_dir).unwrap().unwrap();
         let canonical_path = model_dir.display().to_string();
-        assert_eq!(repaired.source_path.as_deref(), Some(canonical_path.as_str()));
-        assert_eq!(repaired.entry_path.as_deref(), Some(canonical_path.as_str()));
+        assert_eq!(
+            repaired.source_path.as_deref(),
+            Some(canonical_path.as_str())
+        );
+        assert_eq!(
+            repaired.entry_path.as_deref(),
+            Some(canonical_path.as_str())
+        );
     }
 
     #[tokio::test]

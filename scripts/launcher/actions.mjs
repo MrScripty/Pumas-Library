@@ -4,6 +4,7 @@ import { LauncherError } from './errors.mjs';
 import { installDependencies, ensureRuntimeDependencies } from './dependencies.mjs';
 import { log } from './logger.mjs';
 import { runBoundedCommand, runCommand } from './commands.mjs';
+import { corepackPnpmArgs, rootScriptArgs, workspaceScriptArgs } from './package-manager.mjs';
 
 const RELEASE_SMOKE_MIN_UPTIME_MS = 2_000;
 const RELEASE_SMOKE_MAX_UPTIME_MS = 20_000;
@@ -84,12 +85,12 @@ async function buildApp(mode, runtime) {
   }
 
   log('[build] compiling frontend assets');
-  await runCommand(platformService.npmCommand, ['--workspace', 'frontend', 'run', 'build'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./frontend', 'build')), {
     cwd: context.repoRoot,
   });
 
   log('[build] compiling electron main process');
-  await runCommand(platformService.npmCommand, ['--workspace', 'electron', 'run', 'build'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./electron', 'build')), {
     cwd: context.repoRoot,
   });
 
@@ -104,8 +105,8 @@ async function runDevApp(runArgs, runtime) {
 
   log('[run] launching development runtime');
   await runCommand(
-    platformService.npmCommand,
-    ['--workspace', 'electron', 'run', 'dev', '--', ...runArgs],
+    platformService.corepackCommand,
+    corepackPnpmArgs(workspaceScriptArgs('./electron', 'dev', runArgs)),
     {
       cwd: context.repoRoot,
       env: { PUMAS_RUST_BACKEND: '1' },
@@ -121,8 +122,8 @@ async function runReleaseApp(runArgs, runtime) {
 
   log('[run] launching release runtime');
   await runCommand(
-    platformService.npmCommand,
-    ['--workspace', 'electron', 'run', 'run:launcher-release', '--', ...runArgs],
+    platformService.corepackCommand,
+    corepackPnpmArgs(workspaceScriptArgs('./electron', 'run:launcher-release', runArgs)),
     {
       cwd: context.repoRoot,
       env: { PUMAS_RUST_BACKEND: '1' },
@@ -143,22 +144,22 @@ async function runTestSuite(runtime) {
   );
 
   log('[test] running launcher tests');
-  await runCommand(platformService.npmCommand, ['run', 'test:launcher'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(rootScriptArgs('test:launcher')), {
     cwd: context.repoRoot,
   });
 
   log('[test] running frontend tests');
-  await runCommand(platformService.npmCommand, ['run', '-w', 'frontend', 'test:run'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./frontend', 'test:run')), {
     cwd: context.repoRoot,
   });
 
   log('[test] running frontend type checks');
-  await runCommand(platformService.npmCommand, ['run', '-w', 'frontend', 'check:types'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./frontend', 'check:types')), {
     cwd: context.repoRoot,
   });
 
   log('[test] validating electron shell');
-  await runCommand(platformService.npmCommand, ['run', '-w', 'electron', 'validate'], {
+  await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./electron', 'validate')), {
     cwd: context.repoRoot,
   });
 }
@@ -171,8 +172,8 @@ async function runReleaseSmoke(runtime) {
 
   log('[release-smoke] launching bounded release startup check');
   await runBoundedCommand(
-    platformService.npmCommand,
-    ['--workspace', 'electron', 'run', 'run:launcher-release'],
+    platformService.corepackCommand,
+    corepackPnpmArgs(workspaceScriptArgs('./electron', 'run:launcher-release')),
     {
       cwd: context.repoRoot,
       env: {

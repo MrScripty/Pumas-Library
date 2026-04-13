@@ -4,6 +4,7 @@ import { EXIT_CODES } from './contract.mjs';
 import { LauncherError } from './errors.mjs';
 import { commandExists, runCommand } from './commands.mjs';
 import { log } from './logger.mjs';
+import { corepackPnpmArgs, installArgs } from './package-manager.mjs';
 
 const DEPENDENCIES = [
   {
@@ -24,29 +25,22 @@ const DEPENDENCIES = [
     },
   },
   {
-    name: 'npm',
+    name: 'corepack',
     check: ({ platformService }) =>
-      commandExists(platformService.npmCommand, ['--version']),
+      commandExists(platformService.corepackCommand, ['--version']),
     install: async () => {
-      log('[error] npm missing; install npm with your Node.js installation');
+      log('[error] corepack missing; install a Node.js release that includes Corepack');
       return false;
     },
   },
   {
-    name: 'frontend_node_modules',
-    check: ({ context }) => fs.existsSync(path.join(context.frontendDir, 'node_modules')),
+    name: 'workspace_node_modules',
+    check: ({ context }) =>
+      fs.existsSync(path.join(context.repoRoot, 'node_modules')) &&
+      fs.existsSync(path.join(context.frontendDir, 'node_modules')) &&
+      fs.existsSync(path.join(context.electronDir, 'node_modules')),
     install: async ({ context, platformService }) => {
-      await runCommand(platformService.npmCommand, ['install', '--workspace', 'frontend'], {
-        cwd: context.repoRoot,
-      });
-      return true;
-    },
-  },
-  {
-    name: 'electron_node_modules',
-    check: ({ context }) => fs.existsSync(path.join(context.electronDir, 'node_modules')),
-    install: async ({ context, platformService }) => {
-      await runCommand(platformService.npmCommand, ['install', '--workspace', 'electron'], {
+      await runCommand(platformService.corepackCommand, corepackPnpmArgs(installArgs()), {
         cwd: context.repoRoot,
       });
       return true;

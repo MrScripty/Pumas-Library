@@ -51,10 +51,10 @@ test('buildUsage advertises the shared launcher contract', () => {
   assert.match(usage, /--release-smoke/);
 });
 
-test('platform factory resolves the Windows npm command separately', () => {
+test('platform factory resolves the Windows Corepack command separately', () => {
   const windows = createPlatformService('win32');
   const linux = createPlatformService('linux');
 
-  assert.equal(windows.npmCommand, 'npm.cmd');
-  assert.equal(linux.npmCommand, 'npm');
+  assert.equal(windows.corepackCommand, 'corepack.cmd');
+  assert.equal(linux.corepackCommand, 'corepack');
 });

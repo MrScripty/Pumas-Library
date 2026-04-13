@@ -3,6 +3,8 @@
 ## Prerequisites
 
 - All CI checks pass on `main`
+- `npm run test:launcher` passes locally
+- `bash launcher.sh --release-smoke` passes locally on a machine that can launch Electron
 - `cargo test --workspace --exclude pumas_rustler` passes locally (from `rust/`)
 - `cargo clippy --workspace --exclude pumas_rustler -- -D warnings` clean
 - `cargo audit` shows no high/critical vulnerabilities
@@ -20,6 +22,21 @@
 8. CI creates a draft GitHub Release with artifacts
 9. Review the draft release — verify all expected artifacts are present
 10. Publish the release
+
+## Local Verification
+
+Run the release-facing verification commands from the repo root:
+
+```bash
+npm run test:launcher
+bash launcher.sh --build-release
+bash launcher.sh --release-smoke
+
+cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler
+npm run -w frontend test:run
+npm run -w frontend check:types
+npm run -w electron validate
+```
 
 ## Artifacts Produced by CI
 

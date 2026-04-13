@@ -4736,7 +4736,8 @@ mod tests {
     #[tokio::test]
     async fn test_library_creation() {
         let (temp_dir, library) = setup_library().await;
-        assert_eq!(library.library_root(), temp_dir.path());
+        let expected_root = temp_dir.path().canonicalize().unwrap();
+        assert_eq!(library.library_root(), expected_root);
         assert!(library.db_path().exists());
     }
 

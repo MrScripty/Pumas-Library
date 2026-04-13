@@ -161,16 +161,16 @@ outdated architecture story that makes current code harder to understand.
 names so the implementation preserves architecture and compatibility.
 
 **Tasks:**
-- [ ] Record the direct dependency upgrade targets required by the current audit
+- [x] Record the direct dependency upgrade targets required by the current audit
   output.
-- [ ] Record the public-facade preservation decision:
+- [x] Record the public-facade preservation decision:
   `window.electronAPI` stays canonical and any `pywebview` surface becomes a
   deprecated compatibility alias only.
-- [ ] Identify the documentation and directory-traceability updates required by
+- [x] Identify the documentation and directory-traceability updates required by
   the touched frontend/Electron areas.
-- [ ] Decide whether likely transitive fixes should come from direct version
+- [x] Decide whether likely transitive fixes should come from direct version
   bumps, lockfile refresh, or narrow npm `overrides`.
-- [ ] Confirm no new polling, retries, or background ownership changes are in
+- [x] Confirm no new polling, retries, or background ownership changes are in
   scope for this pass.
 
 **Verification:**
@@ -180,7 +180,7 @@ names so the implementation preserves architecture and compatibility.
 - Confirm the planned file/module footprint still fits
   `CODING-STANDARDS.md`.
 
-**Status:** Not started
+**Status:** Completed on 2026-04-12
 
 ### Milestone 2: Remediate Workspace Audit Findings
 
@@ -188,13 +188,13 @@ names so the implementation preserves architecture and compatibility.
 unnecessary runtime footprint or destabilizing packaging.
 
 **Tasks:**
-- [ ] Upgrade the direct Electron packaging dependencies to patched versions.
-- [ ] Refresh the frontend toolchain and lockfile resolution to remove the
+- [x] Upgrade the direct Electron packaging dependencies to patched versions.
+- [x] Refresh the frontend toolchain and lockfile resolution to remove the
   vulnerable Vite-era transitive packages.
-- [ ] Add narrow npm `overrides` only if direct upgrades and lockfile refresh
+- [x] Add narrow npm `overrides` only if direct upgrades and lockfile refresh
   do not eliminate a remaining transitive advisory.
-- [ ] Keep manifest and lockfile updates deterministic and reviewable.
-- [ ] Update CI or release-tooling references only if the dependency upgrades
+- [x] Keep manifest and lockfile updates deterministic and reviewable.
+- [x] Update CI or release-tooling references only if the dependency upgrades
   require them.
 
 **Verification:**
@@ -206,7 +206,7 @@ unnecessary runtime footprint or destabilizing packaging.
 - `npm run -w electron validate`
 - `npm run test:launcher`
 
-**Status:** Not started
+**Status:** Completed on 2026-04-12
 
 ### Milestone 3: Rename the Primary Desktop Bridge Contract
 
@@ -214,15 +214,15 @@ unnecessary runtime footprint or destabilizing packaging.
 while preserving runtime compatibility.
 
 **Tasks:**
-- [ ] Rename the primary bridge interface/types to Electron/desktop
+- [x] Rename the primary bridge interface/types to Electron/desktop
   bridge-first terminology.
-- [ ] Update adapter, preload, comments, and error text to point at the
+- [x] Update adapter, preload, comments, and error text to point at the
   canonical bridge contract.
-- [ ] Retain a deprecated type alias and deprecated `window.pywebview.api`
+- [x] Retain a deprecated type alias and deprecated `window.pywebview.api`
   compatibility exposure only where runtime compatibility still needs it.
-- [ ] Update examples and tests so new code paths use the canonical bridge
+- [x] Update examples and tests so new code paths use the canonical bridge
   names.
-- [ ] Add or update any directory `README.md` files required by
+- [x] Add or update any directory `README.md` files required by
   `DOCUMENTATION-STANDARDS.md` for touched source directories.
 
 **Verification:**
@@ -232,7 +232,7 @@ while preserving runtime compatibility.
 - One cross-layer acceptance path that proves renderer calls still reach the
   backend bridge through the preload facade
 
-**Status:** Not started
+**Status:** Completed on 2026-04-12
 
 ### Milestone 4: Documentation and Release-Safety Closure
 
@@ -240,15 +240,15 @@ while preserving runtime compatibility.
 dependency and bridge story, then close with a full verification pass.
 
 **Tasks:**
-- [ ] Remove stale PyWebView-first terminology from repo docs that describe the
+- [x] Remove stale PyWebView-first terminology from repo docs that describe the
   current Electron desktop flow.
-- [ ] Update plan index or other traceability docs for the new remediation
+- [x] Update plan index or other traceability docs for the new remediation
   artifact.
-- [ ] Verify that README and contributor docs describe the canonical bridge and
+- [x] Verify that README and contributor docs describe the canonical bridge and
   current install/build reality.
-- [ ] Run the full remediation verification stack, including at least one
+- [x] Run the full remediation verification stack, including at least one
   release-oriented launcher path.
-- [ ] Inspect unpushed history before each new implementation commit to keep
+- [x] Inspect unpushed history before each new implementation commit to keep
   commit bodies and cleanup compliant.
 
 **Verification:**
@@ -257,7 +257,7 @@ dependency and bridge story, then close with a full verification pass.
 - `bash launcher.sh --release-smoke`
 - `git log --format='%h %s%n%b%n---' origin/main..HEAD`
 
-**Status:** Not started
+**Status:** Completed on 2026-04-12
 
 ## Execution Notes
 
@@ -266,6 +266,16 @@ Update during implementation:
 - 2026-04-12: Backfilled detailed bodies on the current unpushed local commits
   so the branch history matches `COMMIT-STANDARDS.md` before new implementation
   slices begin.
+- 2026-04-12: Cleared workspace npm audit findings and refreshed the lockfile
+  via `d017cfc7`.
+- 2026-04-12: Renamed the canonical renderer bridge to `DesktopBridgeAPI`,
+  preserved the deprecated compatibility alias, and updated touched module
+  READMEs via `04bccac7`.
+- 2026-04-12: Updated repo-facing architecture and contributor docs to match
+  the current Electron desktop bridge via `873a87ff`.
+- 2026-04-12: Re-ran the release-safety closure, including `npm audit`,
+  `npm audit --omit=dev`, `bash launcher.sh --build-release`, and
+  `bash launcher.sh --release-smoke`.
 
 ## Commit Cadence Notes
 
@@ -306,36 +316,62 @@ Update during implementation:
 
 ### Completed
 
-- None yet.
-- Reason: Implementation has not started.
-- Revisit trigger: Update this section as each milestone closes.
+- Milestone 1: remediation boundary, compatibility posture, and documentation
+  footprint captured in this plan before implementation started.
+- Milestone 2: workspace dependency graph upgraded and lockfile refreshed until
+  both `npm audit` variants reported zero vulnerabilities.
+- Milestone 3: canonical bridge naming moved to `DesktopBridgeAPI` while
+  preserving `PyWebViewAPI` and `window.pywebview.api` as deprecated
+  compatibility aliases.
+- Milestone 4: repo-facing docs aligned to the current Electron desktop flow
+  and the release build plus bounded smoke path completed successfully.
 
 ### Deviations
 
-- None yet.
-- Reason: No implementation deviation exists before execution.
-- Revisit trigger: Record any sequencing or scope changes immediately when a
-  re-plan trigger is hit.
+- Added a direct root `jsdom` devDependency during Milestone 2.
+- Reason: the refreshed workspace Vitest resolution needed `jsdom` available at
+  the workspace root after the dependency graph changed.
+- Revisit trigger: remove the extra root dependency if the workspace test
+  runner is restructured to resolve environment packages per workspace without
+  a root-level install.
 
 ### Follow-Ups
 
-- None yet.
-- Reason: Follow-up work depends on implementation outcomes.
-- Revisit trigger: Record any deferred cleanup or compatibility-removal tasks at
-  plan close.
+- Remove the deprecated `PyWebViewAPI`/`window.pywebview.api` compatibility
+  alias once downstream callers no longer depend on it.
+- Investigate the current Vite bundle-size warning emitted during
+  `bash launcher.sh --build-release`.
+- Review whether the root `jsdom` compatibility pin can be removed in a later
+  workspace-tooling cleanup.
 
 ### Verification Summary
 
-- None yet.
-- Reason: Verification runs will be recorded during implementation.
-- Revisit trigger: Update with the exact commands and outcomes after each
-  verified slice.
+- `npm ci --include=optional`: passed during dependency remediation.
+- `npm audit`: passed with 0 vulnerabilities after remediation and again at
+  release-safety closure.
+- `npm audit --omit=dev`: passed with 0 vulnerabilities after remediation and
+  again at release-safety closure.
+- `npm run -w frontend check:types`: passed after dependency remediation and
+  after the bridge rename.
+- `npm run -w frontend test:run`: passed after dependency remediation and after
+  the bridge rename.
+- `npm run -w electron validate`: passed after dependency remediation and after
+  the bridge rename.
+- `npm run test:launcher`: passed after dependency remediation and after the
+  bridge rename.
+- `bash launcher.sh --build-release`: passed at release-safety closure.
+- `bash launcher.sh --release-smoke`: passed at release-safety closure.
+- `git log --format='%h %s%n%b%n---' origin/main..HEAD`: reviewed before each
+  post-plan implementation commit.
 
 ### Traceability Links
 
-- Module README updated: Pending implementation review
-- ADR added/updated: None yet
-- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: Pending
+- Module README updated: `frontend/src/types/README.md`,
+  `frontend/src/api/README.md`, `frontend/src/errors/README.md`,
+  `frontend/src/components/README.md`, `electron/src/README.md`
+- ADR added/updated: None
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: Not applicable in
+  local branch execution state
 
 ## Brevity Note
 

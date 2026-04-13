@@ -1,636 +1,274 @@
-# Contributing to ComfyUI Linux Launcher
+# Contributing to Pumas Library
 
-This document outlines the development standards, practices, and workflows for contributing to this project. All code must adhere to these standards.
+This guide explains how to make changes to Pumas Library without fighting the
+repo. A good contribution here is not just "code that works". It is a change
+that is clearly scoped, validated at the right layer, documented where the
+contract changed, and committed in a way that keeps history readable.
 
----
+## What Good Contributions Look Like
 
-## Table of Contents
+- Solve one clear problem at a time.
+- Keep changes aligned with the repo's architecture boundaries.
+- Run the smallest verification set that proves the change is correct.
+- Update docs, plans, or architecture notes when behavior or contracts change.
+- Leave a commit history that explains what changed and why.
 
-1. [Development Setup](#development-setup)
-2. [Code Standards](#code-standards)
-3. [Testing Requirements](#testing-requirements)
-4. [Type Hints and Type Safety](#type-hints-and-type-safety)
-5. [Pre-commit Hooks](#pre-commit-hooks)
-6. [Architecture Patterns](#architecture-patterns)
-7. [Security Practices](#security-practices)
-8. [Commit Guidelines](#commit-guidelines)
+If you are unsure where to start, prefer a smaller slice with strong
+verification over a large rewrite with unclear boundaries.
 
----
+## Before You Start
 
-## Development Setup
+Read the current project docs before making a non-trivial change:
 
-### Prerequisites
+- [README.md](README.md): project purpose, setup, and release-facing workflows
+- [docs/README.md](docs/README.md): documentation index
+- [RELEASING.md](RELEASING.md): release validation and artifact expectations
+- [scripts/launcher/README.md](scripts/launcher/README.md): shared launcher contract
 
-- Python 3.12+
-- Node.js 24 LTS
-- Desktop shell dependencies handled by the Electron workspace and launcher
-  wrappers
+This repository also follows the shared standards in the Coding Standards repo:
 
-Linux (Mint 22.x / Ubuntu 24.04) packages:
-```bash
-sudo add-apt-repository universe
-sudo apt update
-sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 libwebkit2gtk-4.1-0
-```
+- `CODING-STANDARDS.md`
+- `ARCHITECTURE-PATTERNS.md`
+- `PLAN-STANDARDS.md`
+- `COMMIT-STANDARDS.md`
+- `TESTING-STANDARDS.md`
+- `CROSS-PLATFORM-STANDARDS.md`
+- `LAUNCHER-STANDARDS.md`
+- `RELEASE-STANDARDS.md`
 
-### Initial Setup
+Use those standards as the source of truth when repo docs are intentionally
+brief.
 
-```bash
-# Clone the repository
-git clone <repository-url>
-cd <repo-root>
+## Development Environment
 
-# Run installation script
-./install.sh
+Toolchain pins used by local development and CI:
 
-# Activate virtual environment
-source venv/bin/activate
+| Tool | Pin Source | Current Pin |
+| ---- | ---------- | ----------- |
+| Rust | `rust-toolchain.toml` | `1.92.0` |
+| Node.js | `.node-version` | `24.12.0` |
+| pnpm | root `package.json#packageManager` | `10.33.0` |
+| Python | `.python-version` | `3.12.3` |
 
-# Install development dependencies and pre-commit hooks
-pip install -r requirements-dev.txt
-pre-commit install
+General prerequisites:
 
-# Or do both via launcher
-./launcher dev-install
-```
+- Rust toolchain with `clippy` and `rustfmt`
+- Node.js with Corepack enabled
+- Python 3.12 for helper scripts and local tooling
+- A desktop environment or virtual display when validating Electron runtime
+  startup
 
-Note: On Linux, `gi` (PyGObject) is provided by the OS. If you create a new venv, use:
-```bash
-python3.12 -m venv venv --system-site-packages
-```
-
-### Running the Application
-
-```bash
-# Normal mode
-./launcher
-
-# Developer mode (console visible)
-./launcher dev
-
-# Rebuild frontend
-./launcher build
-```
-
----
-
-## Code Standards
-
-### Formatting and Style
-
-We use **Black** and **isort** for automatic code formatting, and **Ruff** for linting.
-
-**Line Length:** 100 characters
-
-**Black Configuration:**
-- Automatically formats code to PEP 8 standards
-- Enforced via pre-commit hooks
-
-**isort Configuration:**
-- Profile: black-compatible
-- Sorts imports alphabetically within sections
-
-**Ruff:**
-- Replaces flake8 with faster, more granular control
-- Currently checks for undefined names (F821, F822, F823)
-- Run manually: `ruff check backend/`
-
-### Code Organization
-
-```
-backend/
-├── api/                    # Public API layer
-├── resources/              # Resource management (models, custom nodes)
-├── version_manager_components/  # Version management mixins
-├── *.py                    # Core functionality modules
-frontend/
-├── src/                    # React components and utilities
-tests/
-├── unit/                   # Fast, isolated unit tests
-├── integration/            # Integration tests with real I/O
-├── conftest.py             # Shared fixtures
-```
-
-**Key Principles:**
-- Separation of concerns (API layer vs business logic)
-- Mixin-based composition for complex managers
-- Type protocols for interface contracts
-
-### Logging
-
-**DO NOT use `print()` statements** in backend code. Use the centralized logging system instead.
-
-```python
-from backend.logging_config import get_logger
-
-logger = get_logger(__name__)
-
-# Use appropriate log levels
-logger.debug("Detailed diagnostic information")
-logger.info("General informational messages")
-logger.warning("Warning messages for recoverable issues")
-logger.error("Error messages for failures", exc_info=True)
-```
-
-**Exception:** User-facing output (installation progress, CLI output) can use `print()` with `# noqa: print` comment.
-
-**Pre-commit Hook:** Automatically checks for print statements and enforces logging usage.
-
-### Exception Handling
-
-**DO NOT use generic exception handlers.** Always catch specific exception types.
-**Only one exception type is allowed per `except` clause.** Split into multiple
-`except` blocks when needed.
-**Every `except` block must log** using `logger.*` or `logging.*` with the
-appropriate level. **Exception:** If the `except` block only re-raises
-(`raise` / `raise from`) and performs no other work, logging may be omitted
-to avoid double logging.
-
-```python
-# ❌ BAD - Generic exception handling
-try:
-    do_something()
-except Exception as e:
-    logger.error(f"Error: {e}")
-
-# ✅ GOOD - Specific exception handling
-try:
-    do_something()
-except FileNotFoundError as e:
-    raise MetadataError(f"Metadata file not found: {e}") from e
-except json.JSONDecodeError as e:
-    raise MetadataError(f"Invalid metadata format: {e}") from e
-```
-
-**Custom Exceptions:**
-All custom exceptions are defined in `backend/exceptions.py`:
-- `ComfyUILauncherError` - Base exception
-- `InstallationError` - Installation failures
-- `DependencyError` - Dependency issues
-- `NetworkError` - Network operations
-- `ValidationError` - Input validation failures
-- `MetadataError` - Metadata corruption
-
-**Pre-commit Hook:** Automatically detects bare `except:`, `except Exception:`,
-multi-exception tuples, and missing logging in `except` blocks (raise-only
-handlers are allowed to omit logging).
-
-**Exception:** Use `# noqa: generic-exception` for cases where generic catching
-is truly necessary. Use `# noqa: multi-exception` or `# noqa: no-except-logging`
-only when there is no reasonable alternative.
-
-### Input Validation
-
-**All user inputs and external data must be validated** using the validators in `backend/validators.py`.
-
-```python
-from backend.validators import (
-    validate_version_tag,
-    validate_url,
-    sanitize_path,
-    validate_package_name
-)
-
-# Validate version tags
-if not validate_version_tag(tag):
-    raise ValidationError(f"Invalid version tag: {tag}")
-
-# Validate and sanitize file paths
-safe_path = sanitize_path(user_path, base_directory)
-
-# Validate URLs
-if not validate_url(download_url):
-    raise ValidationError(f"Invalid URL: {download_url}")
-```
-
-**Security Considerations:**
-- Version tags: Alphanumeric + dash/dot only (`^[a-zA-Z0-9.-]+$`)
-- File paths: No `..` traversal, must be within base directory
-- URLs: `https://` schemes only
-- Package names: Standard Python package format
-
-### Configuration
-
-**All configuration values must be in `backend/config.py`.** Do not hardcode values.
-
-```python
-from backend.config import (
-    UIConfig,
-    AppConfig,
-    NetworkConfig,
-    PathsConfig
-)
-
-# Use configuration values
-github_api_base = AppConfig.GITHUB_API_BASE
-max_retries = NetworkConfig.MAX_RETRIES
-```
-
----
-
-## Testing Requirements
-
-### Philosophy: "Test What You Touch"
-
-We follow an **incremental testing approach**:
-- New files: Must have ≥80% test coverage
-- Modified files: Must maintain or improve coverage
-- Untouched files: No coverage requirement (yet)
-
-### Running Tests
+Initial setup from the repo root:
 
 ```bash
-# Run all tests
-pytest
-
-# Run unit tests only
-pytest tests/unit/
-
-# Run with coverage report
-pytest --cov=backend --cov-report=html
-
-# Run specific test file
-pytest tests/unit/test_metadata_manager.py
-
-# Run tests in parallel (faster)
-pytest -n auto
+corepack enable
+corepack pnpm install --frozen-lockfile
 ```
 
-### Writing Tests
-
-**Test Structure:**
-```python
-import pytest
-from backend.metadata_manager import MetadataManager
-
-def test_metadata_creation(metadata_manager, temp_metadata_dir):
-    """Test that metadata is created correctly."""
-    # Arrange
-    version_data = {"tag": "v1.0.0", "path": "/some/path"}
-
-    # Act
-    metadata_manager.save_version_metadata("v1.0.0", version_data)
-
-    # Assert
-    loaded = metadata_manager.get_version_metadata("v1.0.0")
-    assert loaded == version_data
-```
-
-**Test Markers:**
-```python
-@pytest.mark.unit         # Fast, isolated unit tests
-@pytest.mark.integration  # Integration tests with real I/O
-@pytest.mark.slow         # Tests taking >1 second
-@pytest.mark.network      # Tests requiring network (should mock)
-```
-
-**Fixtures:**
-Shared fixtures are in `tests/conftest.py`:
-- `temp_launcher_root` - Temporary test directory
-- `temp_metadata_dir` - Temporary metadata storage
-- `metadata_manager` - MetadataManager instance
-- `sample_releases` - Mock GitHub release data
-
-**Best Practices:**
-- Use real file I/O in temp directories (don't mock filesystem)
-- Mock external APIs (GitHub, PyPI, subprocess calls)
-- Test edge cases and error conditions
-- Keep tests fast (<1 second each for unit tests)
-
-### Coverage Enforcement
-
-**Pre-commit Hook:** Automatically runs full test suite before each commit.
-
-**Coverage Goals:**
-- Overall: 80% (not enforced yet, incremental approach)
-- New files: 80% required (enforced via pre-commit)
-- Critical modules: 90%+ (metadata_manager, version_manager, validators)
-
-**Coverage Report:**
-```bash
-# View HTML coverage report
-pytest --cov=backend --cov-report=html
-open htmlcov/index.html
-```
-
----
-
-## Type Hints and Type Safety
-
-### Requirements
-
-**All new code must have complete type hints.**
-
-```python
-from typing import Optional, Dict, List, Any
-from pathlib import Path
-
-def install_version(
-    self,
-    tag: str,
-    progress_callback: Optional[Callable[[str, float], None]] = None
-) -> bool:
-    """Install a specific ComfyUI version."""
-    # Implementation
-```
-
-### mypy Configuration
-
-We use **mypy** for static type checking. Configuration is in `mypy.ini`.
-
-**Running mypy:**
-```bash
-# Check all backend code
-mypy backend/
-
-# Check specific module
-mypy backend/api/core.py
-```
-
-**Pre-commit Hook:** mypy runs automatically on every commit (will fail if type errors exist).
-
-**Type Checking Standards:**
-- Use `from __future__ import annotations` for deferred evaluation
-- Use `Optional[T]` for nullable types
-- Use `Any` sparingly (only when truly dynamic)
-- Define protocols for duck-typed interfaces (see `version_manager_components/protocols.py`)
-
-### Common Patterns
-
-```python
-from __future__ import annotations
-from typing import Optional, Callable, Protocol
-
-# Type aliases for clarity
-ProgressCallback = Callable[[str, float], None]
-MetadataDict = Dict[str, Any]
-
-# Protocol for duck typing
-class HasMetadata(Protocol):
-    def get_metadata(self) -> MetadataDict: ...
-    def set_metadata(self, data: MetadataDict) -> None: ...
-```
-
----
-
-## Pre-commit Hooks
-
-Pre-commit hooks **automatically enforce code quality** before each commit.
-
-### Installed Hooks
-
-1. **Black** - Auto-formats Python code
-2. **isort** - Sorts imports
-3. **check-print-statements** - Ensures logging system usage
-4. **check-generic-exceptions** - Prevents bare exception handlers
-5. **pytest** - Runs full test suite
-6. **ruff-undefined** - Checks for undefined variables
-7. **mypy** - Type checking
-8. **General hooks** - trailing whitespace, EOF, YAML/JSON validation, large file detection, private key detection
-
-### How They Work
+For desktop-app work, prefer the launcher wrappers instead of ad hoc command
+sequences:
 
 ```bash
-# Hooks run automatically on git commit
-git commit -m "Add feature"
-
-# If hooks fail, commit is blocked
-# Fix issues, then commit again
-
-# Run hooks manually on all files
-pre-commit run --all-files
-
-# Skip hooks (NOT RECOMMENDED - only for emergencies)
-git commit --no-verify
+# Linux / macOS
+./launcher.sh --install
+./launcher.sh --build-release
+./launcher.sh --run
 ```
 
-### Hook Behavior
-
-**Auto-fixing hooks (Black, isort):**
-- Automatically modify files
-- You must `git add` the changes and commit again
-
-**Validation hooks (pytest, mypy, ruff):**
-- Block commit if checks fail
-- Fix issues manually, then commit again
-
----
-
-## Architecture Patterns
-
-### API Layer
-
-**Public API:** `backend/api/core.py` (`ComfyUISetupAPI` class)
-- All JavaScript bindings go through this class
-- Coordinates between subsystems (version manager, resource manager, etc.)
-- Rate limiting for destructive actions
-- Input validation on all entry points
-
-### Manager Classes
-
-**Responsibilities:**
-- `MetadataManager` - JSON metadata persistence
-- `VersionManager` - Version installation/launching/management
-- `ResourceManager` - Model and custom node symlinks
-- `GitHubReleasesFetcher` - GitHub API interactions
-
-**Pattern: Mixin Composition**
-
-The `VersionManager` uses mixins for modularity:
-```python
-# backend/version_manager_components/
-installer.py      # Installation orchestration
-launcher.py       # Process launching, health checks
-dependencies.py   # Venv and dependency management
-state.py          # Active/default version state
-constraints.py    # Constraints cache and PyPI queries
-protocols.py      # Type protocols for contracts
+```powershell
+# Windows PowerShell
+./launcher.ps1 --install
+./launcher.ps1 --build-release
+./launcher.ps1 --run
 ```
 
-### File Operations
+If PowerShell blocks local scripts, run:
 
-**Atomic Writes:** All JSON writes use `backend/file_utils.atomic_write_json()`
-
-```python
-from backend.file_utils import atomic_write_json
-
-# Atomic write with automatic locking
-atomic_write_json(path, data, lock=self._lock)
+```powershell
+powershell -ExecutionPolicy Bypass -File .\launcher.ps1 --help
 ```
 
-**Benefits:**
-- No corruption from interrupted writes
-- Thread-safe with file locking
-- Automatic backup of previous version
-- JSON validation before commit
+## Repository Map
 
-### Network Operations
+| Path | Responsibility |
+| ---- | -------------- |
+| `rust/crates/pumas-core` | Core library logic, indexing, reconciliation, IPC-facing API surface |
+| `rust/crates/pumas-rpc` | Desktop sidecar / RPC backend |
+| `rust/crates/pumas-uniffi` | UniFFI bindings surface |
+| `rust/crates/pumas-rustler` | Rustler bindings for Elixir/Erlang |
+| `frontend/` | React application |
+| `electron/` | Desktop shell, packaging, runtime integration |
+| `scripts/launcher/` | Shared cross-platform launcher implementation |
+| `docs/` | Architecture, plans, testing, and repo-specific guidance |
 
-**Retry Logic:** Use `backend/retry_utils.py` for network operations
+When choosing where a change belongs:
 
-```python
-from backend.retry_utils import retry_operation
+- Put reusable library behavior in Rust crates, not in Electron.
+- Put desktop runtime glue in `electron/` or `scripts/launcher/`, not in the
+  frontend.
+- Put UI behavior in `frontend/`, not in ad hoc Electron renderer glue.
+- Keep platform-specific behavior behind platform modules or factories.
 
-success = retry_operation(
-    operation=lambda: download_file(url, dest),
-    max_retries=3,
-    operation_name="download ComfyUI release"
-)
-```
+## Change Planning
 
-**Features:**
-- Exponential backoff with jitter (2s, 4s, 8s...)
-- Automatic logging of retry attempts
-- Configurable max delay and retries
+Write or update a plan when the change is:
 
----
+- cross-module
+- cross-platform
+- cross-layer
+- release-affecting
+- likely to take more than one commit
 
-## Security Practices
+Plans belong under `docs/plans/` and should follow the shared plan standards.
 
-### Input Validation
+Small single-file fixes usually do not need a formal plan, but they still need
+clear verification and an intentional commit.
 
-**Always validate before use:**
-- Version tags, URLs, file paths, package names
-- See `backend/validators.py` for validation functions
+## Code Expectations
 
-### Dependency Scanning
+### Architecture and Boundaries
 
-**Run security audits regularly:**
+- Follow the existing ownership boundaries in the repo.
+- Do not hide business logic inside build scripts, shell wrappers, or UI event
+  handlers.
+- Keep desktop launcher behavior in the launcher layer.
+- Keep machine-consumed contracts stable, or update producers and consumers in
+  the same slice.
+
+### Cross-Platform Discipline
+
+- Use platform APIs and path helpers rather than string concatenation.
+- Support spaces in paths end to end.
+- When code resolves filesystem identity, compare canonical paths rather than
+  raw display strings.
+- Keep platform-specific behavior isolated rather than scattering checks across
+  business logic.
+
+### Error Handling and Logging
+
+- Prefer typed or domain-specific errors over generic catch-all handling.
+- Preserve context when re-throwing or mapping errors.
+- Log useful operational context at process and boundary layers.
+- Do not swallow failures silently.
+
+For frontend code, keep error handling explicit and actionable. If a boundary
+translates one error type into another, retain the original cause where
+possible.
+
+### Test Safety
+
+- Tests that mutate global or durable state must isolate that state per test or
+  deliberately serialize access.
+- Avoid shared temp roots, shared sqlite files, and shared environment-variable
+  mutation without guards.
+- Add acceptance or integration verification when a change crosses layers.
+
+## Validation Expectations
+
+Run the smallest set of checks that proves your slice is correct. Use the table
+below as the default baseline.
+
+| Change Area | Minimum Verification |
+| ----------- | -------------------- |
+| Docs only | Read the rendered markdown and check links/commands you changed |
+| Rust library logic | `cargo test -p pumas-library --manifest-path rust/Cargo.toml <targeted tests>` |
+| Rust workspace or release-facing Rust change | `cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler` |
+| Frontend UI or hooks | `npm run -w frontend test:run` and `npm run -w frontend check:types` |
+| Electron shell | `npm run -w electron validate` and `npm run -w electron build` |
+| Launcher changes | `npm run test:launcher` |
+| Desktop packaging / runtime startup | `./launcher.sh --build-release` and `./launcher.sh --release-smoke` on a machine that can launch Electron |
+
+Common commands:
+
 ```bash
-# Python dependencies
-pip-audit
+# Rust
+cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler
+cargo clippy --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler -- -D warnings
 
-# Node.js dependencies
-cd frontend && npm audit
+# Frontend
+npm run -w frontend test:run
+npm run -w frontend check:types
+npm run -w frontend build
+
+# Electron
+npm run -w electron validate
+npm run -w electron build
+
+# Launcher
+npm run test:launcher
+./launcher.sh --build-release
+./launcher.sh --release-smoke
 ```
 
-**Pre-release:** Always run security scans before releases.
+If your change affects `pumas_rustler`, validate it on a machine with
+Erlang/OTP installed.
 
-**Vulnerability Handling:**
-- Fix immediately if high/critical severity
-- Update dependency pins in `requirements-lock.txt` and `frontend/package-lock.json`
-- Regenerate SBOM after fixes
+## Documentation Expectations
 
-### Secrets
+Update documentation in the same change when you alter:
 
-**Never commit:**
-- API keys, tokens, credentials
-- `.env` files, config with secrets
-- Log files with sensitive data
+- user-facing setup or usage flows
+- launcher flags or canonical commands
+- release steps or artifact expectations
+- architecture boundaries
+- machine-consumed contracts or generated artifacts
 
-**Pre-commit hook** detects private keys automatically.
+Typical documentation updates live in:
 
----
+- `README.md`
+- `CONTRIBUTING.md`
+- `RELEASING.md`
+- `docs/`
+- directory `README.md` files required by the documentation standards
 
-## Commit Guidelines
+Do not leave new behavior discoverable only from code or commit history.
 
-### Commit Messages
+## Commits
 
-**Format:**
-```
-<type>: <short summary>
+Use conventional commits and keep each commit to one logical slice.
 
-<optional detailed description>
-```
+Preferred shape:
 
-**Types:**
-- `feat`: New feature
-- `fix`: Bug fix
-- `refactor`: Code restructuring (no behavior change)
-- `test`: Add/update tests
-- `docs`: Documentation changes
-- `chore`: Maintenance (deps, config)
+```text
+type(scope): short description
 
-**Examples:**
-```
-feat: Add exponential backoff to GitHub API calls
-
-fix: Prevent metadata corruption with atomic writes
-
-test: Add unit tests for MetadataManager (94% coverage)
+Why the change was needed.
+What approach was taken.
+How it was verified.
 ```
 
-### Pre-commit Checklist
+Examples:
 
-Before committing, ensure:
-- [ ] Code follows Black formatting (auto-fixed)
-- [ ] Imports sorted with isort (auto-fixed)
-- [ ] No print() statements in backend (except with `# noqa: print`)
-- [ ] Specific exception handling (no bare `except:`)
-- [ ] All tests pass (`pytest`)
-- [ ] Type hints added and mypy passes
-- [ ] New code has ≥80% test coverage
-- [ ] Input validation on all external data
+- `fix(library): stabilize canonical root comparisons in tests`
+- `docs(contributing): rewrite contributor workflow for current repo`
+- `ci(workflow): bootstrap pnpm in every frontend job`
 
-**Pre-commit hooks enforce most of these automatically.**
+Commit expectations for this repo:
 
----
+- Make atomic commits.
+- Include a meaningful body for non-trivial changes.
+- Do not mix unrelated cleanup into the same commit.
+- If code and docs must change together to stay accurate, commit them together.
 
-## Development Workflow
+## Pull Requests
 
-### Adding a New Feature
+A strong pull request makes review cheap. Include:
 
-1. **Create a branch** (if using Git flow)
-2. **Write tests first** (TDD approach recommended)
-3. **Implement feature** with type hints
-4. **Validate coverage** ≥80% for new code
-5. **Run pre-commit** hooks (automatic on commit)
-6. **Update documentation** if needed
-7. **Commit** with descriptive message
+- the problem being solved
+- the chosen approach
+- the verification you ran
+- any cross-platform or release risk
+- screenshots when UI behavior changed
 
-### Modifying Existing Code
+If a change is incomplete, say so explicitly instead of implying release
+readiness.
 
-1. **Read existing tests** to understand behavior
-2. **Add tests** for new behavior
-3. **Modify code** with type hints
-4. **Ensure tests pass** (including existing tests)
-5. **Verify coverage** maintained or improved
-6. **Commit** changes
+## When You Are Unsure
 
-### Refactoring
+Default to these decisions:
 
-1. **Ensure existing tests pass** first
-2. **Keep tests passing** throughout refactor
-3. **Add new tests** if coverage drops
-4. **Update type hints** if signatures change
-5. **Update documentation** if architecture changes
-
----
-
-## Additional Resources
-
-- [docs/TESTING.md](docs/TESTING.md) - Comprehensive testing guide
-- [docs/SECURITY.md](docs/SECURITY.md) - Security practices and vulnerability scanning
-- [README.md](README.md) - Project overview and installation
-- [docs/README.md](docs/README.md) - Documentation index
-
----
-
-## Getting Help
-
-For questions or clarification on these standards, please:
-1. Check existing documentation
-2. Review similar code patterns in the codebase
-3. Open an issue for discussion
-
----
-
-## Summary: Quick Reference
-
-**Before writing code:**
-- Set up pre-commit hooks (`pre-commit install`)
-- Understand the architecture (see above)
-
-**While writing code:**
-- Use logging, not print()
-- Add type hints to all functions
-- Validate all external inputs
-- Use specific exception handling
-
-**Before committing:**
-- Write tests (≥80% coverage for new code)
-- Run `pytest` and `mypy`
-- Ensure pre-commit hooks pass
-- Write clear commit message
-
-**The pre-commit hooks will catch most issues automatically!**
+- prefer smaller, reviewable slices
+- prefer explicit contracts over implied behavior
+- prefer canonical launcher workflows over scattered raw commands
+- prefer updating docs now instead of leaving drift for later
+- prefer one well-verified fix over several speculative changes

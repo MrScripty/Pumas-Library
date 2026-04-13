@@ -178,7 +178,8 @@ try {
 - **Type safety**: Custom errors carry relevant data
 - **Logging required**: All catch blocks must log
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for error handling standards.
+See [../CONTRIBUTING.md](../CONTRIBUTING.md) for repository-wide contribution,
+error-handling, and validation expectations.
 
 ### 5. Theme System
 
@@ -523,7 +524,7 @@ Pre-commit hook enforces file size limits:
 
 ## Related Documentation
 
-- [CONTRIBUTING.md](CONTRIBUTING.md) - Frontend coding standards
+- [../CONTRIBUTING.md](../CONTRIBUTING.md) - Contribution workflow and validation expectations
 - [THEME_SYSTEM.md](THEME_SYSTEM.md) - Theme system documentation
 - [../docs/CODING_STANDARDS.md](../docs/CODING_STANDARDS.md) - General code standards
 - [../docs/REACT_ARIA_ENFORCEMENT.md](../docs/REACT_ARIA_ENFORCEMENT.md) - React Aria usage

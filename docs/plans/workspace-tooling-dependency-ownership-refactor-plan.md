@@ -2,7 +2,7 @@
 
 ## Objective
 
-Refactor the frontend test-tooling boundary so workspace-owned commands resolve
+Refactor the Node workspace tooling boundary so workspace-owned commands resolve
 their runtime and test-environment dependencies from the owning `frontend`
 workspace rather than from incidental root-level availability.
 
@@ -24,10 +24,14 @@ preserve the current developer-facing command contract, and comply with:
 
 - Refactor the frontend workspace test-tooling setup so `vitest` and `jsdom`
   are owned and resolved from the `frontend` workspace boundary.
+- Migrate the repo's Node workspace installation path from npm lockfile-driven
+  installs to a pnpm workspace layout because standard npm install strategies do
+  not satisfy the required ownership boundary cleanly.
 - Remove the root-level `jsdom` devDependency from the workspace root once the
   frontend test command no longer depends on it.
-- Update any root/workspace scripts, config, or package-manager settings needed
-  to make package ownership and execution boundaries align.
+- Update root/workspace scripts, lockfiles, CI, launcher tooling, and
+  package-manager settings needed to make package ownership and execution
+  boundaries align.
 - Add verification that package-local commands do not rely on unrelated
   root-level devDependencies.
 - Update plan traceability artifacts and any touched documentation that
@@ -35,8 +39,6 @@ preserve the current developer-facing command contract, and comply with:
 
 ### Out of Scope
 
-- Migrating the repo away from npm workspaces unless a re-plan trigger proves
-  npm cannot satisfy the required ownership boundary correctly.
 - Broad dependency upgrades unrelated to test-tooling ownership.
 - Frontend runtime feature changes unrelated to test/build tooling.
 - Electron, Rust, or launcher behavior changes beyond what is required to keep
@@ -58,9 +60,15 @@ frontend test boundary:
 3. That makes a workspace-local command succeed because of unrelated root-level
    dependency availability, which is exactly the cross-boundary coupling the new
    standards now forbid.
+4. Testing the standard npm install strategies showed that `nested` and
+   `shallow` still collapse resolution back to root-owned paths, while `linked`
+   creates the needed workspace-local boundary but is marked experimental by
+   npm and therefore does not meet the repo's long-term stability bar.
 
-This is stable enough for short-term release preparation, but it is not
-standards-compliant and is not the desired long-term architecture.
+This means the original npm-scoped refactor assumption is invalid. The
+standards-compliant long-term path is now a broader Node workspace tooling
+migration that preserves the current command facade while replacing the install
+and lockfile model underneath.
 
 ### Constraints
 
@@ -74,6 +82,8 @@ standards-compliant and is not the desired long-term architecture.
 - The solution must keep installs deterministic under committed lockfiles.
 - The solution must not rely on accidental hoisting or incidental root
   dependency presence for correctness.
+- The final package-manager path must not rely on experimental install-layout
+  features for correctness.
 - Cross-platform desktop support must remain intact for Linux and Windows, with
   macOS staying best-effort.
 - Any package-manager configuration changes must be explicit, committed, and
@@ -81,12 +91,11 @@ standards-compliant and is not the desired long-term architecture.
 
 ### Assumptions
 
-- The repo can likely remain on npm if workspace-local test-tool execution is
-  made explicit and if package-manager behavior is configured to preserve the
-  ownership boundary in practice.
-- If npm workspace install/layout behavior still prevents ownership-correct
-  execution after explicit refactoring, the repo may need a broader Node
-  workspace tooling change rather than a small script adjustment.
+- A pnpm workspace can preserve the current frontend command facade while
+  producing the required workspace-local tool boundary.
+- The repo can use `corepack` plus a pinned `packageManager` field to keep the
+  package-manager runtime deterministic across local development, launcher
+  tooling, and CI.
 - The frontend workspace should remain the sole owner of `vitest` and `jsdom`
   unless another workspace begins using them directly.
 - Existing frontend, Electron, launcher, and release checks are sufficient to
@@ -96,9 +105,14 @@ standards-compliant and is not the desired long-term architecture.
 
 - Root `package.json`
 - `package-lock.json`
+- `electron/package-lock.json`
+- `pnpm-lock.yaml`
+- `pnpm-workspace.yaml`
 - `frontend/package.json`
 - `frontend/vitest.config.ts`
-- Any npm workspace config files added or changed by the refactor
+- Launcher scripts and platform services under `scripts/launcher/`
+- GitHub Actions workflow config under `.github/workflows/`
+- Rust launcher updater logic under `rust/crates/pumas-core/src/launcher/`
 - Existing launcher scripts and CI/release verification paths
 - `docs/plans/README.md`
 - Standards documents listed in Objective
@@ -108,6 +122,7 @@ standards-compliant and is not the desired long-term architecture.
 - Workspace dependency ownership contract between the root manifest and
   `frontend/package.json`
 - Frontend test command contract: `npm run -w frontend test:run`
+- Root install/update contract for the launcher, CI, and local development
 - Any package-manager or script resolution contract introduced to ensure
   workspace-local tooling execution
 - CI/local verification contract that proves package-local commands do not rely
@@ -118,7 +133,10 @@ standards-compliant and is not the desired long-term architecture.
 - Root `package.json`
 - `frontend/package.json`
 - `package-lock.json`
-- Any new or updated npm config files or workspace tool wrappers
+- `electron/package-lock.json`
+- `pnpm-lock.yaml`
+- `pnpm-workspace.yaml`
+- Any new or updated package-manager config files or workspace tool wrappers
 - CI or validation scripts if required by the final ownership check
 - Plan index content under `docs/plans/README.md`
 
@@ -142,11 +160,11 @@ standards-compliant and is not the desired long-term architecture.
 
 | Risk | Impact | Mitigation |
 | ---- | ------ | ---------- |
-| npm workspace layout still resolves frontend tooling through root-owned paths after script cleanup | High | Verify the real runtime resolution path early, choose an explicit workspace-local execution model, and re-plan immediately if npm cannot satisfy the boundary correctly. |
+| The package-manager migration changes install semantics or lockfile behavior in unexpected ways | High | Keep the migration explicit, commit the new lockfile and workspace metadata together, and verify install/build/test/release paths before each milestone closes. |
 | Removing the root `jsdom` pin breaks frontend tests, CI, or release checks unexpectedly | High | Make root-pin removal a milestone-closing change only after ownership-correct frontend execution is verified locally. |
-| Package-manager configuration changes alter install shape or lockfile behavior in CI | High | Keep config changes explicit, committed, and verified with `npm ci` plus the full frontend/release check stack. |
+| pnpm's build-script approval model blocks Electron or esbuild installation in CI or local bootstrap | High | Encode the trusted build-script policy explicitly and verify release-oriented installs after the migration. |
 | Root/workspace script changes silently drift from launcher or CI usage | Medium | Preserve existing command names and rerun launcher/release verification after the refactor. |
-| The repo needs a broader Node workspace strategy change than originally scoped | Medium | Use the re-plan triggers below instead of accepting a standards-violating partial fix. |
+| npm-facing user commands stop working after the migration | Medium | Preserve the existing command facade deliberately and verify it explicitly alongside the new install path. |
 
 ## Definition of Done
 
@@ -155,7 +173,8 @@ standards-compliant and is not the desired long-term architecture.
   environment without relying on unrelated root-level devDependencies.
 - `npm run -w frontend test:run` remains the canonical frontend test command and
   passes without the root `jsdom` pin.
-- The lockfile and any package-manager config remain deterministic and committed.
+- The repo uses a deterministic, committed pnpm workspace lock/config path
+  instead of the previous npm lockfile path.
 - Frontend, Electron, launcher, and release verification all pass after the
   refactor.
 - The final state complies with the dependency-ownership rules now added to the
@@ -165,16 +184,18 @@ standards-compliant and is not the desired long-term architecture.
 
 ### Milestone 1: Freeze the Ownership Contract
 
-**Goal:** Record the exact ownership boundary, execution contract, and refactor
-constraints before changing tooling behavior.
+**Goal:** Record the exact ownership boundary, execution contract, and broadened
+package-manager refactor constraints before changing tooling behavior.
 
 **Tasks:**
 - [ ] Record the current root/workspace dependency ownership and command surface
   that must be preserved.
 - [ ] Identify the exact resolution path that causes frontend test execution to
   depend on root-level `jsdom`.
-- [ ] Decide the target ownership model for frontend-local test execution under
-  the current npm workspace setup.
+- [ ] Record the evidence that standard npm install strategies do not satisfy
+  the ownership boundary cleanly.
+- [ ] Decide the target pnpm-based ownership model that preserves the current
+  command facade.
 - [ ] Confirm which config/script files may change without violating launcher or
   cross-platform standards.
 - [ ] Record the acceptance rule that the root `jsdom` pin must be removed in
@@ -189,22 +210,22 @@ constraints before changing tooling behavior.
 
 ### Milestone 2: Refactor Frontend Test Tool Ownership
 
-**Goal:** Make frontend test tooling execute correctly from the `frontend`
-boundary without root-owned `jsdom`.
+**Goal:** Establish the pnpm workspace boundary and remove the root `jsdom` pin
+without breaking the current frontend command facade.
 
 **Tasks:**
-- [ ] Refactor frontend test runner invocation and/or package-manager config so
-  workspace-local execution no longer depends on incidental root resolution.
+- [ ] Add the pnpm workspace metadata and pinned package-manager configuration.
 - [ ] Remove the root `jsdom` devDependency once the frontend workspace can
-  execute independently.
+  execute independently under pnpm.
 - [ ] Keep `vitest` and `jsdom` ownership explicit in `frontend/package.json`
   unless a broader shared-owner rule becomes genuinely true.
-- [ ] Update lockfile and any supporting config deterministically.
-- [ ] Add or update any helper scripts only if they keep the current command
-  surface intact and make ownership clearer.
+- [ ] Replace the npm lockfiles with the committed pnpm workspace lock/config
+  artifacts.
+- [ ] Preserve the existing `npm run -w frontend ...` facade while proving the
+  actual install path is now pnpm-owned.
 
 **Verification:**
-- `npm ci`
+- `corepack pnpm install --frozen-lockfile`
 - `npm run -w frontend check:types`
 - `npm run -w frontend test:run`
 - One ownership-specific check that proves the frontend test path no longer
@@ -214,10 +235,14 @@ boundary without root-owned `jsdom`.
 
 ### Milestone 3: Verification and Tooling Closure
 
-**Goal:** Prove the refactor works through the repo’s existing release-oriented
-tooling paths and close documentation/traceability gaps.
+**Goal:** Align launcher/CI/update tooling with pnpm and prove the refactor
+works through the repo’s existing release-oriented paths.
 
 **Tasks:**
+- [ ] Refactor launcher dependency-install paths and package-manager abstractions
+  to use the pinned pnpm workspace install flow.
+- [ ] Refactor any updater/install code paths that still assume `npm install`.
+- [ ] Update CI to cache and install with pnpm instead of npm lockfiles.
 - [ ] Re-run the launcher- and release-oriented checks after the ownership
   refactor.
 - [ ] Update any touched README or tooling documentation required by
@@ -240,6 +265,13 @@ tooling paths and close documentation/traceability gaps.
 
 Update during implementation:
 - 2026-04-12: Plan created before the workspace-tooling ownership refactor.
+- 2026-04-12: Re-plan triggered after testing npm install strategies.
+- 2026-04-12: `nested` and `shallow` still resolved frontend tooling through
+  root-owned paths; `linked` created the needed boundary but npm marked it
+  experimental.
+- 2026-04-12: A pnpm workspace install preserved `npm run -w frontend test:run`
+  while removing the root `jsdom` declaration, so the implementation scope was
+  broadened to a pnpm workspace migration.
 
 ## Commit Cadence Notes
 
@@ -259,26 +291,24 @@ Update during implementation:
 
 ## Re-Plan Triggers
 
-- npm cannot be configured to satisfy ownership-correct frontend test execution
-  while preserving the current command facade.
-- Removing the root `jsdom` pin requires a broader package-manager migration
-  than this plan assumes.
-- A package-manager config change materially alters cross-platform install or CI
-  behavior.
+- The pnpm migration breaks the preserved `npm run -w frontend ...` facade.
+- A pnpm workspace install cannot be made deterministic across local, launcher,
+  and CI paths.
+- The trusted build-script policy for pnpm cannot be expressed non-interactively
+  and committed safely.
 - The refactor requires changing launcher or release contracts beyond the
   current preserved facade.
 
 ## Recommendations
 
-- Prefer one explicit workspace-local execution model over relying on npm
-  hoisting behavior. This is better for maintainability because it makes
-  ownership obvious and auditable.
+- Prefer a real workspace package-manager boundary over script-level shims.
+  This is better for maintainability because ownership is enforced by the
+  installation model rather than by wrapper logic alone.
 - Prefer preserving the current command names while changing the implementation
   underneath. This keeps developer ergonomics stable without compromising the
   new standards.
-- If npm cannot satisfy the required ownership boundary cleanly, prefer
-  re-planning to a fuller Node workspace tooling change over accepting a
-  standards-violating partial fix.
+- Prefer a committed, pinned `corepack` + pnpm path over experimental npm
+  install layouts when long-term stability is the priority.
 
 ## Completion Summary
 

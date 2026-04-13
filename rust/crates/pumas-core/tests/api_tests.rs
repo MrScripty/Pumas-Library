@@ -9,8 +9,44 @@
 
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use tempfile::TempDir;
 use walkdir::WalkDir;
+
+static REGISTRY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+struct RegistryTestGuard {
+    _lock: std::sync::MutexGuard<'static, ()>,
+}
+
+impl RegistryTestGuard {
+    fn new(root: &std::path::Path) -> Self {
+        let lock = REGISTRY_TEST_LOCK
+            .get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("registry test lock poisoned");
+
+        let registry_path = root.join("registry-test").join("registry.db");
+
+        // SAFETY: Integration tests in this binary serialize registry override
+        // access with a process-wide mutex, so no concurrent environment
+        // mutation occurs while the override is set.
+        unsafe {
+            std::env::set_var("PUMAS_REGISTRY_DB_PATH", &registry_path);
+        }
+
+        Self { _lock: lock }
+    }
+}
+
+impl Drop for RegistryTestGuard {
+    fn drop(&mut self) {
+        // SAFETY: Guarded by the same process-wide mutex as set_var above.
+        unsafe {
+            std::env::remove_var("PUMAS_REGISTRY_DB_PATH");
+        }
+    }
+}
 
 /// Create a test environment with proper directory structure.
 fn create_test_env() -> TempDir {
@@ -31,6 +67,7 @@ fn create_test_env() -> TempDir {
 #[tokio::test]
 async fn test_api_creation_succeeds() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await;
     assert!(api.is_ok());
 }
@@ -38,6 +75,7 @@ async fn test_api_creation_succeeds() {
 #[tokio::test]
 async fn test_api_creation_with_auto_create_dirs() {
     let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     // Don't create directories manually - test auto_create_dirs
     let api = PumasApi::builder(temp_dir.path())
         .auto_create_dirs(true)
@@ -48,6 +86,8 @@ async fn test_api_creation_with_auto_create_dirs() {
 
 #[tokio::test]
 async fn test_api_creation_fails_for_nonexistent_path() {
+    let temp_dir = TempDir::new().expect("Failed to create temp dir");
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let result = PumasApi::builder("/nonexistent/path/that/does/not/exist")
         .build()
         .await;
@@ -57,6 +97,7 @@ async fn test_api_creation_fails_for_nonexistent_path() {
 #[tokio::test]
 async fn test_api_paths() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Test path methods
@@ -64,15 +105,17 @@ async fn test_api_paths() {
     assert!(api.launcher_data_dir().ends_with("launcher-data"));
     assert!(api.metadata_dir().ends_with("metadata"));
     assert!(api.cache_dir().ends_with("cache"));
-    assert!(api
-        .versions_dir(AppId::ComfyUI)
-        .ends_with("comfyui-versions"));
+    assert!(
+        api.versions_dir(AppId::ComfyUI)
+            .ends_with("comfyui-versions")
+    );
     assert!(api.versions_dir(AppId::Ollama).ends_with("ollama-versions"));
 }
 
 #[tokio::test]
 async fn test_get_status() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let status = api.get_status().await;
@@ -87,6 +130,7 @@ async fn test_get_status() {
 #[tokio::test]
 async fn test_get_disk_space() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let disk_space = api.get_disk_space().await;
@@ -103,6 +147,7 @@ async fn test_get_disk_space() {
 #[tokio::test]
 async fn test_get_system_resources() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     let resources = api.get_system_resources().await;
@@ -119,6 +164,7 @@ async fn test_get_system_resources() {
 #[tokio::test]
 async fn test_background_fetch_flag() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Initially should be false
@@ -132,6 +178,7 @@ async fn test_background_fetch_flag() {
 #[tokio::test]
 async fn test_process_methods() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // ComfyUI should not be running in test environment
@@ -146,6 +193,7 @@ async fn test_process_methods() {
 #[tokio::test]
 async fn test_open_path_with_invalid_path() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening a non-existent path should fail gracefully
@@ -158,6 +206,7 @@ async fn test_open_path_with_invalid_path() {
 #[tokio::test]
 async fn test_open_url_with_invalid_url() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening an invalid URL should fail gracefully
@@ -170,6 +219,7 @@ async fn test_open_url_with_invalid_url() {
 #[tokio::test]
 async fn test_open_directory_for_nonexistent_path() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening non-existent directory should fail
@@ -180,6 +230,7 @@ async fn test_open_directory_for_nonexistent_path() {
 #[tokio::test]
 async fn test_launch_version_for_nonexistent_version() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Create a non-existent version directory path
@@ -196,6 +247,7 @@ async fn test_launch_version_for_nonexistent_version() {
 #[tokio::test]
 async fn test_model_library_list_with_empty_library() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // With no models, list should return empty
@@ -207,6 +259,7 @@ async fn test_model_library_list_with_empty_library() {
 #[tokio::test]
 async fn test_model_search_with_empty_library() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Searching empty library should return empty results
@@ -220,6 +273,7 @@ async fn test_model_search_with_empty_library() {
 #[tokio::test]
 async fn test_api_creation_clean_startup_remains_idle() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path())
         .with_hf_client(false)
         .with_process_manager(false)
@@ -269,6 +323,7 @@ async fn test_api_creation_clean_startup_remains_idle() {
 #[tokio::test]
 async fn test_get_model_nonexistent() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Getting non-existent model should return None
@@ -280,6 +335,7 @@ async fn test_get_model_nonexistent() {
 #[tokio::test]
 async fn test_get_inference_settings_applies_qwen_diffusion_overrides() {
     let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
     let model_id = "diffusion/qwen/qwen-image-2512";
     let model_dir = temp_dir
         .path()

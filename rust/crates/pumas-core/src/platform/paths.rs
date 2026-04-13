@@ -213,6 +213,10 @@ pub fn pumas_config_dir() -> Result<PathBuf> {
 ///
 /// Returns `{pumas_config_dir}/registry.db`.
 pub fn registry_db_path() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("PUMAS_REGISTRY_DB_PATH") {
+        return Ok(PathBuf::from(path));
+    }
+
     #[cfg(test)]
     if let Some(path) = TEST_REGISTRY_DB_OVERRIDE
         .get_or_init(|| Mutex::new(None))
@@ -310,5 +314,25 @@ mod tests {
             "Registry path should end with registry.db: {:?}",
             path
         );
+    }
+
+    #[test]
+    fn test_registry_db_path_respects_env_override() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let override_path = temp_dir.path().join("custom-registry.db");
+
+        // SAFETY: Unit tests mutate this process-local environment variable
+        // within a single test scope and restore it before returning.
+        unsafe {
+            std::env::set_var("PUMAS_REGISTRY_DB_PATH", &override_path);
+        }
+
+        let resolved = registry_db_path().unwrap();
+        assert_eq!(resolved, override_path);
+
+        // SAFETY: Paired restoration for the scoped override above.
+        unsafe {
+            std::env::remove_var("PUMAS_REGISTRY_DB_PATH");
+        }
     }
 }

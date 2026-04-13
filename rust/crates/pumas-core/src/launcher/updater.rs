@@ -173,6 +173,35 @@ impl LauncherUpdater {
         env!("CARGO_PKG_VERSION").to_string()
     }
 
+    fn corepack_command(&self) -> &'static str {
+        if cfg!(windows) {
+            "corepack.cmd"
+        } else {
+            "corepack"
+        }
+    }
+
+    fn run_pnpm_command(&self, args: &[&str]) -> std::result::Result<(), String> {
+        match Command::new(self.corepack_command())
+            .args(pnpm_args(args))
+            .current_dir(&self.launcher_root)
+            .output()
+        {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => {
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let details = if stderr.is_empty() { stdout } else { stderr };
+                Err(if details.is_empty() {
+                    format!("command exited with status {}", output.status)
+                } else {
+                    details
+                })
+            }
+            Err(error) => Err(error.to_string()),
+        }
+    }
+
     /// Get the launcher version information.
     pub fn get_version_info(&self) -> serde_json::Value {
         let current_commit = self.get_current_commit().unwrap_or_default();
@@ -466,58 +495,58 @@ impl LauncherUpdater {
             // Don't fail on pip warnings
         }
 
-        // Step 3: Update frontend dependencies
-        let frontend_dir = self.launcher_root.join("frontend");
-        if frontend_dir.exists() {
-            info!("Running npm install");
-            let npm_result = Command::new("npm")
-                .args(["install"])
-                .current_dir(&frontend_dir)
-                .output();
-
-            if let Err(e) = npm_result {
-                warn!("npm install warning: {}", e);
+        // Step 3: Refresh workspace dependencies and rebuilt Node artifacts.
+        if self.launcher_root.join("frontend").exists() {
+            info!("Running pnpm install");
+            if let Err(error_message) = self.run_pnpm_command(&["install", "--frozen-lockfile"]) {
+                error!("pnpm install failed: {}", error_message);
+                self.rollback(&current_commit);
+                return UpdateApplyResult {
+                    success: false,
+                    message: None,
+                    new_commit: None,
+                    previous_commit: Some(current_commit.clone()),
+                    error: Some(format!(
+                        "Workspace install failed. Rolled back to {}.",
+                        current_commit
+                    )),
+                };
             }
 
-            // Step 4: Rebuild frontend
-            info!("Running npm build");
-            let build_result = Command::new("npm")
-                .args(["run", "build"])
-                .current_dir(&frontend_dir)
-                .output();
+            info!("Building frontend");
+            if let Err(error_message) =
+                self.run_pnpm_command(&["--filter", "./frontend", "run", "build"])
+            {
+                error!("Frontend build failed: {}", error_message);
+                self.rollback(&current_commit);
+                return UpdateApplyResult {
+                    success: false,
+                    message: None,
+                    new_commit: None,
+                    previous_commit: Some(current_commit.clone()),
+                    error: Some(format!(
+                        "Frontend build failed. Rolled back to {}.",
+                        current_commit
+                    )),
+                };
+            }
 
-            match build_result {
-                Ok(output) if !output.status.success() => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    error!("Frontend build failed: {}", stderr);
-                    // Rollback
-                    self.rollback(&current_commit);
-                    return UpdateApplyResult {
-                        success: false,
-                        message: None,
-                        new_commit: None,
-                        previous_commit: Some(current_commit.clone()),
-                        error: Some(format!(
-                            "Frontend build failed. Rolled back to {}.",
-                            current_commit
-                        )),
-                    };
-                }
-                Err(e) => {
-                    error!("Frontend build failed: {}", e);
-                    self.rollback(&current_commit);
-                    return UpdateApplyResult {
-                        success: false,
-                        message: None,
-                        new_commit: None,
-                        previous_commit: Some(current_commit.clone()),
-                        error: Some(format!(
-                            "Frontend build failed. Rolled back to {}.",
-                            current_commit
-                        )),
-                    };
-                }
-                Ok(_) => {}
+            info!("Building electron shell");
+            if let Err(error_message) =
+                self.run_pnpm_command(&["--filter", "./electron", "run", "build"])
+            {
+                error!("Electron build failed: {}", error_message);
+                self.rollback(&current_commit);
+                return UpdateApplyResult {
+                    success: false,
+                    message: None,
+                    new_commit: None,
+                    previous_commit: Some(current_commit.clone()),
+                    error: Some(format!(
+                        "Electron build failed. Rolled back to {}.",
+                        current_commit
+                    )),
+                };
             }
         }
 
@@ -604,6 +633,13 @@ fn normalize_version(version: &str) -> String {
     version.trim().trim_start_matches(['v', 'V']).to_string()
 }
 
+fn pnpm_args<'a>(args: &'a [&'a str]) -> Vec<&'a str> {
+    let mut full_args = Vec::with_capacity(args.len() + 1);
+    full_args.push("pnpm");
+    full_args.extend_from_slice(args);
+    full_args
+}
+
 fn select_download_url(release: &GitHubRelease) -> Option<String> {
     select_download_asset(&release.assets).map(|asset| asset.download_url.clone())
 }
@@ -683,6 +719,26 @@ mod tests {
             assert_eq!(selected.name, "Pumas Library-0.3.0.AppImage");
         } else {
             assert_eq!(selected.name, "pumas-library-electron_0.3.0_amd64.deb");
+        }
+    }
+
+    #[test]
+    fn test_pnpm_args_prefixes_corepack_subcommand() {
+        assert_eq!(
+            pnpm_args(&["install", "--frozen-lockfile"]),
+            vec!["pnpm", "install", "--frozen-lockfile"]
+        );
+    }
+
+    #[test]
+    fn test_corepack_command_matches_platform() {
+        let temp_dir = TempDir::new().unwrap();
+        let updater = LauncherUpdater::new(temp_dir.path());
+
+        if cfg!(windows) {
+            assert_eq!(updater.corepack_command(), "corepack.cmd");
+        } else {
+            assert_eq!(updater.corepack_command(), "corepack");
         }
     }
 }

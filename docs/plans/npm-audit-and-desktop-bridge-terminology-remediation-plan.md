@@ -29,8 +29,7 @@ The resulting implementation must comply with:
 - Keep the Electron desktop bridge contract stable while renaming PyWebView-era
   primary types, comments, and docs to current Electron/desktop bridge terms.
 - Preserve `window.electronAPI` as the canonical runtime facade.
-- Keep `window.pywebview.api` only as an explicitly deprecated compatibility
-  alias if runtime compatibility still requires it.
+- Remove legacy aliasing when no concrete runtime dependency remains.
 - Update repo documentation and plan traceability artifacts for the renamed
   bridge contract and dependency floor changes.
 - Verify the remediation through the existing frontend, Electron, launcher, and
@@ -70,8 +69,6 @@ outdated architecture story that makes current code harder to understand.
 - Platform-specific behavior must remain isolated at wrapper/preload or thin
   platform-module boundaries, not spread through application logic.
 - The canonical desktop renderer facade must remain `window.electronAPI`.
-- Any retained `window.pywebview.api` surface must be treated as a deprecated
-  compatibility alias, not as the primary contract.
 - Linux and Windows remain required desktop targets; macOS remains best-effort.
 - Paths with spaces and the shared launcher entry flow must continue to work.
 - No new polling loops or background update ownership changes should be
@@ -107,7 +104,6 @@ outdated architecture story that makes current code harder to understand.
 - Frontend bridge type surface currently centered on `PyWebViewAPI`
 - Renderer globals exposed by preload:
   - `window.electronAPI` as the canonical facade
-  - `window.pywebview.api` as the compatibility facade if still required
 - Header/update-check API typings used by the renderer
 - npm workspace manifest and lockfile resolution contract
 
@@ -124,8 +120,7 @@ outdated architecture story that makes current code harder to understand.
   ownership. Update checks remain explicit one-shot actions initiated by the
   current UI flow.
 - The bridge rename must not create two independently evolving renderer
-  contracts. One canonical type/facade remains authoritative; any legacy alias
-  must delegate to it and stay behaviorally identical.
+  contracts. One canonical type/facade remains authoritative.
 
 ### Risks
 
@@ -146,8 +141,6 @@ outdated architecture story that makes current code harder to understand.
 - The desktop bridge uses current Electron/desktop bridge terminology as the
   primary contract in code and docs.
 - `window.electronAPI` remains the canonical runtime facade.
-- Any retained `window.pywebview.api` compatibility path is clearly marked as
-  deprecated and remains behaviorally identical to the canonical bridge.
 - Frontend, Electron, launcher, and release verification checks pass after the
   remediation.
 - Implementation proceeds in atomic, standards-compliant commits after this
@@ -164,8 +157,8 @@ names so the implementation preserves architecture and compatibility.
 - [x] Record the direct dependency upgrade targets required by the current audit
   output.
 - [x] Record the public-facade preservation decision:
-  `window.electronAPI` stays canonical and any `pywebview` surface becomes a
-  deprecated compatibility alias only.
+  `window.electronAPI` stays canonical and legacy aliasing is retained only if
+  a concrete runtime dependency requires it.
 - [x] Identify the documentation and directory-traceability updates required by
   the touched frontend/Electron areas.
 - [x] Decide whether likely transitive fixes should come from direct version
@@ -218,8 +211,8 @@ while preserving runtime compatibility.
   bridge-first terminology.
 - [x] Update adapter, preload, comments, and error text to point at the
   canonical bridge contract.
-- [x] Retain a deprecated type alias and deprecated `window.pywebview.api`
-  compatibility exposure only where runtime compatibility still needs it.
+- [x] Remove the deprecated type alias and `window.pywebview.api` compatibility
+  exposure after confirming there are no remaining in-repo runtime callers.
 - [x] Update examples and tests so new code paths use the canonical bridge
   names.
 - [x] Add or update any directory `README.md` files required by
@@ -268,9 +261,11 @@ Update during implementation:
   slices begin.
 - 2026-04-12: Cleared workspace npm audit findings and refreshed the lockfile
   via `d017cfc7`.
-- 2026-04-12: Renamed the canonical renderer bridge to `DesktopBridgeAPI`,
-  preserved the deprecated compatibility alias, and updated touched module
-  READMEs via `04bccac7`.
+- 2026-04-12: Renamed the canonical renderer bridge to `DesktopBridgeAPI` and
+  updated touched module READMEs via `04bccac7`.
+- 2026-04-12: Removed the unused legacy `PyWebViewAPI` /
+  `window.pywebview.api` alias path after confirming there were no remaining
+  in-repo runtime callers via `9720af7`.
 - 2026-04-12: Updated repo-facing architecture and contributor docs to match
   the current Electron desktop bridge via `873a87ff`.
 - 2026-04-12: Re-ran the release-safety closure, including `npm audit`,
@@ -307,9 +302,8 @@ Update during implementation:
 
 ## Recommendations
 
-- Prefer a canonical name such as `DesktopBridgeAPI` with a deprecated
-  `type PyWebViewAPI = DesktopBridgeAPI` alias during the transition. This is
-  facade-first, append-only, and keeps the migration mechanically simple.
+- Prefer one canonical renderer bridge name and remove deprecated aliases once
+  runtime callers no longer depend on them.
 - Prefer direct dependency upgrades and lockfile refresh before using npm
   `overrides`. This keeps the workspace easier to audit and reduces long-term
   maintenance burden.
@@ -322,9 +316,9 @@ Update during implementation:
   footprint captured in this plan before implementation started.
 - Milestone 2: workspace dependency graph upgraded and lockfile refreshed until
   both `npm audit` variants reported zero vulnerabilities.
-- Milestone 3: canonical bridge naming moved to `DesktopBridgeAPI` while
-  preserving `PyWebViewAPI` and `window.pywebview.api` as deprecated
-  compatibility aliases.
+- Milestone 3: canonical bridge naming moved to `DesktopBridgeAPI` and the
+  unused legacy alias path was removed after confirming there were no remaining
+  in-repo runtime callers.
 - Milestone 4: repo-facing docs aligned to the current Electron desktop flow
   and the release build plus bounded smoke path completed successfully.
 
@@ -339,8 +333,6 @@ Update during implementation:
 
 ### Follow-Ups
 
-- Remove the deprecated `PyWebViewAPI`/`window.pywebview.api` compatibility
-  alias once downstream callers no longer depend on it.
 - Review whether the root `jsdom` compatibility pin can be removed in a later
   workspace-tooling cleanup.
 
@@ -352,19 +344,22 @@ Update during implementation:
 - `npm audit --omit=dev`: passed with 0 vulnerabilities after remediation and
   again at release-safety closure.
 - `npm run -w frontend check:types`: passed after dependency remediation and
-  after the bridge rename.
+  after the bridge rename, and again after removing the legacy alias.
 - `npm run -w frontend test:run`: passed after dependency remediation and after
-  the bridge rename.
+  the bridge rename, and again after removing the legacy alias.
 - `npm run -w electron validate`: passed after dependency remediation and after
-  the bridge rename.
+  the bridge rename, and again after removing the legacy alias.
 - `npm run test:launcher`: passed after dependency remediation and after the
-  bridge rename.
+  bridge rename, and again after removing the legacy alias.
 - `bash launcher.sh --build-release`: passed at release-safety closure.
 - `npm run -w frontend build`: passed after introducing the manual chunk
   strategy for the production renderer bundle.
 - `bash launcher.sh --build-release`: passed again after the frontend chunking
   change and no longer emitted the Vite large-chunk warning.
-- `bash launcher.sh --release-smoke`: passed at release-safety closure.
+- `bash launcher.sh --build-release`: passed again after removing the legacy
+  alias.
+- `bash launcher.sh --release-smoke`: passed at release-safety closure and
+  again after removing the legacy alias.
 - `git log --format='%h %s%n%b%n---' origin/main..HEAD`: reviewed before each
   post-plan implementation commit.
 

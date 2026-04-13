@@ -11,6 +11,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - No changes yet.
 
+## [0.4.0] - 2026-04-13
+
+### Added
+
+- Shared cross-platform launcher core with consistent Bash and PowerShell lifecycle flows, including bounded `--release-smoke` verification
+- GitHub release checks and download prompts in the desktop updater flow
+- UniFFI C# smoke verification and release-packaging scripts for generated bindings and native artifacts
+- Packaged-app fallback flow that lets users choose and persist an existing library root when no library is detected automatically
+
+### Changed
+
+- Moved workspace tooling ownership and CI bootstrap flows to the pinned pnpm/Corepack contract across frontend, Electron, and launcher workflows
+- Refined desktop shell defaults and header interactions, including default window sizing, drag behavior, and feature-split production frontend bundles
+- Updated repo-facing documentation for current cross-platform setup, launcher usage, and contribution workflows
+
+### Fixed
+
+- UniFFI download request drift that broke `pumas-uniffi` builds
+- Packaged desktop launcher root detection, shortcut relocation, and release GUI startup behavior
+- Linux CI Electron smoke execution under sandboxed GitHub runners
+- Reconciliation, registry/test isolation, and canonical path handling across Linux, macOS, and Windows CI
+- Tokio example runtime configuration so documented examples compile with the pinned workspace runtime features
+
 ## [0.3.0] - 2026-03-09
 
 ### Added

@@ -51,6 +51,9 @@ second source of truth for business state.
 - Backend-owned data must remain authoritative.
 - Components must coordinate with the existing preload/API boundary rather than
   talking to infrastructure directly.
+- Desktop drag/drop surfaces should prefer the Electron preload bridge for path
+  resolution and only fall back to URI-list parsing for compatibility with
+  platform file managers.
 - Large screens such as `ModelManager.tsx` still need decomposition reviews when
   they accumulate multiple responsibilities.
 - Migration and import workflows must reflect real backend state and not use
@@ -75,6 +78,8 @@ second source of truth for business state.
 - Components display backend-owned library and migration state rather than
   inventing alternate business state locally.
 - Operator actions go through explicit backend/API calls.
+- Cross-platform file import components must keep the Electron bridge as the
+  primary path source and treat URI-list parsing as a compatibility fallback.
 - Presentation-only state such as expansion, hover, or modal visibility may be
   local, but persisted model-library truth is not.
 

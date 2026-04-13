@@ -15,7 +15,7 @@ import log from 'electron-log';
 log.transports.file.level = 'info';
 log.transports.console.level = 'debug';
 
-// Window dimensions (matching PyWebView config from backend/config.py)
+// Window dimensions for the Electron desktop shell.
 const WINDOW_WIDTH = 800;
 const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;

@@ -1,11 +1,11 @@
 /**
  * API Adapter
  *
- * Provides the API interface for Electron IPC communication.
+ * Provides the canonical renderer API interface for Electron IPC communication.
  * The Python backend runs as a sidecar process, accessed via JSON-RPC.
  */
 
-import type { PyWebViewAPI } from '../types/api';
+import type { DesktopBridgeAPI } from '../types/api';
 import { APIError } from '../errors';
 import { getLogger } from '../utils/logger';
 
@@ -34,13 +34,13 @@ export function detectEnvironment(): RuntimeEnvironment {
 /**
  * Get the API instance for the current runtime
  */
-function getAPIInstance(): PyWebViewAPI | null {
+function getAPIInstance(): DesktopBridgeAPI | null {
   const env = detectEnvironment();
 
   switch (env) {
     case 'electron':
       // In Electron, the API is exposed as window.electronAPI
-      return (window as unknown as { electronAPI: PyWebViewAPI }).electronAPI;
+      return (window as unknown as { electronAPI: DesktopBridgeAPI }).electronAPI;
 
     case 'browser':
       // In browser mode (no backend), return null
@@ -70,11 +70,11 @@ export function getEnvironmentName(): string {
  * ```typescript
  * import { api } from './api/adapter';
  *
- * // Use the API - works in both PyWebView and Electron
+ * // Use the API through the desktop bridge
  * const status = await api.get_status();
  * ```
  */
-export const api: PyWebViewAPI = new Proxy({} as PyWebViewAPI, {
+export const api: DesktopBridgeAPI = new Proxy({} as DesktopBridgeAPI, {
   get(_target, prop: string) {
     const instance = getAPIInstance();
 
@@ -84,13 +84,13 @@ export const api: PyWebViewAPI = new Proxy({} as PyWebViewAPI, {
         throw new APIError(
           `API not available: ${prop}. ` +
             `Current environment: ${detectEnvironment()}. ` +
-            'Make sure you are running in Electron or PyWebView.',
+            'Make sure you are running in the Electron desktop shell.',
           prop
         );
       };
     }
 
-    const value = instance[prop as keyof PyWebViewAPI];
+    const value = instance[prop as keyof DesktopBridgeAPI];
 
     // If it's a function, bind it to the instance
     if (typeof value === 'function') {
@@ -169,4 +169,4 @@ export const windowAPI = {
 };
 
 // Export types
-export type { PyWebViewAPI } from '../types/api';
+export type { DesktopBridgeAPI, PyWebViewAPI } from '../types/api';

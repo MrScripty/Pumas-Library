@@ -17,7 +17,7 @@ interface ModelImportDropZoneProps {
 
 /**
  * Convert a file:// URI to a filesystem path.
- * Handles PyWebView GTK/WebKit URI format.
+ * Handles GTK/WebKit-style file-manager URI payloads.
  */
 function fileUriToPath(uri: string): string {
   // Handle file:// protocol
@@ -127,7 +127,7 @@ export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({
 
       dragCounterRef.current++;
 
-      // Check if dragging files - PyWebView GTK/WebKit may use different types
+      // GTK/WebKit-backed drag sources may use non-File mime types here.
       // Accept any of: Files, text/uri-list, text/plain, or application/x-moz-file
       const types = e.dataTransfer?.types || [];
       const hasFileType =

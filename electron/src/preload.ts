@@ -2,7 +2,8 @@
  * Electron Preload Script
  *
  * Exposes a secure API to the renderer process via contextBridge.
- * Mirrors the PyWebView API interface for seamless migration.
+ * Implements the canonical desktop bridge contract and retains a deprecated
+ * pywebview alias for compatibility during migration.
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
@@ -17,7 +18,7 @@ async function apiCall<T>(method: string, params: Record<string, unknown> = {}):
 
 /**
  * Electron API exposed to the renderer
- * Matches PyWebViewAPI interface for compatibility
+ * Matches the canonical desktop bridge contract
  */
 const electronAPI = {
   // ========================================
@@ -460,7 +461,7 @@ const electronAPI = {
 // Expose the API to the renderer process
 contextBridge.exposeInMainWorld('electronAPI', electronAPI);
 
-// Also expose as pywebview.api for backwards compatibility during migration
+// Also expose a deprecated pywebview alias for backwards compatibility.
 contextBridge.exposeInMainWorld('pywebview', {
   api: electronAPI,
 });

@@ -33,7 +33,7 @@ export class NetworkError extends ComfyUILauncherError {
 }
 
 /**
- * PyWebView API call failures
+ * Desktop bridge API call failures
  */
 export class APIError extends ComfyUILauncherError {
   constructor(

@@ -26,5 +26,28 @@ export default defineConfig({
     assetsDir: 'assets',
     sourcemap: false,
     minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
+
+          if (id.includes('/src/components/app-panels/')) {
+            return 'app-panels';
+          }
+
+          if (id.includes('/src/components/model-import/')) {
+            return 'model-import';
+          }
+
+          if (id.includes('/src/hooks/use')) {
+            return 'hooks';
+          }
+
+          return undefined;
+        },
+      },
+    },
   }
 });

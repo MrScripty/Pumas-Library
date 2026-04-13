@@ -252,7 +252,7 @@ async fn test_get_library_status_reconciles_stale_library_state_on_first_read() 
         .exists());
     assert!(temp_dir
         .path()
-        .join("shared-resources/models/llm/catplusplus/qwen-image-2512-heretic")
+        .join("shared-resources/models/diffusion/catplusplus/qwen-image-2512-heretic")
         .exists());
 }
 
@@ -277,6 +277,6 @@ async fn test_generate_migration_dry_run_reconciles_before_reporting() {
         .exists());
     assert!(temp_dir
         .path()
-        .join("shared-resources/models/llm/catplusplus/qwen-image-2512-heretic")
+        .join("shared-resources/models/diffusion/catplusplus/qwen-image-2512-heretic")
         .exists());
 }

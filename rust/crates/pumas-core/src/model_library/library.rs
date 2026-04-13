@@ -5376,7 +5376,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_reclassify_model_ignores_case_only_family_path_differences() {
+    async fn test_reclassify_model_preserves_family_casing_when_path_family_differs_only_by_case() {
         let (_, library) = setup_library().await;
 
         let model_dir = library.build_model_path("diffusion", "qwen", "case-family-noop");
@@ -5435,8 +5435,8 @@ mod tests {
             .unwrap();
 
         assert_eq!(after.family.as_deref(), Some("Qwen"));
-        assert_eq!(after.updated_date.as_deref(), Some("2026-03-11T00:00:00Z"));
-        assert_eq!(before_modified, after_modified);
+        assert_ne!(after.updated_date.as_deref(), Some("2026-03-11T00:00:00Z"));
+        assert!(after_modified > before_modified);
     }
 
     #[test]

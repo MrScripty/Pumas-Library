@@ -166,6 +166,7 @@ async function runTestSuite(runtime) {
 
 async function runReleaseSmoke(runtime) {
   const { context, platformService } = runtime;
+  const releaseSmokeScript = resolveReleaseSmokeScript(platformService);
 
   ensureRuntimeDependencies(runtime);
   ensureReleaseArtifacts(runtime);
@@ -173,7 +174,7 @@ async function runReleaseSmoke(runtime) {
   log('[release-smoke] launching bounded release startup check');
   await runBoundedCommand(
     platformService.corepackCommand,
-    corepackPnpmArgs(workspaceScriptArgs('./electron', 'run:launcher-release')),
+    corepackPnpmArgs(workspaceScriptArgs('./electron', releaseSmokeScript)),
     {
       cwd: context.repoRoot,
       env: {
@@ -187,6 +188,14 @@ async function runReleaseSmoke(runtime) {
   );
 
   log('[done] release smoke completed');
+}
+
+export function resolveReleaseSmokeScript(platformService) {
+  if (platformService.id === 'linux' && process.env.CI === 'true') {
+    return 'run:launcher-release-ci-smoke';
+  }
+
+  return 'run:launcher-release';
 }
 
 function ensureDevRuntimeArtifacts(runtime) {

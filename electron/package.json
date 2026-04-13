@@ -16,6 +16,7 @@
     "watch": "tsc -w",
     "start": "npm run build && electron .",
     "run:launcher-release": "electron .",
+    "run:launcher-release-ci-smoke": "electron --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu .",
     "dev": "npm run build && electron . --dev",
     "clean": "rm -rf dist",
     "lint": "eslint src --ext .ts",

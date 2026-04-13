@@ -276,6 +276,8 @@ Update during implementation:
 - 2026-04-12: Re-ran the release-safety closure, including `npm audit`,
   `npm audit --omit=dev`, `bash launcher.sh --build-release`, and
   `bash launcher.sh --release-smoke`.
+- 2026-04-12: Resolved the release-build Vite chunk-size warning by adding a
+  bounded manual chunk strategy in `frontend/vite.config.ts` via `9abe1d2`.
 
 ## Commit Cadence Notes
 
@@ -339,8 +341,6 @@ Update during implementation:
 
 - Remove the deprecated `PyWebViewAPI`/`window.pywebview.api` compatibility
   alias once downstream callers no longer depend on it.
-- Investigate the current Vite bundle-size warning emitted during
-  `bash launcher.sh --build-release`.
 - Review whether the root `jsdom` compatibility pin can be removed in a later
   workspace-tooling cleanup.
 
@@ -360,6 +360,10 @@ Update during implementation:
 - `npm run test:launcher`: passed after dependency remediation and after the
   bridge rename.
 - `bash launcher.sh --build-release`: passed at release-safety closure.
+- `npm run -w frontend build`: passed after introducing the manual chunk
+  strategy for the production renderer bundle.
+- `bash launcher.sh --build-release`: passed again after the frontend chunking
+  change and no longer emitted the Vite large-chunk warning.
 - `bash launcher.sh --release-smoke`: passed at release-safety closure.
 - `git log --format='%h %s%n%b%n---' origin/main..HEAD`: reviewed before each
   post-plan implementation commit.

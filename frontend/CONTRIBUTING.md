@@ -105,7 +105,7 @@ try {
 All custom exceptions are defined in `frontend/src/errors/index.ts`:
 - `ComfyUILauncherError` - Base exception
 - `NetworkError` - Network operations
-- `APIError` - PyWebView API failures
+- `APIError` - Desktop bridge API failures
 - `ValidationError` - Input validation failures
 - `MetadataError` - Metadata corruption
 - `ProcessError` - Process management failures
@@ -197,7 +197,7 @@ Organize code by feature and concern:
 ```
 frontend/src/
 ├── api/                    # API clients
-│   ├── pywebview.ts       # PyWebView API wrapper
+│   ├── adapter.ts         # Desktop bridge API wrapper
 │   ├── models.ts          # Model-related API calls
 │   └── versions.ts        # Version-related API calls
 ├── components/            # React components

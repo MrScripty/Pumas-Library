@@ -1,6 +1,7 @@
 # Frontend Architecture
 
-This document explains the architecture, design decisions, and organization of the ComfyUI Launcher frontend.
+This document explains the architecture, design decisions, and organization of
+the Pumas Library frontend.
 
 ## Overview
 
@@ -10,7 +11,7 @@ The frontend is a React-based single-page application (SPA) that provides:
 - Model management interface (search, download, import, mapping)
 - System resource monitoring display
 - Installation progress tracking
-- Real-time status updates via PyWebView bridge
+- Real-time status updates via the Electron desktop bridge
 
 ## Technology Stack
 
@@ -24,33 +25,29 @@ The frontend is a React-based single-page application (SPA) that provides:
 
 ## Architecture Patterns
 
-### 1. PyWebView Bridge Pattern
+### 1. Desktop Bridge Pattern
 
-The frontend communicates with the Python backend via PyWebView's JavaScript API:
+The frontend communicates with the Electron preload bridge, which delegates to
+the desktop backend over the sidecar RPC boundary:
 
 ```typescript
-// Type-safe API declarations
+// Type-safe bridge declarations
 declare global {
   interface Window {
-    pywebview: {
-      api: {
-        get_releases(options?: ReleaseOptions): Promise<Release[]>;
-        install_version(tag: string): Promise<boolean>;
-        launch_version(tag: string): Promise<boolean>;
-        // ... more API methods
-      };
-    };
+    electronAPI: DesktopBridgeAPI;
   }
 }
 ```
 
 **Design Rationale:**
-- **Type safety**: Full TypeScript definitions for Python API
+- **Type safety**: Full TypeScript definitions for the preload bridge contract
 - **Async by default**: All backend calls return Promises
 - **Error handling**: Errors propagated to frontend for user feedback
 - **Separation**: UI logic separate from backend business logic
 
-See [src/types/pywebview.d.ts](src/types/pywebview.d.ts) for API type definitions.
+See [src/types/api.ts](src/types/api.ts) for the canonical bridge type
+definitions. `window.pywebview.api` may remain as a deprecated compatibility
+alias, but new code should target `window.electronAPI` or the shared adapter.
 
 ### 2. Component Architecture
 
@@ -71,7 +68,7 @@ src/
 │   ├── useStatus.ts     # Status polling
 │   └── ...
 ├── api/                 # API abstraction layer
-│   ├── pywebview.ts     # PyWebView API wrappers
+│   ├── adapter.ts       # Desktop bridge adapter and availability checks
 │   ├── versions.ts      # Version management API
 │   └── models.ts        # Model library API
 ├── types/               # TypeScript type definitions
@@ -99,7 +96,7 @@ function useVersions() {
   const fetchReleases = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await window.pywebview.api.get_releases();
+      const data = await api.get_releases();
       setReleases(data);
     } catch (error) {
       // Error handling
@@ -162,7 +159,7 @@ export class APIError extends ComfyUILauncherError {
 **Usage Pattern:**
 ```typescript
 try {
-  await window.pywebview.api.install_version(tag);
+  await api.install_version(tag);
 } catch (error) {
   if (error instanceof NetworkError) {
     logger.error('Network request failed', { url: error.url });
@@ -454,7 +451,7 @@ test('calls onClick when clicked', () => {
 **Testing Guidelines:**
 - Test user behavior, not implementation
 - Use `data-testid` for non-text elements
-- Mock PyWebView API in tests
+- Mock the desktop bridge adapter in tests
 - Test error states and edge cases
 
 ## Performance Considerations

@@ -17,4 +17,5 @@ These docs describe the current code paths in:
 - `electron/src`
 - `frontend/src`
 
-Legacy planning documents from the prior Python/PyWebView implementation were removed from this directory.
+Legacy planning documents from the prior Python desktop-shell implementation
+were removed from this directory.

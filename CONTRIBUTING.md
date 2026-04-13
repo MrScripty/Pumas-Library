@@ -23,7 +23,8 @@ This document outlines the development standards, practices, and workflows for c
 
 - Python 3.12+
 - Node.js 24 LTS
-- GTK/WebKit libraries (for PyWebView)
+- Desktop shell dependencies handled by the Electron workspace and launcher
+  wrappers
 
 Linux (Mint 22.x / Ubuntu 24.04) packages:
 ```bash

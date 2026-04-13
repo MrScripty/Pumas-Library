@@ -146,4 +146,30 @@ describe('LocalModelsList', () => {
       'https://huggingface.co/org/related-model'
     );
   });
+
+  it('renders a centered existing-library action when the local library is empty', () => {
+    const onChooseExistingLibrary = vi.fn();
+
+    render(
+      <LocalModelsList
+        modelGroups={[]}
+        starredModels={new Set()}
+        excludedModels={new Set()}
+        onToggleStar={vi.fn()}
+        onToggleLink={vi.fn()}
+        selectedAppId="comfyui"
+        totalModels={0}
+        hasFilters={false}
+        relatedModelsById={{}}
+        expandedRelated={new Set()}
+        onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()}
+        onChooseExistingLibrary={onChooseExistingLibrary}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /use existing library/i }));
+
+    expect(onChooseExistingLibrary).toHaveBeenCalledTimes(1);
+  });
 });

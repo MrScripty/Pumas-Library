@@ -1577,6 +1577,13 @@ export interface CloseWindowResponse extends BaseResponse {
   // Empty body on success
 }
 
+export interface SelectLauncherRootResponse extends BaseResponse {
+  cancelled?: boolean;
+  restarting?: boolean;
+  selectedPath?: string;
+  launcherRoot?: string;
+}
+
 // ============================================================================
 // Main Desktop Bridge Interface
 // ============================================================================
@@ -2042,6 +2049,7 @@ export interface DesktopBridgeAPI {
   // ========================================
   open_url(url: string): Promise<OpenUrlResponse>;
   open_path(path: string): Promise<OpenPathResponse>;
+  select_launcher_root(): Promise<SelectLauncherRootResponse>;
   open_active_install(appId?: string): Promise<OpenActiveInstallResponse>;
   close_window(): Promise<CloseWindowResponse>;
 

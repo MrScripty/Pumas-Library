@@ -8,7 +8,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
-import { resolveLauncherRoot } from './launcher-root';
+import { persistLauncherRootOverride, resolveLauncherRoot } from './launcher-root';
 import { PythonBridge } from './python-bridge';
 import log from 'electron-log';
 
@@ -219,6 +219,47 @@ function registerIPCHandlers(): void {
   ipcMain.handle('dialog:openFile', async (_event, options: Electron.OpenDialogOptions) => {
     if (!mainWindow) return { canceled: true, filePaths: [] };
     return await dialog.showOpenDialog(mainWindow, options);
+  });
+
+  ipcMain.handle('launcher:chooseLibraryRoot', async () => {
+    if (!mainWindow) {
+      return { success: false, error: 'Main window is not available.' };
+    }
+
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Existing Pumas Library',
+      buttonLabel: 'Use This Library',
+      properties: ['openDirectory'],
+      message: 'Choose a launcher root, shared-resources directory, or shared-resources/models directory.',
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, cancelled: true };
+    }
+
+    try {
+      const selectedPath = result.filePaths[0]!;
+      const config = persistLauncherRootOverride(app.getPath('userData'), selectedPath);
+
+      log.info(`Persisted launcher root override: ${config.launcherRoot}`);
+
+      setTimeout(() => {
+        app.relaunch();
+        app.quit();
+      }, 100);
+
+      return {
+        success: true,
+        cancelled: false,
+        restarting: true,
+        selectedPath: config.selectedPath ?? selectedPath,
+        launcherRoot: config.launcherRoot,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error(`Failed to persist launcher root override: ${message}`);
+      return { success: false, cancelled: false, error: message };
+    }
   });
 
   // Shell handlers

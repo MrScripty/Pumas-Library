@@ -10,10 +10,23 @@ export interface LauncherRootResolutionOptions {
   userDataPath: string;
 }
 
+interface PersistedLauncherRootConfig {
+  launcherRoot: string;
+  selectedPath?: string;
+  updatedAt: string;
+}
+
+const LAUNCHER_ROOT_OVERRIDE_FILENAME = 'launcher-root.json';
+
 export function resolveLauncherRoot(options: LauncherRootResolutionOptions): string {
   const override = resolveLauncherRootOverride(options.argv ?? process.argv, process.env);
   if (override) {
     return override;
+  }
+
+  const persistedOverride = readPersistedLauncherRootOverride(options.userDataPath);
+  if (persistedOverride) {
+    return persistedOverride;
   }
 
   const appImagePortableRoot = options.appImagePath
@@ -50,6 +63,38 @@ export function resolveLauncherRoot(options: LauncherRootResolutionOptions): str
   return options.devRoot;
 }
 
+export function persistLauncherRootOverride(
+  userDataPath: string,
+  selectedPath: string
+): PersistedLauncherRootConfig {
+  const launcherRoot = normalizeLauncherRootSelection(selectedPath);
+  if (!launcherRoot) {
+    throw new Error(
+      'Selected path must be a launcher root, shared-resources directory, or shared-resources/models directory.'
+    );
+  }
+
+  fs.mkdirSync(userDataPath, { recursive: true });
+
+  const config: PersistedLauncherRootConfig = {
+    launcherRoot,
+    selectedPath: path.resolve(selectedPath),
+    updatedAt: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(
+    launcherRootOverrideConfigPath(userDataPath),
+    `${JSON.stringify(config, null, 2)}\n`,
+    'utf8'
+  );
+
+  return config;
+}
+
+export function launcherRootOverrideConfigPath(userDataPath: string): string {
+  return path.join(userDataPath, LAUNCHER_ROOT_OVERRIDE_FILENAME);
+}
+
 function resolveLauncherRootOverride(argv: string[], env: NodeJS.ProcessEnv): string | null {
   const envOverride = env.PUMAS_LAUNCHER_ROOT?.trim();
   if (envOverride) {
@@ -72,6 +117,52 @@ function resolveLauncherRootOverride(argv: string[], env: NodeJS.ProcessEnv): st
       if (value) {
         return path.resolve(value);
       }
+    }
+  }
+
+  return null;
+}
+
+function readPersistedLauncherRootOverride(userDataPath: string): string | null {
+  const configPath = launcherRootOverrideConfigPath(userDataPath);
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(fs.readFileSync(configPath, 'utf8')) as Partial<PersistedLauncherRootConfig>;
+    const configuredRoot = typeof parsed.launcherRoot === 'string' ? parsed.launcherRoot : '';
+    if (!configuredRoot) {
+      return null;
+    }
+
+    const normalized = normalizeLauncherRootSelection(configuredRoot);
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeLauncherRootSelection(selectedPath: string): string | null {
+  const resolved = path.resolve(selectedPath);
+  const candidates = [resolved];
+
+  if (path.basename(resolved) === 'models' && path.basename(path.dirname(resolved)) === 'shared-resources') {
+    candidates.push(path.dirname(path.dirname(resolved)));
+  }
+
+  if (path.basename(resolved) === 'shared-resources') {
+    candidates.push(path.dirname(resolved));
+  }
+
+  const ancestorCandidate = findLauncherRootFrom(resolved);
+  if (ancestorCandidate) {
+    candidates.push(ancestorCandidate);
+  }
+
+  for (const candidate of candidates) {
+    if (isExistingLauncherRoot(candidate)) {
+      return candidate;
     }
   }
 

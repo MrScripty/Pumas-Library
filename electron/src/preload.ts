@@ -397,6 +397,10 @@ const electronAPI = {
     return await apiCall('open_path', { path });
   },
 
+  select_launcher_root: async () => {
+    return await ipcRenderer.invoke('launcher:chooseLibraryRoot');
+  },
+
   open_active_install: (appId?: string) => apiCall('open_active_install', { app_id: appId }),
 
   close_window: async () => {

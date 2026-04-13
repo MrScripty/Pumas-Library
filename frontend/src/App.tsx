@@ -185,6 +185,7 @@ export default function App() {
     closeWindow,
     minimizeWindow,
     openModelsRoot,
+    chooseLibraryRoot,
   } = useAppWindowActions();
   const {
     handleImportComplete,
@@ -455,6 +456,7 @@ export default function App() {
     onOpenModelsRoot: openModelsRoot,
     onModelsImported: fetchModels,
     activeVersion: appVersions.activeVersion,
+    onChooseExistingLibrary: chooseLibraryRoot,
   };
 
   return (

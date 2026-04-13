@@ -46,6 +46,7 @@ export interface ModelManagerProps {
   onModelsImported?: () => void;
   /** Active version tag for link health check */
   activeVersion?: string | null;
+  onChooseExistingLibrary?: () => Promise<void> | void;
 }
 
 export const ModelManager: React.FC<ModelManagerProps> = ({
@@ -59,6 +60,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   onOpenModelsRoot,
   onModelsImported,
   activeVersion,
+  onChooseExistingLibrary,
 }) => {
   // UI State
   const [searchQuery, setSearchQuery] = useState('');
@@ -73,6 +75,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // HuggingFace Auth State
   const [showHfAuth, setShowHfAuth] = useState(false);
+  const [isChoosingExistingLibrary, setIsChoosingExistingLibrary] = useState(false);
 
   // Custom Hooks
   const {
@@ -319,6 +322,19 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   }, []);
 
+  const handleChooseExistingLibrary = useCallback(async () => {
+    if (!onChooseExistingLibrary || isChoosingExistingLibrary) {
+      return;
+    }
+
+    setIsChoosingExistingLibrary(true);
+    try {
+      await onChooseExistingLibrary();
+    } finally {
+      setIsChoosingExistingLibrary(false);
+    }
+  }, [isChoosingExistingLibrary, onChooseExistingLibrary]);
+
   return (
     <>
       {/* Import dialog (for file picker button) */}
@@ -416,6 +432,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 downloadErrors={downloadErrors}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
+                onChooseExistingLibrary={onChooseExistingLibrary ? handleChooseExistingLibrary : undefined}
+                isChoosingExistingLibrary={isChoosingExistingLibrary}
               />
               {/* Link Health Status */}
               <div className="mt-4">

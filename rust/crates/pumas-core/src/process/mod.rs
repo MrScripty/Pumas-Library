@@ -13,7 +13,7 @@
 //! ```rust,no_run
 //! use pumas_library::process::ProcessManager;
 //!
-//! #[tokio::main]
+//! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> anyhow::Result<()> {
 //!     let manager = ProcessManager::new("/path/to/launcher", None)?;
 //!

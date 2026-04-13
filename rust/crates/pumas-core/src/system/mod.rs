@@ -11,7 +11,7 @@
 //! ```rust,no_run
 //! use pumas_library::system::SystemUtils;
 //!
-//! #[tokio::main]
+//! #[tokio::main(flavor = "current_thread")]
 //! async fn main() -> anyhow::Result<()> {
 //!     let utils = SystemUtils::new("/path/to/launcher");
 //!
@@ -32,4 +32,4 @@ mod utils;
 
 pub use gpu::{GpuInfo, GpuMonitor, NvidiaSmiMonitor};
 pub use resources::{ProcessResources, ResourceTracker, SystemResourceSnapshot};
-pub use utils::{check_brave, check_git, check_setproctitle, SystemCheckResult, SystemUtils};
+pub use utils::{SystemCheckResult, SystemUtils, check_brave, check_git, check_setproctitle};

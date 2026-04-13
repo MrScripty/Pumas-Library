@@ -2,7 +2,7 @@
 
 use pumas_library::{PumasApi, Result};
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     // Get path from args or use current directory
     let path = std::env::args()

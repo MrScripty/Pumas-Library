@@ -28,8 +28,8 @@
     "electron-log": "^5.0.0"
   },
   "devDependencies": {
-    "electron": "^38.0.0",
-    "electron-builder": "^25.0.0"
+    "electron": "39.8.6",
+    "electron-builder": "26.8.1"
   },
   "build": {
     "appId": "com.pumas.library",
@@ -46,28 +46,41 @@
       {
         "from": "../frontend/dist",
         "to": "frontend",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       },
       {
         "from": "resources/bin",
         "to": ".",
-        "filter": ["pumas-rpc", "pumas-rpc.exe"]
+        "filter": [
+          "pumas-rpc",
+          "pumas-rpc.exe"
+        ]
       },
       {
         "from": "build/icons",
         "to": "icons",
-        "filter": ["Pumas-Library_05.png", "icon.ico", "icon.icns"]
+        "filter": [
+          "Pumas-Library_05.png",
+          "icon.ico",
+          "icon.icns"
+        ]
       }
     ],
     "linux": {
       "target": [
         {
           "target": "AppImage",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "deb",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icons/Pumas-Library_05.png",
@@ -78,11 +91,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "build/icons/icon.ico",
@@ -104,7 +121,9 @@
       "target": [
         {
           "target": "dmg",
-          "arch": ["arm64"]
+          "arch": [
+            "arm64"
+          ]
         }
       ],
       "icon": "build/icons/icon.icns",

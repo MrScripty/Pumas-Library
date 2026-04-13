@@ -9,8 +9,15 @@
   "scripts": {
     "test:launcher": "node --test scripts/launcher/*.test.mjs"
   },
+  "overrides": {
+    "minimatch@^3.1.2": "3.1.5",
+    "minimatch@^10.0.3": "10.2.5",
+    "brace-expansion@^1.1.7": "1.1.14",
+    "@isaacs/brace-expansion@^5.0.0": "5.0.1"
+  },
   "devDependencies": {
-    "typescript": "~5.8.2",
-    "@types/node": "^22.14.0"
+    "@types/node": "^22.14.0",
+    "jsdom": "27.4.0",
+    "typescript": "~5.8.2"
   }
 }

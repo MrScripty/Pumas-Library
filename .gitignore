@@ -34,6 +34,10 @@ frontend/coverage/
 *.swo
 *~
 .claude/
+.codex
+.mypy_cache/
+.ruff_cache/
+.pre-commit-hooks/
 
 # OS
 .DS_Store
@@ -44,6 +48,7 @@ Thumbs.db
 *.bak
 *.backup
 temp/
+tmp/
 *.original
 
 # Design artifacts
@@ -98,3 +103,6 @@ bindings/csharp/Pumas.NativeSmoke/*
 
 # Rust
 rust/target/
+
+# Workspace dependencies
+node_modules/

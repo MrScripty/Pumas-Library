@@ -8,6 +8,7 @@
 import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import { resolveLauncherRoot } from './launcher-root';
 import { PythonBridge } from './python-bridge';
 import log from 'electron-log';
 
@@ -261,18 +262,14 @@ async function initializeBackend(): Promise<void> {
       ? path.join(process.resourcesPath, binaryName)
       : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
 
-    // Data root: portable (next to AppImage) or project root in dev
-    let launcherRoot: string;
-    if (process.env.APPIMAGE) {
-      // AppImage: store data next to the .AppImage file
-      launcherRoot = path.join(path.dirname(process.env.APPIMAGE), 'pumas-data');
-    } else if (app.isPackaged) {
-      // Other packaged formats (.deb, etc.): use standard user data path
-      launcherRoot = app.getPath('userData');
-    } else {
-      // Development mode: project root
-      launcherRoot = path.join(__dirname, '..', '..');
-    }
+    const launcherRoot = resolveLauncherRoot({
+      appImagePath: process.env.APPIMAGE,
+      devRoot: path.join(__dirname, '..', '..'),
+      execPath: process.execPath,
+      isPackaged: app.isPackaged,
+      userDataPath: app.getPath('userData'),
+    });
+    log.info(`Resolved launcher root: ${launcherRoot}`);
 
     pythonBridge = new PythonBridge({
       port: 0,

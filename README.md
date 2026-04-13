@@ -101,6 +101,10 @@ Use the same lifecycle flags on both wrappers:
 Note: `--run` expects the release backend binary to exist, so build first with
 `--build-release`.
 
+Packaged desktop builds try to reuse an existing launcher root by walking up
+from the packaged binary location. If you need to pin a specific existing
+library root, set `PUMAS_LAUNCHER_ROOT=/path/to/root` before launching the app.
+
 ### Rust Crate
 
 Add the core crate:

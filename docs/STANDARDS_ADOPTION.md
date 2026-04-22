@@ -67,6 +67,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.
 - 2026-04-22: Torch sidecar Python now has pinned Ruff development tooling, a root `ruff.toml`, launcher and CI lint/format checks, and formatted Python sources.
+- 2026-04-22: Torch sidecar LAN binding now requires both explicit LAN opt-in and an API token, with token middleware enforced for sidecar API routes when configured.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

@@ -41,14 +41,14 @@ Rectification:
 - Completed: sidecar unit tests cover path canonicalization, approved-root rejection, listener policy, and invalid configure behavior.
 
 ### P02 - Torch Server Has No Visible Auth or Origin Policy for LAN Mode
-Status: partially remediated; residual security follow-up tracked by D08
+Status: remediated
 
 `configure` can set LAN mode by switching host to `0.0.0.0`. The server exposes model load/unload/configure endpoints. That may be intended, but the standards require listener limits and transport safety.
 
 Rectification:
 - Completed: non-loopback bind hosts and `lan_access=true` require explicit `PUMAS_TORCH_ALLOW_LAN=1` opt-in.
+- Completed: LAN binding also requires `PUMAS_TORCH_API_TOKEN`, and configured tokens are enforced on sidecar API routes through `X-Pumas-Torch-Token` or `Authorization: Bearer`.
 - Completed: startup logs a warning when LAN access is enabled.
-- Remaining: add token-based or same-machine bridge authentication before treating LAN exposure as fully standards-compliant.
 
 ### P03 - Python ModelManager Has Shared Mutable State Without a Single Lock
 Status: remediated; integration-test expansion tracked by D06
@@ -138,4 +138,4 @@ Rectification:
 - Completed: Python test/tooling addition.
 - Completed: Launcher run/build semantic correction.
 - Completed: Script template portability cleanup.
-- Remaining: LAN authentication beyond explicit trusted-network opt-in.
+- Completed: LAN token authentication beyond explicit trusted-network opt-in.

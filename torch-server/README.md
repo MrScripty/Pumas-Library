@@ -16,7 +16,8 @@ The launcher and Rust app-manager clients should treat this service as a local s
 `validation.py` owns shared validation for model paths, model names, device selectors, listener host, API ports, and model-slot limits.
 
 - `PUMAS_TORCH_MODEL_ROOTS` may contain an `os.pathsep`-separated list of approved model roots. When set, `/api/load` rejects model paths outside those roots.
-- `PUMAS_TORCH_ALLOW_LAN=1` is required before the service accepts a non-loopback bind host or `lan_access=true`.
+- `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN=<token>` are required before the service accepts a non-loopback bind host or `lan_access=true`.
+- When `PUMAS_TORCH_API_TOKEN` is set, sidecar API routes require either `X-Pumas-Torch-Token: <token>` or `Authorization: Bearer <token>`. `/health` remains unauthenticated for process health checks.
 - API ports must be unprivileged ports in the range `1024..65535`.
 - `max_loaded_models` is bounded to `1..16`.
 

@@ -12,13 +12,17 @@ import sys
 
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
 from control_api import router as control_router
 from device_manager import DeviceManager
 from model_manager import ModelManager
 from openai_api import router as openai_router
 from validation import (
+    configured_api_token,
+    extract_bearer_token,
     is_loopback_host,
+    token_matches,
     validate_api_port,
     validate_bind_host,
     validate_max_loaded_models,
@@ -33,6 +37,7 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
     host = validate_bind_host(host, lan_access=lan_access)
     port = validate_api_port(port)
     max_models = validate_max_loaded_models(max_models)
+    api_token = configured_api_token()
 
     device_manager = DeviceManager()
     model_manager = ModelManager(
@@ -54,6 +59,9 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
     if lan_access:
         logger.warning("Torch server LAN access enabled on %s:%s", host, port)
 
+    if api_token:
+        install_token_auth(app, api_token)
+
     app.include_router(openai_router, prefix="/v1")
     app.include_router(control_router, prefix="/api")
 
@@ -62,6 +70,24 @@ def create_app(host: str = "127.0.0.1", port: int = 8400, max_models: int = 4) -
         return {"status": "ok"}
 
     return app
+
+
+def install_token_auth(app: FastAPI, api_token: str) -> None:
+    """Install a token-auth middleware for sidecar API routes."""
+
+    @app.middleware("http")
+    async def require_api_token(request, call_next):
+        if request.url.path == "/health":
+            return await call_next(request)
+
+        provided_token = request.headers.get("x-pumas-torch-token")
+        if provided_token is None:
+            provided_token = extract_bearer_token(request.headers.get("authorization"))
+
+        if not token_matches(provided_token, api_token):
+            return JSONResponse(status_code=401, content={"detail": "invalid or missing API token"})
+
+        return await call_next(request)
 
 
 def parse_args() -> argparse.Namespace:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import ipaddress
 import os
 import re
@@ -11,6 +12,7 @@ from typing import Iterable
 MODEL_NAME_MAX_LENGTH = 128
 MAX_LOADED_MODELS_LIMIT = 16
 LAN_ALLOW_ENV = "PUMAS_TORCH_ALLOW_LAN"
+API_TOKEN_ENV = "PUMAS_TORCH_API_TOKEN"
 MODEL_ROOTS_ENV = "PUMAS_TORCH_MODEL_ROOTS"
 
 _MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{0,127}$")
@@ -110,6 +112,35 @@ def require_lan_policy() -> None:
     """Require an explicit trusted-network opt-in before LAN binding."""
     if os.environ.get(LAN_ALLOW_ENV) != "1":
         raise ValueError(f"LAN access requires {LAN_ALLOW_ENV}=1")
+    if not configured_api_token():
+        raise ValueError(f"LAN access requires {API_TOKEN_ENV}")
+
+
+def configured_api_token() -> str | None:
+    """Return the configured sidecar API token, if present."""
+    token = os.environ.get(API_TOKEN_ENV, "").strip()
+    return token or None
+
+
+def extract_bearer_token(authorization_header: str | None) -> str | None:
+    """Extract a bearer token from an Authorization header."""
+    if not authorization_header:
+        return None
+
+    scheme, separator, token = authorization_header.partition(" ")
+    if separator and scheme.lower() == "bearer" and token.strip():
+        return token.strip()
+
+    return None
+
+
+def token_matches(provided_token: str | None, expected_token: str | None) -> bool:
+    """Compare API tokens using constant-time comparison when auth is enabled."""
+    if expected_token is None:
+        return True
+    if provided_token is None:
+        return False
+    return hmac.compare_digest(provided_token, expected_token)
 
 
 def _configured_model_roots() -> Iterable[Path]:

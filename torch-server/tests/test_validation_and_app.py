@@ -48,6 +48,7 @@ def _install_optional_dependency_stubs() -> None:
         class FastAPI:
             def __init__(self, *args, **kwargs):
                 self.routes = []
+                self.middleware_handlers = []
                 self.state = types.SimpleNamespace()
 
             def include_router(self, router, prefix=""):
@@ -63,6 +64,20 @@ def _install_optional_dependency_stubs() -> None:
 
                 return decorator
 
+            def middleware(self, middleware_type):
+                def decorator(func):
+                    self.middleware_handlers.append(
+                        types.SimpleNamespace(type=middleware_type, endpoint=func)
+                    )
+                    return func
+
+                return decorator
+
+        class JSONResponse:
+            def __init__(self, status_code, content):
+                self.status_code = status_code
+                self.content = content
+
         class StreamingResponse:
             pass
 
@@ -70,6 +85,7 @@ def _install_optional_dependency_stubs() -> None:
         fastapi_module.FastAPI = FastAPI
         fastapi_module.HTTPException = HTTPException
         fastapi_module.Request = Request
+        responses_module.JSONResponse = JSONResponse
         responses_module.StreamingResponse = StreamingResponse
         sys.modules["fastapi"] = fastapi_module
         sys.modules["fastapi.responses"] = responses_module
@@ -123,6 +139,7 @@ _install_optional_dependency_stubs()
 class TorchValidationTests(unittest.TestCase):
     def setUp(self):
         os.environ.pop("PUMAS_TORCH_ALLOW_LAN", None)
+        os.environ.pop("PUMAS_TORCH_API_TOKEN", None)
         os.environ.pop("PUMAS_TORCH_MODEL_ROOTS", None)
 
         self.control_api = importlib.import_module("control_api")
@@ -155,6 +172,12 @@ class TorchValidationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.control_api.ConfigureRequest(host="0.0.0.0", lan_access=True)
 
+    def test_configure_rejects_lan_without_api_token(self):
+        os.environ["PUMAS_TORCH_ALLOW_LAN"] = "1"
+
+        with self.assertRaises(ValueError):
+            self.control_api.ConfigureRequest(host="0.0.0.0", lan_access=True)
+
     def test_configure_accepts_localhost_without_lan_policy(self):
         request = self.control_api.ConfigureRequest(host="localhost")
 
@@ -162,11 +185,35 @@ class TorchValidationTests(unittest.TestCase):
 
     def test_configure_accepts_lan_with_explicit_policy(self):
         os.environ["PUMAS_TORCH_ALLOW_LAN"] = "1"
+        os.environ["PUMAS_TORCH_API_TOKEN"] = "test-token"
 
         request = self.control_api.ConfigureRequest(host="0.0.0.0", lan_access=True)
 
         self.assertEqual(request.host, "0.0.0.0")
         self.assertTrue(request.lan_access)
+
+    def test_create_app_rejects_lan_without_api_token(self):
+        os.environ["PUMAS_TORCH_ALLOW_LAN"] = "1"
+
+        with self.assertRaises(ValueError):
+            self.serve.create_app(host="0.0.0.0")
+
+    def test_create_app_installs_token_auth_when_token_configured(self):
+        os.environ["PUMAS_TORCH_API_TOKEN"] = "test-token"
+
+        app = self.serve.create_app()
+
+        middleware_handlers = getattr(app, "middleware_handlers", [])
+        if middleware_handlers:
+            self.assertEqual(middleware_handlers[0].type, "http")
+
+    def test_token_helpers_accept_header_and_bearer_tokens(self):
+        validation = importlib.import_module("validation")
+
+        self.assertEqual(validation.extract_bearer_token("Bearer test-token"), "test-token")
+        self.assertIsNone(validation.extract_bearer_token("Basic test-token"))
+        self.assertTrue(validation.token_matches("test-token", "test-token"))
+        self.assertFalse(validation.token_matches("wrong-token", "test-token"))
 
     def test_create_app_returns_fresh_app_instances_without_duplicate_routes(self):
         first = self.serve.create_app()

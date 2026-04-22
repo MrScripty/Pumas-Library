@@ -101,7 +101,6 @@ describe('MigrationReportsPanel', () => {
       success: false,
       error: 'cannot open path',
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -125,6 +124,8 @@ describe('MigrationReportsPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Execute Migration/i }));
+    expect(screen.getByRole('alertdialog', { name: 'Execute metadata migration' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Execute migration' }));
 
     await waitFor(() => {
       expect(executeMigrationMock).toHaveBeenCalledTimes(1);
@@ -140,6 +141,8 @@ describe('MigrationReportsPanel', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: /Delete/i }));
+    expect(screen.getByRole('alertdialog', { name: 'Delete migration report' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete report' }));
 
     await waitFor(() => {
       expect(deleteReportMock).toHaveBeenCalledWith('/tmp/reports/2026/04/report.json');

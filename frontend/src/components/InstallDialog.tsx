@@ -17,6 +17,7 @@ import { X } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { useInstallationProgress } from '../hooks/useInstallationProgress';
 import { useInstallationState } from '../hooks/useInstallationState';
+import { ConfirmationDialog } from './ConfirmationDialog';
 import { InstallDialogContent } from './InstallDialogContent';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
@@ -70,6 +71,7 @@ export function InstallDialog({
   const [installingVersion, setInstallingVersion] = useState<string | null>(installingTag || null);
   const [errorVersion, setErrorVersion] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const cancellationRef = useRef(false);
   const sizeCalcTriggeredRef = useRef(false);
 
@@ -290,11 +292,8 @@ export function InstallDialog({
     }
   };
 
-  const handleCancelInstallation = async () => {
-    if (!window.confirm('Are you sure you want to cancel the installation? This will stop the process and remove any partially installed files.')) {
-      return;
-    }
-
+  const confirmCancelInstallation = async () => {
+    setShowCancelConfirmation(false);
     cancellationRef.current = true;
     setErrorVersion(null);
     setErrorMessage(null);
@@ -322,6 +321,10 @@ export function InstallDialog({
         logger.error('Unknown error cancelling installation', { error });
       }
     }
+  };
+
+  const handleCancelInstallation = () => {
+    setShowCancelConfirmation(true);
   };
 
   // Close on escape key
@@ -406,6 +409,15 @@ export function InstallDialog({
           void handleInstall(tag);
         }}
         onReportRemoveError={reportRemoveError}
+      />
+
+      <ConfirmationDialog
+        isOpen={showCancelConfirmation}
+        title="Cancel installation"
+        message="This will stop the process and remove any partially installed files."
+        confirmLabel="Cancel installation"
+        onCancel={() => setShowCancelConfirmation(false)}
+        onConfirm={() => void confirmCancelInstallation()}
       />
     </div>
   );

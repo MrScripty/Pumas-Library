@@ -15,6 +15,7 @@ import {
 import { MigrationReportArtifactList } from './MigrationReportArtifactList';
 import { MigrationReportControls } from './MigrationReportControls';
 import { MigrationReportSummaries } from './MigrationReportSummaries';
+import { ConfirmationDialog } from './ConfirmationDialog';
 
 const logger = getLogger('MigrationReportsPanel');
 
@@ -22,6 +23,10 @@ interface FlashMessage {
   type: 'success' | 'error' | 'info';
   text: string;
 }
+
+type PendingConfirmation =
+  | { kind: 'executeMigration' }
+  | { kind: 'deleteReport'; reportPath: string };
 
 function formatTimestamp(value: string): string {
   const parsed = new Date(value);
@@ -46,6 +51,7 @@ export const MigrationReportsPanel: React.FC = () => {
   const [isPruning, setIsPruning] = useState(false);
   const [deletingReportPath, setDeletingReportPath] = useState<string | null>(null);
   const [openingPath, setOpeningPath] = useState<string | null>(null);
+  const [pendingConfirmation, setPendingConfirmation] = useState<PendingConfirmation | null>(null);
 
   const fetchReports = useCallback(async () => {
     if (!isAPIAvailable()) return;
@@ -98,13 +104,8 @@ export const MigrationReportsPanel: React.FC = () => {
     }
   }, [fetchReports]);
 
-  const handleExecuteMigration = useCallback(async () => {
+  const executeMigration = useCallback(async () => {
     if (!isAPIAvailable()) return;
-
-    const confirmed = window.confirm(
-      'Execute metadata v2 migration now? This will move model folders and rewrite metadata.'
-    );
-    if (!confirmed) return;
 
     setIsExecutingMigration(true);
     setMessage(null);
@@ -137,12 +138,13 @@ export const MigrationReportsPanel: React.FC = () => {
     }
   }, [fetchReports]);
 
-  const handleDeleteReport = useCallback(
+  const handleExecuteMigration = useCallback(() => {
+    setPendingConfirmation({ kind: 'executeMigration' });
+  }, []);
+
+  const deleteReport = useCallback(
     async (reportPath: string) => {
       if (!isAPIAvailable()) return;
-
-      const confirmed = window.confirm('Delete this migration report artifact entry?');
-      if (!confirmed) return;
 
       setDeletingReportPath(reportPath);
       try {
@@ -165,6 +167,26 @@ export const MigrationReportsPanel: React.FC = () => {
     },
     [fetchReports]
   );
+
+  const handleDeleteReport = useCallback((reportPath: string) => {
+    setPendingConfirmation({ kind: 'deleteReport', reportPath });
+  }, []);
+
+  const handleConfirmPendingAction = useCallback(() => {
+    const pending = pendingConfirmation;
+    setPendingConfirmation(null);
+
+    if (!pending) {
+      return;
+    }
+
+    if (pending.kind === 'executeMigration') {
+      void executeMigration();
+      return;
+    }
+
+    void deleteReport(pending.reportPath);
+  }, [deleteReport, executeMigration, pendingConfirmation]);
 
   const handlePruneReports = useCallback(async () => {
     if (!isAPIAvailable()) return;
@@ -219,6 +241,17 @@ export const MigrationReportsPanel: React.FC = () => {
     return null;
   }
 
+  const pendingConfirmationCopy = pendingConfirmation;
+  const confirmationTitle = pendingConfirmationCopy?.kind === 'executeMigration'
+    ? 'Execute metadata migration'
+    : 'Delete migration report';
+  const confirmationMessage = pendingConfirmationCopy?.kind === 'executeMigration'
+    ? 'This will move model folders and rewrite metadata.'
+    : 'This removes the migration report artifact entry from the report list.';
+  const confirmationLabel = pendingConfirmationCopy?.kind === 'executeMigration'
+    ? 'Execute migration'
+    : 'Delete report';
+
   return (
     <div className="bg-[hsl(var(--launcher-bg-tertiary)/0.3)] rounded-lg border border-[hsl(var(--launcher-border)/0.5)]">
       <button
@@ -253,7 +286,7 @@ export const MigrationReportsPanel: React.FC = () => {
             isPruning={isPruning}
             keepLatest={keepLatest}
             message={message}
-            onExecuteMigration={() => void handleExecuteMigration()}
+            onExecuteMigration={handleExecuteMigration}
             onGenerateDryRun={() => void handleGenerateDryRun()}
             onKeepLatestChange={setKeepLatest}
             onPruneReports={() => void handlePruneReports()}
@@ -273,12 +306,21 @@ export const MigrationReportsPanel: React.FC = () => {
                 ...report,
                 generated_at: formatTimestamp(report.generated_at),
               }))}
-              onDeleteReport={(reportPath) => void handleDeleteReport(reportPath)}
+              onDeleteReport={handleDeleteReport}
               onOpenPath={(path, label) => void handleOpenPath(path, label)}
             />
           </div>
         </div>
       )}
+
+      <ConfirmationDialog
+        isOpen={pendingConfirmation !== null}
+        title={confirmationTitle}
+        message={confirmationMessage}
+        confirmLabel={confirmationLabel}
+        onCancel={() => setPendingConfirmation(null)}
+        onConfirm={handleConfirmPendingAction}
+      />
     </div>
   );
 };

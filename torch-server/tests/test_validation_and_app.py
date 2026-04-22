@@ -1,3 +1,4 @@
+import asyncio
 import importlib
 import os
 import sys
@@ -178,6 +179,40 @@ class TorchValidationTests(unittest.TestCase):
         self.assertIsNot(first.state.model_manager, second.state.model_manager)
         self.assertEqual(len(first_paths), len(set(first_paths)))
         self.assertEqual(first_paths, second_paths)
+
+    def test_configure_does_not_partially_mutate_config_on_limit_rejection(self):
+        class RejectingManager:
+            async def set_max_loaded_models(self, max_loaded_models):
+                raise RuntimeError("limit too low")
+
+        config = {
+            "host": "127.0.0.1",
+            "api_port": 8400,
+            "max_loaded_models": 4,
+            "lan_access": False,
+        }
+        fake_request = types.SimpleNamespace(
+            app=types.SimpleNamespace(
+                state=types.SimpleNamespace(
+                    config=config,
+                    model_manager=RejectingManager(),
+                )
+            )
+        )
+        request = self.control_api.ConfigureRequest(host="localhost", max_loaded_models=1)
+
+        with self.assertRaises(self.control_api.HTTPException):
+            asyncio.run(self.control_api.configure(request, fake_request))
+
+        self.assertEqual(
+            config,
+            {
+                "host": "127.0.0.1",
+                "api_port": 8400,
+                "max_loaded_models": 4,
+                "lan_access": False,
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from validation import (
+    is_loopback_host,
     validate_api_port,
     validate_bind_host,
     validate_device,
@@ -128,6 +129,8 @@ async def unload_model(req: UnloadModelRequest, request: Request):
         return {"success": True}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         _log_and_raise_internal_error("unload model", e)
 
@@ -183,29 +186,35 @@ async def list_devices(request: Request):
 async def configure(req: ConfigureRequest, request: Request):
     """Update server configuration (some changes require restart)."""
     config = request.app.state.config
+    next_config = dict(config)
     manager = request.app.state.model_manager
     restart_required = False
 
-    if req.host is not None and req.host != config["host"]:
-        config["host"] = req.host
-        config["lan_access"] = req.host != "127.0.0.1"
+    if req.host is not None and req.host != next_config["host"]:
+        next_config["host"] = req.host
+        next_config["lan_access"] = not is_loopback_host(req.host)
         restart_required = True
 
-    if req.api_port is not None and req.api_port != config["api_port"]:
-        config["api_port"] = req.api_port
+    if req.api_port is not None and req.api_port != next_config["api_port"]:
+        next_config["api_port"] = req.api_port
         restart_required = True
 
     if req.max_loaded_models is not None:
-        config["max_loaded_models"] = req.max_loaded_models
-        manager.max_loaded_models = req.max_loaded_models
+        try:
+            await manager.set_max_loaded_models(req.max_loaded_models)
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e))
+        next_config["max_loaded_models"] = req.max_loaded_models
 
     if req.lan_access is not None:
-        config["lan_access"] = req.lan_access
+        next_config["lan_access"] = req.lan_access
         if req.lan_access:
-            config["host"] = "0.0.0.0"
+            next_config["host"] = "0.0.0.0"
         else:
-            config["host"] = "127.0.0.1"
+            next_config["host"] = "127.0.0.1"
         restart_required = True
+
+    config.update(next_config)
 
     return {
         "success": True,

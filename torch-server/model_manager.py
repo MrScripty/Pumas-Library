@@ -66,6 +66,7 @@ class ModelManager:
         self.max_loaded_models = max_loaded_models
         self.slots: dict[str, ModelSlot] = {}
         self._device_locks: dict[str, asyncio.Lock] = {}
+        self._registry_lock = asyncio.Lock()
 
     def _get_device_lock(self, device_str: str) -> asyncio.Lock:
         if device_str not in self._device_locks:
@@ -78,6 +79,17 @@ class ModelManager:
     def get_slot(self, slot_id: str) -> Optional[ModelSlot]:
         return self.slots.get(slot_id)
 
+    async def set_max_loaded_models(self, max_loaded_models: int) -> None:
+        """Update slot limit without invalidating active or loading slots."""
+        async with self._registry_lock:
+            active_count = self._active_slot_count()
+            if max_loaded_models < active_count:
+                raise RuntimeError(
+                    f"Cannot reduce max_loaded_models to {max_loaded_models}; "
+                    f"{active_count} models are active or loading."
+                )
+            self.max_loaded_models = max_loaded_models
+
     async def load(
         self,
         model_path: str,
@@ -86,52 +98,53 @@ class ModelManager:
         model_type: Optional[str] = None,
     ) -> ModelSlot:
         """Load a model into a new slot."""
-        active_count = sum(
-            1 for s in self.slots.values() if s.state in (SlotState.READY, SlotState.LOADING)
-        )
-        if active_count >= self.max_loaded_models:
-            raise RuntimeError(
-                f"Maximum loaded models ({self.max_loaded_models}) reached. "
-                "Unload a model first."
-            )
-
-        slot_id = str(uuid.uuid4())[:8]
         resolved_device = self.device_manager.resolve_device(device_str)
         device_label = str(resolved_device)
 
-        slot = ModelSlot(
-            slot_id=slot_id,
-            model_name=model_name,
-            model_path=model_path,
-            device=device_label,
-            state=SlotState.LOADING,
-            model_type=model_type,
-        )
-        self.slots[slot_id] = slot
+        async with self._registry_lock:
+            active_count = self._active_slot_count()
+            if active_count >= self.max_loaded_models:
+                raise RuntimeError(
+                    f"Maximum loaded models ({self.max_loaded_models}) reached. "
+                    "Unload a model first."
+                )
+
+            slot_id = str(uuid.uuid4())[:8]
+            slot = ModelSlot(
+                slot_id=slot_id,
+                model_name=model_name,
+                model_path=model_path,
+                device=device_label,
+                state=SlotState.LOADING,
+                model_type=model_type,
+            )
+            self.slots[slot_id] = slot
+            lock = self._get_device_lock(device_label)
 
         try:
-            lock = self._get_device_lock(device_label)
             async with lock:
-                loaded = await asyncio.get_event_loop().run_in_executor(
-                    None, self._load_sync, model_path, resolved_device, model_type
-                )
-            slot._loaded = loaded
-            slot.model_type = loaded.model_type or model_type
-            slot.state = SlotState.READY
+                loaded = await self._load_model(model_path, resolved_device, model_type)
 
-            # Update memory usage
-            if resolved_device.type == "cuda":
-                slot.gpu_memory_bytes = self.device_manager.get_device_memory_used(resolved_device)
-            else:
-                slot.ram_memory_bytes = _estimate_model_ram(loaded.model)
+            async with self._registry_lock:
+                slot._loaded = loaded
+                slot.model_type = loaded.model_type or model_type
+                slot.state = SlotState.READY
+
+                # Update memory usage
+                if resolved_device.type == "cuda":
+                    slot.gpu_memory_bytes = self.device_manager.get_device_memory_used(
+                        resolved_device
+                    )
+                else:
+                    slot.ram_memory_bytes = _estimate_model_ram(loaded.model)
 
             logger.info("Model loaded: %s on %s (slot %s)", model_name, device_label, slot_id)
         except EXPECTED_LOAD_ERRORS:
-            slot.state = SlotState.ERROR
+            await self._mark_slot_error(slot_id)
             logger.exception("Failed to load model %s", model_name)
             raise
         except Exception:
-            slot.state = SlotState.ERROR
+            await self._mark_slot_error(slot_id)
             logger.exception("Unexpected failure while loading model %s", model_name)
             raise
 
@@ -151,13 +164,24 @@ class ModelManager:
             model_type=detected_type,
         )
 
+    async def _load_model(
+        self, model_path: str, device: torch.device, model_type: Optional[str]
+    ) -> LoadedModel:
+        """Load a model without blocking the event loop."""
+        return await asyncio.get_event_loop().run_in_executor(
+            None, self._load_sync, model_path, device, model_type
+        )
+
     async def unload(self, slot_id: str) -> None:
         """Unload a model from a slot."""
-        slot = self.slots.get(slot_id)
-        if slot is None:
-            raise KeyError(f"Slot not found: {slot_id}")
+        async with self._registry_lock:
+            slot = self.slots.get(slot_id)
+            if slot is None:
+                raise KeyError(f"Slot not found: {slot_id}")
+            if slot.state == SlotState.LOADING:
+                raise RuntimeError(f"Cannot unload loading slot: {slot_id}")
+            slot.state = SlotState.UNLOADING
 
-        slot.state = SlotState.UNLOADING
         try:
             if slot._loaded is not None:
                 device = slot._loaded.device
@@ -170,14 +194,16 @@ class ModelManager:
                 if device.type == "cuda":
                     torch.cuda.empty_cache()
 
-            del self.slots[slot_id]
+            async with self._registry_lock:
+                if self.slots.get(slot_id) is slot:
+                    del self.slots[slot_id]
             logger.info("Model unloaded: %s (slot %s)", slot.model_name, slot_id)
         except EXPECTED_UNLOAD_ERRORS:
-            slot.state = SlotState.ERROR
+            await self._mark_slot_error(slot_id)
             logger.exception("Failed to unload slot %s", slot_id)
             raise
         except Exception:
-            slot.state = SlotState.ERROR
+            await self._mark_slot_error(slot_id)
             logger.exception("Unexpected failure while unloading slot %s", slot_id)
             raise
 
@@ -195,6 +221,17 @@ class ModelManager:
             for slot in self.slots.values()
             if slot.state == SlotState.READY
         ]
+
+    def _active_slot_count(self) -> int:
+        return sum(
+            1 for slot in self.slots.values() if slot.state in (SlotState.READY, SlotState.LOADING)
+        )
+
+    async def _mark_slot_error(self, slot_id: str) -> None:
+        async with self._registry_lock:
+            slot = self.slots.get(slot_id)
+            if slot is not None:
+                slot.state = SlotState.ERROR
 
 
 def _estimate_model_ram(model: Any) -> Optional[int]:

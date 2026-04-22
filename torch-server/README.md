@@ -23,5 +23,8 @@ The launcher and Rust app-manager clients should treat this service as a local s
 ## Testing Contract
 Tests should create a fresh app instance per test and avoid sharing model manager state unless the test explicitly verifies concurrency behavior.
 
+## Concurrency Contract
+`model_manager.py` owns a manager-level async registry lock for slot reservations, unload transitions, and `max_loaded_models` updates. Expensive model loading still runs outside the registry lock and is serialized per resolved device.
+
 ## Non-Goals
 Frontend UI behavior is out of scope. Reason: this directory owns the Python service boundary only. Revisit trigger: add an end-to-end sidecar smoke harness.

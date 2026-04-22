@@ -85,18 +85,20 @@ Status: partially remediated; large workflow owners remain
 
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
-- `frontend/src/App.tsx` at 486 lines after launcher update state extraction;
+- `frontend/src/App.tsx` at 430 lines after launcher update and model preference state extraction;
 - `frontend/src/components/ModelManager.tsx` at 453 lines;
 - `frontend/src/components/LocalModelsList.tsx` at 467 lines;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
-- `frontend/src/components/InstallDialog.tsx` at 449 lines;
-- `frontend/src/components/ConflictResolutionDialog.tsx` at 419 lines.
+- `frontend/src/components/InstallDialog.tsx` at 482 lines;
+- `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
 
 The standards require one owner for state machines and backend-owned data to be confirmed by the backend, not speculatively owned by the frontend.
 
 Rectification:
 - Completed: move launcher update availability, update-check action state, URL opening, and stale-update clearing from `App.tsx` into `frontend/src/hooks/useLauncherUpdates.ts` with hook tests.
 - Completed: clear the delayed background launcher update check on `App.tsx` unmount now that the timer belongs to the extracted startup wiring.
+- Completed: move model starring and backend-owned link-exclusion preferences from `App.tsx` into `frontend/src/hooks/useModelPreferences.ts` with load, optimistic update, rollback, and API-unavailable tests.
+- Completed: prevent in-flight link-exclusion loads from overwriting newer local optimistic changes by guarding backend load application with an exclusion revision.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

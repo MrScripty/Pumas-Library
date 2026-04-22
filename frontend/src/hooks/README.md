@@ -16,6 +16,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useRemoteModelSearch.test.ts` | Hook coverage for debounced search flow, blank-query resets, API-unavailable errors, hydration dedupe, and stale-generation protection. |
 | `useModelLibraryActions.ts` | Related-model expansion, partial-download recovery, delete orchestration, and remote URL handling for the library UI. |
 | `useModelLibraryActions.test.ts` | Hook coverage for related-model fetch caching, offline errors, partial-download recovery flows, delete-side cancellation, and remote URL opening. |
+| `useModelPreferences.ts` | Local model starring and backend-owned link-exclusion preference state. |
+| `useModelPreferences.test.ts` | Hook coverage for backend exclusion loading, local starring, optimistic link persistence, rollback, and API-unavailable no-ops. |
 | `useDiskSpace.ts` | Disk-space lookup state for storage-health indicators in version and app controls. |
 | `useDiskSpace.test.ts` | Hook coverage for successful disk-space updates, unavailable-API no-ops, and failure swallowing. |
 | `useNetworkStatus.ts` | Polling and derivation of offline, rate-limit, and circuit-breaker status for network health indicators. |

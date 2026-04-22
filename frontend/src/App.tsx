@@ -20,6 +20,7 @@ import { useAppProcessActions } from './hooks/useAppProcessActions';
 import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useLauncherUpdates } from './hooks/useLauncherUpdates';
 import { useManagedApps } from './hooks/useManagedApps';
+import { useModelPreferences } from './hooks/useModelPreferences';
 import { api, isAPIAvailable } from './api/adapter';
 import { getLogger } from './utils/logger';
 import { APIError, ProcessError } from './errors';
@@ -34,10 +35,6 @@ export default function App() {
 
   // --- UI State ---
   const [isInstalling, setIsInstalling] = useState(false);
-
-  // Model Manager State
-  const [starredModels, setStarredModels] = useState<Set<string>>(new Set());
-  const [excludedModels, setExcludedModels] = useState<Set<string>>(new Set());
 
   // --- Custom Hooks ---
   const {
@@ -177,6 +174,12 @@ export default function App() {
   const selectedApp = apps.find((app) => app.id === selectedAppId) ?? null;
   const appDisplayName = selectedApp?.displayName ?? 'App';
   const panelState = getPanelState(selectedAppId);
+  const {
+    excludedModels,
+    starredModels,
+    toggleLink: handleToggleLink,
+    toggleStar: handleToggleStar,
+  } = useModelPreferences({ selectedAppId });
   const activeShortcutState =
     selectedAppId === 'comfyui' ? { menu: menuShortcut, desktop: desktopShortcut } : undefined;
   const {
@@ -216,19 +219,6 @@ export default function App() {
     openTorchLogPath,
     refetchStatus,
   });
-
-  // Load link exclusions from backend on mount and when app changes
-  useEffect(() => {
-    const appId = selectedAppId || 'comfyui';
-    if (!isAPIAvailable()) return;
-    void api.get_link_exclusions(appId).then((result) => {
-      if (result.success) {
-        setExcludedModels(new Set(result.excluded_model_ids));
-      }
-    }).catch((err: unknown) => {
-      logger.error('Failed to load link exclusions', { error: err });
-    });
-  }, [selectedAppId]);
 
   // --- Effects ---
   useEffect(() => {
@@ -308,52 +298,6 @@ export default function App() {
 
   const handleAddApp = (insertAtIndex: number) => {
     addApp(insertAtIndex);
-  };
-
-  const handleToggleStar = (modelId: string) => {
-    setStarredModels(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(modelId)) {
-        newSet.delete(modelId);
-      } else {
-        newSet.add(modelId);
-      }
-      return newSet;
-    });
-  };
-
-  const handleToggleLink = (modelId: string) => {
-    const appId = selectedAppId || 'comfyui';
-    const wasExcluded = excludedModels.has(modelId);
-    const nowExcluded = !wasExcluded;
-
-    // Optimistically update UI
-    setExcludedModels(prev => {
-      const newSet = new Set(prev);
-      if (nowExcluded) {
-        newSet.add(modelId);
-      } else {
-        newSet.delete(modelId);
-      }
-      return newSet;
-    });
-
-    // Persist to backend
-    if (isAPIAvailable()) {
-      void api.set_model_link_exclusion(modelId, appId, nowExcluded).catch((err: unknown) => {
-        logger.error('Failed to persist link exclusion', { modelId, error: err });
-        // Revert on failure
-        setExcludedModels(prev => {
-          const newSet = new Set(prev);
-          if (wasExcluded) {
-            newSet.add(modelId);
-          } else {
-            newSet.delete(modelId);
-          }
-          return newSet;
-        });
-      });
-    }
   };
 
   const handleShowVersionManager = (show: boolean) => {

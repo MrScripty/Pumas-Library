@@ -20,7 +20,7 @@
 ## Findings
 
 ### P01 - Torch Server Request Validation Is Too Thin for Externally Reachable Mode
-Status: non-compliant when LAN mode is enabled
+Status: remediated
 
 `torch-server/control_api.py` accepts:
 
@@ -35,28 +35,23 @@ Status: non-compliant when LAN mode is enabled
 Pydantic validates only broad Python types. The standards require boundary validation for paths, names, numeric ranges, and listener policy.
 
 Rectification:
-- Use Pydantic field validators:
-  - `model_path` must be canonicalized and inside approved model roots;
-  - `model_name` must have length and character constraints;
-  - `device` must be `auto`, `cpu`, `cuda`, or a recognized device ID;
-  - `api_port` must be 1-65535 with reserved-port policy;
-  - `max_loaded_models` must be bounded;
-  - `host` must be loopback unless LAN mode is explicitly enabled by trusted config.
-- Add a shared path validator module for Torch server instead of inline checks.
+- Completed: `torch-server/validation.py` owns shared validation for model names, canonical model paths, approved model roots, device selectors, bind hosts, API ports, LAN policy, and model-slot limits.
+- Completed: `control_api.py` validates request models at the Pydantic boundary before route handlers mutate manager state.
+- Completed: `serve.py` validates startup host, port, and max-model configuration before constructing app state.
+- Completed: sidecar unit tests cover path canonicalization, approved-root rejection, listener policy, and invalid configure behavior.
 
 ### P02 - Torch Server Has No Visible Auth or Origin Policy for LAN Mode
-Status: security risk
+Status: partially remediated; residual security follow-up tracked by D08
 
 `configure` can set LAN mode by switching host to `0.0.0.0`. The server exposes model load/unload/configure endpoints. That may be intended, but the standards require listener limits and transport safety.
 
 Rectification:
-- Add a documented LAN threat model.
-- Require an auth token, same-machine bridge token, or explicit trusted-network configuration before binding non-loopback.
-- Add request concurrency limits and model-load queue limits.
-- Log LAN mode startup prominently.
+- Completed: non-loopback bind hosts and `lan_access=true` require explicit `PUMAS_TORCH_ALLOW_LAN=1` opt-in.
+- Completed: startup logs a warning when LAN access is enabled.
+- Remaining: add token-based or same-machine bridge authentication before treating LAN exposure as fully standards-compliant.
 
 ### P03 - Python ModelManager Has Shared Mutable State Without a Single Lock
-Status: concurrency risk
+Status: remediated; integration-test expansion tracked by D06
 
 `torch-server/model_manager.py` mutates:
 
@@ -68,20 +63,19 @@ Status: concurrency risk
 Load operations use per-device locks only around the synchronous model load. Slot registry changes and max-model checks are not protected by a single manager lock. Concurrent `/api/load`, `/api/unload`, and `/api/configure` calls can race.
 
 Rectification:
-- Add an `asyncio.Lock` protecting slot registry and max-model state transitions.
-- Keep expensive model loading outside the registry lock, but reserve slots atomically first.
-- Make load/unload/configure state transitions explicit and idempotent.
-- Add concurrent request tests.
+- Completed: `ModelManager` owns a manager-level async registry lock for slot reservations, unload transitions, and `max_loaded_models` updates.
+- Completed: expensive model loading runs outside the registry lock while slot capacity is reserved atomically first.
+- Completed: tests cover concurrent load reservation and rejection behavior plus active-slot limit updates.
+- Remaining: add route-level concurrent request tests when a heavier Python API integration harness is introduced.
 
 ### P04 - Torch Server Composition Root Uses Module-Global FastAPI App
-Status: partial architecture issue
+Status: remediated
 
 `torch-server/serve.py` declares a module-global `app = FastAPI(...)`, and `create_app()` mutates this global by adding routers and state. Multiple invocations in tests or embedded contexts can duplicate routers and leak state.
 
 Rectification:
-- Construct a fresh `FastAPI` inside `create_app`.
-- Attach state and routers to the fresh instance.
-- Add a test that calling `create_app()` twice does not duplicate routes or share managers.
+- Completed: `create_app()` constructs a fresh `FastAPI` instance, attaches fresh state, and includes routers on the new instance.
+- Completed: tests verify repeated app construction does not duplicate routes or share model managers.
 
 ### P05 - Python Tooling and Test Contract Is Missing
 Status: remediated
@@ -109,7 +103,7 @@ Rectification:
 - No remaining follow-up in this finding.
 
 ### P07 - Shell Template TODO Uses `/tmp` Directly
-Status: cross-platform/script hygiene issue
+Status: remediated
 
 `scripts/templates/comfyui_run.sh` contains:
 
@@ -120,12 +114,12 @@ TEMP_PROFILE_DIR="$(mktemp -d /tmp/comfyui-profile.XXXXXX)"
 The standards require platform-aware paths and support for spaces in paths. This template is Linux-oriented, but the assumption should be documented or abstracted.
 
 Rectification:
-- Use `${TMPDIR:-/tmp}` and quote consistently.
-- Document that the template is Linux-only if that is intended.
-- Add a shellcheck pass to launcher/script tooling.
+- Completed: the template now uses `${TMPDIR:-/tmp}` as a temporary base and quotes the `mktemp` template.
+- Completed: `scripts/templates/README.md` documents the temporary-directory contract for shell templates.
+- Remaining: shellcheck enforcement remains a broader script-tooling follow-up outside this finding.
 
 ### P08 - Script and Generated-Artifact Directory Docs Are Missing
-Status: documentation non-compliance
+Status: remediated
 
 Missing READMEs from pass 1 include:
 
@@ -135,12 +129,13 @@ Missing READMEs from pass 1 include:
 - `torch-server/loaders`
 
 Rectification:
-- Add READMEs with command contract, generated artifact ownership, runtime constraints, and dependencies.
+- Completed: `scripts/dev/README.md`, `scripts/templates/README.md`, `torch-server/README.md`, and `torch-server/loaders/README.md` document command contracts, ownership, runtime constraints, and dependencies.
 
 ## Pass 04 Refactor Inputs
-- Torch request validation and path validator.
-- Torch concurrency/state lock.
-- Torch composition root cleanup.
-- Python test/tooling addition.
-- Launcher run/build semantic correction or documentation.
-- Script template portability cleanup.
+- Completed: Torch request validation and shared path/listener validator.
+- Completed: Torch concurrency/state lock.
+- Completed: Torch composition root cleanup.
+- Completed: Python test/tooling addition.
+- Completed: Launcher run/build semantic correction.
+- Completed: Script template portability cleanup.
+- Remaining: LAN authentication beyond explicit trusted-network opt-in.

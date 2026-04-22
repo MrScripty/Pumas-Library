@@ -3,7 +3,7 @@
   "src/components/AppSidebar.tsx": 339,
   "src/components/ConflictResolutionDialog.tsx": 421,
   "src/components/InstallDialog.tsx": 430,
-  "src/components/LocalModelsList.tsx": 348,
+  "src/components/LocalModelsList.tsx": 304,
   "src/components/ModelManager.tsx": 333,
   "src/components/ModelMetadataModal.tsx": 328,
   "src/components/RemoteModelListItem.tsx": 361,

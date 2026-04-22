@@ -21,6 +21,7 @@ import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps
 import { IconButton, HoldToDeleteButton, ListItem, ListItemContent } from './ui';
 import { LocalModelsEmptyState } from './LocalModelsEmptyState';
 import { LocalModelMetadataSummary } from './LocalModelMetadataSummary';
+import { LocalModelNameButton } from './LocalModelNameButton';
 import { ModelMetadataModal } from './ModelMetadataModal';
 import { RelatedModelsPanel } from './RelatedModelsPanel';
 
@@ -81,19 +82,6 @@ export function LocalModelsList({
     modelName: string;
   } | null>(null);
 
-  // Handle ctrl+click on model name to open metadata
-  const handleModelNameClick = (
-    e: React.MouseEvent,
-    modelId: string,
-    modelName: string
-  ) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault();
-      e.stopPropagation();
-      setMetadataModal({ modelId, modelName });
-    }
-  };
-
   if (modelGroups.length === 0) {
     return (
       <LocalModelsEmptyState
@@ -123,7 +111,6 @@ export function LocalModelsList({
             {group.models.map((model) => {
               const isStarred = starredModels.has(model.id);
               const isPartialDownload = Boolean(model.isPartialDownload);
-              const hasIntegrityIssue = Boolean(model.hasIntegrityIssue);
               const isLinked = !excludedModels.has(model.id);
               const isDownloading = Boolean(model.isDownloading);
               const isConvertible = !isDownloading && !isPartialDownload && Boolean(model.primaryFormat);
@@ -161,52 +148,19 @@ export function LocalModelsList({
                         size="sm"
                       />
                       <div className="flex-1 min-w-0">
-                        <button
-                          type="button"
-                          className={`text-sm font-medium flex max-w-full items-center text-left bg-transparent border-0 p-0 cursor-pointer ${
-                            isDownloading
-                              ? 'text-[hsl(var(--text-muted))]'
-                              : isPartialDownload
-                              ? 'text-[hsl(var(--launcher-accent-warning))]'
-                              : isLinked
-                              ? 'text-[hsl(var(--text-primary))]'
-                              : 'text-[hsl(var(--text-secondary))]'
-                          }`}
-                          onClick={(e) => handleModelNameClick(e, model.id, model.name)}
-                          title="Ctrl+click to view metadata"
-                        >
-                          <span className="truncate">{model.name}</span>
-                          {model.wasDequantized && (
-                            <span
-                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
-                                bg-[hsl(var(--launcher-accent-warning)/0.15)]
-                                text-[hsl(var(--launcher-accent-warning))]"
-                              title="Dequantized from quantized GGUF - may have reduced precision"
-                            >
-                              DQ
-                            </span>
-                          )}
-                          {hasIntegrityIssue && (
-                            <span
-                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
-                                bg-[hsl(var(--accent-warning)/0.2)]
-                                text-[hsl(var(--accent-warning))]"
-                              title={model.integrityIssueMessage ?? 'Library integrity issue detected for this model.'}
-                            >
-                              ISSUE
-                            </span>
-                          )}
-                          {isPartialDownload && (
-                            <span
-                              className="ml-1.5 inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded
-                                bg-[hsl(var(--launcher-accent-warning)/0.15)]
-                                text-[hsl(var(--launcher-accent-warning))]"
-                              title="Partial download detected - some expected files are missing"
-                            >
-                              PARTIAL
-                            </span>
-                          )}
-                        </button>
+                        <LocalModelNameButton
+                          modelId={model.id}
+                          modelName={model.name}
+                          isDownloading={isDownloading}
+                          isPartialDownload={isPartialDownload}
+                          isLinked={isLinked}
+                          wasDequantized={model.wasDequantized}
+                          hasIntegrityIssue={Boolean(model.hasIntegrityIssue)}
+                          integrityIssueMessage={model.integrityIssueMessage}
+                          onOpenMetadata={(modelId, modelName) => {
+                            setMetadataModal({ modelId, modelName });
+                          }}
+                        />
                         <LocalModelMetadataSummary
                           format={model.format}
                           quant={model.quant}

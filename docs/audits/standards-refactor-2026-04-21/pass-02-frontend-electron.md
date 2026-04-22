@@ -87,7 +87,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
-- `frontend/src/components/LocalModelsList.tsx` at 357 lines after related-panel, empty-state, and metadata-summary extraction;
+- `frontend/src/components/LocalModelsList.tsx` at 312 lines after related-panel, empty-state, metadata-summary, and name-button extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
@@ -116,6 +116,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 402 to 374 effective lines after empty-state extraction.
 - Completed: move local model format, quant, size, dependency, and partial-error rendering from `LocalModelsList.tsx` into `frontend/src/components/LocalModelMetadataSummary.tsx` with fallback, dependency, and partial-error tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 374 to 348 effective lines after metadata-summary extraction.
+- Completed: move local model name metadata access and status badge rendering from `LocalModelsList.tsx` into `frontend/src/components/LocalModelNameButton.tsx` with modified-click and badge tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 348 to 304 effective lines after name-button extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

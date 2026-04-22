@@ -10,18 +10,34 @@ import {
   windowAPI,
 } from './adapter';
 
-function installBridge(overrides: Partial<ElectronAPI> = {}): ElectronAPI {
+interface InstalledBridge {
+  bridge: ElectronAPI;
+  getThemeMock: ReturnType<typeof vi.fn<() => Promise<'dark' | 'light'>>>;
+  maximizeWindowMock: ReturnType<typeof vi.fn<() => Promise<void>>>;
+  minimizeWindowMock: ReturnType<typeof vi.fn<() => Promise<void>>>;
+}
+
+function installBridge(overrides: Partial<ElectronAPI> = {}): InstalledBridge {
+  const minimizeWindowMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const maximizeWindowMock = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
+  const getThemeMock = vi.fn<() => Promise<'dark' | 'light'>>().mockResolvedValue('light');
+
   const bridge = {
-    minimizeWindow: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    maximizeWindow: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
-    getTheme: vi.fn<() => Promise<'dark' | 'light'>>().mockResolvedValue('light'),
+    minimizeWindow: minimizeWindowMock,
+    maximizeWindow: maximizeWindowMock,
+    getTheme: getThemeMock,
     getPathForFile: vi.fn<(file: File) => string>().mockReturnValue('/tmp/model.gguf'),
     get_status: vi.fn(),
     ...overrides,
   } as unknown as ElectronAPI;
 
   window.electronAPI = bridge;
-  return bridge;
+  return {
+    bridge,
+    getThemeMock,
+    maximizeWindowMock,
+    minimizeWindowMock,
+  };
 }
 
 describe('api adapter', () => {
@@ -45,7 +61,7 @@ describe('api adapter', () => {
   });
 
   it('routes Electron-specific calls through the canonical bridge', async () => {
-    const bridge = installBridge();
+    const { bridge, getThemeMock, maximizeWindowMock, minimizeWindowMock } = installBridge();
 
     await windowAPI.minimize();
     await windowAPI.maximize();
@@ -54,8 +70,8 @@ describe('api adapter', () => {
     expect(detectEnvironment()).toBe('electron');
     expect(getElectronAPI()).toBe(bridge);
     expect(isAPIAvailable()).toBe(true);
-    expect(bridge.minimizeWindow).toHaveBeenCalledTimes(1);
-    expect(bridge.maximizeWindow).toHaveBeenCalledTimes(1);
-    expect(bridge.getTheme).toHaveBeenCalledTimes(1);
+    expect(minimizeWindowMock).toHaveBeenCalledTimes(1);
+    expect(maximizeWindowMock).toHaveBeenCalledTimes(1);
+    expect(getThemeMock).toHaveBeenCalledTimes(1);
   });
 });

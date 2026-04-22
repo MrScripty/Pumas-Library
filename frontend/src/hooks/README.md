@@ -14,6 +14,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useActiveModelDownload.test.ts` | Hook coverage for active download prioritization, polling refreshes, API-unavailable resets, and empty-download clearing. |
 | `useModelManagerFilters.ts` | Model manager local/remote search, category, kind, and download-mode filter state. |
 | `useModelManagerFilters.test.ts` | Hook coverage for local filters, remote kind filters, mode switching, and developer search. |
+| `useModelImportPicker.ts` | Model manager file-picker import dialog state and selected import paths. |
+| `useModelImportPicker.test.ts` | Hook coverage for import picker success, close/reset behavior, completion callback, and API-unavailable no-op behavior. |
 | `useDependencyInstaller.ts` | Root setup dependency installation action state and post-install status refresh. |
 | `useDependencyInstaller.test.ts` | Hook coverage for dependency install success, pending state, failure reset, and API-unavailable no-ops. |
 | `useRemoteModelSearch.ts` | Debounced Hugging Face search, kind derivation, and follow-up download-detail hydration for remote model discovery. |

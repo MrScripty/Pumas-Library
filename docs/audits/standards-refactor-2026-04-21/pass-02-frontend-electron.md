@@ -86,7 +86,7 @@ Status: partially remediated; large workflow owners remain
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
-- `frontend/src/components/ModelManager.tsx` at 431 lines after filter-state extraction;
+- `frontend/src/components/ModelManager.tsx` at 404 lines after filter and import-picker state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 467 lines;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
@@ -102,6 +102,8 @@ Rectification:
 - Completed: move setup dependency installation action state and error classification from `App.tsx` into `frontend/src/hooks/useDependencyInstaller.ts` with success, pending-state, failure, and API-unavailable tests.
 - Completed: move model manager search, category, remote-kind, and download-mode filter state into `frontend/src/hooks/useModelManagerFilters.ts` with local/remote/developer-search tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 401 to 388 effective lines after filter-state extraction.
+- Completed: move model manager file-picker import dialog state into `frontend/src/hooks/useModelImportPicker.ts` with picker success, close/reset, completion callback, and API-unavailable tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 388 to 368 effective lines after import-picker extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

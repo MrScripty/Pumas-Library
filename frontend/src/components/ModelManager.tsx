@@ -10,6 +10,7 @@ import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
+import { useModelImportPicker } from '../hooks/useModelImportPicker';
 import { useModelLibraryActions } from '../hooks/useModelLibraryActions';
 import { useModelManagerFilters } from '../hooks/useModelManagerFilters';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
@@ -63,10 +64,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   activeVersion,
   onChooseExistingLibrary,
 }) => {
-  // Import State
-  const [importPaths, setImportPaths] = useState<string[]>([]);
-  const [showImportDialog, setShowImportDialog] = useState(false);
-
   // HuggingFace Auth State
   const [showHfAuth, setShowHfAuth] = useState(false);
   const [isChoosingExistingLibrary, setIsChoosingExistingLibrary] = useState(false);
@@ -125,6 +122,13 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   });
 
   const filterList = isDownloadMode ? remoteKinds : categories;
+  const {
+    closeImportDialog,
+    completeImport,
+    importPaths,
+    openImportPicker,
+    showImportDialog,
+  } = useModelImportPicker({ onModelsImported });
 
   // Network status for offline/rate limit indicators
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
@@ -269,37 +273,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   };
 
-  // Import handlers (for file picker button)
-  const handleImportDialogClose = useCallback(() => {
-    setShowImportDialog(false);
-    setImportPaths([]);
-  }, []);
-
-  const handleImportComplete = useCallback(() => {
-    logger.info('Import complete, refreshing model list');
-    if (onModelsImported) {
-      onModelsImported();
-    }
-  }, [onModelsImported]);
-
-  const handleImportClick = useCallback(async () => {
-    if (!isAPIAvailable()) {
-      logger.warn('open_model_import_dialog API not available');
-      return;
-    }
-
-    try {
-      const result = await api.open_model_import_dialog();
-      if (result.success && result.paths.length > 0) {
-        logger.info('Import paths selected', { count: result.paths.length });
-        setImportPaths(result.paths);
-        setShowImportDialog(true);
-      }
-    } catch (error) {
-      logger.error('Failed to open model import dialog', { error });
-    }
-  }, []);
-
   const handleChooseExistingLibrary = useCallback(async () => {
     if (!onChooseExistingLibrary || isChoosingExistingLibrary) {
       return;
@@ -319,8 +292,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       {showImportDialog && importPaths.length > 0 && (
         <ModelImportDialog
           importPaths={importPaths}
-          onClose={handleImportDialogClose}
-          onImportComplete={handleImportComplete}
+          onClose={closeImportDialog}
+          onImportComplete={completeImport}
         />
       )}
 
@@ -353,7 +326,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         selectedFilter={selectedFilter}
         onSelectFilter={handleFilterSelect}
         onOpenModelsRoot={onOpenModelsRoot}
-        onImportModels={handleImportClick}
+        onImportModels={openImportPicker}
         onHfAuthClick={() => setShowHfAuth(true)}
         showModeToggle={Boolean(onAddModels)}
       />

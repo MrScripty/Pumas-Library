@@ -154,7 +154,7 @@ async function createWindow(): Promise<void> {
     log.info(`Loading development server: ${frontendPath}`);
     try {
       await mainWindow.loadURL(frontendPath);
-    } catch (error) {
+    } catch {
       // Dev server not running, fall back to production build
       log.warn('Dev server not available, falling back to production build');
       const prodPath = app.isPackaged
@@ -287,7 +287,8 @@ function registerIPCHandlers(): void {
  */
 async function initializeBackend(): Promise<void> {
   if (backendInitializationPromise) {
-    return await backendInitializationPromise;
+    await backendInitializationPromise;
+    return;
   }
 
   backendInitializationPromise = (async () => {
@@ -347,7 +348,7 @@ async function cleanup(): Promise<void> {
 configureLinuxDisplay();
 
 // App lifecycle handlers
-app.whenReady().then(async () => {
+void app.whenReady().then(async () => {
   log.info('App ready');
   const runtimeIconPath = getRuntimeIconPath();
   const releaseSmokeMode = isReleaseSmokeMode();

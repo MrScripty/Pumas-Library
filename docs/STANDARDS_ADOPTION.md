@@ -60,6 +60,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: The root `.editorconfig` now matches the standards template across TypeScript, Rust, Python, shell, C#, YAML/JSON, Docker, Make, and Markdown formatting boundaries.
 - 2026-04-22: Release checksum generation now fails when no artifacts are staged and excludes `checksums-sha256.txt` from its own digest list.
 - 2026-04-22: Import lookup metadata rows now use a named native expand button instead of a custom role-button wrapper.
+- 2026-04-22: The Electron workspace now owns a flat ESLint 9 configuration, declares the TypeScript ESLint tooling it executes, runs lint without the legacy `--ext` flag, and verifies linting in the Electron packaging CI job.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

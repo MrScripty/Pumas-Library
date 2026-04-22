@@ -11,7 +11,7 @@
   },
   "scripts": {
     "validate": "tsc --noEmit",
-    "prebuild": "npm run validate",
+    "prebuild": "pnpm run validate",
     "build": "tsc",
     "watch": "tsc -w",
     "start": "npm run build && electron .",
@@ -19,7 +19,7 @@
     "run:launcher-release-ci-smoke": "electron --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage --disable-gpu .",
     "dev": "npm run build && electron . --dev",
     "clean": "rm -rf dist",
-    "lint": "eslint src --ext .ts",
+    "lint": "eslint . --report-unused-disable-directives --max-warnings 0",
     "package": "npm run build && electron-builder",
     "package:linux": "npm run build && electron-builder --linux",
     "package:win": "cd ../frontend && PUMAS_MULTI_APP=false npm run build && cd ../electron && npm run build && electron-builder --win",
@@ -29,11 +29,13 @@
     "electron-log": "^5.0.0"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@types/node": "^22.14.0",
     "electron": "39.8.6",
     "electron-builder": "26.8.1",
     "eslint": "^9.39.2",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.2",
+    "typescript-eslint": "8.58.1"
   },
   "build": {
     "appId": "com.pumas.library",

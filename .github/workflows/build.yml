@@ -373,8 +373,11 @@ jobs:
             }
           }
 
+      - name: Lint Electron
+        run: corepack pnpm --filter ./electron lint
+
       - name: Build Electron TypeScript
-        run: npm run -w electron build
+        run: corepack pnpm --filter ./electron build
 
       - name: Package Electron app
         run: corepack pnpm --filter ./electron exec electron-builder --${{ matrix.platform }} --publish never

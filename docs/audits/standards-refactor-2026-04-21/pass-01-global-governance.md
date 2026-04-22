@@ -128,7 +128,8 @@ Missing or partial enforcement at audit time:
 - no `lefthook.yml` found;
 - no committed commit-message validation was present before the enforcement pass;
 - no `.github/` CI workflow found in the file inventory;
-- frontend package uses ESLint 9 flat config, but the lint command still passes `--ext`, which the standards identify as a flat-config pitfall;
+- frontend package used an ESLint 9 flat config with a legacy `--ext` lint command at audit time;
+- Electron package also used a legacy ESLint command shape and did not own a flat config before the enforcement pass;
 - frontend explicitly disables `max-lines`, `max-lines-per-function`, and `complexity`, despite active decomposition violations;
 - Rust workspace lacks `[workspace.lints]` and member `[lints] workspace = true` opt-ins;
 - no visible Rust audit policy for `cargo audit`, `cargo deny`, duplicate dependencies, or unused dependencies;
@@ -144,6 +145,7 @@ Rectification:
 
 Implementation notes:
 - The existing `.editorconfig` was expanded to cover the standards template's TypeScript, Rust, Python, shell, C#, YAML/JSON, Docker, Make, and Markdown formatting boundaries.
+- Electron linting now uses a package-local ESLint 9 flat config, a command that avoids the legacy `--ext` flat-config pitfall, and CI coverage in the Electron packaging job.
 - The repository uses `pre-commit` instead of Lefthook today; `scripts/dev/check-commit-message.sh` has been added as a commit-msg hook to enforce conventional commit subjects while broader hook migration remains a separate tooling task.
 
 ### G05 - Dependency Ownership Does Not Match Workspace Execution Boundaries
@@ -159,6 +161,10 @@ Rectification:
 - Move execution-owned TypeScript, ESLint, and type dependencies to the workspaces that run those commands.
 - Use `pnpm-workspace.yaml` catalog entries for shared versions only, not hidden ownership.
 - Verify package-local commands via workspace-scoped commands.
+
+Implementation notes:
+- Frontend and Electron now declare TypeScript/ESLint tooling in the packages that execute those commands.
+- Electron linting has a package-local flat config and passes through `corepack pnpm --filter ./electron lint`.
 
 ### G06 - Release Governance Is Present but Not Complete
 Status: partially compliant

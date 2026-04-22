@@ -366,7 +366,7 @@ export class PythonBridge {
             } else {
               resolve(response.result);
             }
-          } catch (error) {
+          } catch {
             reject(new Error(`Invalid JSON response: ${data}`));
           }
         });

@@ -11,11 +11,12 @@
  */
 
 import { useState, useEffect, useId, useRef } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
+import { api } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { useInstallationProgress } from '../hooks/useInstallationProgress';
+import { useInstallDialogLinks } from '../hooks/useInstallDialogLinks';
 import { useReleaseSizeCalculation } from '../hooks/useReleaseSizeCalculation';
 import { useInstallationState } from '../hooks/useInstallationState';
 import { ConfirmationDialog } from './ConfirmationDialog';
@@ -107,6 +108,7 @@ export function InstallDialog({
     installingVersion,
     progress,
   });
+  const { openLogPath, openReleaseLink } = useInstallDialogLinks();
 
   useReleaseSizeCalculation({
     appId,
@@ -164,44 +166,6 @@ export function InstallDialog({
   const failedLogPath = progress && progress.completed_at && !progress.success ? progress.log_path || null : null;
   const stickyFailedTag = failedTag || failedInstall?.tag || null;
   const stickyFailedLogPath = failedLogPath || failedInstall?.log || null;
-
-  const openLogPath = async (path?: string | null) => {
-    if (!path || !isAPIAvailable()) return;
-    try {
-      await api.open_path(path);
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error opening log path', { error: error.message, endpoint: error.endpoint, path });
-      } else if (error instanceof Error) {
-        logger.error('Failed to open log path', { error: error.message, path });
-      } else {
-        logger.error('Unknown error opening log path', { error, path });
-      }
-    }
-  };
-
-  const openReleaseLink = async (url: string) => {
-    try {
-      if (isAPIAvailable()) {
-        const result = await api.open_url(url);
-        if (!result?.success) {
-          logger.warn('API failed to open URL, falling back to window.open', { url });
-          window.open(url, '_blank');
-        }
-      } else {
-        window.open(url, '_blank');
-      }
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error opening release link', { error: error.message, endpoint: error.endpoint, url });
-      } else if (error instanceof Error) {
-        logger.error('Failed to open release link', { error: error.message, url });
-      } else {
-        logger.error('Unknown error opening release link', { error, url });
-      }
-      window.open(url, '_blank');
-    }
-  };
 
   const handleInstall = async (tag: string) => {
     logger.info('Starting installation', { tag });

@@ -58,6 +58,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useInstallationProgress.test.ts` | Hook coverage for external progress sync, local polling, cancellation notices, and completion-stop behavior. |
 | `useReleaseSizeCalculation.ts` | Install-dialog background release-size calculation with one-run-per-open-session guard and version refresh. |
 | `useReleaseSizeCalculation.test.ts` | Hook coverage for size calculation, skipped states, open-session guard, and close/reopen reset behavior. |
+| `useInstallDialogLinks.ts` | Install-dialog log-path and release-link opening through the backend bridge with browser fallback for release URLs. |
+| `useInstallDialogLinks.test.ts` | Hook coverage for log opening, unavailable bridge handling, release URL opening, and browser fallback. |
 | `useInstallationAccess.ts` | Filesystem-open and version-info helpers for installed version management flows. |
 | `useInstallationAccess.test.ts` | Hook coverage for API gating, active-install access, path opening, version-info lookups, and backend failure surfacing. |
 | `useInstallationManager.ts` | Version install, switch, remove, progress polling, and install-access orchestration. |

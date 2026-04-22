@@ -4,8 +4,8 @@ This register captures problems discovered during standards analysis that are no
 
 | ID | Area | Location | Problem | Suggested Follow-Up |
 | --- | --- | --- | --- | --- |
-| D01 | Electron security | `electron/src/main.ts` | `api:call` forwards arbitrary method strings and params after trusting TypeScript annotations. | Add allowlist/schema validation and tests for malformed renderer payloads. |
-| D02 | Electron security | `electron/src/main.ts` | `dialog:openFile` accepts raw dialog options from renderer. | Validate allowed properties or expose narrower dedicated dialog methods. |
+| D01 | Electron security | `electron/src/main.ts` | `api:call` forwards arbitrary method strings and params after trusting TypeScript annotations. | Addressed by RPC method allowlisting, params shape validation, and package-local malformed payload tests. |
+| D02 | Electron security | `electron/src/main.ts` | `dialog:openFile` accepts raw dialog options from renderer. | Addressed by dialog option sanitization and package-local tests that reject unsupported fields and malformed filters. |
 | D03 | RPC security | `rust/crates/pumas-rpc/src/server.rs` | CORS allows any origin/method/header. | Addressed by loopback-only origin checks, narrowed methods/headers, and unit tests; revisit if a non-loopback web client becomes supported. |
 | D04 | RPC lifecycle | `rust/crates/pumas-rpc/src/server.rs` | Spawned Axum server handle is discarded; shutdown/panic handling is not owned. | Addressed by returning an owned `ServerHandle`, logging server task errors, and aborting the task during explicit or drop-based shutdown. |
 | D05 | Async lifecycle | `rust/crates/pumas-core/src/api/builder.rs` | Startup recovery tasks are spawned without tracked handles. | Add task supervisor and shutdown tests. |

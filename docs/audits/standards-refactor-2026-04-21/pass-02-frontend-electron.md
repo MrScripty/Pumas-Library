@@ -56,6 +56,10 @@ Rectification:
 - Validate dialog options and restrict allowed properties from renderer callers.
 - Change `shell:openExternal` raw input type to `unknown`, validate string shape, parse URL, and restrict schemes.
 
+Implementation notes:
+- `electron/src/ipc-validation.ts` validates RPC method names, params records, dialog options, and external URL schemes before main-process handlers use renderer-supplied values.
+- `electron/tests/ipc-validation.test.mjs` covers malformed methods, non-record params, unsupported dialog fields, malformed filters, and non-http URL schemes through the package-local Electron test script.
+
 ### F03 - Frontend Uses Local Casts Around `window.electronAPI`
 Status: partially compliant, needs contract consolidation
 

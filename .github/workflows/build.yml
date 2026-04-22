@@ -376,6 +376,9 @@ jobs:
       - name: Lint Electron
         run: corepack pnpm --filter ./electron lint
 
+      - name: Test Electron IPC validation
+        run: corepack pnpm --filter ./electron test
+
       - name: Build Electron TypeScript
         run: corepack pnpm --filter ./electron build
 

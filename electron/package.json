@@ -13,6 +13,7 @@
     "validate": "tsc --noEmit",
     "prebuild": "pnpm run validate",
     "build": "tsc",
+    "test": "pnpm run build && node --test tests/*.test.mjs",
     "watch": "tsc -w",
     "start": "npm run build && electron .",
     "run:launcher-release": "electron .",

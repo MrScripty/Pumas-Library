@@ -8,7 +8,7 @@ This directory contains developer-oriented setup, build, run, and SBOM helper sc
 | ---- | ----------- |
 | `build.sh` | Delegates release build behavior to the root launcher contract. |
 | `generate-sbom.sh` | Generates dependency SBOM snapshots for supported ecosystems. |
-| `list-audit-files.sh` | Prints the source tree view used by standards audits while excluding generated/runtime paths. |
+| `list-audit-files.sh` | Prints the source tree view used by standards audits while excluding generated/runtime paths and retaining tracked plugin manifests. |
 | `run-dev.sh` | Delegates development launch behavior to the root launcher contract. |
 | `setup.sh` | Delegates local setup behavior to the root launcher contract. |
 

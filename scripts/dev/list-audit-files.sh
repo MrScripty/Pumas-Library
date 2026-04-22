@@ -11,6 +11,7 @@ Usage: scripts/dev/list-audit-files.sh [--tracked-only] [--null]
 Prints source-controlled and non-ignored local files that should be included in
 standards audits. Generated and runtime-heavy paths are excluded explicitly so
 local build output does not pollute line-count, search, or ownership scans.
+Tracked plugin manifests under launcher-data/plugins remain in scope.
 USAGE
 }
 
@@ -52,7 +53,14 @@ pathspecs=(
   ':!:bindings/swift/**'
   ':!:electron/release/**'
   ':!:frontend/dist/**'
-  ':!:launcher-data/**'
+  ':!:launcher-data/cache/**'
+  ':!:launcher-data/config/**'
+  ':!:launcher-data/icons/**'
+  ':!:launcher-data/logs/**'
+  ':!:launcher-data/mapping-configs/**'
+  ':!:launcher-data/metadata/**'
+  ':!:launcher-data/model-library/**'
+  ':!:launcher-data/profiles/**'
   ':!:node_modules/**'
   ':!:rust/target/**'
   ':!:torch-server/.venv/**'

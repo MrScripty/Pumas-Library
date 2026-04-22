@@ -16,7 +16,7 @@ This document maps Pumas Library's local standards work to the shared standards 
 | `CROSS-PLATFORM-STANDARDS.md` | Partially adopted | Platform modules and package targets | Add CI matrix and platform contract documentation. |
 | `INTEROP-STANDARDS.md` | Partially adopted | Preload bridge, JSON-RPC, UniFFI/Rustler crates | Replace hand-maintained method drift with a registry and boundary validation. |
 | `DEPENDENCY-STANDARDS.md` | Partially adopted | Lockfiles, workspace dependency declarations, package-local TypeScript tool ownership | Continue dependency audits for Rust crates and release tooling. |
-| `TOOLING-STANDARDS.md` | Partially adopted | Launcher test entrypoint, frontend lint/typecheck scripts | Add hooks, CI, Rust workspace lints, and staged artifact validation. |
+| `TOOLING-STANDARDS.md` | Partially adopted | Launcher test entrypoint, frontend lint/typecheck scripts, Rust workspace verification script and CI job | Add hooks, Rust workspace lints, and staged artifact validation. |
 | `TESTING-STANDARDS.md` | Partially adopted | Colocated frontend tests, Rust tests, launcher tests | Add cross-layer contract checks and Python/Torch tests. |
 | `LANGUAGE-BINDINGS-STANDARDS.md` | Partially adopted | UniFFI/Rustler crates and C# smoke harness | Classify binding surfaces and split wrapper modules by domain. |
 | `LAUNCHER-STANDARDS.md` | Mostly adopted | Root `launcher.sh`, JS launcher parser/tests | Clarify dev/release artifact semantics and CI GUI smoke contract. |
@@ -48,6 +48,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Frontend destructive and state-changing confirmations moved from `window.confirm` to an app-owned accessible alert dialog.
 - 2026-04-22: Launcher app icons now keep app selection and launch/stop indicators as sibling native buttons instead of nested custom role-button controls.
 - 2026-04-22: The model metadata modal now uses a named dialog, native backdrop button, Escape close handling, and focus restoration.
+- 2026-04-22: Rust workspace verification was centralized in `scripts/rust/check.sh` and wired into CI for fmt, check, clippy, tests, doc tests, and no-default-feature checks.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

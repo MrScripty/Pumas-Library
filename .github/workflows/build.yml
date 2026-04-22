@@ -76,6 +76,28 @@ jobs:
             rust/target/${{ matrix.target }}/release/pumas-rpc.exe
           if-no-files-found: ignore
 
+  rust-quality:
+    name: Rust Quality
+    needs: [lint-workflows]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust -> target
+
+      - name: Run Rust verification contract
+        run: ./scripts/rust/check.sh
+
   # Build and test frontend
   build-frontend:
     name: Build Frontend (${{ matrix.os }})
@@ -373,7 +395,7 @@ jobs:
   release:
     name: Create Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build-rust, build-electron, generate-bindings, verify-launcher]
+    needs: [build-rust, rust-quality, build-electron, generate-bindings, verify-launcher]
     runs-on: ubuntu-latest
     permissions:
       contents: write

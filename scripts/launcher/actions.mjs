@@ -110,7 +110,10 @@ async function runDevApp(runArgs, runtime) {
     corepackPnpmArgs(workspaceScriptArgs('./electron', 'dev', runArgs)),
     {
       cwd: context.repoRoot,
-      env: { PUMAS_RUST_BACKEND: '1' },
+      env: {
+        PUMAS_RUST_BACKEND: '1',
+        PUMAS_RPC_BINARY: platformService.debugBackendBinary(context),
+      },
     }
   );
 }
@@ -127,7 +130,10 @@ async function runReleaseApp(runArgs, runtime) {
     corepackPnpmArgs(workspaceScriptArgs('./electron', 'run:launcher-release', runArgs)),
     {
       cwd: context.repoRoot,
-      env: { PUMAS_RUST_BACKEND: '1' },
+      env: {
+        PUMAS_RUST_BACKEND: '1',
+        PUMAS_RPC_BINARY: platformService.releaseBackendBinary(context),
+      },
     }
   );
 }
@@ -191,6 +197,7 @@ async function runReleaseSmoke(runtime) {
       cwd: context.repoRoot,
       env: {
         PUMAS_RUST_BACKEND: '1',
+        PUMAS_RPC_BINARY: platformService.releaseBackendBinary(context),
         PUMAS_RELEASE_SMOKE: '1',
         PUMAS_RELEASE_SMOKE_EXIT_MS: String(RELEASE_SMOKE_EXIT_DELAY_MS),
       },
@@ -212,11 +219,11 @@ export function resolveReleaseSmokeScript(platformService) {
 
 function ensureDevRuntimeArtifacts(runtime) {
   const { context, platformService } = runtime;
-  const releaseBackendBinary = platformService.releaseBackendBinary(context);
+  const debugBackendBinary = platformService.debugBackendBinary(context);
 
-  if (!fs.existsSync(releaseBackendBinary)) {
+  if (!fs.existsSync(debugBackendBinary)) {
     throw new LauncherError(
-      `missing runtime backend binary: ${releaseBackendBinary} (run ${context.displayName} --build-release first)`,
+      `missing runtime backend binary: ${debugBackendBinary} (run ${context.displayName} --build first)`,
       { exitCode: EXIT_CODES.OPERATION_FAILED }
     );
   }

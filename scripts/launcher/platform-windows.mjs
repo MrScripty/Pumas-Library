@@ -9,6 +9,9 @@ export function createWindowsPlatformService() {
     pythonModuleArgs(moduleName, args = []) {
       return ['-3', '-m', moduleName, ...args];
     },
+    debugBackendBinary(context) {
+      return path.join(context.rustTargetDir, 'debug', `${context.appBin}.exe`);
+    },
     releaseBackendBinary(context) {
       return path.join(context.rustTargetDir, 'release', `${context.appBin}.exe`);
     },

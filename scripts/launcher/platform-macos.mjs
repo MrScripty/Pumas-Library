@@ -9,6 +9,9 @@ export function createMacOSPlatformService() {
     pythonModuleArgs(moduleName, args = []) {
       return ['-m', moduleName, ...args];
     },
+    debugBackendBinary(context) {
+      return path.join(context.rustTargetDir, 'debug', context.appBin);
+    },
     releaseBackendBinary(context) {
       return path.join(context.rustTargetDir, 'release', context.appBin);
     },

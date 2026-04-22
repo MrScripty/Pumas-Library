@@ -98,8 +98,8 @@ Use the same lifecycle flags on both wrappers:
 | `--release-smoke` | Launch the release runtime briefly and fail if startup is not healthy |
 | `--help` | Show launcher usage |
 
-Note: `--run` expects the release backend binary to exist, so build first with
-`--build-release`.
+Note: `--run` expects the debug backend binary from `--build`. Use
+`--build-release` before `--run-release` or `--release-smoke`.
 
 Packaged desktop builds try to reuse an existing launcher root by walking up
 from the packaged binary location. If you need to pin a specific existing

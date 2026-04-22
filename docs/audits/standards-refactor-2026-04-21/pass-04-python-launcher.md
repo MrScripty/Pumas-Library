@@ -95,19 +95,17 @@ Rectification:
 - Remaining: add a formal Python lint/format/type-check policy, or document why the sidecar remains unit-tested only until a dedicated Python tooling package is introduced.
 
 ### P06 - Launcher Contract Is Mostly Implemented but Build/Release Semantics Need Clarification
-Status: partially compliant
+Status: remediated
 
 Launcher positives are strong. Remaining gaps:
 
-- `ensureDevRuntimeArtifacts` requires a release backend binary before `--run`, which may surprise developers expecting a dev build path;
-- `--build` compiles Rust debug backend, frontend, and Electron main, but `--run` checks release backend;
-- CI smoke behavior is encoded for Linux via `run:launcher-release-ci-smoke`, but the CI workflow file is not visible;
-- dependency installation implementation needs deeper audit against per-dependency idempotent behavior.
+- Completed: `--run` now checks the debug backend binary produced by `--build` and passes that path to Electron through `PUMAS_RPC_BINARY`.
+- Completed: `--run-release` and `--release-smoke` pass the release backend binary produced by `--build-release`.
+- Completed: Electron backend path resolution has package-local tests for launcher overrides, source build profiles, packaged resource paths, and platform executable names.
+- Completed: CI smoke behavior is visible in `.github/workflows/build.yml` through bounded release smoke.
 
 Rectification:
-- Decide whether `--run` requires release backend by design. If yes, document the reason in launcher README and usage. If no, make `--run` use the debug artifact produced by `--build`.
-- Add launcher README sections for state roots, CI GUI smoke, and release artifact expectations.
-- Verify `installDependencies` has one check/install/recheck unit per dependency.
+- Remaining follow-up: add deeper unit coverage around `installDependencies` check/install/recheck behavior for each dependency.
 
 ### P07 - Shell Template TODO Uses `/tmp` Directly
 Status: cross-platform/script hygiene issue

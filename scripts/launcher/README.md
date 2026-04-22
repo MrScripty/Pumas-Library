@@ -86,6 +86,9 @@ node --test scripts/launcher/*.test.mjs
 - Only `--run` and `--run-release` accept forwarded args after `--`.
 - `--test` runs the Rust workspace, launcher tests, frontend tests and type
   checks, Electron validation, and Torch sidecar Python unit tests.
+- `--run` launches Electron with the debug backend binary created by
+  `--build`; release launch and smoke actions use the release backend binary
+  created by `--build-release`.
 - Errors return stable exit codes for usage, missing dependencies, missing
   release artifacts, and general operation failure.
 - The CLI contract is preserved even if internal modules are reorganized.

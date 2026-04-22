@@ -54,9 +54,15 @@ test('buildUsage advertises the shared launcher contract', () => {
 test('platform factory resolves the Windows Corepack command separately', () => {
   const windows = createPlatformService('win32');
   const linux = createPlatformService('linux');
+  const context = {
+    rustTargetDir: '/repo/rust/target',
+    appBin: 'pumas-rpc',
+  };
 
   assert.equal(windows.corepackCommand, 'corepack.cmd');
   assert.equal(linux.corepackCommand, 'corepack');
+  assert.equal(windows.debugBackendBinary(context), '/repo/rust/target/debug/pumas-rpc.exe');
+  assert.equal(linux.debugBackendBinary(context), '/repo/rust/target/debug/pumas-rpc');
 });
 
 test('platform factory resolves Python module invocations per host', () => {

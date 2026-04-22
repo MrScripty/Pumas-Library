@@ -14,6 +14,7 @@ import {
   validateApiCallPayload,
   validateExternalUrl,
 } from './ipc-validation';
+import { resolveBackendBinaryPath } from './backend-path';
 import { PythonBridge } from './python-bridge';
 import log from 'electron-log';
 
@@ -294,11 +295,14 @@ async function initializeBackend(): Promise<void> {
   backendInitializationPromise = (async () => {
     log.info('Initializing backend bridge...');
 
-    const binaryName = process.platform === 'win32' ? 'pumas-rpc.exe' : 'pumas-rpc';
-
-    const rustBinaryPath = app.isPackaged
-      ? path.join(process.resourcesPath, binaryName)
-      : path.join(__dirname, '..', '..', 'rust', 'target', 'release', binaryName);
+    const rustBinaryPath = resolveBackendBinaryPath({
+      defaultBuildProfile: process.argv.includes('--dev') ? 'debug' : 'release',
+      isPackaged: app.isPackaged,
+      overridePath: process.env.PUMAS_RPC_BINARY,
+      platform: process.platform,
+      resourcesPath: process.resourcesPath,
+      sourceRoot: path.join(__dirname, '..', '..'),
+    });
 
     const launcherRoot = resolveLauncherRoot({
       appImagePath: process.env.APPIMAGE,

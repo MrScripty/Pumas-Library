@@ -64,6 +64,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Sidebar background deselection no longer depends on a generic JSX keyboard handler; Escape handling is owned by an explicit listener with focused tests.
 - 2026-04-22: Electron IPC validation now has package-local Node tests for RPC method allowlisting, dialog option sanitization, and external URL scheme validation.
 - 2026-04-22: The launcher `--test` action and CI launcher verification now run the Torch sidecar Python unit suite through platform-specific Python module commands.
+- 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

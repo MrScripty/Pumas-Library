@@ -8,10 +8,11 @@ This directory verifies Electron source behavior that can be tested without laun
 ## Contents
 | File | Description |
 | ---- | ----------- |
+| `backend-path.test.mjs` | Exercises compiled backend binary path resolution for launcher overrides, source builds, and packaged resources. |
 | `ipc-validation.test.mjs` | Exercises compiled IPC validation helpers for RPC method allowlisting, dialog option sanitization, and external URL scheme validation. |
 
 ## Problem
-Renderer input is not trusted just because TypeScript types exist in preload or frontend code. The Electron package needs fast tests that prove main-process boundary validators reject malformed payloads before IPC handlers forward work.
+Renderer input is not trusted just because TypeScript types exist in preload or frontend code. Runtime paths also need an explicit launcher contract so development and release flows do not accidentally launch different artifacts than the wrapper verified. The Electron package needs fast tests that prove main-process helpers enforce those boundaries before IPC handlers forward work or backend processes are spawned.
 
 ## Constraints
 - Tests run with Node's built-in `node:test` runner to avoid adding another Electron test framework.
@@ -37,7 +38,9 @@ Keep Electron boundary tests in this package and execute them through the packag
 
 ## Dependencies
 ### Internal
+- `../src/backend-path.ts` - Source backend binary path resolver compiled before the tests run.
 - `../src/ipc-validation.ts` - Source validators compiled before the tests run.
+- `../dist/backend-path.js` - Runtime module imported by the Node tests.
 - `../dist/ipc-validation.js` - Runtime module imported by the Node tests.
 
 ### External

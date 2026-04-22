@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { useInstallationProgress } from '../hooks/useInstallationProgress';
+import { useReleaseSizeCalculation } from '../hooks/useReleaseSizeCalculation';
 import { useInstallationState } from '../hooks/useInstallationState';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { InstallDialogContent } from './InstallDialogContent';
@@ -73,7 +74,6 @@ export function InstallDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const cancellationRef = useRef(false);
-  const sizeCalcTriggeredRef = useRef(false);
   const titleId = useId();
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -106,6 +106,13 @@ export function InstallDialog({
     isOpen,
     installingVersion,
     progress,
+  });
+
+  useReleaseSizeCalculation({
+    appId,
+    availableVersions,
+    isOpen,
+    onRefreshAll,
   });
 
   // Sync installingVersion with external tag
@@ -141,64 +148,6 @@ export function InstallDialog({
 
     return () => clearTimeout(timer);
   }, [progress, onRefreshProgress, setShowCompletedItems, setViewMode]);
-
-  // Reset size calculation flag when dialog closes
-  useEffect(() => {
-    if (!isOpen) {
-      sizeCalcTriggeredRef.current = false;
-    }
-  }, [isOpen]);
-
-  // Calculate sizes for releases in the background when dialog opens (once per session)
-  useEffect(() => {
-    if (!isOpen || availableVersions.length === 0 || sizeCalcTriggeredRef.current) {
-      return;
-    }
-
-    const releasesNeedingSize = availableVersions.filter(
-      release =>
-        release.tagName && // Skip releases without valid tag_name
-        (release.totalSize === null || release.totalSize === undefined)
-    );
-
-    if (releasesNeedingSize.length === 0) {
-      return;
-    }
-
-    // Mark as triggered to prevent re-running on availableVersions updates
-    sizeCalcTriggeredRef.current = true;
-
-    const calculateSizes = async () => {
-      logger.info('Starting background size calculation', { releaseCount: releasesNeedingSize.length });
-
-      for (const release of releasesNeedingSize) {
-        try {
-          await api.calculate_release_size(release.tagName, false, appId);
-        } catch (error) {
-          if (error instanceof APIError) {
-            logger.error('API error calculating release size', { error: error.message, endpoint: error.endpoint, tag: release.tagName });
-          } else if (error instanceof Error) {
-            logger.error('Failed to calculate release size', { error: error.message, tag: release.tagName });
-          } else {
-            logger.error('Unknown error calculating release size', { error, tag: release.tagName });
-          }
-        }
-      }
-
-      logger.info('Size calculation complete, refreshing versions');
-      await onRefreshAll(false);
-    };
-
-    calculateSizes().catch((error: unknown) => {
-      if (error instanceof APIError) {
-        logger.error('API error during background size calculation', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Error during background size calculation', { error: error.message });
-      } else {
-        logger.error('Unknown error during background size calculation', { error: String(error) });
-      }
-    });
-  }, [appId, isOpen, availableVersions, onRefreshAll]);
 
   // Filter versions based on user preferences
   const filteredVersions = availableVersions.filter((release) => {

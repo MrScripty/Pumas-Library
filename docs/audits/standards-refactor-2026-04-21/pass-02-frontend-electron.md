@@ -89,7 +89,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
-- `frontend/src/components/InstallDialog.tsx` at 482 lines;
+- `frontend/src/components/InstallDialog.tsx` at 432 lines after release-size calculation extraction;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
 
 The standards require one owner for state machines and backend-owned data to be confirmed by the backend, not speculatively owned by the frontend.
@@ -126,6 +126,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/model-import/useModelImportWorkflow.ts` from 391 to 354 effective lines after sharded-set detection extraction.
 - Completed: move import metadata lookup execution from `useModelImportWorkflow.ts` into `frontend/src/components/model-import/modelImportMetadataLookup.ts` with embedded match, bundle lookup, invalid file, and progress tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/model-import/useModelImportWorkflow.ts` from the oversized-file baseline after it reached 259 effective lines.
+- Completed: move install-dialog background release-size calculation from `InstallDialog.tsx` into `frontend/src/hooks/useReleaseSizeCalculation.ts` with size calculation, skipped-state, session guard, and close/reopen reset tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/InstallDialog.tsx` from 430 to 390 effective lines after release-size calculation extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

@@ -217,6 +217,26 @@ pub type FfiResult<T> = Result<T, FfiError>;
 // UniFFI scaffolding - this generates the FFI glue code
 uniffi::setup_scaffolding!();
 
+fn validate_required_string(value: String, field: &str) -> FfiResult<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(FfiError::Validation {
+            message: format!("{field} must not be empty"),
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_path_string(value: String, field: &str) -> FfiResult<String> {
+    let path = validate_required_string(value, field)?;
+    if path.contains('\0') {
+        return Err(FfiError::Validation {
+            message: format!("{field} must not contain NUL bytes"),
+        });
+    }
+    Ok(path)
+}
+
 /// Get the version of the pumas-uniffi bindings.
 #[uniffi::export]
 pub fn version() -> String {
@@ -346,18 +366,18 @@ pub struct FfiModelImportSpec {
     pub security_acknowledged: Option<bool>,
 }
 
-impl From<FfiModelImportSpec> for pumas_library::models::ModelImportSpec {
-    fn from(s: FfiModelImportSpec) -> Self {
-        Self {
-            path: s.path,
-            family: s.family,
-            official_name: s.official_name,
-            repo_id: s.repo_id,
-            model_type: s.model_type,
-            subtype: s.subtype,
-            tags: s.tags,
-            security_acknowledged: s.security_acknowledged,
-        }
+impl FfiModelImportSpec {
+    fn into_core(self) -> FfiResult<pumas_library::models::ModelImportSpec> {
+        Ok(pumas_library::models::ModelImportSpec {
+            path: validate_path_string(self.path, "path")?,
+            family: validate_required_string(self.family, "family")?,
+            official_name: validate_required_string(self.official_name, "official_name")?,
+            repo_id: self.repo_id,
+            model_type: self.model_type,
+            subtype: self.subtype,
+            tags: self.tags,
+            security_acknowledged: self.security_acknowledged,
+        })
     }
 }
 
@@ -680,17 +700,17 @@ pub struct FfiDownloadRequest {
     pub pipeline_tag: Option<String>,
 }
 
-impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest {
-    fn from(r: FfiDownloadRequest) -> Self {
-        Self {
-            repo_id: r.repo_id,
-            family: r.family,
-            official_name: r.official_name,
-            model_type: r.model_type,
-            quant: r.quant,
-            filename: r.filename,
-            filenames: r.filenames,
-            pipeline_tag: r.pipeline_tag,
+impl FfiDownloadRequest {
+    fn into_core(self) -> FfiResult<pumas_library::model_library::DownloadRequest> {
+        Ok(pumas_library::model_library::DownloadRequest {
+            repo_id: validate_required_string(self.repo_id, "repo_id")?,
+            family: validate_required_string(self.family, "family")?,
+            official_name: validate_required_string(self.official_name, "official_name")?,
+            model_type: self.model_type,
+            quant: self.quant,
+            filename: self.filename,
+            filenames: self.filenames,
+            pipeline_tag: self.pipeline_tag,
             bundle_format: None,
             pipeline_class: None,
             // Preserve the existing foreign-language request shape for now.
@@ -699,7 +719,7 @@ impl From<FfiDownloadRequest> for pumas_library::model_library::DownloadRequest 
             download_url: None,
             model_card_json: None,
             license_status: None,
-        }
+        })
     }
 }
 
@@ -1121,6 +1141,7 @@ enum FfiApiInner {
 
 impl FfiPumasApi {
     async fn new_with_default_root(launcher_root: String) -> Result<Arc<Self>, FfiError> {
+        let launcher_root = validate_path_string(launcher_root, "launcher_root")?;
         if let Some(client) = Self::try_connect_client(&launcher_root).await? {
             return Ok(Arc::new(Self {
                 inner: FfiApiInner::Client(client),
@@ -1136,13 +1157,14 @@ impl FfiPumasApi {
     }
 
     async fn new_with_configured_root(config: FfiApiConfig) -> Result<Arc<Self>, FfiError> {
-        if let Some(client) = Self::try_connect_client(&config.launcher_root).await? {
+        let launcher_root = validate_path_string(config.launcher_root, "launcher_root")?;
+        if let Some(client) = Self::try_connect_client(&launcher_root).await? {
             return Ok(Arc::new(Self {
                 inner: FfiApiInner::Client(client),
             }));
         }
 
-        let api = PumasApi::builder(&config.launcher_root)
+        let api = PumasApi::builder(&launcher_root)
             .auto_create_dirs(config.auto_create_dirs)
             .with_hf_client(config.enable_hf)
             .with_process_manager(false)
@@ -1328,7 +1350,7 @@ impl FfiPumasApi {
         &self,
         spec: FfiModelImportSpec,
     ) -> Result<FfiModelImportResult, FfiError> {
-        let core_spec = pumas_library::models::ModelImportSpec::from(spec);
+        let core_spec = spec.into_core()?;
         let result = match &self.inner {
             FfiApiInner::Primary(api) => {
                 api.import_model(&core_spec).await.map_err(FfiError::from)?
@@ -1346,8 +1368,21 @@ impl FfiPumasApi {
         &self,
         specs: Vec<FfiModelImportSpec>,
     ) -> Vec<FfiModelImportResult> {
-        let core_specs: Vec<pumas_library::models::ModelImportSpec> =
-            specs.into_iter().map(Into::into).collect();
+        let mut core_specs = Vec::with_capacity(specs.len());
+        for spec in specs {
+            match spec.into_core() {
+                Ok(core_spec) => core_specs.push(core_spec),
+                Err(err) => {
+                    return vec![FfiModelImportResult {
+                        path: String::new(),
+                        success: false,
+                        model_path: None,
+                        error: Some(err.to_string()),
+                        security_tier: None,
+                    }];
+                }
+            }
+        }
         match &self.inner {
             FfiApiInner::Primary(api) => api
                 .import_models_batch(core_specs)
@@ -1521,7 +1556,7 @@ impl FfiPumasApi {
 
     /// Start downloading a model from HuggingFace.
     pub async fn start_hf_download(&self, request: FfiDownloadRequest) -> Result<String, FfiError> {
-        let core_req = pumas_library::model_library::DownloadRequest::from(request);
+        let core_req = request.into_core()?;
         match &self.inner {
             FfiApiInner::Primary(api) => api
                 .start_hf_download(&core_req)
@@ -1874,7 +1909,7 @@ mod tests {
             pipeline_tag: Some("text-to-image".to_string()),
         };
 
-        let request = pumas_library::model_library::DownloadRequest::from(ffi_request);
+        let request = ffi_request.into_core().unwrap();
         assert_eq!(request.repo_id, "repo/model");
         assert_eq!(request.family, "diffusion");
         assert_eq!(request.official_name, "Model");
@@ -1887,5 +1922,45 @@ mod tests {
         assert!(request.download_url.is_none());
         assert!(request.model_card_json.is_none());
         assert!(request.license_status.is_none());
+    }
+
+    #[test]
+    fn test_ffi_download_request_rejects_empty_required_fields() {
+        let ffi_request = FfiDownloadRequest {
+            repo_id: " ".to_string(),
+            family: "diffusion".to_string(),
+            official_name: "Model".to_string(),
+            model_type: None,
+            quant: None,
+            filename: None,
+            filenames: None,
+            pipeline_tag: None,
+        };
+
+        let error = ffi_request.into_core().unwrap_err();
+        assert!(matches!(error, FfiError::Validation { .. }));
+    }
+
+    #[test]
+    fn test_ffi_import_spec_rejects_empty_path() {
+        let spec = FfiModelImportSpec {
+            path: " ".to_string(),
+            family: "llm".to_string(),
+            official_name: "Model".to_string(),
+            repo_id: None,
+            model_type: None,
+            subtype: None,
+            tags: None,
+            security_acknowledged: None,
+        };
+
+        let error = spec.into_core().unwrap_err();
+        assert!(matches!(error, FfiError::Validation { .. }));
+    }
+
+    #[test]
+    fn test_validate_path_string_rejects_nul_bytes() {
+        let error = validate_path_string("abc\0def".to_string(), "launcher_root").unwrap_err();
+        assert!(matches!(error, FfiError::Validation { .. }));
     }
 }

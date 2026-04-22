@@ -9,6 +9,8 @@ This crate owns generated binding configuration, FFI-safe DTOs, async runtime br
 ## Producer Contract
 Every exported API must have an explicit support tier before broadening the binding surface. Host-facing strings, paths, and JSON payloads must be validated before reaching core services.
 
+The current support tiers and validation rules are tracked in `docs/contracts/native-bindings-surface.md`.
+
 ## Consumer Contract
 Binding consumers should use generated packages and avoid depending on Rust-internal DTO layout. Compatibility is governed by the artifact contract and the support tier assigned to each API.
 

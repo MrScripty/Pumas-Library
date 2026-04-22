@@ -54,6 +54,9 @@ Only one native library is present per platform package.
 - The internal native module identity remains `pumas_uniffi` in this release
   flow even when outer package names are product-facing.
 - Generated code is disposable and must not be hand-edited.
+- Exported methods and records are classified in
+  `docs/contracts/native-bindings-surface.md`; generated packages should expose
+  only that documented surface.
 
 ## C# Loading
 

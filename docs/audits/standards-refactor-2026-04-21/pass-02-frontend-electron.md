@@ -172,6 +172,7 @@ The file comments say this is due to legacy noise. That is an acceptable tempora
 Rectification:
 - Completed: `frontend/scripts/check-file-size.js` now enforces a committed baseline ratchet so existing oversized files cannot grow and new files still fail above 300 source lines.
 - Completed: `frontend/scripts/file-size-baseline.json` records the current oversized file baseline for decomposition tracking.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/App.tsx` from 498 to 376 effective lines after the F04 state-owner extractions.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.
 

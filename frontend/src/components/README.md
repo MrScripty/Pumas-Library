@@ -17,6 +17,8 @@ bridge.
 | `ConfirmationDialog.test.tsx` | Interaction coverage for confirmation, cancellation, and Escape handling. |
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |
 | `InstallDialog.test.tsx` | Dialog naming and dismissal coverage for modal install interactions. |
+| `InstallDialogFrame.tsx` | Modal/page frame, header, backdrop, Escape handling, and focus restoration for install dialog content. |
+| `InstallDialogFrame.test.tsx` | Rendering and dismissal coverage for install dialog modal and page frames. |
 | `InstallDialogContent.tsx` | Presentational install-dialog body for banners, progress details, and version rows. |
 | `InstallDialogContent.test.tsx` | Interaction coverage for install-dialog notices, detail-view routing, and version-row action wiring. |
 | `ProgressDetailsView.tsx` | Detailed install-progress view for stage, speed, package, completed-item, and failure summaries. |

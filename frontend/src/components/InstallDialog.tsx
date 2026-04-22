@@ -10,10 +10,8 @@
  * - installationFormatters utility (formatting helpers)
  */
 
-import { useState, useEffect, useId, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../api/adapter';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
 import type { VersionRelease, InstallationProgress } from '../hooks/useVersions';
 import { useInstallationProgress } from '../hooks/useInstallationProgress';
 import { useInstallDialogLinks } from '../hooks/useInstallDialogLinks';
@@ -21,6 +19,7 @@ import { useReleaseSizeCalculation } from '../hooks/useReleaseSizeCalculation';
 import { useInstallationState } from '../hooks/useInstallationState';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { InstallDialogContent } from './InstallDialogContent';
+import { InstallDialogFrame } from './InstallDialogFrame';
 import { getLogger } from '../utils/logger';
 import { APIError, NetworkError } from '../errors';
 
@@ -75,8 +74,6 @@ export function InstallDialog({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const cancellationRef = useRef(false);
-  const titleId = useId();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Custom hooks
   const {
@@ -242,34 +239,10 @@ export function InstallDialog({
     setShowCancelConfirmation(true);
   };
 
-  useEffect(() => {
-    if (!isOpen || isPageMode) {
-      return undefined;
-    }
-
-    const previousFocus = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
-
-    const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-
-    window.addEventListener('keydown', handleEscape);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleEscape);
-      previousFocus?.focus();
-    };
-  }, [isOpen, isPageMode, onClose]);
-
   const showProgressDetails = viewMode === 'details' && Boolean(installingVersion && progress);
-  const containerClasses = isPageMode
-    ? 'w-full h-full flex flex-col'
-    : 'w-full max-w-3xl max-h-[80vh] flex flex-col';
+  const dialogTitle = installingVersion
+    ? `Installing ${installingVersion}`
+    : `Install ${appDisplayName} Version`;
 
   const reportRemoveError = (tag: string, error: unknown) => {
     if (error instanceof APIError) {
@@ -281,34 +254,13 @@ export function InstallDialog({
     }
   };
 
-  const dialogContent = (
-    <div
-      role={isPageMode ? undefined : 'dialog'}
-      aria-modal={isPageMode ? undefined : true}
-      aria-labelledby={isPageMode ? undefined : titleId}
-      className={containerClasses}
+  return (
+    <InstallDialogFrame
+      isOpen={isOpen}
+      isPageMode={isPageMode}
+      onClose={onClose}
+      title={dialogTitle}
     >
-      {/* Header */}
-      {!isPageMode && (
-        <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
-          <div className="flex items-center gap-3">
-            <h2 id={titleId} className="text-xl font-semibold text-[hsl(var(--text-primary))]">
-              {installingVersion ? `Installing ${installingVersion}` : `Install ${appDisplayName} Version`}
-            </h2>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              ref={closeButtonRef}
-              onClick={onClose}
-              className="p-1 rounded hover:bg-[hsl(var(--surface-interactive-hover))] transition-colors"
-              aria-label="Close install dialog"
-            >
-              <X size={20} className="text-[hsl(var(--text-muted))]" />
-            </button>
-          </div>
-        </div>
-      )}
-
       <InstallDialogContent
         cancellationNotice={cancellationNotice}
         cancelHoverTag={cancelHoverTag}
@@ -349,47 +301,6 @@ export function InstallDialog({
         onCancel={() => setShowCancelConfirmation(false)}
         onConfirm={() => void confirmCancelInstallation()}
       />
-    </div>
-  );
-
-  if (!isOpen) {
-    return null;
-  }
-
-  if (isPageMode) {
-    return (
-      <div className="w-full h-full flex flex-col">
-        {dialogContent}
-      </div>
-    );
-  }
-
-  return (
-    <AnimatePresence>
-      {isOpen && (
-        <>
-          <motion.button
-            type="button"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={onClose}
-            className="fixed inset-0 bg-black/70 z-50"
-            aria-label="Dismiss install dialog"
-          />
-          <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 20 }}
-            transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
-          >
-            <div className="pointer-events-auto">
-              {dialogContent}
-            </div>
-          </motion.div>
-        </>
-      )}
-    </AnimatePresence>
+    </InstallDialogFrame>
   );
 }

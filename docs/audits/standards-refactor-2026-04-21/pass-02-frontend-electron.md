@@ -136,6 +136,11 @@ Rectification:
 - Replace `window.confirm` with app-owned confirmation dialogs that manage focus.
 - Add keyboard interaction tests for any custom interactive generic element retained.
 
+Implementation notes:
+- App launcher indicator, version selector controls, and import lookup metadata expansion now use native buttons instead of custom role-button wrappers.
+- `InstallDialog`, `ModelMetadataModal`, `ConflictResolutionDialog`, and `MappingPreviewDialog` use named dialogs, native backdrop buttons, Escape handling, and focus-return tests.
+- Install cancellation and migration report destructive actions use app-owned confirmation dialogs instead of `window.confirm`.
+
 ### F07 - Frontend Lint Config Has Legacy Waivers That Hide Refactor Pressure
 Status: partially compliant
 

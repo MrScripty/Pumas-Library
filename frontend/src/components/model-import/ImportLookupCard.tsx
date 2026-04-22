@@ -167,29 +167,15 @@ export function ImportLookupCard({
   return (
     <div className="rounded-lg bg-[hsl(var(--launcher-bg-tertiary)/0.5)]">
       <div
-        className={`flex items-center gap-3 p-3 ${canInteract ? 'cursor-pointer hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
-        role={canInteract ? 'button' : undefined}
-        tabIndex={canInteract ? 0 : undefined}
-        aria-expanded={canInteract ? isExpanded : undefined}
-        onClick={canInteract ? () => toggleMetadataExpand(entry.path) : undefined}
-        onKeyDown={
-          canInteract
-            ? (event) => {
-                if (event.key === 'Enter' || event.key === ' ') {
-                  event.preventDefault();
-                  toggleMetadataExpand(entry.path);
-                }
-              }
-            : undefined
-        }
+        className={`flex items-center gap-3 p-3 ${canInteract ? 'hover:bg-[hsl(var(--launcher-bg-tertiary)/0.8)]' : ''}`}
       >
         {canInteract ? (
           <button
-            className="h-4 w-4 flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))]"
-            onClick={(event) => {
-              event.stopPropagation();
-              toggleMetadataExpand(entry.path);
-            }}
+            type="button"
+            className="h-4 w-4 flex-shrink-0 text-[hsl(var(--launcher-text-muted))] hover:text-[hsl(var(--launcher-text-secondary))] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[hsl(var(--accent-primary))]"
+            aria-expanded={isExpanded}
+            aria-label={`${isExpanded ? 'Collapse' : 'Expand'} metadata for ${entry.filename}`}
+            onClick={() => toggleMetadataExpand(entry.path)}
           >
             {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           </button>

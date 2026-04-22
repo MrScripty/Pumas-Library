@@ -16,6 +16,21 @@ Composable section components used by app panels to render status, selectors, de
 ## Design Decisions
 - Keep sections focused and composable to reduce duplicated panel markup.
 - Shared section API surface is centralized via `index.ts` exports.
+- Section-level polling is allowed only for backend state that is not yet
+  available through a shared hook or event stream. New panel polling should
+  prefer a hook owner first.
+
+## Timer Ownership
+| Section | Current Reason | Required Guardrail |
+| ------- | -------------- | ------------------ |
+| `ModelSelectorSection.tsx` | Loaded model options are read from app-specific backend state. | Clear the interval on unmount and avoid polling when the app is not running. |
+| `StatsSection.tsx` | Runtime stats are sampled while the app is running. | Make interval configurable and clear it on dependency changes/unmount. |
+| `OllamaModelSection.tsx` | Ollama model state is backend-owned and currently sampled. | Poll only while the app is running and clear on unmount. |
+| `TorchModelSlotsSection.tsx` | Torch slot state is backend-owned and currently sampled. | Poll only while the app is running and clear on unmount. |
+
+Event-driven replacement trigger: when app panels receive a shared runtime-state
+subscription, section intervals should collapse into that owner or move into
+dedicated hooks.
 
 ## Dependencies
 **Internal:** shared types/hooks/components.

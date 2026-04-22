@@ -50,6 +50,23 @@ Custom React hooks for backend polling, process status, version/model workflows,
 ## Design Decisions
 - Hooks encapsulate async side effects and state transitions outside UI components.
 - Domain hooks consume typed API wrappers and return UI-friendly state.
+- Polling remains hook-owned until the backend exposes a durable event stream.
+  Polling hooks must own overlap prevention, cleanup on unmount, and API-unavailable
+  fallback behavior in the hook instead of pushing timers into components.
+
+## Timer Ownership
+| Polling Owner | Current Reason | Required Guardrail |
+| ------------- | -------------- | ------------------ |
+| `useNetworkStatus.ts` | Network counters and circuit-breaker state are sampled backend status today. | Prevent overlapping polls and clear the interval on unmount. |
+| `useStatus.ts` | Launcher/app status has no subscribed event stream yet. | Clear API-wait and polling timers on unmount. |
+| `useActiveModelDownload.ts` and `useModelDownloads.ts` | Download progress is backend-owned and currently exposed through polling APIs. | Keep polling in hooks, dedupe startup recovery, and clear intervals on unmount. |
+| `useInstallationManager.ts` and `useInstallationProgress.ts` | Installation progress can outlive a single dialog render and still lacks a push channel. | Stop polling on completion/cancel and clear completion-delay timers. |
+| `useAvailableVersionState.ts` | Background fetch status is backend-owned cache state without push notifications. | Clear wait, interval, and follow-up refresh timers together. |
+
+Event-driven replacement trigger: when the RPC backend exposes a durable app
+event stream for status, installs, downloads, and cache updates, these polling
+owners should move behind one subscription adapter and the per-hook intervals
+should be removed.
 
 ## Dependencies
 **Internal:** `api/`, `types/`, `utils/`, and component state needs.

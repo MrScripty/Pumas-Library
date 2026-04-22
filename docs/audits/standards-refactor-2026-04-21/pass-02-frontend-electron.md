@@ -97,7 +97,7 @@ Rectification:
 - Extract presentational subcomponents only after state ownership is settled.
 
 ### F05 - Polling Is Widespread and Needs Justification or Event-Driven Replacement
-Status: partially compliant
+Status: partially remediated
 
 Polling/timer locations include:
 
@@ -118,9 +118,11 @@ Polling/timer locations include:
 Several hooks use refs and cleanup tests, which is good. The gap is architectural: the standards prefer event-driven synchronization and require documentation when polling is unavoidable.
 
 Rectification:
-- Add timer ownership comments only where event-driven alternatives are impractical.
-- Consolidate install/download/status polling behind a backend event stream or single scheduler if feasible.
-- Add deterministic cleanup tests for hooks and Electron bridge timers that lack them.
+- Completed: `frontend/src/hooks/README.md` now records hook-level polling ownership, current justification, guardrails, and event-stream replacement trigger.
+- Completed: `frontend/src/components/app-panels/sections/README.md` now records section-level polling ownership and the shared-hook/event-stream replacement trigger.
+- Completed: existing hook tests cover cleanup or polling behavior for active downloads, model downloads, network status, installation manager/progress, available versions, and status.
+- Remaining: consolidate install/download/status polling behind a backend event stream or single scheduler when the backend exposes one.
+- Remaining: add deterministic timer cleanup tests for Electron bridge health-check and restart timers.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks
 Status: remediated for audited controls

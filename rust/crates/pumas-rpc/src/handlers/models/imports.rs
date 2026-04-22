@@ -1,31 +1,56 @@
 //! Model import and metadata handlers.
 
 use crate::handlers::{
-    extract_safetensors_header, get_bool_param, get_str_param, require_str_param,
+    extract_safetensors_header, get_bool_param, get_str_param, parse_params, require_str_param,
+    validate_non_empty,
 };
 use crate::server::AppState;
 use pumas_library::model_library::get_diffusers_component_manifest;
+use serde::Deserialize;
 use serde_json::{json, Value};
 
+#[derive(Debug, Deserialize)]
+struct ImportModelParams {
+    #[serde(alias = "localPath")]
+    local_path: String,
+    family: String,
+    #[serde(alias = "officialName")]
+    official_name: String,
+    #[serde(default, alias = "repoId")]
+    repo_id: Option<String>,
+    #[serde(default, alias = "modelType")]
+    model_type: Option<String>,
+    #[serde(default)]
+    subtype: Option<String>,
+    #[serde(default, alias = "securityAcknowledged")]
+    security_acknowledged: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalDiffusersImportParams {
+    #[serde(alias = "sourcePath")]
+    source_path: String,
+    family: String,
+    #[serde(alias = "officialName")]
+    official_name: String,
+    #[serde(default, alias = "repoId")]
+    repo_id: Option<String>,
+    #[serde(default)]
+    tags: Option<Vec<String>>,
+}
+
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let local_path = require_str_param(params, "local_path", "localPath")?;
-    let family = require_str_param(params, "family", "family")?;
-    let official_name = require_str_param(params, "official_name", "officialName")?;
-    let repo_id = get_str_param(params, "repo_id", "repoId").map(String::from);
-    let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
-    let subtype = get_str_param(params, "subtype", "subtype").map(String::from);
-    let security_acknowledged =
-        get_bool_param(params, "security_acknowledged", "securityAcknowledged");
+    let command: ImportModelParams = parse_params("import_model", params)?;
 
     let spec = pumas_library::model_library::ModelImportSpec {
-        path: local_path,
-        family,
-        official_name,
-        repo_id,
-        model_type,
-        subtype,
+        path: validate_non_empty(command.local_path, "local_path")?,
+        family: validate_non_empty(command.family, "family")?,
+        official_name: validate_non_empty(command.official_name, "official_name")?,
+        repo_id: command.repo_id,
+        model_type: command.model_type,
+        subtype: command.subtype,
         tags: None,
-        security_acknowledged,
+        security_acknowledged: command.security_acknowledged,
     };
 
     let result = state.api.import_model(&spec).await?;
@@ -55,28 +80,15 @@ pub async fn import_external_diffusers_directory(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let source_path = require_str_param(params, "source_path", "sourcePath")?;
-    let family = require_str_param(params, "family", "family")?;
-    let official_name = require_str_param(params, "official_name", "officialName")?;
-    let repo_id = get_str_param(params, "repo_id", "repoId").map(String::from);
-
-    let tags: Option<Vec<String>> =
-        params
-            .get("tags")
-            .and_then(|value| value.as_array())
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(|value| value.as_str().map(String::from))
-                    .collect()
-            });
+    let command: ExternalDiffusersImportParams =
+        parse_params("import_external_diffusers_directory", params)?;
 
     let spec = pumas_library::model_library::ExternalDiffusersImportSpec {
-        source_path,
-        family,
-        official_name,
-        repo_id,
-        tags,
+        source_path: validate_non_empty(command.source_path, "source_path")?,
+        family: validate_non_empty(command.family, "family")?,
+        official_name: validate_non_empty(command.official_name, "official_name")?,
+        repo_id: command.repo_id,
+        tags: command.tags,
     };
 
     let result = state.api.import_external_diffusers_directory(&spec).await?;

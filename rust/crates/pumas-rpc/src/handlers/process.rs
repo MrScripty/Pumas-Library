@@ -1,9 +1,23 @@
 //! Process management handlers.
 
-use super::{get_str_param, require_str_param, sync_version_paths_to_process_manager};
+use super::{
+    get_str_param, parse_params, sync_version_paths_to_process_manager, validate_external_url,
+    validate_non_empty,
+};
 use crate::server::AppState;
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tracing::{info, warn};
+
+#[derive(Debug, Deserialize)]
+struct OpenPathParams {
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenUrlParams {
+    url: String,
+}
 
 pub async fn is_comfyui_running(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     // Ensure process manager has current version paths for accurate detection
@@ -130,7 +144,8 @@ pub async fn is_torch_running(state: &AppState, _params: &Value) -> pumas_librar
 }
 
 pub async fn open_path(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let path = require_str_param(params, "path", "path")?;
+    let command: OpenPathParams = parse_params("open_path", params)?;
+    let path = validate_non_empty(command.path, "path")?;
     match state.api.open_path(&path) {
         Ok(()) => Ok(json!({"success": true})),
         Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
@@ -138,7 +153,8 @@ pub async fn open_path(state: &AppState, params: &Value) -> pumas_library::Resul
 }
 
 pub async fn open_url(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let url = require_str_param(params, "url", "url")?;
+    let command: OpenUrlParams = parse_params("open_url", params)?;
+    let url = validate_external_url(command.url)?;
     match state.api.open_url(&url) {
         Ok(()) => Ok(json!({"success": true})),
         Err(e) => Ok(json!({"success": false, "error": e.to_string()})),

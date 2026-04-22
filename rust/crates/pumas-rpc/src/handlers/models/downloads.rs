@@ -1,47 +1,73 @@
 //! Model download handlers.
 
-use crate::handlers::{get_str_param, require_str_param};
+use crate::handlers::{parse_params, require_str_param, validate_non_empty};
 use crate::server::AppState;
+use serde::Deserialize;
 use serde_json::{json, Value};
+
+#[derive(Debug, Deserialize)]
+struct DownloadModelFromHfParams {
+    #[serde(alias = "repoId")]
+    repo_id: String,
+    family: String,
+    #[serde(alias = "officialName")]
+    official_name: String,
+    #[serde(default, alias = "modelType")]
+    model_type: Option<String>,
+    #[serde(default)]
+    quant: Option<String>,
+    #[serde(default)]
+    filename: Option<String>,
+    #[serde(default)]
+    filenames: Option<Vec<String>>,
+    #[serde(default, alias = "pipelineTag")]
+    pipeline_tag: Option<String>,
+    #[serde(default)]
+    subtype: Option<String>,
+    #[serde(default, alias = "releaseDate")]
+    release_date: Option<String>,
+    #[serde(default, alias = "downloadUrl")]
+    download_url: Option<String>,
+    #[serde(default, alias = "modelCardJson")]
+    model_card_json: Option<String>,
+    #[serde(default, alias = "licenseStatus")]
+    license_status: Option<String>,
+}
+
+impl DownloadModelFromHfParams {
+    fn into_download_request(self) -> pumas_library::Result<pumas_library::DownloadRequest> {
+        Ok(pumas_library::DownloadRequest {
+            repo_id: validate_non_empty(self.repo_id, "repo_id")?,
+            family: validate_non_empty(self.family, "family")?,
+            official_name: validate_non_empty(self.official_name, "official_name")?,
+            model_type: self.model_type,
+            quant: self.quant,
+            filename: self.filename,
+            filenames: self.filenames,
+            pipeline_tag: self.pipeline_tag.or(self.subtype),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: self.release_date,
+            download_url: self.download_url,
+            model_card_json: self.model_card_json,
+            license_status: self.license_status,
+        })
+    }
+}
+
+fn parse_download_request(
+    method: &str,
+    params: &Value,
+) -> pumas_library::Result<pumas_library::DownloadRequest> {
+    let command: DownloadModelFromHfParams = parse_params(method, params)?;
+    command.into_download_request()
+}
 
 pub async fn download_model_from_hf(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let repo_id = require_str_param(params, "repo_id", "repoId")?;
-    let family = require_str_param(params, "family", "family")?;
-    let official_name = require_str_param(params, "official_name", "officialName")?;
-    let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
-    let quant = get_str_param(params, "quant", "quant").map(String::from);
-    let filename = get_str_param(params, "filename", "filename").map(String::from);
-    let filenames: Option<Vec<String>> = params
-        .get("filenames")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
-        .or_else(|| get_str_param(params, "subtype", "subtype"))
-        .map(String::from);
-    let release_date = get_str_param(params, "release_date", "releaseDate").map(String::from);
-    let download_url = get_str_param(params, "download_url", "downloadUrl").map(String::from);
-    let model_card_json =
-        get_str_param(params, "model_card_json", "modelCardJson").map(String::from);
-    let license_status = get_str_param(params, "license_status", "licenseStatus").map(String::from);
-
-    let request = pumas_library::DownloadRequest {
-        repo_id,
-        family,
-        official_name,
-        model_type,
-        quant,
-        filename,
-        filenames,
-        pipeline_tag,
-        bundle_format: None,
-        pipeline_class: None,
-        release_date,
-        download_url,
-        model_card_json,
-        license_status,
-    };
+    let request = parse_download_request("download_model_from_hf", params)?;
 
     match state.api.start_hf_download(&request).await {
         Ok(download_id) => Ok(json!({
@@ -59,40 +85,7 @@ pub async fn start_model_download_from_hf(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let repo_id = require_str_param(params, "repo_id", "repoId")?;
-    let family = require_str_param(params, "family", "family")?;
-    let official_name = require_str_param(params, "official_name", "officialName")?;
-    let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
-    let quant = get_str_param(params, "quant", "quant").map(String::from);
-    let filename = get_str_param(params, "filename", "filename").map(String::from);
-    let filenames: Option<Vec<String>> = params
-        .get("filenames")
-        .and_then(|v| serde_json::from_value(v.clone()).ok());
-    let pipeline_tag = get_str_param(params, "pipeline_tag", "pipelineTag")
-        .or_else(|| get_str_param(params, "subtype", "subtype"))
-        .map(String::from);
-    let release_date = get_str_param(params, "release_date", "releaseDate").map(String::from);
-    let download_url = get_str_param(params, "download_url", "downloadUrl").map(String::from);
-    let model_card_json =
-        get_str_param(params, "model_card_json", "modelCardJson").map(String::from);
-    let license_status = get_str_param(params, "license_status", "licenseStatus").map(String::from);
-
-    let request = pumas_library::DownloadRequest {
-        repo_id,
-        family,
-        official_name,
-        model_type,
-        quant,
-        filename,
-        filenames,
-        pipeline_tag,
-        bundle_format: None,
-        pipeline_class: None,
-        release_date,
-        download_url,
-        model_card_json,
-        license_status,
-    };
+    let request = parse_download_request("start_model_download_from_hf", params)?;
 
     match state.api.start_hf_download(&request).await {
         Ok(download_id) => Ok(json!({

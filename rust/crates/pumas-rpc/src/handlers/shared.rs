@@ -1,9 +1,48 @@
 //! Shared handler utilities used across RPC domains.
 
 use crate::server::AppState;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+
+/// Parse an RPC params object into a typed command at the handler boundary.
+pub(crate) fn parse_params<T>(method: &str, params: &Value) -> pumas_library::Result<T>
+where
+    T: DeserializeOwned,
+{
+    serde_json::from_value(params.clone()).map_err(|error| {
+        pumas_library::PumasError::InvalidParams {
+            message: format!("Invalid params for {method}: {error}"),
+        }
+    })
+}
+
+/// Validate a required string that serde has already parsed.
+pub(crate) fn validate_non_empty(value: String, field: &str) -> pumas_library::Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(pumas_library::PumasError::InvalidParams {
+            message: format!("Parameter '{field}' must not be empty"),
+        });
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Validate a renderer-supplied URL before opening it through the OS shell.
+pub(crate) fn validate_external_url(value: String) -> pumas_library::Result<String> {
+    let url = validate_non_empty(value, "url")?;
+    let parsed =
+        url::Url::parse(&url).map_err(|error| pumas_library::PumasError::InvalidParams {
+            message: format!("Invalid url: {error}"),
+        })?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(url),
+        scheme => Err(pumas_library::PumasError::InvalidParams {
+            message: format!("Unsupported url scheme: {scheme}"),
+        }),
+    }
+}
 
 /// Extract an optional string parameter, supporting both snake_case and camelCase.
 pub(crate) fn get_str_param<'a>(params: &'a Value, snake: &str, camel: &str) -> Option<&'a str> {
@@ -143,4 +182,43 @@ pub(crate) fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static 
     }
 
     (false, "none", vec![])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde::Deserialize;
+    use serde_json::json;
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    struct Command {
+        #[serde(alias = "modelId")]
+        model_id: String,
+    }
+
+    #[test]
+    fn parse_params_accepts_aliases() {
+        let command: Command = parse_params("test_method", &json!({"modelId": "abc"})).unwrap();
+
+        assert_eq!(
+            command,
+            Command {
+                model_id: "abc".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parse_params_rejects_missing_required_field() {
+        let error = parse_params::<Command>("test_method", &json!({})).unwrap_err();
+
+        assert!(error.to_string().contains("Invalid params for test_method"));
+    }
+
+    #[test]
+    fn validate_external_url_rejects_non_web_schemes() {
+        let error = validate_external_url("file:///tmp/example".to_string()).unwrap_err();
+
+        assert!(error.to_string().contains("Unsupported url scheme"));
+    }
 }

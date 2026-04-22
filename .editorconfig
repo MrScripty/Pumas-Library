@@ -7,18 +7,67 @@ end_of_line = lf
 charset = utf-8
 trim_trailing_whitespace = true
 insert_final_newline = true
+max_line_length = 100
+
+[*.{js,jsx,ts,tsx,mjs,cjs}]
+indent_size = 2
+
+[*.{json,jsonc}]
+indent_size = 2
+
+[*.{css,scss,sass,less}]
+indent_size = 2
+
+[*.{html,htm}]
+indent_size = 2
+
+[*.{yml,yaml}]
+indent_size = 2
+
+[*.{toml,lock}]
+indent_size = 2
 
 [*.rs]
 indent_size = 4
+max_line_length = 100
 
 [*.py]
 indent_size = 4
+max_line_length = 88
 
 [*.md]
 trim_trailing_whitespace = false
+max_line_length = off
 
 [*.sh]
 indent_size = 2
 
+[*.bash]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+
+[*.csproj]
+indent_size = 2
+
+[*.sln]
+indent_style = tab
+
+[*.xml]
+indent_size = 2
+
+[*.config]
+indent_size = 2
+
+[Dockerfile*]
+indent_size = 4
+
+[docker-compose*.yml]
+indent_size = 2
+
 [Makefile]
+indent_style = tab
+
+[*.mk]
 indent_style = tab

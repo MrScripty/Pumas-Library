@@ -122,9 +122,9 @@ Rectification:
 ### G04 - Tooling Enforcement Is Incomplete
 Status: non-compliant
 
-Missing or partial enforcement:
+Missing or partial enforcement at audit time:
 
-- no `.editorconfig` found;
+- `.editorconfig` coverage was too narrow for the repository's language mix;
 - no `lefthook.yml` found;
 - no committed commit-message validation was present before the enforcement pass;
 - no `.github/` CI workflow found in the file inventory;
@@ -143,6 +143,7 @@ Rectification:
 - Restore frontend complexity/file-size enforcement after decomposition baselines are set.
 
 Implementation notes:
+- The existing `.editorconfig` was expanded to cover the standards template's TypeScript, Rust, Python, shell, C#, YAML/JSON, Docker, Make, and Markdown formatting boundaries.
 - The repository uses `pre-commit` instead of Lefthook today; `scripts/dev/check-commit-message.sh` has been added as a commit-msg hook to enforce conventional commit subjects while broader hook migration remains a separate tooling task.
 
 ### G05 - Dependency Ownership Does Not Match Workspace Execution Boundaries

@@ -10,7 +10,6 @@
 import { useState, type CSSProperties } from 'react';
 import {
   Star,
-  Tag,
   ChevronDown,
   ChevronRight,
   Download,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
 import { IconButton, HoldToDeleteButton, ListItem, ListItemContent } from './ui';
+import { LocalModelGroupHeader } from './LocalModelGroupHeader';
 import { LocalModelsEmptyState } from './LocalModelsEmptyState';
 import { LocalModelMetadataSummary } from './LocalModelMetadataSummary';
 import { LocalModelNameButton } from './LocalModelNameButton';
@@ -98,15 +98,10 @@ export function LocalModelsList({
     <>
       {modelGroups.map((group: ModelCategory) => (
         <div key={group.category} className="space-y-2">
-          <div className="flex items-center gap-2 px-1">
-            <Tag className="w-3.5 h-3.5 text-[hsl(var(--text-muted))]" />
-            <p className="text-xs font-semibold text-[hsl(var(--text-muted))] uppercase tracking-wider">
-              {group.category}
-            </p>
-            <span className="text-xs text-[hsl(var(--text-muted))]">
-              ({group.models.length})
-            </span>
-          </div>
+          <LocalModelGroupHeader
+            category={group.category}
+            modelCount={group.models.length}
+          />
           <div className="space-y-1.5">
             {group.models.map((model) => {
               const isStarred = starredModels.has(model.id);

@@ -52,6 +52,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Rust crates now inherit a workspace lint baseline that denies unsafe operations hidden inside unsafe functions while broader unsafe isolation remains tracked.
 - 2026-04-22: The conflict-resolution modal now uses a named dialog, native backdrop button, Escape close handling, and focus restoration.
 - 2026-04-22: The mapping-preview modal now uses a named dialog, native backdrop button, Escape close handling, and focus restoration.
+- 2026-04-22: Version selector rows no longer use custom `role="button"` wrappers; switching, default, and shortcut actions are separate native buttons with tests.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

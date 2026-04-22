@@ -40,6 +40,7 @@ bridge.
 | `VersionSelector.tsx` | Version install/switch/update UI. |
 | `VersionSelectorTrigger.tsx` | Presentational trigger shell for the active-version selector and action buttons. |
 | `VersionSelectorDropdown.tsx` | Presentational dropdown menu and row items for installed/selectable versions. |
+| `VersionSelectorDropdown.test.tsx` | Interaction coverage for native version switch, default, and shortcut controls. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
 | `MappingPreviewDialog.tsx` | Accessible modal wrapper for previewing and applying model-library mappings. |

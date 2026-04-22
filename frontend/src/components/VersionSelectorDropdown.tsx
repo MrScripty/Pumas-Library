@@ -47,19 +47,6 @@ function VersionDropdownItem({
   return (
     <div
       {...rowHoverProps}
-      role="button"
-      tabIndex={0}
-      onClick={() => {
-        if (isInstalling) return;
-        onSwitchVersion(version);
-      }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          if (isInstalling) return;
-          onSwitchVersion(version);
-        }
-      }}
       className={`relative flex w-full items-center justify-between px-3 py-2 text-left text-sm transition-colors ${
         isActive
           ? 'bg-[hsl(var(--surface-interactive-hover))] text-[hsl(var(--accent-success))]'
@@ -72,6 +59,7 @@ function VersionDropdownItem({
         <div className="flex w-4 flex-shrink-0 items-center justify-center">
           {onMakeDefault ? (
             <button
+              type="button"
               {...anchorHoverProps}
               onClick={(event) => {
                 event.stopPropagation();
@@ -121,6 +109,7 @@ function VersionDropdownItem({
                 }
               }}
               className="flex items-center justify-center"
+              aria-label={isDefault ? `Unset ${version} as default` : `Set ${version} as default`}
               title={isDefault ? 'Click to unset as default' : 'Click to set as default'}
               disabled={isSwitching || isLoading}
             >
@@ -138,16 +127,25 @@ function VersionDropdownItem({
             <div className="w-4" />
           )}
         </div>
-        <span className="truncate font-medium">{version}</span>
-        {isInstalling && (
-          <span className="rounded-full border border-amber-400/60 bg-amber-500/20 px-1.5 py-[2px] text-[10px] text-amber-200">
-            Installing
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={() => onSwitchVersion(version)}
+          disabled={isInstalling}
+          className="flex min-w-0 flex-1 items-center gap-2 bg-transparent p-0 text-left disabled:cursor-not-allowed"
+          aria-label={`Switch to ${version}`}
+        >
+          <span className="truncate font-medium">{version}</span>
+          {isInstalling && (
+            <span className="rounded-full border border-amber-400/60 bg-amber-500/20 px-1.5 py-[2px] text-[10px] text-amber-200">
+              Installing
+            </span>
+          )}
+        </button>
       </div>
       <div className="flex items-center gap-2 pr-12">
         {supportsShortcuts && !isInstalling && (isRowHovered || isEnabled) && onToggleShortcuts && (
           <button
+            type="button"
             onClick={async (event) => {
               event.stopPropagation();
               const next = !isEnabled;
@@ -155,6 +153,7 @@ function VersionDropdownItem({
             }}
             disabled={isSwitching || isLoading}
             className="absolute right-8 top-1/2 flex -translate-y-1/2 items-center justify-center transition-colors"
+            aria-label={isEnabled ? `Disable shortcuts for ${version}` : `Enable shortcuts for ${version}`}
             title={isEnabled ? 'Shortcuts enabled (click to disable)' : 'Shortcuts disabled (click to enable)'}
           >
             <Link2

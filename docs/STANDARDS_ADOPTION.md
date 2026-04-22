@@ -67,6 +67,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Electron backend bridge timers now use an injectable timer controller with package-local tests for health-check rescheduling, restart backoff replacement, and stop-time cleanup.
 - 2026-04-22: Launcher update state moved from `App.tsx` into `frontend/src/hooks/useLauncherUpdates.ts`, with tests for backend metadata ownership, stale-state clearing, URL preference, and API-unavailable no-ops.
 - 2026-04-22: Model starring and backend link-exclusion preferences moved from `App.tsx` into `frontend/src/hooks/useModelPreferences.ts`, including rollback tests and stale-load protection for optimistic link changes.
+- 2026-04-22: Setup dependency installation state moved from `App.tsx` into `frontend/src/hooks/useDependencyInstaller.ts`, with tests for success, pending state, failure reset, and API-unavailable behavior.
 - 2026-04-22: The launcher `--test` action and CI launcher verification now run the Torch sidecar Python unit suite through platform-specific Python module commands.
 - 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.

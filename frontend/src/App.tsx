@@ -10,6 +10,7 @@ import { useVersions } from './hooks/useVersions';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
+import { useDependencyInstaller } from './hooks/useDependencyInstaller';
 import { useOllamaProcess } from './hooks/useOllamaProcess';
 import { useTorchProcess } from './hooks/useTorchProcess';
 import { useModels } from './hooks/useModels';
@@ -21,9 +22,8 @@ import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useLauncherUpdates } from './hooks/useLauncherUpdates';
 import { useManagedApps } from './hooks/useManagedApps';
 import { useModelPreferences } from './hooks/useModelPreferences';
-import { api, isAPIAvailable } from './api/adapter';
+import { isAPIAvailable } from './api/adapter';
 import { getLogger } from './utils/logger';
-import { APIError, ProcessError } from './errors';
 import { getAppVersionState } from './utils/appVersionState';
 
 const logger = getLogger('App');
@@ -32,9 +32,6 @@ export default function App() {
   const [selectedAppId, setSelectedAppId] = useState<string | null>(
     __FEATURE_MULTI_APP__ ? null : 'comfyui'
   );
-
-  // --- UI State ---
-  const [isInstalling, setIsInstalling] = useState(false);
 
   // --- Custom Hooks ---
   const {
@@ -46,6 +43,12 @@ export default function App() {
     refetch: refetchStatus
   } = useStatus();
   const { diskSpacePercent, fetchDiskSpace } = useDiskSpace();
+  const {
+    installDependencies: handleInstallDeps,
+    isInstallingDeps,
+  } = useDependencyInstaller({
+    refetchStatus,
+  });
   const {
     checkLauncherUpdates,
     checkLauncherVersion,
@@ -261,28 +264,6 @@ export default function App() {
   }, [comfyActiveVersion]);
 
   // --- Handlers ---
-  const handleInstallDeps = async () => {
-    if (!isAPIAvailable()) return;
-
-    setIsInstalling(true);
-    try {
-      await api.install_deps();
-      await refetchStatus();
-    } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error installing dependencies', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof ProcessError) {
-        logger.error('Process error installing dependencies', { error: error.message, exitCode: error.exitCode });
-      } else if (error instanceof Error) {
-        logger.error('Unexpected error installing dependencies', { error: error.message });
-      } else {
-        logger.error('Unknown error installing dependencies', { error });
-      }
-    } finally {
-      setIsInstalling(false);
-    }
-  };
-
   const handleDeleteApp = (appId: string) => {
     if (appId === 'comfyui') {
       logger.warn('Attempt to delete ComfyUI app prevented', { appId });
@@ -388,7 +369,7 @@ export default function App() {
               diskSpacePercent,
               isCheckingDeps,
               depsInstalled,
-              isInstallingDeps: isInstalling,
+              isInstallingDeps,
               comfyUIRunning,
               onInstallDeps: handleInstallDeps,
               displayStatus,

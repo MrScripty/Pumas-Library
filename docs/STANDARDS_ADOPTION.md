@@ -55,6 +55,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Version selector rows no longer use custom `role="button"` wrappers; switching, default, and shortcut actions are separate native buttons with tests.
 - 2026-04-22: The install-version modal now uses a named dialog, native backdrop button, Escape close handling, and focus restoration.
 - 2026-04-22: Standards audits now have `scripts/dev/list-audit-files.sh` to enumerate source files while excluding generated bindings, release output, runtime state, dependency installs, and Rust targets while retaining tracked plugin manifests.
+- 2026-04-22: The Rust workspace root now has a standards-complete `README.md`, and `scripts/dev/check-readme-coverage.sh` verifies README coverage for audited source/support roots.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

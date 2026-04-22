@@ -14,7 +14,7 @@ local environment setup, and system validation.
 | `launcher/` | Shared cross-platform launcher core used by the root Unix and Windows entry wrappers. |
 | `contract-tests.ts` | Runs repo-specific contract checks for JavaScript/TypeScript-facing integration paths. |
 | `system-check.sh` | Verifies required local tools and runtime prerequisites for common development workflows. |
-| `dev/` | Developer helpers for launcher-delegated workflows, SBOM generation, and standards-audit source listing. |
+| `dev/` | Developer helpers for launcher-delegated workflows, SBOM generation, standards-audit source listing, and README coverage checks. |
 | `rust/` | Rust workspace verification scripts shared by local development and CI. |
 
 ## Problem

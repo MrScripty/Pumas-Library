@@ -7,6 +7,7 @@ This directory contains developer-oriented setup, build, run, and SBOM helper sc
 | File | Description |
 | ---- | ----------- |
 | `build.sh` | Delegates release build behavior to the root launcher contract. |
+| `check-readme-coverage.sh` | Verifies that standards-controlled source and support directories include `README.md` contracts. |
 | `generate-sbom.sh` | Generates dependency SBOM snapshots for supported ecosystems. |
 | `list-audit-files.sh` | Prints the source tree view used by standards audits while excluding generated/runtime paths and retaining tracked plugin manifests. |
 | `run-dev.sh` | Delegates development launch behavior to the root launcher contract. |

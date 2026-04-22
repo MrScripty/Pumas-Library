@@ -6,6 +6,8 @@ This directory records an iterative standards-compliance audit of Pumas Library 
 ## Scope
 The audit covered the checked-in source, manifests, launcher tooling, documentation, and binding surfaces. Runtime/build outputs ignored by git, such as `rust/target/`, `launcher-data/cache/`, and `launcher-data/profiles/`, were treated as generated state and not counted as refactor targets.
 
+Use `scripts/dev/list-audit-files.sh` for the source-file inventory and `scripts/dev/check-readme-coverage.sh` for README coverage checks when continuing this audit.
+
 ## Passes
 | Pass | File | Focus |
 | --- | --- | --- |

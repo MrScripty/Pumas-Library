@@ -24,7 +24,7 @@ Pumas Library is a multi-runtime desktop app:
 ## Findings
 
 ### G01 - Source Directory README Coverage Is Incomplete
-Status: non-compliant
+Status: addressed for audited source/support roots as of 2026-04-22
 
 The standards require every directory under source roots to contain a `README.md`. The audit found 17 relevant source/support directories without local README contracts:
 
@@ -55,6 +55,11 @@ Rectification:
 - Use explicit `None` statements with `Reason:` and `Revisit trigger:` where sections do not apply.
 - Give `launcher-data/plugins` a structured producer/consumer contract because plugin JSON is machine-consumed.
 - Give `bindings/csharp/Pumas.NativeSmoke` a host-facing contract because it validates generated binding artifacts.
+
+Implementation notes:
+- README contracts were added for the listed Rust crate, Torch sidecar, script, binding, and plugin directories.
+- `rust/README.md` now documents the Cargo workspace boundary, default member policy, lockfile contract, and generated `target/` exclusion.
+- `scripts/dev/check-readme-coverage.sh` verifies README coverage for the audited source/support roots and skips generated dependency, cache, and build output directories.
 
 ### G02 - File Size Decomposition Triggers Are Systemic
 Status: non-compliant, requires staged refactor

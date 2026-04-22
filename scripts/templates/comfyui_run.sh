@@ -51,7 +51,8 @@ fi
 
 PID_FILE="$COMFYUI_DIR/comfyui.pid"
 URL="http://127.0.0.1:8188"
-TEMP_PROFILE_DIR="$(mktemp -d /tmp/comfyui-profile.XXXXXX)"
+TEMP_BASE_DIR="${TMPDIR:-/tmp}"
+TEMP_PROFILE_DIR="$(mktemp -d "${TEMP_BASE_DIR%/}/comfyui-profile.XXXXXX")"
 WINDOW_CLASS="ComfyUI-App"
 SERVER_START_DELAY=10  # Increased slightly for reliability
 

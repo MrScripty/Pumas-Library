@@ -103,7 +103,7 @@ Rectification:
 - Add a decomposition-review register for any file that remains over threshold after the first extraction round.
 
 ### G03 - Project Standards Are Duplicated Instead of Adopted as a Single Traceable Contract
-Status: partially compliant
+Status: remediated for adoption-map traceability
 
 The repo has local standards docs:
 
@@ -115,9 +115,9 @@ The repo has local standards docs:
 These do not yet map directly to the external standards library. For example, `docs/CODING_STANDARDS.md` focuses on React Aria while the external coding standards also cover file size, layering, backend-owned data, composition roots, configuration, validation, and error handling.
 
 Rectification:
-- Replace local one-off standards with an adoption map: standard source, adopted rule, project-specific interpretation, enforcement status, exceptions.
-- Link the adoption map from root `README.md` and `CONTRIBUTING.md`.
-- Add a decision traceability hook so module README or ADR updates accompany architectural changes.
+- Completed: `docs/STANDARDS_ADOPTION.md` maps external standards to project status, enforcement, follow-ups, exception policy, completed adoption steps, and revisit triggers.
+- Completed: root `README.md` and `CONTRIBUTING.md` link the adoption map from the primary onboarding paths.
+- Completed: module README and audit updates have accompanied standards-impacting implementation commits in this pass.
 
 ### G04 - Tooling Enforcement Is Incomplete
 Status: non-compliant

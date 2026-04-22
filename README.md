@@ -30,6 +30,8 @@ The core idea is simple: stop treating model storage as app-by-app glue code. Pu
 - `electron/`: the desktop shell and packaging configuration
 - `bindings/`: generated binding artifacts and packaging outputs
 
+Standards adoption is tracked in [docs/STANDARDS_ADOPTION.md](docs/STANDARDS_ADOPTION.md).
+
 ## Core Capabilities
 
 - Shared model library with SQLite-backed metadata and FTS5 search

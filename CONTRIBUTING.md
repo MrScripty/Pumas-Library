@@ -22,6 +22,7 @@ Read the current project docs before making a non-trivial change:
 
 - [README.md](README.md): project purpose, setup, and release-facing workflows
 - [docs/README.md](docs/README.md): documentation index
+- [docs/STANDARDS_ADOPTION.md](docs/STANDARDS_ADOPTION.md): shared standards adoption, enforcement, and exceptions
 - [RELEASING.md](RELEASING.md): release validation and artifact expectations
 - [scripts/launcher/README.md](scripts/launcher/README.md): shared launcher contract
 

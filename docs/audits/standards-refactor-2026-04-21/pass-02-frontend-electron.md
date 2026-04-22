@@ -88,7 +88,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
-- `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
+- `frontend/src/components/model-import/useModelImportWorkflow.ts` at 443 lines after embedded-metadata toggle extraction;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
 
@@ -120,6 +120,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 348 to 304 effective lines after name-button extraction.
 - Completed: move local model group header rendering from `LocalModelsList.tsx` into `frontend/src/components/LocalModelGroupHeader.tsx` with category/count tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/LocalModelsList.tsx` from the oversized-file baseline after it reached 299 effective lines.
+- Completed: move import embedded-metadata disclosure and on-demand metadata loading from `useModelImportWorkflow.ts` into `frontend/src/components/model-import/useEmbeddedMetadataToggles.ts` with loading, cached, unsupported, and all-field toggle tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/model-import/useModelImportWorkflow.ts` from 451 to 391 effective lines after embedded-metadata toggle extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

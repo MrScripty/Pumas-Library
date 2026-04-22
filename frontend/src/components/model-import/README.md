@@ -10,6 +10,8 @@ This directory holds the workflow and extracted support components behind the mo
 | `modelImportWorkflowHelpers.test.ts` | Unit coverage for the extracted import workflow helper transformations and repo-id inference rules. |
 | `useModelImportWorkflow.ts` | Owns the import dialog workflow state machine from path classification through metadata lookup and import execution. |
 | `useModelImportWorkflow.test.ts` | Hook coverage for classification orchestration, embedded-metadata lookup flow, shard grouping, and import completion state. |
+| `useEmbeddedMetadataToggles.ts` | Owns embedded-metadata visibility and on-demand embedded metadata loading for import review entries. |
+| `useEmbeddedMetadataToggles.test.ts` | Hook coverage for embedded metadata loading, cached states, unsupported files, and all-field toggles. |
 | `metadataUtils.ts` | Pure helpers for security badges, GGUF metadata display priority, and import-review formatting. |
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
 | `ImportBundleComponents.tsx` | Presentational disclosure for external diffusers bundle component manifests. |
@@ -26,6 +28,7 @@ The import dialog has to review mixed inputs such as single files, single-model 
 
 ## Decision
 - Keep the workflow orchestration in `useModelImportWorkflow.ts` so one hook owns import lifecycle state, lookup retries, and completion callbacks.
+- Keep embedded-metadata disclosure state in `useEmbeddedMetadataToggles.ts` so optional metadata loading does not grow the import lifecycle state machine.
 - Keep classification-to-entry shaping and import spec assembly in `modelImportWorkflowHelpers.ts` so the transformation rules stay pure, testable, and separate from React state mutation.
 - Keep display-only logic in `metadataUtils.ts` as pure functions so metadata formatting and badge decisions stay easy to test.
 - Extract bundle-manifest and lookup-card rendering into small components so the dialog can focus on step orchestration instead of carrying every import-entry detail inline.

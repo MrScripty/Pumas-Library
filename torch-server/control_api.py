@@ -8,7 +8,17 @@ import logging
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from validation import (
+    validate_api_port,
+    validate_bind_host,
+    validate_device,
+    validate_max_loaded_models,
+    validate_model_name,
+    validate_model_path,
+    require_lan_policy,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +38,24 @@ class LoadModelRequest(BaseModel):
     device: str = "auto"
     model_type: Optional[str] = None
 
+    @field_validator("model_path")
+    @classmethod
+    def _validate_model_path(cls, value: str) -> str:
+        return validate_model_path(value)
+
+    @field_validator("model_name")
+    @classmethod
+    def _validate_model_name(cls, value: str) -> str:
+        return validate_model_name(value)
+
+    @field_validator("device")
+    @classmethod
+    def _validate_device(cls, value: str) -> str:
+        return validate_device(value)
+
 
 class UnloadModelRequest(BaseModel):
-    slot_id: str
+    slot_id: str = Field(min_length=1, max_length=64)
 
 
 class ConfigureRequest(BaseModel):
@@ -38,6 +63,29 @@ class ConfigureRequest(BaseModel):
     api_port: Optional[int] = None
     max_loaded_models: Optional[int] = None
     lan_access: Optional[bool] = None
+
+    @field_validator("api_port")
+    @classmethod
+    def _validate_api_port(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        return validate_api_port(value)
+
+    @field_validator("max_loaded_models")
+    @classmethod
+    def _validate_max_loaded_models(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        return validate_max_loaded_models(value)
+
+    @model_validator(mode="after")
+    def _validate_listener_policy(self) -> "ConfigureRequest":
+        lan_access = self.lan_access is True
+        if self.host is not None:
+            self.host = validate_bind_host(self.host, lan_access=lan_access)
+        if lan_access:
+            require_lan_policy()
+        return self
 
 
 # --- Endpoints ---

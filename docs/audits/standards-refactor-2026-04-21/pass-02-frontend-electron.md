@@ -138,6 +138,7 @@ Rectification:
 
 Implementation notes:
 - App launcher indicator, version selector controls, and import lookup metadata expansion now use native buttons instead of custom role-button wrappers.
+- Sidebar background deselection now uses pointer handling plus a window Escape listener instead of casting a keyboard event through a generic JSX handler.
 - `InstallDialog`, `ModelMetadataModal`, `ConflictResolutionDialog`, and `MappingPreviewDialog` use named dialogs, native backdrop buttons, Escape handling, and focus-return tests.
 - Install cancellation and migration report destructive actions use app-owned confirmation dialogs instead of `window.confirm`.
 

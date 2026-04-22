@@ -150,12 +150,23 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     return listOffset + LIST_TOP_PADDING + (nearestIndex * TOTAL_HEIGHT);
   };
 
-  const handleSidebarClick = (e: React.MouseEvent) => {
+  const handleSidebarPointerDown = (e: React.PointerEvent) => {
     // Only deselect if clicking the background
     if (e.currentTarget === e.target && !draggedId && floatingState === null) {
       onSelectApp(null);
     }
   };
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && selectedAppId && !draggedId && floatingState === null) {
+        onSelectApp(null);
+      }
+    };
+
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [draggedId, floatingState, onSelectApp, selectedAppId]);
 
   const handleIconClick = (appId: string) => {
     if (!draggedId && floatingState === null) {
@@ -316,8 +327,7 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     <div
       ref={sidebarRef}
       className="flex flex-col items-center p-3 gap-3 border-[hsl(var(--launcher-border))] transition-all duration-300 relative py-1 h-auto font-normal font-mono shadow-none border-r-0 mx-0 px-1 w-16 overflow-visible bg-[hsl(var(--launcher-bg-secondary)/0.5)]"
-      onClick={handleSidebarClick}
-      onKeyDown={(e) => { if (e.key === 'Escape') handleSidebarClick(e as unknown as React.MouseEvent); }}
+      onPointerDown={handleSidebarPointerDown}
       role="toolbar"
       tabIndex={-1}
     >

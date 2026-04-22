@@ -61,7 +61,7 @@ describe('AppSidebar', () => {
     const onSelectApp = vi.fn();
     render(<AppSidebar {...defaultProps} onSelectApp={onSelectApp} />);
 
-    const firstApp = screen.getByTitle(mockApps[0]!.displayName);
+    const firstApp = screen.getByRole('button', { name: mockApps[0]!.displayName });
     await user.click(firstApp);
 
     expect(onSelectApp).toHaveBeenCalled();
@@ -76,6 +76,21 @@ describe('AppSidebar', () => {
     if (sidebar) {
       await user.click(sidebar as HTMLElement);
     }
+
+    expect(onSelectApp).toHaveBeenCalledWith(null);
+  });
+
+  it('deselects the active app when Escape is pressed', () => {
+    const onSelectApp = vi.fn();
+    render(
+      <AppSidebar
+        {...defaultProps}
+        selectedAppId="comfyui"
+        onSelectApp={onSelectApp}
+      />
+    );
+
+    fireEvent.keyDown(window, { key: 'Escape' });
 
     expect(onSelectApp).toHaveBeenCalledWith(null);
   });

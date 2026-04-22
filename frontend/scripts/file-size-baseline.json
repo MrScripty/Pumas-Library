@@ -1,0 +1,16 @@
+{
+  "src/App.tsx": 498,
+  "src/components/AppSidebar.tsx": 339,
+  "src/components/ConflictResolutionDialog.tsx": 421,
+  "src/components/InstallDialog.tsx": 430,
+  "src/components/LocalModelsList.tsx": 455,
+  "src/components/ModelManager.tsx": 401,
+  "src/components/ModelMetadataModal.tsx": 328,
+  "src/components/RemoteModelListItem.tsx": 361,
+  "src/components/app-panels/sections/OllamaModelSection.tsx": 319,
+  "src/components/app-panels/sections/TorchModelSlotsSection.tsx": 350,
+  "src/components/model-import/ImportLookupCard.tsx": 338,
+  "src/components/model-import/useModelImportWorkflow.ts": 451,
+  "src/hooks/usePhysicsDrag.ts": 427,
+  "src/types/api.ts": 1746
+}

@@ -68,6 +68,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.
 - 2026-04-22: Torch sidecar Python now has pinned Ruff development tooling, a root `ruff.toml`, launcher and CI lint/format checks, and formatted Python sources.
 - 2026-04-22: Torch sidecar LAN binding now requires both explicit LAN opt-in and an API token, with token middleware enforced for sidecar API routes when configured.
+- 2026-04-22: Frontend file-size checks now use a committed baseline ratchet so existing oversized files cannot grow while new files keep the 300-line ceiling.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

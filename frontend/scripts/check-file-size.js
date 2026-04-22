@@ -6,10 +6,15 @@
  * Helps enforce modular, focused code organization.
  */
 
-import { readFileSync } from 'fs';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { globSync } from 'glob';
 
 const MAX_LINES = 300;
+const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+const baselinePath = path.join(moduleDir, 'file-size-baseline.json');
+const baseline = JSON.parse(readFileSync(baselinePath, 'utf-8'));
 const violations = [];
 const files = globSync('src/**/*.{ts,tsx}', {
   ignore: [
@@ -29,7 +34,16 @@ files.forEach((file) => {
   });
 
   if (lines.length > MAX_LINES) {
-    violations.push(`${file}: ${lines.length} lines (max ${MAX_LINES})`);
+    const baselineLimit = baseline[file];
+    const maxAllowed = typeof baselineLimit === 'number' ? baselineLimit : MAX_LINES;
+
+    if (lines.length > maxAllowed) {
+      const reason =
+        typeof baselineLimit === 'number'
+          ? `baseline ${baselineLimit}; ratchet requires no growth`
+          : `max ${MAX_LINES}`;
+      violations.push(`${file}: ${lines.length} lines (${reason})`);
+    }
   }
 });
 
@@ -40,4 +54,6 @@ if (violations.length > 0) {
   process.exit(1);
 }
 
-console.log(`✅ File size checks passed (all files <${MAX_LINES} lines)`);
+console.log(
+  `✅ File size checks passed (new files <${MAX_LINES} lines; baseline files did not grow)`
+);

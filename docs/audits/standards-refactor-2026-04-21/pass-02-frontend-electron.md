@@ -147,7 +147,7 @@ Implementation notes:
 - Install cancellation and migration report destructive actions use app-owned confirmation dialogs instead of `window.confirm`.
 
 ### F07 - Frontend Lint Config Has Legacy Waivers That Hide Refactor Pressure
-Status: partially compliant
+Status: partially remediated
 
 `frontend/eslint.config.js` disables:
 
@@ -160,9 +160,10 @@ Status: partially compliant
 The file comments say this is due to legacy noise. That is an acceptable temporary explanation, but it should become a tracked ratchet with explicit thresholds and target files.
 
 Rectification:
-- Convert disabled rules to warning or scoped overrides for known legacy files.
-- Add issue IDs or audit references for each broad waiver.
-- Re-enable file-size/complexity after the first decomposition wave.
+- Completed: `frontend/scripts/check-file-size.js` now enforces a committed baseline ratchet so existing oversized files cannot grow and new files still fail above 300 source lines.
+- Completed: `frontend/scripts/file-size-baseline.json` records the current oversized file baseline for decomposition tracking.
+- Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
+- Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

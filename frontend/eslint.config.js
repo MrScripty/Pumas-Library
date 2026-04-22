@@ -61,7 +61,7 @@ export default tseslint.config(
         'error',
         { ignoreArrowShorthand: true },
       ],
-      // Disabled for now: strict mode is too noisy for current code patterns.
+      // Audit F07 tracks ratcheting these broad legacy waivers after decomposition.
       '@typescript-eslint/no-unnecessary-condition': 'off',
       '@typescript-eslint/no-non-null-assertion': 'off',
       // Allow async functions in event handlers and callbacks
@@ -81,7 +81,7 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/no-unnecessary-type-conversion': 'off',
 
-      // File size and complexity limits are disabled while existing code is being refactored.
+      // File size is ratcheted by scripts/check-file-size.js until ESLint limits can be re-enabled.
       'max-lines': 'off',
       'max-lines-per-function': 'off',
       complexity: 'off',

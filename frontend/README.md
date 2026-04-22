@@ -424,6 +424,7 @@ npm run dev     # Start dev server (http://localhost:5173)
 npm run build   # Production build
 npm run preview # Preview production build
 npm run lint    # Run ESLint
+npm run check:size # Enforce file-size ratchet
 npm run typecheck # Run TypeScript compiler
 ```
 
@@ -491,6 +492,7 @@ ESLint enforces:
 ```bash
 npm run lint      # Check for violations
 npm run lint:fix  # Auto-fix where possible
+npm run check:size # Enforce file-size ratchet
 ```
 
 ### Type Checking

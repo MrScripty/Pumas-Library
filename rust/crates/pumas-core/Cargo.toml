@@ -116,3 +116,6 @@ hf-client = []       # HuggingFace model search & download
 process-manager = [] # ComfyUI process management
 gpu-monitor = []     # GPU monitoring via nvidia-smi
 uniffi = ["dep:uniffi"]  # Cross-language bindings via UniFFI
+
+[lints]
+workspace = true

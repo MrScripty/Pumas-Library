@@ -45,3 +45,6 @@ uniffi = { workspace = true, features = ["bindgen-tests"] }
 default = ["bindings"]
 bindings = ["dep:pumas-library", "dep:tokio", "dep:serde", "dep:serde_json", "dep:thiserror"]
 cli = ["uniffi/cli"]
+
+[lints]
+workspace = true

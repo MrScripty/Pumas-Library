@@ -15,6 +15,11 @@ This directory contains the Rust workspace members that provide Pumas Library's 
 ## Producer Contract
 Workspace crates must expose stable boundaries through crate APIs, command binaries, or generated binding artifacts. Shared dependency versions belong in `rust/Cargo.toml`; crate-specific tools or features belong in the owning crate manifest.
 
+Workspace crates inherit the lint baseline from `rust/Cargo.toml`. Unsafe
+operations inside unsafe functions are denied across the workspace. Existing
+standalone unsafe blocks remain allowed while OS/FFI modules are isolated and
+documented with `SAFETY:` comments in later refactor slices.
+
 ## Consumer Contract
 Consumers should depend on the narrowest crate that owns the operation they need. New host surfaces should not bypass `pumas-rpc`, `pumas-uniffi`, or `pumas_rustler` boundary validation.
 

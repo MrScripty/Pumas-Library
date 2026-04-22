@@ -12,6 +12,11 @@ authors = ["Jeremy"]
 license = "MIT"
 repository = "https://github.com/MrScripty/Pumas-Library"
 
+[workspace.lints.rust]
+# Existing OS/FFI unsafe blocks are still being isolated. This first ratchet
+# prevents unsafe functions from hiding unsafe operations in their bodies.
+unsafe_op_in_unsafe_fn = "deny"
+
 [workspace.dependencies]
 # Async runtime
 tokio = { version = "1" }

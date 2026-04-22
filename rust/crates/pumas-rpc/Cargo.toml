@@ -50,3 +50,6 @@ clap = { version = "4", features = ["derive"] }
 [dev-dependencies]
 tokio = { workspace = true, features = ["test-util", "macros"] }
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

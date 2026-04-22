@@ -88,7 +88,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
-- `frontend/src/components/model-import/useModelImportWorkflow.ts` at 399 lines after embedded-metadata toggle and sharded-set detection extraction;
+- `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
 
@@ -124,6 +124,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/model-import/useModelImportWorkflow.ts` from 451 to 391 effective lines after embedded-metadata toggle extraction.
 - Completed: move import sharded-file detection and expansion state from `useModelImportWorkflow.ts` into `frontend/src/components/model-import/useShardedSetDetection.ts` with detection, entry annotation, expansion, and clear-state tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/model-import/useModelImportWorkflow.ts` from 391 to 354 effective lines after sharded-set detection extraction.
+- Completed: move import metadata lookup execution from `useModelImportWorkflow.ts` into `frontend/src/components/model-import/modelImportMetadataLookup.ts` with embedded match, bundle lookup, invalid file, and progress tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/model-import/useModelImportWorkflow.ts` from the oversized-file baseline after it reached 259 effective lines.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

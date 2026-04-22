@@ -8,6 +8,8 @@ This directory holds the workflow and extracted support components behind the mo
 |-------------|-------------|
 | `modelImportWorkflowHelpers.ts` | Pure helpers that normalize backend import classifications into review entries, directory findings, shard state, embedded metadata matches, and final import specs. |
 | `modelImportWorkflowHelpers.test.ts` | Unit coverage for the extracted import workflow helper transformations and repo-id inference rules. |
+| `modelImportMetadataLookup.ts` | Backend metadata lookup operation for file validation, embedded repo matches, HF search, and bundle metadata lookup. |
+| `modelImportMetadataLookup.test.ts` | Unit coverage for embedded metadata matches, bundle lookup, invalid file handling, and progress updates. |
 | `useModelImportWorkflow.ts` | Owns the import dialog workflow state machine from path classification through metadata lookup and import execution. |
 | `useModelImportWorkflow.test.ts` | Hook coverage for classification orchestration, embedded-metadata lookup flow, shard grouping, and import completion state. |
 | `useEmbeddedMetadataToggles.ts` | Owns embedded-metadata visibility and on-demand embedded metadata loading for import review entries. |
@@ -32,6 +34,7 @@ The import dialog has to review mixed inputs such as single files, single-model 
 - Keep the workflow orchestration in `useModelImportWorkflow.ts` so one hook owns import lifecycle state, lookup retries, and completion callbacks.
 - Keep embedded-metadata disclosure state in `useEmbeddedMetadataToggles.ts` so optional metadata loading does not grow the import lifecycle state machine.
 - Keep sharded-file detection in `useShardedSetDetection.ts` so backend-backed file grouping is isolated from import execution and metadata lookup state.
+- Keep metadata lookup execution in `modelImportMetadataLookup.ts` so API-specific lookup branching is tested outside the React workflow coordinator.
 - Keep classification-to-entry shaping and import spec assembly in `modelImportWorkflowHelpers.ts` so the transformation rules stay pure, testable, and separate from React state mutation.
 - Keep display-only logic in `metadataUtils.ts` as pure functions so metadata formatting and badge decisions stay easy to test.
 - Extract bundle-manifest and lookup-card rendering into small components so the dialog can focus on step orchestration instead of carrying every import-entry detail inline.

@@ -5,10 +5,11 @@
  * Includes drag-and-drop import support.
  */
 
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useMemo, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
+import { useHfAuthPrompt } from '../hooks/useHfAuthPrompt';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useModelImportPicker } from '../hooks/useModelImportPicker';
@@ -65,8 +66,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   activeVersion,
   onChooseExistingLibrary,
 }) => {
-  // HuggingFace Auth State
-  const [showHfAuth, setShowHfAuth] = useState(false);
   const {
     chooseExistingLibrary,
     isChoosingExistingLibrary,
@@ -152,19 +151,11 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     setDownloadErrors,
     startDownload,
   });
-
-  // Auto-open HF auth dialog when a download fails with 401
-  const prevDownloadErrorsRef = useRef<Record<string, string>>({});
-  useEffect(() => {
-    const prev = prevDownloadErrorsRef.current;
-    for (const [repoId, errorMsg] of Object.entries(downloadErrors)) {
-      if (!prev[repoId] && isAuthRequiredError(errorMsg)) {
-        setShowHfAuth(true);
-        break;
-      }
-    }
-    prevDownloadErrorsRef.current = downloadErrors;
-  }, [downloadErrors]);
+  const {
+    closeHfAuth,
+    isHfAuthOpen,
+    openHfAuth,
+  } = useHfAuthPrompt({ downloadErrors, isAuthRequiredError });
 
   // Auto-refresh model list when downloads complete
   const prevDownloadStatusRef = useRef<Record<string, string>>({});
@@ -272,7 +263,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
       }
       setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
       if (isAuthRequiredError(message)) {
-        setShowHfAuth(true);
+        openHfAuth();
       }
     }
   };
@@ -290,8 +281,8 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
       {/* HuggingFace Auth Dialog */}
       <HuggingFaceAuthDialog
-        isOpen={showHfAuth}
-        onClose={() => setShowHfAuth(false)}
+        isOpen={isHfAuthOpen}
+        onClose={closeHfAuth}
       />
 
     <div className="flex-1 bg-[hsl(var(--launcher-bg-tertiary)/0.2)] overflow-hidden flex flex-col">
@@ -318,7 +309,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         onSelectFilter={handleFilterSelect}
         onOpenModelsRoot={onOpenModelsRoot}
         onImportModels={openImportPicker}
-        onHfAuthClick={() => setShowHfAuth(true)}
+        onHfAuthClick={openHfAuth}
         showModeToggle={Boolean(onAddModels)}
       />
 
@@ -343,7 +334,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
               onSearchDeveloper={handleSearchDeveloper}
               onClearFilters={handleClearRemoteFilters}
               selectedKind={selectedKind}
-              onHfAuthClick={() => setShowHfAuth(true)}
+              onHfAuthClick={openHfAuth}
             />
           ) : (
             <>

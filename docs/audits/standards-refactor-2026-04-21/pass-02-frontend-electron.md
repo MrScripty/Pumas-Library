@@ -81,11 +81,11 @@ Rectification:
 - Completed: adapter tests cover Electron detection and browser fallback behavior.
 
 ### F04 - UI State and Backend-Owned Data Boundaries Need Review
-Status: needs decomposition review
+Status: partially remediated; large workflow owners remain
 
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
-- `frontend/src/App.tsx` at 563 lines;
+- `frontend/src/App.tsx` at 486 lines after launcher update state extraction;
 - `frontend/src/components/ModelManager.tsx` at 453 lines;
 - `frontend/src/components/LocalModelsList.tsx` at 467 lines;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
@@ -95,7 +95,9 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 The standards require one owner for state machines and backend-owned data to be confirmed by the backend, not speculatively owned by the frontend.
 
 Rectification:
-- Classify each local state variable as transient UI, form input, derived view state, or backend-owned.
+- Completed: move launcher update availability, update-check action state, URL opening, and stale-update clearing from `App.tsx` into `frontend/src/hooks/useLauncherUpdates.ts` with hook tests.
+- Completed: clear the delayed background launcher update check on `App.tsx` unmount now that the timer belongs to the extracted startup wiring.
+- Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.
 

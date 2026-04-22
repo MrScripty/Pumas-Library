@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppIcon } from './AppIcon';
 
@@ -18,18 +18,34 @@ describe('AppIcon', () => {
     });
 
     it('displays AppIndicator when not a ghost', () => {
-      const { container } = render(<AppIcon {...defaultProps} />);
-      const button = container.querySelector('button');
-      expect(button).toBeInTheDocument();
+      render(<AppIcon {...defaultProps} />);
+
+      expect(screen.getByTestId('app-indicator')).toBeInTheDocument();
     });
 
     it('calls onClick when icon is clicked', async () => {
       const user = userEvent.setup();
       const onClick = vi.fn();
-      const { container } = render(<AppIcon {...defaultProps} onClick={onClick} />);
+      render(<AppIcon {...defaultProps} title="Test App" onClick={onClick} />);
 
-      await user.click(container.querySelector('button')!);
+      await user.click(screen.getByRole('button', { name: 'Test App' }));
       expect(onClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps indicator actions outside the main icon button', async () => {
+      const user = userEvent.setup();
+      const onClick = vi.fn();
+      const onLaunch = vi.fn();
+      render(<AppIcon {...defaultProps} title="Test App" onClick={onClick} onLaunch={onLaunch} />);
+
+      expect(screen.getByRole('button', { name: 'Test App' })).not.toContainElement(
+        screen.getByTestId('app-indicator')
+      );
+
+      await user.click(screen.getByRole('button', { name: 'Launch test-app' }));
+
+      expect(onLaunch).toHaveBeenCalledTimes(1);
+      expect(onClick).not.toHaveBeenCalled();
     });
 
     it('hides AppIndicator when isGhost is true', () => {

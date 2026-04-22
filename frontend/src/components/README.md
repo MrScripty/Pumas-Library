@@ -12,6 +12,7 @@ bridge.
 | `ModelManager.tsx` | Main model management screen and interactions. |
 | `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
 | `ModelManagerUtils.test.ts` | Unit coverage for model-manager helper behavior such as download overlay merging and remote-kind mapping. |
+| `AppIcon.tsx`, `ComfyUIIcon.tsx`, `AppIndicator.tsx` | Launcher icon controls with sibling native buttons for app selection and launch/stop/status actions. |
 | `ConfirmationDialog.tsx` | Accessible confirmation dialog for destructive or state-changing operator actions. |
 | `ConfirmationDialog.test.tsx` | Interaction coverage for confirmation, cancellation, and Escape handling. |
 | `InstallDialog.tsx` | Version installation dialog orchestration and async install controls. |

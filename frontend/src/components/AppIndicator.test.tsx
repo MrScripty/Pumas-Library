@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, fireEvent, act } from '@testing-library/react';
+import { render, fireEvent, act, screen } from '@testing-library/react';
 import { AppIndicator } from './AppIndicator';
 
 describe('AppIndicator', () => {
@@ -214,6 +214,12 @@ describe('AppIndicator', () => {
   });
 
   describe('Offline State', () => {
+    it('exposes a native launch button with an accessible name', () => {
+      render(<AppIndicator {...defaultProps} state="offline" hasInstall={true} />);
+
+      expect(screen.getByRole('button', { name: 'Launch test-app' })).toBeInTheDocument();
+    });
+
     it('should show play icon for offline state with install', () => {
       render(<AppIndicator {...defaultProps} state="offline" hasInstall={true} />);
 

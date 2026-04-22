@@ -194,20 +194,21 @@ export const ComfyUIIcon: React.FC<ComfyUIIconProps> = ({
   isGhost = false,
 }) => { void _1;
   return (
-    <button
-      onClick={onClick}
-      onDragStart={(event) => event.preventDefault()}
-      className={`relative w-full overflow-visible hover:z-50 bg-transparent border-0 p-0 outline-none appearance-none select-none ${
-        isGhost ? 'shadow-2xl cursor-grabbing' : 'cursor-grab'
-      } ${isSelected ? 'opacity-100' : state === 'uninstalled' ? 'opacity-60' : 'opacity-80'}`}
-      style={{
-        opacity: dragOpacity,
-        transition: 'opacity 0.2s ease-out',
-        ...shakeStyle
-      }}
-      title={title}
-    >
-      <div className="relative overflow-visible">
+    <div className="relative w-full overflow-visible hover:z-50" title={title}>
+      <button
+        type="button"
+        onClick={onClick}
+        onDragStart={(event) => event.preventDefault()}
+        className={`relative w-full overflow-visible bg-transparent border-0 p-0 outline-none appearance-none select-none ${
+          isGhost ? 'shadow-2xl cursor-grabbing' : 'cursor-grab'
+        } ${isSelected ? 'opacity-100' : state === 'uninstalled' ? 'opacity-60' : 'opacity-80'}`}
+        style={{
+          opacity: dragOpacity,
+          transition: 'opacity 0.2s ease-out',
+          ...shakeStyle
+        }}
+        aria-label={title ?? 'ComfyUI'}
+      >
         {state === 'running' ? (
           <RunningIcon ramUsage={ramUsage} gpuUsage={gpuUsage} isSelected={isSelected} />
         ) : state === 'offline' ? (
@@ -217,20 +218,20 @@ export const ComfyUIIcon: React.FC<ComfyUIIconProps> = ({
         ) : (
           <ErrorIcon isSelected={isSelected} />
         )}
+      </button>
 
-        {!isGhost && (
-          <AppIndicator
-            appId="comfyui"
-            state={state}
-            isSelected={isSelected}
-            hasInstall={hasInstall}
-            launchError={launchError}
-            onLaunch={onLaunch}
-            onStop={onStop}
-            onOpenLog={onOpenLog}
-          />
-        )}
-      </div>
-    </button>
+      {!isGhost && (
+        <AppIndicator
+          appId="comfyui"
+          state={state}
+          isSelected={isSelected}
+          hasInstall={hasInstall}
+          launchError={launchError}
+          onLaunch={onLaunch}
+          onStop={onStop}
+          onOpenLog={onOpenLog}
+        />
+      )}
+    </div>
   );
 };

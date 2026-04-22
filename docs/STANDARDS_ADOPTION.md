@@ -46,6 +46,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: The ComfyUI shell template now honors `TMPDIR` for temporary browser profiles instead of hard-coding `/tmp`.
 - 2026-04-22: Release CI now follows the documented Rustler exclusion by building/testing the Rust workspace without `pumas_rustler` and publishing only the supported UniFFI native artifacts.
 - 2026-04-22: Frontend destructive and state-changing confirmations moved from `window.confirm` to an app-owned accessible alert dialog.
+- 2026-04-22: Launcher app icons now keep app selection and launch/stop indicators as sibling native buttons instead of nested custom role-button controls.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

@@ -69,7 +69,7 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   }, [launchError, appId]);
 
 
-  const handleClick = (e: React.MouseEvent) => {
+  const handleClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
 
     // Ignore clicks during transition states
@@ -234,6 +234,12 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   };
 
   const content = getIndicatorContent();
+  const isTransitioning = state === 'starting' || state === 'stopping';
+  const actionLabel = state === 'running'
+    ? `Stop ${appId}`
+    : state === 'error' && isHovering
+      ? `Open ${appId} log`
+      : `Launch ${appId}`;
 
   // Don't render if no content
   if (!content) {
@@ -241,17 +247,18 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
   }
 
   return (
-    <div
+    <button
       {...hoverProps}
-      className="absolute right-0 top-1/2 transform translate-x-1/2 -translate-y-1/2 z-30 cursor-pointer"
+      type="button"
+      aria-label={actionLabel}
+      data-testid="app-indicator"
+      disabled={isTransitioning}
+      className="absolute right-0 top-1/2 z-30 -translate-y-1/2 translate-x-1/2 cursor-pointer appearance-none border-0 bg-transparent p-0 disabled:cursor-not-allowed"
       style={{
         width: indicatorRadius * 2,
         height: indicatorRadius * 2,
       }}
       onClick={handleClick}
-      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleClick(e as unknown as React.MouseEvent); }}
-      role="button"
-      tabIndex={0}
     >
       {/* Invisible interaction zone */}
       <div className="absolute inset-0 rounded-full" />
@@ -260,6 +267,6 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
       <div className="w-full h-full flex items-center justify-center pointer-events-none">
         {content}
       </div>
-    </div>
+    </button>
   );
 };

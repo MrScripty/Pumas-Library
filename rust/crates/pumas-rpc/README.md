@@ -11,6 +11,8 @@ Handlers must parse renderer or network supplied payloads at the RPC boundary be
 
 The first typed-command pass covers model import/download and process open handlers. New handlers should prefer `handlers::parse_params` plus serde aliases for camelCase compatibility instead of ad hoc `serde_json::Value` extraction.
 
+The HTTP server accepts CORS requests only from loopback browser origins and only for `GET`/`POST` with `Content-Type`. External LAN or internet browser origins are not part of the supported trust boundary.
+
 ## Consumer Contract
 Electron should treat this crate as the only Rust process RPC endpoint. Tests may launch the binary or call server helpers, but should avoid reaching into domain modules through this crate.
 

@@ -3,6 +3,7 @@
 use crate::handlers::{handle_health, handle_rpc};
 use crate::shortcut::ShortcutManager;
 use axum::{
+    http::{header, HeaderValue, Method},
     routing::{get, post},
     Router,
 };
@@ -13,7 +14,7 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{info, warn};
 
 /// Application state shared across handlers.
@@ -67,11 +68,13 @@ pub async fn start_server(
         plugin_loader: Arc::new(plugin_loader),
     });
 
-    // Configure CORS for development
+    // Configure CORS for local development and packaged renderer diagnostics.
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+        .allow_origin(AllowOrigin::predicate(|origin, _parts| {
+            is_allowed_cors_origin(origin)
+        }))
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers([header::CONTENT_TYPE]);
 
     // Build the router
     let app = Router::new()
@@ -95,6 +98,24 @@ pub async fn start_server(
     });
 
     Ok(actual_addr)
+}
+
+fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    let Ok(url) = url::Url::parse(origin) else {
+        return false;
+    };
+    if !matches!(url.scheme(), "http" | "https") {
+        return false;
+    }
+    match url.host() {
+        Some(url::Host::Domain("localhost")) => true,
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        _ => false,
+    }
 }
 
 #[cfg(test)]
@@ -159,5 +180,29 @@ mod tests {
             Err(err) => panic!("test_server_starts failed: {err:#}"),
         };
         assert!(addr.port() > 0);
+    }
+
+    #[test]
+    fn cors_allows_loopback_origins() {
+        for origin in [
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://[::1]:5173",
+        ] {
+            let header = HeaderValue::from_str(origin).unwrap();
+            assert!(is_allowed_cors_origin(&header), "{origin}");
+        }
+    }
+
+    #[test]
+    fn cors_rejects_non_loopback_origins() {
+        for origin in [
+            "https://example.com",
+            "http://192.168.1.10:5173",
+            "file:///tmp/index.html",
+        ] {
+            let header = HeaderValue::from_str(origin).unwrap();
+            assert!(!is_allowed_cors_origin(&header), "{origin}");
+        }
     }
 }

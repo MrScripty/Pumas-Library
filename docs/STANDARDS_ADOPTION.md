@@ -38,6 +38,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-21: Torch sidecar API validation and app construction were hardened with shared validators, LAN opt-in policy, fresh FastAPI app creation, and focused unit tests.
 - 2026-04-21: Torch model-manager slot reservations, unload transitions, and model-limit updates were moved behind a manager-level async lock with concurrency tests.
 - 2026-04-22: Rust RPC model import/download and process open handlers now parse renderer payloads into typed command structs at the boundary.
+- 2026-04-22: Rust RPC CORS policy was narrowed from wildcard origins, methods, and headers to loopback browser origins, `GET`/`POST`, and `Content-Type`.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

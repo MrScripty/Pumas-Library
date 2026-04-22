@@ -5,12 +5,13 @@
  * Displays metadata for a library model when ctrl+clicked.
  */
 
-import React, { useEffect, useId, useRef, useState } from 'react';
-import { Loader2, RefreshCw, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import { modelsAPI } from '../api/models';
 import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
 import { getStoredNotes, type MetadataSource } from './ModelMetadataFieldConfig';
 import { ModelMetadataModalContent } from './ModelMetadataModalContent';
+import { ModelMetadataModalFrame } from './ModelMetadataModalFrame';
 
 interface ModelMetadataModalProps {
   modelId: string;
@@ -37,8 +38,6 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [refetchError, setRefetchError] = useState<string | null>(null);
   const [expandedFieldKeys, setExpandedFieldKeys] = useState<Set<string>>(new Set());
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
-  const titleId = useId();
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Inference settings state
   const [inferenceSettings, setInferenceSettings] = useState<InferenceParamSchema[]>([]);
@@ -113,25 +112,6 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     setNotesSaveError(null);
     setNotesSaveSuccess(false);
   }, [modelId]);
-
-  useEffect(() => {
-    const previousFocus = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.clearTimeout(focusTimer);
-      window.removeEventListener('keydown', handleKeyDown);
-      previousFocus?.focus();
-    };
-  }, [onClose]);
 
   // ========================================
   // Inference settings handlers
@@ -260,47 +240,13 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center pointer-events-none">
-      <button
-        type="button"
-        className="absolute inset-0 bg-black/50 pointer-events-auto"
-        aria-label="Close metadata modal"
-        onClick={onClose}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        className="relative pointer-events-auto bg-[hsl(var(--surface-overlay)/0.95)] border border-[hsl(var(--border-default))] backdrop-blur-md rounded-lg shadow-lg w-full max-w-2xl max-h-[80vh] overflow-hidden"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-[hsl(var(--border-default))]">
-          <h2 id={titleId} className="text-lg font-semibold truncate text-[hsl(var(--text-primary))]">
-            {modelName}
-          </h2>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={handleRefetchFromHF}
-              disabled={refetching || loading}
-              className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))] disabled:opacity-40"
-              aria-label="Refetch metadata from HuggingFace"
-              title="Refetch metadata from HuggingFace"
-            >
-              <RefreshCw className={`w-4 h-4 ${refetching ? 'animate-spin' : ''}`} />
-            </button>
-            <button
-              ref={closeButtonRef}
-              onClick={onClose}
-              className="p-1 hover:bg-[hsl(var(--surface-mid))] rounded text-[hsl(var(--text-secondary))]"
-              aria-label="Close"
-            >
-              <X className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-
-        {/* Content */}
-        <div className="p-4 overflow-y-auto">
+    <ModelMetadataModalFrame
+      isLoading={loading}
+      isRefetching={refetching}
+      modelName={modelName}
+      onClose={onClose}
+      onRefetch={() => void handleRefetchFromHF()}
+    >
           {loading ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="w-6 h-6 animate-spin text-[hsl(var(--text-muted))]" />
@@ -350,8 +296,6 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               onToggleShowAllFields={() => setShowAllFields((prev) => !prev)}
             />
           )}
-        </div>
-      </div>
-    </div>
+    </ModelMetadataModalFrame>
   );
 };

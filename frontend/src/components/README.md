@@ -43,6 +43,8 @@ bridge.
 | `RelatedModelsPanel.test.tsx` | Rendering and URL-opening coverage for related-model panel states. |
 | `ModelMetadataModal.tsx` | Modal for stored, embedded, inference, and notes metadata with semantic dialog/backdrop controls. |
 | `ModelMetadataModal.test.tsx` | Dialog naming and dismissal coverage for metadata modal interactions. |
+| `ModelMetadataModalFrame.tsx` | Metadata modal shell with header actions, backdrop dismissal, Escape handling, and focus restoration. |
+| `ModelMetadataModalFrame.test.tsx` | Rendering, dismissal, and refetch disabled-state coverage for the metadata modal shell. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `MigrationReportsPanel.test.tsx` | Integration coverage for migration report loading, action dispatch, validation, and operator feedback. |
 | `MigrationReportControls.tsx` | Migration action buttons, prune controls, and flash-message presentation for the report panel. |

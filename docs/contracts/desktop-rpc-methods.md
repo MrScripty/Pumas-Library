@@ -4,7 +4,7 @@
 This registry records the current method contract between the renderer bridge, Electron main process, and Rust JSON-RPC backend.
 
 ## Current Enforcement
-`electron/src/ipc-validation.ts` enforces:
+`electron/src/rpc-method-registry.ts` owns the executable method registry and `electron/src/ipc-validation.ts` enforces:
 
 - method name must be a string;
 - method name must be in the known backend allowlist;
@@ -12,7 +12,7 @@ This registry records the current method contract between the renderer bridge, E
 - dialog and external URL IPC payloads are sanitized independently from renderer types.
 
 ## Current Limitation
-This pass intentionally enforces method-level allowlisting, not full per-method request schemas. The next contract pass should promote this registry into generated request/response schema artifacts used by TypeScript and Rust.
+This pass intentionally enforces method-level allowlisting, not full per-method request schemas. The executable registry records request and response schemas as `deferred` until the next contract pass promotes them into generated request/response schema artifacts used by TypeScript and Rust.
 
 ## Method Groups
 | Group | Representative Methods | Owner |
@@ -28,10 +28,11 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | Plugins and custom nodes | `get_plugins`, `get_custom_nodes`, `install_custom_node` | `rust/crates/pumas-rpc/src/handlers/plugins.rs`, `custom_nodes.rs` |
 
 ## Contract Rules
-- New method names must be added to `electron/src/ipc-validation.ts`.
+- New method names must be added to `electron/src/rpc-method-registry.ts`.
 - Renderer-visible methods must be exposed through `electron/src/preload.ts` and typed in `frontend/src/types/api.ts`.
 - Backend handlers must parse params at the boundary before calling internal services.
 - Destructive and path-taking methods must receive per-method schemas before broader model-library decomposition proceeds.
+- `electron/tests/ipc-validation.test.mjs` must keep enforcing registry uniqueness and representative runtime allowlisting.
 
 ## Next Schema Targets
 Prioritize these methods for typed request schemas:

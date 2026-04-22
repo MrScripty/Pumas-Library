@@ -20,7 +20,7 @@
 ## Findings
 
 ### F01 - Desktop Bridge Contract Is Hand-Maintained in Multiple Places
-Status: non-compliant with executable boundary contract expectations
+Status: partially remediated; schema generation remains open
 
 The renderer contract is represented by `frontend/src/types/api.ts` at 2,176 lines, Electron preload exposes a large manual `electronAPI` object in `electron/src/preload.ts`, and Rust JSON-RPC dispatch separately maps string method names in `rust/crates/pumas-rpc/src/handlers/mod.rs`.
 
@@ -31,7 +31,10 @@ This creates a high-risk drift path:
 - Rust handlers use `serde_json::Value` and local helper extraction in many handlers instead of shared executable schemas.
 
 Rectification:
-- Define a single method registry artifact with method name, request schema, response schema, ownership, stability tier, and validation policy.
+- Completed: define `electron/src/rpc-method-registry.ts` as the executable desktop RPC method registry with method name, ownership, stability tier, request-schema, response-schema, and params-validation policy metadata.
+- Completed: make `electron/src/ipc-validation.ts` consume the registry instead of owning a separate inline method list.
+- Completed: add an Electron package test that rejects duplicate registry entries and verifies representative allowed methods still pass runtime validation.
+- Remaining: add per-method request and response schemas.
 - Generate or validate:
   - `frontend/src/types/api.ts`
   - `electron/src/preload.ts` bridge signatures

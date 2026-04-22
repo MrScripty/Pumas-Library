@@ -19,7 +19,7 @@ The Electron preload bridge, Electron main process, Rust JSON-RPC server, fronte
 - Contract changes must be additive unless a migration note and changelog entry accompany the change.
 
 ## Decision
-Track method ownership in this directory and enforce the current method allowlist in Electron main-process IPC validation. Later refactor passes should replace the hand-maintained list with generated TypeScript and Rust artifacts from a single registry.
+Track method ownership in this directory and enforce the current method allowlist from the Electron registry in main-process IPC validation. Later refactor passes should replace the registry's deferred schemas with generated TypeScript and Rust artifacts from a single schema source.
 
 ## Alternatives Rejected
 - Keep method names only in `preload.ts` and Rust match arms: rejected because that already permits drift.
@@ -39,7 +39,7 @@ Track method ownership in this directory and enforce the current method allowlis
 - Adding or renaming release artifacts.
 
 ## Dependencies
-**Internal:** `electron/src/ipc-validation.ts`, `electron/src/main.ts`, `electron/src/preload.ts`, `rust/crates/pumas-rpc/src/handlers/mod.rs`, `rust/crates/pumas-uniffi/src/bindings.rs`, `frontend/src/types/api.ts`, `RELEASING.md`, `scripts/package-uniffi-csharp-artifacts.sh`, `scripts/dev/generate-sbom.sh`.
+**Internal:** `electron/src/rpc-method-registry.ts`, `electron/src/ipc-validation.ts`, `electron/src/main.ts`, `electron/src/preload.ts`, `rust/crates/pumas-rpc/src/handlers/mod.rs`, `rust/crates/pumas-uniffi/src/bindings.rs`, `frontend/src/types/api.ts`, `RELEASING.md`, `scripts/package-uniffi-csharp-artifacts.sh`, `scripts/dev/generate-sbom.sh`.
 
 **External:** Electron IPC and JSON-RPC 2.0 conventions.
 
@@ -61,7 +61,8 @@ await pythonBridge.call(request.method, request.params);
 
 ## Structured Producer Contract
 - `desktop-rpc-methods.md` is the human-readable registry.
+- `electron/src/rpc-method-registry.ts` is the executable desktop RPC method registry and includes owner, stability, request-schema, response-schema, and params-validation policy metadata.
 - `native-bindings-surface.md` is the human-readable native binding support-tier registry.
 - `release-artifacts.md` is the human-readable release artifact registry.
-- `electron/src/ipc-validation.ts` is the current executable allowlist.
+- `electron/src/ipc-validation.ts` consumes the executable registry as the main-process allowlist.
 - Field additions must be append-only unless a migration note is recorded.

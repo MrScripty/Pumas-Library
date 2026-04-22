@@ -1,10 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  ALLOWED_RPC_METHODS,
   sanitizeOpenDialogOptions,
   validateApiCallPayload,
   validateExternalUrl,
 } from '../dist/ipc-validation.js';
+
+test('RPC method registry has stable unique method names', () => {
+  assert.ok(ALLOWED_RPC_METHODS.length > 100);
+  assert.deepEqual(
+    [...new Set(ALLOWED_RPC_METHODS)],
+    [...ALLOWED_RPC_METHODS]
+  );
+  assert.ok(ALLOWED_RPC_METHODS.includes('get_status'));
+  assert.ok(ALLOWED_RPC_METHODS.includes('torch_configure'));
+});
 
 test('validateApiCallPayload rejects unknown methods and non-record params', () => {
   assert.deepEqual(validateApiCallPayload('get_status', undefined), {

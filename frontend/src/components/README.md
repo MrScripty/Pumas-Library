@@ -25,8 +25,10 @@ bridge.
 | `VersionListItem.test.tsx` | Interaction coverage for installable, installed, and in-progress version row behaviors. |
 | `ConflictResolutionDialog.tsx` | Accessible conflict-resolution modal for model mapping collisions. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
-| `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
+| `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure wiring, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
+| `RelatedModelsPanel.tsx` | Presentational related-model expansion for loading, error, empty, and remote model rows. |
+| `RelatedModelsPanel.test.tsx` | Rendering and URL-opening coverage for related-model panel states. |
 | `ModelMetadataModal.tsx` | Modal for stored, embedded, inference, and notes metadata with semantic dialog/backdrop controls. |
 | `ModelMetadataModal.test.tsx` | Dialog naming and dismissal coverage for metadata modal interactions. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |

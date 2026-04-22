@@ -87,7 +87,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
-- `frontend/src/components/LocalModelsList.tsx` at 467 lines;
+- `frontend/src/components/LocalModelsList.tsx` at 414 lines after related-panel extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 454 lines.
@@ -110,6 +110,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 361 to 355 effective lines after HF auth prompt extraction.
 - Completed: move delayed model-list refresh scheduling after completed or disappeared downloads into `frontend/src/hooks/useDownloadCompletionRefresh.ts`, with completion, disappeared-download, initial completed no-op, and unmount cleanup tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 355 to 333 effective lines after download-refresh extraction.
+- Completed: move related-model expansion rendering from `LocalModelsList.tsx` into `frontend/src/components/RelatedModelsPanel.tsx` with loading, error, empty, and URL-opening tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 455 to 402 effective lines after related-panel extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

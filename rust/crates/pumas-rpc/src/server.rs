@@ -13,9 +13,9 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::{sync::RwLock, task::JoinHandle};
 use tower_http::cors::{AllowOrigin, CorsLayer};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -33,9 +33,42 @@ pub struct AppState {
     pub plugin_loader: Arc<PluginLoader>,
 }
 
+/// Owned handle for the running HTTP server task.
+pub struct ServerHandle {
+    addr: SocketAddr,
+    task: Option<JoinHandle<()>>,
+}
+
+impl ServerHandle {
+    /// Address the server actually bound to.
+    pub fn addr(&self) -> SocketAddr {
+        self.addr
+    }
+
+    /// Stop the server task and wait until it is no longer running.
+    pub async fn shutdown(mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+            match task.await {
+                Ok(()) => {}
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => warn!("RPC server task failed during shutdown: {}", error),
+            }
+        }
+    }
+}
+
+impl Drop for ServerHandle {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
 /// Start the JSON-RPC HTTP server.
 ///
-/// Returns the actual address the server is bound to (useful when port=0).
+/// Returns an owned handle that exposes the actual bound address and server task.
 #[allow(clippy::too_many_arguments)]
 pub async fn start_server(
     api: PumasApi,
@@ -46,7 +79,7 @@ pub async fn start_server(
     launcher_root: PathBuf,
     host: &str,
     port: u16,
-) -> anyhow::Result<SocketAddr> {
+) -> anyhow::Result<ServerHandle> {
     // Initialize shortcut manager
     let shortcut_manager = match ShortcutManager::new(&launcher_root) {
         Ok(mgr) => {
@@ -92,12 +125,17 @@ pub async fn start_server(
 
     info!("Server listening on {}", actual_addr);
 
-    // Spawn the server in the background
-    tokio::spawn(async move {
-        axum::serve(listener, app).await.expect("Server error");
+    // Spawn the server in the background and retain ownership of the task.
+    let task = tokio::spawn(async move {
+        if let Err(error) = axum::serve(listener, app).await {
+            error!("RPC server error: {}", error);
+        }
     });
 
-    Ok(actual_addr)
+    Ok(ServerHandle {
+        addr: actual_addr,
+        task: Some(task),
+    })
 }
 
 fn is_allowed_cors_origin(origin: &HeaderValue) -> bool {
@@ -171,15 +209,17 @@ mod tests {
             0,
         )
         .await;
-        let addr = match result {
-            Ok(addr) => addr,
+        let server = match result {
+            Ok(server) => server,
             Err(err) if is_socket_bind_permission_error(&err) => {
                 eprintln!("Skipping test_server_starts: socket bind not permitted ({err})");
                 return;
             }
             Err(err) => panic!("test_server_starts failed: {err:#}"),
         };
+        let addr = server.addr();
         assert!(addr.port() > 0);
+        server.shutdown().await;
     }
 
     #[test]

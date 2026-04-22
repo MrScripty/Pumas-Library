@@ -13,6 +13,8 @@ The first typed-command pass covers model import/download and process open handl
 
 The HTTP server accepts CORS requests only from loopback browser origins and only for `GET`/`POST` with `Content-Type`. External LAN or internet browser origins are not part of the supported trust boundary.
 
+`start_server` returns an owned `ServerHandle`; callers must keep it alive for the server lifetime and call `shutdown()` during controlled teardown.
+
 ## Consumer Contract
 Electron should treat this crate as the only Rust process RPC endpoint. Tests may launch the binary or call server helpers, but should avoid reaching into domain modules through this crate.
 

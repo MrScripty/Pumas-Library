@@ -156,7 +156,7 @@ async fn main() -> Result<()> {
     };
 
     // Start the server
-    let addr = server::start_server(
+    let server = server::start_server(
         api,
         version_managers,
         custom_nodes_manager,
@@ -167,6 +167,7 @@ async fn main() -> Result<()> {
         args.port,
     )
     .await?;
+    let addr = server.addr();
 
     // Print port for Electron to read (intentional stdout for IPC)
     // This format must match what python-bridge.ts expects
@@ -177,6 +178,7 @@ async fn main() -> Result<()> {
     // Wait for shutdown signal
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received, exiting");
+    server.shutdown().await;
 
     Ok(())
 }

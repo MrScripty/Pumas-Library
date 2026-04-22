@@ -5,7 +5,7 @@
  * Users can choose to Overwrite, Rename, or Skip for each conflict.
  */
 
-import React, { useState, useCallback, useEffect, useId, useMemo, useRef } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
@@ -20,19 +20,11 @@ import {
   ChevronUp,
 } from 'lucide-react';
 import type { MappingAction } from '../types/api';
-import { getLogger } from '../utils/logger';
-
-const logger = getLogger('ConflictResolutionDialog');
-
-/**
- * Resolution action types
- */
-export type ConflictResolutionAction = 'skip' | 'overwrite' | 'rename';
-
-/**
- * Resolution map for all conflicts
- */
-export type ConflictResolutions = Record<string, ConflictResolutionAction>;
+import {
+  useConflictResolutions,
+  type ConflictResolutionAction,
+  type ConflictResolutions,
+} from '../hooks/useConflictResolutions';
 
 interface ConflictResolutionDialogProps {
   /** Whether dialog is open */
@@ -100,64 +92,18 @@ export const ConflictResolutionDialog: React.FC<ConflictResolutionDialogProps> =
   onApply,
   versionTag,
 }) => {
-  // Resolution state for each conflict (keyed by model_id)
-  const [resolutions, setResolutions] = useState<ConflictResolutions>({});
-  const [isApplying, setIsApplying] = useState(false);
-  const [expandedConflict, setExpandedConflict] = useState<string | null>(null);
   const titleId = useId();
   const cancelButtonRef = useRef<HTMLButtonElement>(null);
-
-  // Initialize resolutions with 'skip' as default
-  const effectiveResolutions = useMemo(() => {
-    const result: ConflictResolutions = {};
-    for (const conflict of conflicts) {
-      result[conflict.model_id] = resolutions[conflict.model_id] || 'skip';
-    }
-    return result;
-  }, [conflicts, resolutions]);
-
-  // Count resolutions by type
-  const resolutionCounts = useMemo(() => {
-    const counts = { skip: 0, overwrite: 0, rename: 0 };
-    for (const resolution of Object.values(effectiveResolutions)) {
-      counts[resolution]++;
-    }
-    return counts;
-  }, [effectiveResolutions]);
-
-  const handleResolutionChange = useCallback(
-    (modelId: string, action: ConflictResolutionAction) => {
-      setResolutions((prev) => ({
-        ...prev,
-        [modelId]: action,
-      }));
-    },
-    []
-  );
-
-  const handleApplyToAll = useCallback((action: ConflictResolutionAction) => {
-    const newResolutions: ConflictResolutions = {};
-    for (const conflict of conflicts) {
-      newResolutions[conflict.model_id] = action;
-    }
-    setResolutions(newResolutions);
-  }, [conflicts]);
-
-  const handleApply = useCallback(async () => {
-    setIsApplying(true);
-    try {
-      await onApply(effectiveResolutions);
-      logger.info('Applied conflict resolutions', { resolutions: effectiveResolutions });
-    } catch (error) {
-      logger.error('Failed to apply resolutions', { error });
-    } finally {
-      setIsApplying(false);
-    }
-  }, [effectiveResolutions, onApply]);
-
-  const toggleExpanded = useCallback((modelId: string) => {
-    setExpandedConflict((prev) => (prev === modelId ? null : modelId));
-  }, []);
+  const {
+    effectiveResolutions,
+    expandedConflict,
+    handleApply,
+    handleApplyToAll,
+    handleResolutionChange,
+    isApplying,
+    resolutionCounts,
+    toggleExpanded,
+  } = useConflictResolutions({ conflicts, onApply });
 
   useEffect(() => {
     if (!isOpen) {

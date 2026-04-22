@@ -11,6 +11,18 @@ import * as http from 'http';
 import * as net from 'net';
 import log from 'electron-log';
 
+type BridgeTimer = ReturnType<typeof setTimeout>;
+
+export interface PythonBridgeTimerController {
+  setTimeout(callback: () => void, delayMs: number): BridgeTimer;
+  clearTimeout(timer: BridgeTimer): void;
+}
+
+const NODE_TIMER_CONTROLLER: PythonBridgeTimerController = {
+  setTimeout: (callback, delayMs) => setTimeout(callback, delayMs),
+  clearTimeout: (timer) => clearTimeout(timer),
+};
+
 export interface PythonBridgeOptions {
   /** Port for the RPC server (0 = auto-assign) */
   port: number;
@@ -24,6 +36,8 @@ export interface PythonBridgeOptions {
   rustBinaryPath: string;
   /** Launcher root directory */
   launcherRoot: string;
+  /** Timer controller for lifecycle testing */
+  timerController?: PythonBridgeTimerController;
 }
 
 interface RPCError {
@@ -38,20 +52,23 @@ interface RPCResponse {
 }
 
 export class PythonBridge {
-  private options: Required<PythonBridgeOptions>;
+  private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
+  private timerController: PythonBridgeTimerController;
   private process: ChildProcess | null = null;
   private port = 0;
   private restartCount = 0;
   private isShuttingDown = false;
-  private healthCheckTimer: NodeJS.Timeout | null = null;
-  private restartTimer: NodeJS.Timeout | null = null;
+  private healthCheckTimer: BridgeTimer | null = null;
+  private restartTimer: BridgeTimer | null = null;
 
   constructor(options: PythonBridgeOptions) {
+    const { timerController, ...runtimeOptions } = options;
     this.options = {
       autoRestart: true,
       maxRestarts: 3,
-      ...options,
+      ...runtimeOptions,
     };
+    this.timerController = timerController ?? NODE_TIMER_CONTROLLER;
 
     log.info(`Backend bridge initialized: ${this.options.rustBinaryPath}`);
   }
@@ -195,7 +212,7 @@ export class PythonBridge {
           return;
         }
       } catch {
-        await new Promise((resolve) => setTimeout(resolve, 100));
+        await this.delay(100);
       }
     }
 
@@ -220,7 +237,7 @@ export class PythonBridge {
   private startHealthCheck(): void {
     const backendLabel = 'Rust';
     this.clearHealthCheckTimer();
-    this.healthCheckTimer = setTimeout(async () => {
+    this.healthCheckTimer = this.timerController.setTimeout(async () => {
       this.healthCheckTimer = null;
       if (this.isShuttingDown) {
         return;
@@ -257,7 +274,7 @@ export class PythonBridge {
     // Try graceful shutdown first
     try {
       await this.call('shutdown', {});
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await this.delay(1000);
     } catch {
       // Ignore errors during shutdown
     }
@@ -268,7 +285,7 @@ export class PythonBridge {
 
       // Wait for process to exit
       await new Promise<void>((resolve) => {
-        const timeout = setTimeout(() => {
+        const timeout = this.timerController.setTimeout(() => {
           if (this.process) {
             log.warn(`Force killing ${backendLabel} process`);
             this.process.kill('SIGKILL');
@@ -278,11 +295,11 @@ export class PythonBridge {
 
         if (this.process) {
           this.process.once('exit', () => {
-            clearTimeout(timeout);
+            this.timerController.clearTimeout(timeout);
             resolve();
           });
         } else {
-          clearTimeout(timeout);
+          this.timerController.clearTimeout(timeout);
           resolve();
         }
       });
@@ -295,14 +312,14 @@ export class PythonBridge {
 
   private clearHealthCheckTimer(): void {
     if (this.healthCheckTimer) {
-      clearTimeout(this.healthCheckTimer);
+      this.timerController.clearTimeout(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
   }
 
   private clearRestartTimer(): void {
     if (this.restartTimer) {
-      clearTimeout(this.restartTimer);
+      this.timerController.clearTimeout(this.restartTimer);
       this.restartTimer = null;
     }
   }
@@ -311,12 +328,18 @@ export class PythonBridge {
     this.clearRestartTimer();
     this.restartCount++;
     log.info(`Restarting ${backendLabel} process (attempt ${this.restartCount}/${this.options.maxRestarts})`);
-    this.restartTimer = setTimeout(() => {
+    this.restartTimer = this.timerController.setTimeout(() => {
       this.restartTimer = null;
       void this.start().catch((error: unknown) => {
         log.error(`Failed to restart ${backendLabel} process:`, error);
       });
     }, 1000 * this.restartCount);
+  }
+
+  private async delay(delayMs: number): Promise<void> {
+    await new Promise<void>((resolve) => {
+      this.timerController.setTimeout(resolve, delayMs);
+    });
   }
 
   /**

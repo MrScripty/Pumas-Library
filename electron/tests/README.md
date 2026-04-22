@@ -10,14 +10,16 @@ This directory verifies Electron source behavior that can be tested without laun
 | ---- | ----------- |
 | `backend-path.test.mjs` | Exercises compiled backend binary path resolution for launcher overrides, source builds, and packaged resources. |
 | `ipc-validation.test.mjs` | Exercises compiled IPC validation helpers for RPC method allowlisting, dialog option sanitization, and external URL scheme validation. |
+| `python-bridge.test.mjs` | Exercises backend bridge health-check and restart timer cleanup through an injected deterministic timer controller. |
 
 ## Problem
-Renderer input is not trusted just because TypeScript types exist in preload or frontend code. Runtime paths also need an explicit launcher contract so development and release flows do not accidentally launch different artifacts than the wrapper verified. The Electron package needs fast tests that prove main-process helpers enforce those boundaries before IPC handlers forward work or backend processes are spawned.
+Renderer input is not trusted just because TypeScript types exist in preload or frontend code. Runtime paths also need an explicit launcher contract so development and release flows do not accidentally launch different artifacts than the wrapper verified. The Electron package needs fast tests that prove main-process helpers enforce those boundaries before IPC handlers forward work or backend processes are spawned. Backend process lifecycle timers also need deterministic cleanup coverage so health checks and restart backoff do not leak across shutdown or replacement attempts.
 
 ## Constraints
 - Tests run with Node's built-in `node:test` runner to avoid adding another Electron test framework.
 - Tests import compiled files from `electron/dist`, so `pnpm run test` builds the package first.
 - Tests must not launch Electron windows, spawn backend processes, or depend on desktop display services.
+- Backend bridge timer tests use an injected timer controller rather than wall-clock sleeps.
 
 ## Decision
 Keep Electron boundary tests in this package and execute them through the package-local `test` script. Runtime integration and GUI smoke coverage remain owned by the launcher and CI release-smoke flows.
@@ -40,8 +42,10 @@ Keep Electron boundary tests in this package and execute them through the packag
 ### Internal
 - `../src/backend-path.ts` - Source backend binary path resolver compiled before the tests run.
 - `../src/ipc-validation.ts` - Source validators compiled before the tests run.
+- `../src/python-bridge.ts` - Source backend bridge compiled before the tests run.
 - `../dist/backend-path.js` - Runtime module imported by the Node tests.
 - `../dist/ipc-validation.js` - Runtime module imported by the Node tests.
+- `../dist/python-bridge.js` - Runtime module imported by the Node tests.
 
 ### External
 - `node:test` - Built-in Node test runner.

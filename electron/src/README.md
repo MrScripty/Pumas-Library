@@ -9,7 +9,7 @@ that hosts the frontend and routes RPC calls to backend services.
 | ----------- | ----------- |
 | `main.ts` | Main process startup, window lifecycle, and IPC wiring. |
 | `preload.ts` | Secure renderer bridge exposing the canonical desktop API. |
-| `python-bridge.ts` | Python backend process bridge and lifecycle helpers. |
+| `python-bridge.ts` | Backend process bridge, lifecycle helpers, and deterministic timer ownership. |
 
 ## Problem
 The desktop shell needs a single place to own window lifecycle, backend process
@@ -22,10 +22,14 @@ OS APIs directly.
 - `window.electronAPI` is the canonical renderer facade.
 - Cross-platform shell behavior must stay isolated to Electron and thin
   platform-specific paths rather than leaking into renderer features.
+- Backend lifecycle timers are owned by `python-bridge.ts` and must be
+  injectable for deterministic tests instead of relying on wall-clock sleeps.
 
 ## Decision
 - Keep window lifecycle and backend process ownership in `main.ts`.
 - Keep renderer API exposure constrained to `preload.ts`.
+- Keep backend health-check and restart backoff scheduling in `python-bridge.ts`
+  behind an injectable timer controller.
 
 ## Alternatives Rejected
 - Expose Node/Electron primitives directly to the renderer: rejected because it
@@ -36,6 +40,8 @@ OS APIs directly.
 ## Invariants
 - The renderer reaches backend methods through preload, not direct Node access.
 - `window.electronAPI` remains the canonical bridge contract.
+- Backend health-check and restart timers are cleared during bridge stop before
+  process shutdown checks continue.
 
 ## Revisit Triggers
 - A non-Electron desktop shell becomes a first-class runtime.
@@ -68,6 +74,8 @@ contextBridge.exposeInMainWorld('electronAPI', apiMethods);
 ## Structured Producer Contract
 - `preload.ts` produces the renderer-visible global bridge shape consumed by the
   frontend.
+- `python-bridge.ts` produces the backend lifecycle scheduling contract consumed
+  by `main.ts` and verified by package-local tests.
 - `main.ts` produces IPC channels and window lifecycle behavior, but not
   persisted machine-consumed artifacts.
 - Revisit trigger: bridge schema/codegen or persisted Electron metadata becomes

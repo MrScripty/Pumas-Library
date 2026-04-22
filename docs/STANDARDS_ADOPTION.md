@@ -64,6 +64,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Sidebar background deselection no longer depends on a generic JSX keyboard handler; Escape handling is owned by an explicit listener with focused tests.
 - 2026-04-22: Electron IPC validation now has package-local Node tests for RPC method allowlisting, dialog option sanitization, and external URL scheme validation.
 - 2026-04-22: The desktop RPC method allowlist now lives in `electron/src/rpc-method-registry.ts` with ownership, stability, validation, and deferred schema metadata consumed by Electron IPC validation.
+- 2026-04-22: Electron backend bridge timers now use an injectable timer controller with package-local tests for health-check rescheduling, restart backoff replacement, and stop-time cleanup.
 - 2026-04-22: The launcher `--test` action and CI launcher verification now run the Torch sidecar Python unit suite through platform-specific Python module commands.
 - 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.

@@ -124,8 +124,8 @@ Rectification:
 - Completed: `frontend/src/hooks/README.md` now records hook-level polling ownership, current justification, guardrails, and event-stream replacement trigger.
 - Completed: `frontend/src/components/app-panels/sections/README.md` now records section-level polling ownership and the shared-hook/event-stream replacement trigger.
 - Completed: existing hook tests cover cleanup or polling behavior for active downloads, model downloads, network status, installation manager/progress, available versions, and status.
+- Completed: `electron/src/python-bridge.ts` accepts an injectable timer controller, and `electron/tests/python-bridge.test.mjs` covers health-check rescheduling, restart backoff replacement, and stop-time timer cleanup without spawning a backend.
 - Remaining: consolidate install/download/status polling behind a backend event stream or single scheduler when the backend exposes one.
-- Remaining: add deterministic timer cleanup tests for Electron bridge health-check and restart timers.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks
 Status: remediated for audited controls

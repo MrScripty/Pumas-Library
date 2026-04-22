@@ -27,6 +27,8 @@ bridge.
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure wiring, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
+| `LocalModelsEmptyState.tsx` | Empty local-library and no-match filter states for the local model list. |
+| `LocalModelsEmptyState.test.tsx` | Rendering and action coverage for local model empty states. |
 | `RelatedModelsPanel.tsx` | Presentational related-model expansion for loading, error, empty, and remote model rows. |
 | `RelatedModelsPanel.test.tsx` | Rendering and URL-opening coverage for related-model panel states. |
 | `ModelMetadataModal.tsx` | Modal for stored, embedded, inference, and notes metadata with semantic dialog/backdrop controls. |

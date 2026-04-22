@@ -5,9 +5,10 @@
  * Includes drag-and-drop import support.
  */
 
-import React, { useMemo, useEffect, useRef } from 'react';
+import React, { useMemo } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
+import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
 import { useHfAuthPrompt } from '../hooks/useHfAuthPrompt';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
@@ -156,33 +157,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     isHfAuthOpen,
     openHfAuth,
   } = useHfAuthPrompt({ downloadErrors, isAuthRequiredError });
-
-  // Auto-refresh model list when downloads complete
-  const prevDownloadStatusRef = useRef<Record<string, string>>({});
-  useEffect(() => {
-    const prev = prevDownloadStatusRef.current;
-    let anyNewlyCompleted = false;
-    const refreshOnDisappearStatuses = new Set(['queued', 'downloading', 'pausing']);
-    for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
-      if (status.status === 'completed' && prev[repoId] && prev[repoId] !== 'completed') {
-        anyNewlyCompleted = true;
-        logger.info('Download completed, will refresh model list', { repoId });
-      }
-    }
-    for (const [repoId, prevStatus] of Object.entries(prev)) {
-      if (!downloadStatusByRepo[repoId] && refreshOnDisappearStatuses.has(prevStatus)) {
-        anyNewlyCompleted = true;
-        logger.info('Download left tracked state, will refresh model list', { repoId, prevStatus });
-      }
-    }
-    prevDownloadStatusRef.current = Object.fromEntries(
-      Object.entries(downloadStatusByRepo).map(([k, v]) => [k, v.status])
-    );
-    if (anyNewlyCompleted) {
-      // Delay to allow backend import_in_place indexing to finish
-      setTimeout(() => onModelsImported?.(), 1000);
-    }
-  }, [downloadStatusByRepo, onModelsImported]);
+  useDownloadCompletionRefresh({ downloadStatusByRepo, onModelsImported });
 
   // Computed Values
   const totalModels = useMemo(() => {

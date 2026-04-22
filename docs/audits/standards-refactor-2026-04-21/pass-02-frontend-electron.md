@@ -86,7 +86,7 @@ Status: partially remediated; large workflow owners remain
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
-- `frontend/src/components/ModelManager.tsx` at 386 lines after filter, import-picker, existing-library chooser, and HF auth prompt state extraction;
+- `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 467 lines;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 507 lines;
 - `frontend/src/components/InstallDialog.tsx` at 482 lines;
@@ -108,6 +108,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 368 to 361 effective lines after existing-library chooser extraction.
 - Completed: move Hugging Face auth prompt visibility and new-auth-error detection into `frontend/src/hooks/useHfAuthPrompt.ts` with new-error, repeated-error, non-auth-error, and explicit open/close tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 361 to 355 effective lines after HF auth prompt extraction.
+- Completed: move delayed model-list refresh scheduling after completed or disappeared downloads into `frontend/src/hooks/useDownloadCompletionRefresh.ts`, with completion, disappeared-download, initial completed no-op, and unmount cleanup tests.
+- Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 355 to 333 effective lines after download-refresh extraction.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.
@@ -138,6 +140,7 @@ Rectification:
 - Completed: `frontend/src/components/app-panels/sections/README.md` now records section-level polling ownership and the shared-hook/event-stream replacement trigger.
 - Completed: existing hook tests cover cleanup or polling behavior for active downloads, model downloads, network status, installation manager/progress, available versions, and status.
 - Completed: `electron/src/python-bridge.ts` accepts an injectable timer controller, and `electron/tests/python-bridge.test.mjs` covers health-check rescheduling, restart backoff replacement, and stop-time timer cleanup without spawning a backend.
+- Completed: `frontend/src/hooks/useDownloadCompletionRefresh.ts` owns the model-manager delayed refresh timer and clears pending refreshes on unmount.
 - Remaining: consolidate install/download/status polling behind a backend event stream or single scheduler when the backend exposes one.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks

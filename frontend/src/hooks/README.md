@@ -8,6 +8,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | ----------- | ----------- |
 | `useModels.ts` | Model list fetching, shared-storage rescans, and stale-while-revalidate FTS search state. |
 | `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, cached FTS revalidation, stale search suppression, and new-results notifications. |
+| `useDownloadCompletionRefresh.ts` | Delayed model-list refresh scheduling when tracked downloads complete or leave active state. |
+| `useDownloadCompletionRefresh.test.ts` | Hook coverage for completion refreshes, disappeared-download refreshes, initial completed no-op behavior, and timer cleanup on unmount. |
 | `useExistingLibraryChooser.ts` | Existing-library chooser pending state and duplicate-invocation guard. |
 | `useExistingLibraryChooser.test.ts` | Hook coverage for chooser success, pending state, duplicate request suppression, and missing-callback no-ops. |
 | `useHfAuthPrompt.ts` | Hugging Face auth prompt visibility and auto-open behavior for new auth-required download errors. |

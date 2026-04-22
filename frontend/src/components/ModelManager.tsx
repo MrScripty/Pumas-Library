@@ -5,9 +5,10 @@
  * Includes drag-and-drop import support.
  */
 
-import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
+import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useModelImportPicker } from '../hooks/useModelImportPicker';
@@ -66,7 +67,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 }) => {
   // HuggingFace Auth State
   const [showHfAuth, setShowHfAuth] = useState(false);
-  const [isChoosingExistingLibrary, setIsChoosingExistingLibrary] = useState(false);
+  const {
+    chooseExistingLibrary,
+    isChoosingExistingLibrary,
+  } = useExistingLibraryChooser({ onChooseExistingLibrary });
 
   const {
     downloadStatusByRepo,
@@ -273,19 +277,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     }
   };
 
-  const handleChooseExistingLibrary = useCallback(async () => {
-    if (!onChooseExistingLibrary || isChoosingExistingLibrary) {
-      return;
-    }
-
-    setIsChoosingExistingLibrary(true);
-    try {
-      await onChooseExistingLibrary();
-    } finally {
-      setIsChoosingExistingLibrary(false);
-    }
-  }, [isChoosingExistingLibrary, onChooseExistingLibrary]);
-
   return (
     <>
       {/* Import dialog (for file picker button) */}
@@ -383,7 +374,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
                 downloadErrors={downloadErrors}
                 onDeleteModel={handleDeleteModel}
                 onConvertModel={handleConvertModel}
-                onChooseExistingLibrary={onChooseExistingLibrary ? handleChooseExistingLibrary : undefined}
+                onChooseExistingLibrary={onChooseExistingLibrary ? chooseExistingLibrary : undefined}
                 isChoosingExistingLibrary={isChoosingExistingLibrary}
               />
               {/* Link Health Status */}

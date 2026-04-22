@@ -8,6 +8,8 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | ----------- | ----------- |
 | `useModels.ts` | Model list fetching, shared-storage rescans, and stale-while-revalidate FTS search state. |
 | `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, cached FTS revalidation, stale search suppression, and new-results notifications. |
+| `useExistingLibraryChooser.ts` | Existing-library chooser pending state and duplicate-invocation guard. |
+| `useExistingLibraryChooser.test.ts` | Hook coverage for chooser success, pending state, duplicate request suppression, and missing-callback no-ops. |
 | `useModelDownloads.ts` | Download state and operation controls. |
 | `useModelDownloads.test.ts` | Hook coverage for startup download recovery, active polling updates, duplicate-start protection, and pause/cancel/resume transitions. |
 | `useActiveModelDownload.ts` | Top-level polling for the most relevant active model download and active download count. |

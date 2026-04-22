@@ -27,6 +27,8 @@ bridge.
 | `VersionListItem.test.tsx` | Interaction coverage for installable, installed, and in-progress version row behaviors. |
 | `ConflictResolutionDialog.tsx` | Accessible conflict-resolution modal for model mapping collisions. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
+| `ConflictResolutionItem.tsx` | Presentational conflict row with resolution selector, path details, and per-action descriptions. |
+| `ConflictResolutionItem.test.tsx` | Rendering and interaction coverage for conflict rows and expanded details. |
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure wiring, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `LocalModelGroupHeader.tsx` | Presentational category header and count for local model groups. |

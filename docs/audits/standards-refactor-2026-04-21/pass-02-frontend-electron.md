@@ -90,7 +90,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
 - `frontend/src/components/InstallDialog.tsx` at 307 lines and 275 effective lines after release-size calculation, link-opening, and frame extraction;
-- `frontend/src/components/ConflictResolutionDialog.tsx` at 401 lines after conflict-resolution state extraction.
+- `frontend/src/components/ConflictResolutionDialog.tsx` at 235 lines and 220 effective lines after conflict-resolution state and row extraction.
 
 The standards require one owner for state machines and backend-owned data to be confirmed by the backend, not speculatively owned by the frontend.
 
@@ -134,6 +134,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/InstallDialog.tsx` from the oversized-file baseline after it reached 275 effective lines.
 - Completed: move conflict-resolution default decisions, counts, bulk updates, expanded row state, and async apply handling from `ConflictResolutionDialog.tsx` into `frontend/src/hooks/useConflictResolutions.ts` with default, individual, bulk, expansion, and apply tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ConflictResolutionDialog.tsx` from 421 to 379 effective lines after conflict-resolution state extraction.
+- Completed: move conflict row summary, selector, expanded path details, and per-action descriptions from `ConflictResolutionDialog.tsx` into `frontend/src/components/ConflictResolutionItem.tsx` with summary, selector, and expanded-detail tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/ConflictResolutionDialog.tsx` from the oversized-file baseline after it reached 220 effective lines.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

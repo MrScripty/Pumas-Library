@@ -33,6 +33,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 
 ## Completed Adoption Steps
 - 2026-04-21: TypeScript, Node type, and Electron lint tooling declarations were moved to the workspaces that execute those commands, leaving the root manifest focused on root-owned launcher tests.
+- 2026-04-21: Source/support directory README contracts were added for Rust crate roles, RPC and binding boundaries, Torch sidecar ownership, script templates, binding smoke harnesses, and launcher plugin manifests.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

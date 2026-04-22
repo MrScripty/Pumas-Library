@@ -93,6 +93,10 @@ security-audit-*.json
 bindings/
 !bindings/
 bindings/*
+!bindings/README.md
+!bindings/csharp-test/
+bindings/csharp-test/*
+!bindings/csharp-test/README.md
 !bindings/csharp/
 bindings/csharp/*
 !bindings/csharp/README.md
@@ -100,6 +104,7 @@ bindings/csharp/*
 !bindings/csharp/Pumas.NativeSmoke/
 bindings/csharp/Pumas.NativeSmoke/*
 !bindings/csharp/Pumas.NativeSmoke/Program.cs
+!bindings/csharp/Pumas.NativeSmoke/README.md
 
 # Rust
 rust/target/

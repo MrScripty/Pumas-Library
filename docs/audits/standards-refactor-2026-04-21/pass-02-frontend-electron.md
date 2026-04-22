@@ -89,6 +89,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
+- `frontend/src/components/model-import/ImportLookupCard.tsx` at 193 lines and 182 effective lines after expanded metadata details extraction;
 - `frontend/src/components/InstallDialog.tsx` at 307 lines and 275 effective lines after release-size calculation, link-opening, and frame extraction;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 235 lines and 220 effective lines after conflict-resolution state and row extraction.
 - `frontend/src/components/ModelMetadataModal.tsx` at 302 lines and 275 effective lines after metadata modal frame extraction.
@@ -128,6 +129,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/model-import/useModelImportWorkflow.ts` from 391 to 354 effective lines after sharded-set detection extraction.
 - Completed: move import metadata lookup execution from `useModelImportWorkflow.ts` into `frontend/src/components/model-import/modelImportMetadataLookup.ts` with embedded match, bundle lookup, invalid file, and progress tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/model-import/useModelImportWorkflow.ts` from the oversized-file baseline after it reached 259 effective lines.
+- Completed: move expanded metadata details from `ImportLookupCard.tsx` into `frontend/src/components/model-import/ImportMetadataDetails.tsx` with Hugging Face field, source-switching, linked embedded metadata, and hidden-field disclosure tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/model-import/ImportLookupCard.tsx` from the oversized-file baseline after it reached 182 effective lines.
 - Completed: move install-dialog background release-size calculation from `InstallDialog.tsx` into `frontend/src/hooks/useReleaseSizeCalculation.ts` with size calculation, skipped-state, session guard, and close/reopen reset tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/InstallDialog.tsx` from 430 to 390 effective lines after release-size calculation extraction.
 - Completed: move install-dialog log-path and release-link opening from `InstallDialog.tsx` into `frontend/src/hooks/useInstallDialogLinks.ts` with backend bridge, unavailable bridge, and browser fallback tests.

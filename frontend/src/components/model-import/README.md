@@ -20,6 +20,8 @@ This directory holds the workflow and extracted support components behind the mo
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
 | `ImportBundleComponents.tsx` | Presentational disclosure for external diffusers bundle component manifests. |
 | `ImportLookupCard.tsx` | Presentational metadata-lookup card for file and directory import entries. |
+| `ImportMetadataDetails.tsx` | Presentational expanded metadata details for source switching, formatted fields, links, and embedded metadata states. |
+| `ImportMetadataDetails.test.tsx` | Rendering and interaction coverage for Hugging Face fields, source switching, linked embedded metadata, and hidden-field disclosure. |
 
 ## Problem
 The import dialog has to review mixed inputs such as single files, single-model directories, and external diffusers bundles. That review flow needs transient UI state, formatting helpers, and a few extracted presentational components, but it must still preserve the backend as the source of truth for path classification and import behavior.

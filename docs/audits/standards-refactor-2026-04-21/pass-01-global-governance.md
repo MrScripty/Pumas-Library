@@ -126,6 +126,7 @@ Missing or partial enforcement:
 
 - no `.editorconfig` found;
 - no `lefthook.yml` found;
+- no committed commit-message validation was present before the enforcement pass;
 - no `.github/` CI workflow found in the file inventory;
 - frontend package uses ESLint 9 flat config, but the lint command still passes `--ext`, which the standards identify as a flat-config pitfall;
 - frontend explicitly disables `max-lines`, `max-lines-per-function`, and `complexity`, despite active decomposition violations;
@@ -136,9 +137,13 @@ Missing or partial enforcement:
 Rectification:
 - Add `.editorconfig` from the standards template, adjusted for Rust/TypeScript/Python/shell.
 - Add `lefthook.yml` with fast pre-commit checks and slower pre-push checks.
+- Add commit-message validation for conventional commit subjects.
 - Add CI matrix for Linux and Windows at minimum.
 - Enable Rust workspace lints in a staged mode that initially warns on legacy issues, then ratchets.
 - Restore frontend complexity/file-size enforcement after decomposition baselines are set.
+
+Implementation notes:
+- The repository uses `pre-commit` instead of Lefthook today; `scripts/dev/check-commit-message.sh` has been added as a commit-msg hook to enforce conventional commit subjects while broader hook migration remains a separate tooling task.
 
 ### G05 - Dependency Ownership Does Not Match Workspace Execution Boundaries
 Status: non-compliant

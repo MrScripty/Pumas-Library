@@ -1,5 +1,5 @@
 # Pre-commit hooks for code quality enforcement
-# Install: pre-commit install
+# Install: pre-commit install --hook-type pre-commit --hook-type commit-msg
 # Run manually: pre-commit run --all-files
 # Update hooks: pre-commit autoupdate
 
@@ -13,6 +13,11 @@ repos:
         language: system
         types_or: [ts, tsx, javascript, jsx]
         files: ^frontend/src/
+      - id: check-commit-message
+        name: Check commit message format
+        entry: scripts/dev/check-commit-message.sh
+        language: system
+        stages: [commit-msg]
 
   # General pre-commit hooks
   - repo: https://github.com/pre-commit/pre-commit-hooks

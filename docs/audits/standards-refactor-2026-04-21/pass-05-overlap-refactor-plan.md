@@ -119,6 +119,7 @@ Tasks:
 - Add `lefthook.yml`:
   - pre-commit: format, lint, typecheck, decision traceability, staged schema/artifact validation;
   - pre-push: tests and targeted audit checks.
+- Add commit-msg validation for conventional commit subjects.
 - Add CI:
   - Linux and Windows required builds/tests;
   - Rust fmt/clippy/test/doc/all-features/no-default-features;

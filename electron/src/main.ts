@@ -9,6 +9,11 @@ import { app, BrowserWindow, ipcMain, dialog, shell, nativeTheme } from 'electro
 import * as path from 'path';
 import * as fs from 'fs';
 import { persistLauncherRootOverride, resolveLauncherRoot } from './launcher-root';
+import {
+  sanitizeOpenDialogOptions,
+  validateApiCallPayload,
+  validateExternalUrl,
+} from './ipc-validation';
 import { PythonBridge } from './python-bridge';
 import log from 'electron-log';
 
@@ -186,8 +191,10 @@ async function createWindow(): Promise<void> {
 function registerIPCHandlers(): void {
   log.info('Registering IPC handlers...');
 
-  // Generic API call handler - forwards to Python sidecar
-  ipcMain.handle('api:call', async (_event, method: string, params: Record<string, unknown>) => {
+  // Generic API call handler - forwards validated renderer requests to the backend sidecar.
+  ipcMain.handle('api:call', async (_event, method: unknown, params: unknown) => {
+    const request = validateApiCallPayload(method, params);
+
     if (backendInitializationPromise) {
       await backendInitializationPromise;
     }
@@ -195,7 +202,7 @@ function registerIPCHandlers(): void {
     if (!pythonBridge) {
       throw new Error('Python bridge not initialized');
     }
-    return await pythonBridge.call(method, params);
+    return await pythonBridge.call(request.method, request.params);
   });
 
   // Window control handlers
@@ -216,9 +223,9 @@ function registerIPCHandlers(): void {
   });
 
   // File dialog handler
-  ipcMain.handle('dialog:openFile', async (_event, options: Electron.OpenDialogOptions) => {
+  ipcMain.handle('dialog:openFile', async (_event, options: unknown) => {
     if (!mainWindow) return { canceled: true, filePaths: [] };
-    return await dialog.showOpenDialog(mainWindow, options);
+    return await dialog.showOpenDialog(mainWindow, sanitizeOpenDialogOptions(options));
   });
 
   ipcMain.handle('launcher:chooseLibraryRoot', async () => {
@@ -263,19 +270,8 @@ function registerIPCHandlers(): void {
   });
 
   // Shell handlers
-  ipcMain.handle('shell:openExternal', async (_event, url: string) => {
-    let parsedUrl: URL;
-    try {
-      parsedUrl = new URL(url);
-    } catch {
-      throw new Error('Invalid URL');
-    }
-
-    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
-      throw new Error('Only http/https URLs are allowed');
-    }
-
-    await shell.openExternal(parsedUrl.toString());
+  ipcMain.handle('shell:openExternal', async (_event, url: unknown) => {
+    await shell.openExternal(validateExternalUrl(url));
   });
 
   // Theme handler

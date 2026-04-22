@@ -40,6 +40,10 @@ npm run -w electron validate
 
 ## Artifacts Produced by CI
 
+Artifact names, platform identifiers, checksum coverage, SBOM requirements, and
+native binding compatibility are governed by
+`docs/contracts/release-artifacts.md`.
+
 | Artifact | Platforms |
 |----------|-----------|
 | `pumas-rpc` binary | Linux x86_64, Windows x86_64, macOS ARM |

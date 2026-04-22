@@ -7,9 +7,10 @@ This directory owns executable and documented contracts for data crossing proces
 | File | Description |
 | --- | --- |
 | `desktop-rpc-methods.md` | Current desktop bridge and Rust JSON-RPC method registry contract. |
+| `release-artifacts.md` | Release artifact naming, checksum, SBOM, and native binding compatibility contract. |
 
 ## Problem
-The Electron preload bridge, Electron main process, Rust JSON-RPC server, frontend TypeScript API types, and binding layers all need to agree on method names and payload shapes.
+The Electron preload bridge, Electron main process, Rust JSON-RPC server, frontend TypeScript API types, binding layers, and release scripts all need to agree on cross-boundary names, payloads, artifacts, and compatibility rules.
 
 ## Constraints
 - Renderer typing is not a security boundary.
@@ -26,14 +27,16 @@ Track method ownership in this directory and enforce the current method allowlis
 ## Invariants
 - Every renderer-visible backend call must pass through `api:call` validation before it reaches the backend bridge.
 - New desktop/RPC methods must be added to this contract and to the Electron allowlist in the same change.
+- Release artifacts published under the same version must be built from the same commit and covered by checksums.
 
 ## Revisit Triggers
 - Adding generated schema validation.
 - Adding a second renderer runtime.
 - Exposing a method to external host-language bindings.
+- Adding or renaming release artifacts.
 
 ## Dependencies
-**Internal:** `electron/src/ipc-validation.ts`, `electron/src/main.ts`, `electron/src/preload.ts`, `rust/crates/pumas-rpc/src/handlers/mod.rs`, `frontend/src/types/api.ts`.
+**Internal:** `electron/src/ipc-validation.ts`, `electron/src/main.ts`, `electron/src/preload.ts`, `rust/crates/pumas-rpc/src/handlers/mod.rs`, `frontend/src/types/api.ts`, `RELEASING.md`, `scripts/package-uniffi-csharp-artifacts.sh`, `scripts/dev/generate-sbom.sh`.
 
 **External:** Electron IPC and JSON-RPC 2.0 conventions.
 
@@ -55,5 +58,6 @@ await pythonBridge.call(request.method, request.params);
 
 ## Structured Producer Contract
 - `desktop-rpc-methods.md` is the human-readable registry.
+- `release-artifacts.md` is the human-readable release artifact registry.
 - `electron/src/ipc-validation.ts` is the current executable allowlist.
 - Field additions must be append-only unless a migration note is recorded.

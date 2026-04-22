@@ -6,7 +6,7 @@
  * ComfyUI version.
  */
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useId, useRef } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -50,6 +50,8 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
     warning?: string;
     recommendation?: string;
   } | null>(null);
+  const titleId = useId();
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   // Fetch sandbox and cross-filesystem warnings on open
   useEffect(() => {
@@ -104,15 +106,27 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
     onClose();
   }, [onClose]);
 
-  // Handle escape key
   useEffect(() => {
+    if (!isOpen) {
+      return undefined;
+    }
+
+    const previousFocus = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    const focusTimer = window.setTimeout(() => closeButtonRef.current?.focus(), 0);
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && isOpen) {
+      if (e.key === 'Escape') {
         handleClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.clearTimeout(focusTimer);
+      window.removeEventListener('keydown', handleKeyDown);
+      previousFocus?.focus();
+    };
   }, [isOpen, handleClose]);
 
   if (!isOpen) return null;
@@ -122,11 +136,13 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
       {isOpen && (
         <>
           {/* Backdrop */}
-          <motion.div
+          <motion.button
+            type="button"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 bg-black/50 z-50"
+            aria-label="Close mapping preview dialog"
             onClick={handleClose}
           />
 
@@ -136,19 +152,20 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.95 }}
             transition={{ duration: 0.2 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none"
           >
-            {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions */}
             <div
-              className="bg-[hsl(var(--launcher-bg-primary))] rounded-lg shadow-xl border border-[hsl(var(--launcher-border))] w-full max-w-2xl max-h-[80vh] flex flex-col"
-              onClick={(e) => e.stopPropagation()}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby={titleId}
+              className="pointer-events-auto bg-[hsl(var(--launcher-bg-primary))] rounded-lg shadow-xl border border-[hsl(var(--launcher-border))] w-full max-w-2xl max-h-[80vh] flex flex-col"
             >
               {/* Header */}
               <div className="flex items-center justify-between px-6 py-4 border-b border-[hsl(var(--launcher-border))]">
                 <div className="flex items-center gap-3">
                   <FolderSymlink className="w-5 h-5 text-[hsl(var(--accent-primary))]" />
                   <div>
-                    <h2 className="text-lg font-semibold text-[hsl(var(--launcher-text-primary))]">
+                    <h2 id={titleId} className="text-lg font-semibold text-[hsl(var(--launcher-text-primary))]">
                       Sync Library Models
                     </h2>
                     <p className="text-sm text-[hsl(var(--launcher-text-secondary))]">
@@ -159,6 +176,7 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
                 <button
                   onClick={handleClose}
                   className="p-2 rounded-lg hover:bg-[hsl(var(--launcher-bg-tertiary))] transition-colors"
+                  aria-label="Close"
                 >
                   <X className="w-5 h-5 text-[hsl(var(--launcher-text-secondary))]" />
                 </button>
@@ -237,6 +255,7 @@ export const MappingPreviewDialog: React.FC<MappingPreviewDialogProps> = ({
               {/* Footer */}
               <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-[hsl(var(--launcher-border))]">
                 <button
+                  ref={closeButtonRef}
                   onClick={handleClose}
                   className="px-4 py-2 text-sm font-medium text-[hsl(var(--launcher-text-secondary))] hover:text-[hsl(var(--launcher-text-primary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] rounded-lg transition-colors"
                 >

@@ -42,6 +42,8 @@ bridge.
 | `VersionSelectorDropdown.tsx` | Presentational dropdown menu and row items for installed/selectable versions. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
+| `MappingPreviewDialog.tsx` | Accessible modal wrapper for previewing and applying model-library mappings. |
+| `MappingPreviewDialog.test.tsx` | Dialog naming and dismissal coverage for mapping-preview modal interactions. |
 | `RemoteModelListItem.tsx` | Presentational row for one Hugging Face search result and its download controls. |
 | `RemoteModelDownloadMenu.tsx` | Extracted remote-download option menu for grouped file and quantized model selections. |
 | `RemoteModelDownloadMenu.test.tsx` | Interaction coverage for grouped-file and quantized remote download menu actions. |

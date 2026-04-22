@@ -16,6 +16,27 @@ function createConflict(overrides: Partial<MappingAction> = {}): MappingAction {
 }
 
 describe('ConflictResolutionDialog', () => {
+  it('renders as a named dialog and closes from backdrop or Escape key', () => {
+    const onClose = vi.fn();
+
+    render(
+      <ConflictResolutionDialog
+        isOpen={true}
+        conflicts={[createConflict()]}
+        onClose={onClose}
+        onApply={vi.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByRole('dialog', { name: 'Resolve Conflicts' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Close conflict resolution dialog' }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
   it('applies default skip resolutions when submitted without changes', async () => {
     const onApply = vi.fn().mockResolvedValue(undefined);
 

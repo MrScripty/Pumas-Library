@@ -22,6 +22,7 @@ bridge.
 | `ProgressDetailsView.test.tsx` | Interaction coverage for progress details actions plus cancellation and success summary rendering. |
 | `VersionListItem.tsx` | Presentational install-version row with install, uninstall, cancel, release-note, and log affordances. |
 | `VersionListItem.test.tsx` | Interaction coverage for installable, installed, and in-progress version row behaviors. |
+| `ConflictResolutionDialog.tsx` | Accessible conflict-resolution modal for model mapping collisions. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |

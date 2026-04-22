@@ -3,6 +3,15 @@
 ## Purpose
 This directory contains developer-oriented setup, build, run, and SBOM helper scripts.
 
+## Contents
+| File | Description |
+| ---- | ----------- |
+| `build.sh` | Delegates release build behavior to the root launcher contract. |
+| `generate-sbom.sh` | Generates dependency SBOM snapshots for supported ecosystems. |
+| `list-audit-files.sh` | Prints the source tree view used by standards audits while excluding generated/runtime paths. |
+| `run-dev.sh` | Delegates development launch behavior to the root launcher contract. |
+| `setup.sh` | Delegates local setup behavior to the root launcher contract. |
+
 ## Producer Contract
 Scripts should be idempotent where practical, fail fast, and document externally installed tools they require. Release-affecting scripts must keep artifact names aligned with the release artifact contract.
 

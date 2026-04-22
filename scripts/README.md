@@ -14,7 +14,7 @@ local environment setup, and system validation.
 | `launcher/` | Shared cross-platform launcher core used by the root Unix and Windows entry wrappers. |
 | `contract-tests.ts` | Runs repo-specific contract checks for JavaScript/TypeScript-facing integration paths. |
 | `system-check.sh` | Verifies required local tools and runtime prerequisites for common development workflows. |
-| `dev/` | Thin Bash helpers that delegate install, build, and run flows to the root launcher contract. |
+| `dev/` | Developer helpers for launcher-delegated workflows, SBOM generation, and standards-audit source listing. |
 | `rust/` | Rust workspace verification scripts shared by local development and CI. |
 
 ## Problem
@@ -77,6 +77,7 @@ such as `.NET` or bindgen CLIs depending on the script.
 ./scripts/package-uniffi-csharp-artifacts.sh
 ./scripts/generate-bindings.sh csharp
 ./scripts/rust/check.sh
+./scripts/dev/list-audit-files.sh --tracked-only
 node scripts/launcher/cli.mjs --help
 ```
 

@@ -29,6 +29,8 @@ bridge.
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `LocalModelsEmptyState.tsx` | Empty local-library and no-match filter states for the local model list. |
 | `LocalModelsEmptyState.test.tsx` | Rendering and action coverage for local model empty states. |
+| `LocalModelMetadataSummary.tsx` | Presentational format, quant, size, dependency, and partial-error metadata for local model rows. |
+| `LocalModelMetadataSummary.test.tsx` | Rendering coverage for local model metadata fallbacks, dependency labels, and partial errors. |
 | `RelatedModelsPanel.tsx` | Presentational related-model expansion for loading, error, empty, and remote model rows. |
 | `RelatedModelsPanel.test.tsx` | Rendering and URL-opening coverage for related-model panel states. |
 | `ModelMetadataModal.tsx` | Modal for stored, embedded, inference, and notes metadata with semantic dialog/backdrop controls. |

@@ -18,9 +18,9 @@ import {
   ArrowRightLeft,
 } from 'lucide-react';
 import type { ModelCategory, ModelInfo, RelatedModelsState } from '../types/apps';
-import { formatSize } from '../utils/modelFormatters';
 import { IconButton, HoldToDeleteButton, ListItem, ListItemContent } from './ui';
 import { LocalModelsEmptyState } from './LocalModelsEmptyState';
+import { LocalModelMetadataSummary } from './LocalModelMetadataSummary';
 import { ModelMetadataModal } from './ModelMetadataModal';
 import { RelatedModelsPanel } from './RelatedModelsPanel';
 
@@ -48,14 +48,6 @@ interface LocalModelsListProps {
   onConvertModel?: (modelId: string) => void;
   onChooseExistingLibrary?: () => Promise<void> | void;
   isChoosingExistingLibrary?: boolean;
-}
-
-function formatModelFormat(format?: string): string {
-  return format ? format.toUpperCase() : 'N/A';
-}
-
-function formatQuantLabel(quant?: string): string {
-  return quant ?? 'N/A';
 }
 
 export function LocalModelsList({
@@ -215,34 +207,14 @@ export function LocalModelsList({
                             </span>
                           )}
                         </button>
-                        <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[hsl(var(--text-secondary))]">
-                          <span className="min-w-0 truncate">
-                            {formatModelFormat(model.format)}
-                          </span>
-                          <span className="min-w-0 truncate">
-                            {formatQuantLabel(model.quant)}
-                          </span>
-                          <span className="min-w-0 truncate">
-                            {formatSize(model.size)}
-                          </span>
-                          <div className="flex items-center">
-                            {model.hasDependencies && (
-                              <span
-                                className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium bg-[hsl(var(--accent-success)/0.14)] text-[hsl(var(--accent-success))]"
-                                title={model.dependencyCount
-                                  ? `${model.dependencyCount} dependency binding${model.dependencyCount === 1 ? '' : 's'}`
-                                  : 'Dependency bindings projected from the library index'}
-                              >
-                                Deps
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {partialError && (
-                          <div className="mt-1 text-xs text-[hsl(var(--accent-error))]">
-                            {partialError}
-                          </div>
-                        )}
+                        <LocalModelMetadataSummary
+                          format={model.format}
+                          quant={model.quant}
+                          size={model.size}
+                          hasDependencies={model.hasDependencies}
+                          dependencyCount={model.dependencyCount}
+                          partialError={partialError}
+                        />
                       </div>
                     </div>
                     <div className="flex items-center gap-1">

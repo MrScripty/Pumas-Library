@@ -40,7 +40,7 @@ Rectification:
 - Keep hand-written behavior in implementation modules only.
 
 ### F02 - Electron IPC Payloads Are Not Validated at the Main-Process Boundary
-Status: non-compliant
+Status: remediated
 
 `electron/src/main.ts` uses handlers such as:
 
@@ -61,7 +61,7 @@ Implementation notes:
 - `electron/tests/ipc-validation.test.mjs` covers malformed methods, non-record params, unsupported dialog fields, malformed filters, and non-http URL schemes through the package-local Electron test script.
 
 ### F03 - Frontend Uses Local Casts Around `window.electronAPI`
-Status: partially compliant, needs contract consolidation
+Status: remediated for local casts; executable contract consolidation remains in F01
 
 Examples:
 
@@ -72,10 +72,10 @@ Examples:
 These use `window as unknown as { electronAPI: ... }` casts. This is tolerable in a thin adapter if the global type is declared once, but current casts repeat local shape fragments.
 
 Rectification:
-- Add a global `Window` augmentation for `electronAPI`.
-- Route all direct bridge access through `frontend/src/api/adapter.ts`.
-- Remove component-level bridge casts.
-- Add a test proving browser mode returns null/fallback without throwing outside Electron.
+- Completed: `frontend/src/types/api.ts` declares the global `Window.electronAPI` augmentation.
+- Completed: direct bridge reads are centralized through `frontend/src/api/adapter.ts` and `getElectronAPI()`.
+- Completed: component-level bridge casts were removed from the audited source paths.
+- Completed: adapter tests cover Electron detection and browser fallback behavior.
 
 ### F04 - UI State and Backend-Owned Data Boundaries Need Review
 Status: needs decomposition review
@@ -123,7 +123,7 @@ Rectification:
 - Add deterministic cleanup tests for hooks and Electron bridge timers that lack them.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks
-Status: partially compliant
+Status: remediated for audited controls
 
 Potential risks found by search:
 

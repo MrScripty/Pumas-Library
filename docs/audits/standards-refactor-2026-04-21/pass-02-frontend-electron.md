@@ -92,6 +92,7 @@ Long UI modules combine display, backend calls, local derived state, and workflo
 - `frontend/src/components/InstallDialog.tsx` at 307 lines and 275 effective lines after release-size calculation, link-opening, and frame extraction;
 - `frontend/src/components/ConflictResolutionDialog.tsx` at 235 lines and 220 effective lines after conflict-resolution state and row extraction.
 - `frontend/src/components/ModelMetadataModal.tsx` at 302 lines and 275 effective lines after metadata modal frame extraction.
+- `frontend/src/components/RemoteModelListItem.tsx` at 233 lines and 225 effective lines after remote model summary extraction.
 
 The standards require one owner for state machines and backend-owned data to be confirmed by the backend, not speculatively owned by the frontend.
 
@@ -139,6 +140,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/ConflictResolutionDialog.tsx` from the oversized-file baseline after it reached 220 effective lines.
 - Completed: move metadata modal frame rendering, header actions, backdrop dismissal, Escape handling, and focus restoration from `ModelMetadataModal.tsx` into `frontend/src/components/ModelMetadataModalFrame.tsx` with modal shell, dismissal, and disabled-refetch tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/ModelMetadataModal.tsx` from the oversized-file baseline after it reached 275 effective lines.
+- Completed: move remote model metadata summary rendering from `RemoteModelListItem.tsx` into `frontend/src/components/RemoteModelSummary.tsx` with metadata, developer-search, auth, and retry tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/RemoteModelListItem.tsx` from the oversized-file baseline after it reached 225 effective lines.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.

@@ -63,6 +63,8 @@ bridge.
 | `MappingPreviewDialog.tsx` | Accessible modal wrapper for previewing and applying model-library mappings. |
 | `MappingPreviewDialog.test.tsx` | Dialog naming and dismissal coverage for mapping-preview modal interactions. |
 | `RemoteModelListItem.tsx` | Presentational row for one Hugging Face search result and its download controls. |
+| `RemoteModelSummary.tsx` | Presentational remote model metadata summary for developer, kind, size, engine, auth, and retry details. |
+| `RemoteModelSummary.test.tsx` | Rendering and interaction coverage for remote metadata, developer search, auth prompts, and retry hints. |
 | `RemoteModelDownloadMenu.tsx` | Extracted remote-download option menu for grouped file and quantized model selections. |
 | `RemoteModelDownloadMenu.test.tsx` | Interaction coverage for grouped-file and quantized remote download menu actions. |
 | `ui/` | Small reusable primitives (buttons, tooltips, list items). |

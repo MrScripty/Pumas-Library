@@ -11,7 +11,7 @@ logic, or runtime orchestration.
 | ----------- | ----------- |
 | `cli.mjs` | Node entrypoint that parses launcher args, builds context, and dispatches actions. |
 | `actions.mjs` | Action orchestration for install, build, run, run-release, test, and release-smoke flows. |
-| `dependencies.mjs` | Dependency checks, per-dependency install behavior, and runtime prerequisite enforcement. |
+| `dependencies.mjs` | Injectable dependency checks, per-dependency install behavior, and runtime prerequisite enforcement. |
 | `parse-args.mjs` | Canonical CLI parsing and validation for launcher flags and forwarded args. |
 | `platform-*.mjs` | Platform-specific command-name, Python module invocation, and artifact conventions selected by the factory. |
 | `*.test.mjs` | Node built-in test runner coverage for launcher contract and wrapper behavior. |
@@ -99,6 +99,8 @@ node --test scripts/launcher/*.test.mjs
   consumed by action handlers.
 - Dependency install output keeps the `[ok]`, `[install]`, `[done]`, and
   `[error]` message prefixes expected by callers and docs.
+- Dependency installs follow a check/install/recheck contract before an
+  installed dependency is marked done.
 - `--release-smoke` remains a bounded startup check rather than an open-ended
   runtime launcher.
 - If action names, exit codes, or help text examples change, wrappers, tests,

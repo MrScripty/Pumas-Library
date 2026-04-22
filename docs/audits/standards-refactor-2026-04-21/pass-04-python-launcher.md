@@ -103,9 +103,10 @@ Launcher positives are strong. Remaining gaps:
 - Completed: `--run-release` and `--release-smoke` pass the release backend binary produced by `--build-release`.
 - Completed: Electron backend path resolution has package-local tests for launcher overrides, source build profiles, packaged resource paths, and platform executable names.
 - Completed: CI smoke behavior is visible in `.github/workflows/build.yml` through bounded release smoke.
+- Completed: `installDependencies` has injectable plan coverage for dependency command checks, workspace install invocation, check/install/recheck sequencing, failed installs, failed verification, and missing runtime dependency errors.
 
 Rectification:
-- Remaining follow-up: add deeper unit coverage around `installDependencies` check/install/recheck behavior for each dependency.
+- No remaining follow-up in this finding.
 
 ### P07 - Shell Template TODO Uses `/tmp` Directly
 Status: cross-platform/script hygiene issue

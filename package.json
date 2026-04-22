@@ -15,9 +15,5 @@
     "minimatch@^10.0.3": "10.2.5",
     "brace-expansion@^1.1.7": "1.1.14",
     "@isaacs/brace-expansion@^5.0.0": "5.0.1"
-  },
-  "devDependencies": {
-    "@types/node": "^22.14.0",
-    "typescript": "~5.8.2"
   }
 }

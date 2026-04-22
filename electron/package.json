@@ -29,8 +29,11 @@
     "electron-log": "^5.0.0"
   },
   "devDependencies": {
+    "@types/node": "^22.14.0",
     "electron": "39.8.6",
-    "electron-builder": "26.8.1"
+    "electron-builder": "26.8.1",
+    "eslint": "^9.39.2",
+    "typescript": "~5.8.2"
   },
   "build": {
     "appId": "com.pumas.library",

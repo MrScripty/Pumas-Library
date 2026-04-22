@@ -9,5 +9,13 @@ Tests should prefer lightweight fakes for heavyweight Torch/FastAPI dependencies
 ## Consumer Contract
 Developers and CI may run these tests from the repository root or `torch-server/` after installing Python test dependencies.
 
+Repository-root command:
+
+```bash
+python3 -m unittest discover -s torch-server/tests
+```
+
+The shared launcher also runs this suite as part of `launcher.sh --test`.
+
 ## Non-Goals
 Full model inference validation is out of scope. Reason: model inference requires large external artifacts and belongs behind an explicit integration-test gate. Revisit trigger: add small deterministic model fixtures.

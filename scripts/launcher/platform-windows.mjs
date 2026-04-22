@@ -5,6 +5,10 @@ export function createWindowsPlatformService() {
     id: 'windows',
     corepackCommand: 'corepack.cmd',
     cargoCommand: 'cargo.exe',
+    pythonCommand: 'py.exe',
+    pythonModuleArgs(moduleName, args = []) {
+      return ['-3', '-m', moduleName, ...args];
+    },
     releaseBackendBinary(context) {
       return path.join(context.rustTargetDir, 'release', `${context.appBin}.exe`);
     },

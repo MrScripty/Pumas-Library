@@ -84,15 +84,15 @@ Rectification:
 - Add a test that calling `create_app()` twice does not duplicate routes or share managers.
 
 ### P05 - Python Tooling and Test Contract Is Missing
-Status: non-compliant
+Status: partially remediated
 
 No Python test/lint/type-check configuration was found in the audited files. `torch-server/requirements.txt` exists, but no `pytest`, `ruff`, `mypy`, or launcher/CI command is visible.
 
 Rectification:
-- Add `torch-server/README.md` with runtime contract, API contract, and verification instructions.
-- Add minimal tests for `create_app`, validation, model manager state transitions, and loader dispatch with fakes.
-- Add `ruff`/format/type-check policy or document why Python is currently smoke-tested only.
-- Include Python checks in `launcher.sh --test`.
+- Completed: `torch-server/README.md` documents the runtime, API boundary, and sidecar verification command.
+- Completed: focused `unittest` coverage now exercises `create_app`, request validation, and model manager state transitions with fakes.
+- Completed: `launcher.sh --test` runs the sidecar suite through platform-specific Python module commands, and CI runs the same suite in launcher verification.
+- Remaining: add a formal Python lint/format/type-check policy, or document why the sidecar remains unit-tested only until a dedicated Python tooling package is introduced.
 
 ### P06 - Launcher Contract Is Mostly Implemented but Build/Release Semantics Need Clarification
 Status: partially compliant

@@ -16,5 +16,7 @@ export function createLauncherContext() {
     frontendDistIndex: path.join(repoRoot, 'frontend', 'dist', 'index.html'),
     electronDir: path.join(repoRoot, 'electron'),
     electronDistMain: path.join(repoRoot, 'electron', 'dist', 'main.js'),
+    torchServerDir: path.join(repoRoot, 'torch-server'),
+    torchServerTestsDir: path.join(repoRoot, 'torch-server', 'tests'),
   };
 }

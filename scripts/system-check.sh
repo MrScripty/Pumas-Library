@@ -54,6 +54,7 @@ echo "Recommended verification commands:"
 echo "  corepack pnpm install --frozen-lockfile"
 echo "  bash ./launcher.sh --install"
 echo "  npm run test:launcher"
+echo "  python3 -m unittest discover -s torch-server/tests"
 echo "  cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler"
 
 if [[ "$missing_tools" -ne 0 ]]; then

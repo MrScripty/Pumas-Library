@@ -184,6 +184,11 @@ jobs:
         with:
           toolchain: ${{ env.RUST_TOOLCHAIN_VERSION }}
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version-file: '.python-version'
+
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
@@ -200,6 +205,9 @@ jobs:
 
       - name: Run launcher tests
         run: npm run test:launcher
+
+      - name: Run Torch sidecar tests
+        run: python3 -m unittest discover -s torch-server/tests
 
       - name: Run bounded release smoke
         run: xvfb-run -a bash launcher.sh --release-smoke

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { ACTION_FLAGS, EXIT_CODES, buildUsage } from './contract.mjs';
 import { LauncherError } from './errors.mjs';
 import { installDependencies, ensureRuntimeDependencies } from './dependencies.mjs';
@@ -162,6 +163,17 @@ async function runTestSuite(runtime) {
   await runCommand(platformService.corepackCommand, corepackPnpmArgs(workspaceScriptArgs('./electron', 'validate')), {
     cwd: context.repoRoot,
   });
+
+  log('[test] running Torch sidecar Python tests');
+  await runCommand(
+    platformService.pythonCommand,
+    platformService.pythonModuleArgs('unittest', [
+      'discover',
+      '-s',
+      path.relative(context.repoRoot, context.torchServerTestsDir),
+    ]),
+    { cwd: context.repoRoot }
+  );
 }
 
 async function runReleaseSmoke(runtime) {

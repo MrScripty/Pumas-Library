@@ -23,6 +23,14 @@ The launcher and Rust app-manager clients should treat this service as a local s
 ## Testing Contract
 Tests should create a fresh app instance per test and avoid sharing model manager state unless the test explicitly verifies concurrency behavior.
 
+Run the focused sidecar suite from the repository root:
+
+```bash
+python3 -m unittest discover -s torch-server/tests
+```
+
+The root launcher includes this suite in `launcher.sh --test`.
+
 ## Concurrency Contract
 `model_manager.py` owns a manager-level async registry lock for slot reservations, unload transitions, and `max_loaded_models` updates. Expensive model loading still runs outside the registry lock and is serialized per resolved device.
 

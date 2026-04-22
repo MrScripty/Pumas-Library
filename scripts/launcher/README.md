@@ -13,7 +13,7 @@ logic, or runtime orchestration.
 | `actions.mjs` | Action orchestration for install, build, run, run-release, test, and release-smoke flows. |
 | `dependencies.mjs` | Dependency checks, per-dependency install behavior, and runtime prerequisite enforcement. |
 | `parse-args.mjs` | Canonical CLI parsing and validation for launcher flags and forwarded args. |
-| `platform-*.mjs` | Platform-specific command-name and artifact conventions selected by the factory. |
+| `platform-*.mjs` | Platform-specific command-name, Python module invocation, and artifact conventions selected by the factory. |
 | `*.test.mjs` | Node built-in test runner coverage for launcher contract and wrapper behavior. |
 
 ## Problem
@@ -58,7 +58,8 @@ behavioral logic into small modules under this directory.
 **Internal:** Root `package.json`, `electron/package.json`, `launcher.sh`, and
 the Rust/frontend/Electron build outputs.
 **External:** Node runtime with Corepack available, the pinned pnpm package
-manager resolved through Corepack, and shell hosts that invoke the wrappers.
+manager resolved through Corepack, Python 3 for Torch sidecar tests, and shell
+hosts that invoke the wrappers.
 
 ## Related ADRs
 - None identified as of 2026-04-12.
@@ -72,6 +73,7 @@ manager resolved through Corepack, and shell hosts that invoke the wrappers.
 node scripts/launcher/cli.mjs --help
 node scripts/launcher/cli.mjs --build-release
 node scripts/launcher/cli.mjs --run -- --devtools
+node scripts/launcher/cli.mjs --test
 node scripts/launcher/cli.mjs --release-smoke
 node --test scripts/launcher/*.test.mjs
 ```
@@ -82,6 +84,8 @@ node --test scripts/launcher/*.test.mjs
 - Supported actions are `--help`, `--install`, `--build`, `--build-release`,
   `--run`, `--run-release`, `--test`, and `--release-smoke`.
 - Only `--run` and `--run-release` accept forwarded args after `--`.
+- `--test` runs the Rust workspace, launcher tests, frontend tests and type
+  checks, Electron validation, and Torch sidecar Python unit tests.
 - Errors return stable exit codes for usage, missing dependencies, missing
   release artifacts, and general operation failure.
 - The CLI contract is preserved even if internal modules are reorganized.

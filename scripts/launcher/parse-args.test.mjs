@@ -58,3 +58,13 @@ test('platform factory resolves the Windows Corepack command separately', () => 
   assert.equal(windows.corepackCommand, 'corepack.cmd');
   assert.equal(linux.corepackCommand, 'corepack');
 });
+
+test('platform factory resolves Python module invocations per host', () => {
+  const windows = createPlatformService('win32');
+  const linux = createPlatformService('linux');
+
+  assert.equal(windows.pythonCommand, 'py.exe');
+  assert.deepEqual(windows.pythonModuleArgs('unittest', ['discover']), ['-3', '-m', 'unittest', 'discover']);
+  assert.equal(linux.pythonCommand, 'python3');
+  assert.deepEqual(linux.pythonModuleArgs('unittest', ['discover']), ['-m', 'unittest', 'discover']);
+});

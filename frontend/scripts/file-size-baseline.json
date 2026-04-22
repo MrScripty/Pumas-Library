@@ -4,7 +4,7 @@
   "src/components/ConflictResolutionDialog.tsx": 421,
   "src/components/InstallDialog.tsx": 430,
   "src/components/LocalModelsList.tsx": 455,
-  "src/components/ModelManager.tsx": 401,
+  "src/components/ModelManager.tsx": 388,
   "src/components/ModelMetadataModal.tsx": 328,
   "src/components/RemoteModelListItem.tsx": 361,
   "src/components/app-panels/sections/OllamaModelSection.tsx": 319,

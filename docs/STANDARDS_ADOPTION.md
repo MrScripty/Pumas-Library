@@ -69,6 +69,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Model starring and backend link-exclusion preferences moved from `App.tsx` into `frontend/src/hooks/useModelPreferences.ts`, including rollback tests and stale-load protection for optimistic link changes.
 - 2026-04-22: Setup dependency installation state moved from `App.tsx` into `frontend/src/hooks/useDependencyInstaller.ts`, with tests for success, pending state, failure reset, and API-unavailable behavior.
 - 2026-04-22: The frontend file-size baseline now ratchets `src/App.tsx` to its reduced 376 effective-line ceiling after the root state-owner extractions.
+- 2026-04-22: Model manager filter state moved from `ModelManager.tsx` into `frontend/src/hooks/useModelManagerFilters.ts`, with tests for local filters, remote kind filters, mode switching, and developer search, and the file-size baseline now ratchets `ModelManager.tsx` to 388 effective lines.
 - 2026-04-22: The launcher `--test` action and CI launcher verification now run the Torch sidecar Python unit suite through platform-specific Python module commands.
 - 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.

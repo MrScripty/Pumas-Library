@@ -11,6 +11,7 @@ import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 import { useRemoteModelSearch } from '../hooks/useRemoteModelSearch';
 import { useModelDownloads } from '../hooks/useModelDownloads';
 import { useModelLibraryActions } from '../hooks/useModelLibraryActions';
+import { useModelManagerFilters } from '../hooks/useModelManagerFilters';
 import { useNetworkStatus } from '../hooks/useNetworkStatus';
 import { ModelSearchBar } from './ModelSearchBar';
 import { LocalModelsList } from './LocalModelsList';
@@ -62,13 +63,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   activeVersion,
   onChooseExistingLibrary,
 }) => {
-  // UI State
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedKind, setSelectedKind] = useState<string>('all');
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
-  const [isDownloadMode, setIsDownloadMode] = useState(false);
-
   // Import State
   const [importPaths, setImportPaths] = useState<string[]>([]);
   const [showImportDialog, setShowImportDialog] = useState(false);
@@ -77,7 +71,47 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   const [showHfAuth, setShowHfAuth] = useState(false);
   const [isChoosingExistingLibrary, setIsChoosingExistingLibrary] = useState(false);
 
-  // Custom Hooks
+  const {
+    downloadStatusByRepo,
+    downloadErrors,
+    hasActiveDownloads,
+    startDownload,
+    cancelDownload,
+    pauseDownload,
+    resumeDownload,
+    setDownloadErrors,
+  } = useModelDownloads();
+
+  const downloadingModels = useMemo(() => {
+    return buildDownloadingModels(downloadStatusByRepo);
+  }, [downloadStatusByRepo]);
+
+  const localModelGroups = useMemo(() => {
+    return mergeLocalModelGroups(modelGroups, downloadingModels);
+  }, [modelGroups, downloadingModels]);
+
+  const categories = useMemo(() => {
+    const cats = localModelGroups.map((g: ModelCategory) => g.category);
+    return ['all', ...cats];
+  }, [localModelGroups]);
+  const {
+    clearLocalFilters: handleClearLocalFilters,
+    clearRemoteFilters: handleClearRemoteFilters,
+    hasLocalFilters,
+    isCategoryFiltered,
+    isDownloadMode,
+    searchDeveloper: handleSearchDeveloper,
+    searchQuery,
+    selectedCategory,
+    selectedFilter,
+    selectedKind,
+    selectFilter: handleFilterSelect,
+    setSearchQuery,
+    showCategoryMenu,
+    toggleFilterMenu,
+    toggleMode: handleToggleMode,
+  } = useModelManagerFilters();
+
   const {
     results: remoteResults,
     kinds: remoteKinds,
@@ -90,16 +124,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
     searchQuery,
   });
 
-  const {
-    downloadStatusByRepo,
-    downloadErrors,
-    hasActiveDownloads,
-    startDownload,
-    cancelDownload,
-    pauseDownload,
-    resumeDownload,
-    setDownloadErrors,
-  } = useModelDownloads();
+  const filterList = isDownloadMode ? remoteKinds : categories;
 
   // Network status for offline/rate limit indicators
   const { isOffline, isRateLimited, successRate, circuitBreakerRejections } = useNetworkStatus();
@@ -161,25 +186,10 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   }, [downloadStatusByRepo, onModelsImported]);
 
   // Computed Values
-  const downloadingModels = useMemo(() => {
-    return buildDownloadingModels(downloadStatusByRepo);
-  }, [downloadStatusByRepo]);
-
-  const localModelGroups = useMemo(() => {
-    return mergeLocalModelGroups(modelGroups, downloadingModels);
-  }, [modelGroups, downloadingModels]);
-
-  const categories = useMemo(() => {
-    const cats = localModelGroups.map((g: ModelCategory) => g.category);
-    return ['all', ...cats];
-  }, [localModelGroups]);
-
   const totalModels = useMemo(() => {
     return localModelGroups.reduce((sum: number, group: ModelCategory) => sum + group.models.length, 0);
   }, [localModelGroups]);
 
-  const isCategoryFiltered = isDownloadMode ? selectedKind !== 'all' : selectedCategory !== 'all';
-  const hasLocalFilters = Boolean(searchQuery.trim()) || selectedCategory !== 'all';
   const integrityIssueCount = useMemo(() => {
     return localModelGroups.reduce(
       (count, group) => count + group.models.filter((model) => model.hasIntegrityIssue).length,
@@ -198,16 +208,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
   }, [remoteResults, selectedKind]);
 
   // Handlers
-  const handleClearLocalFilters = () => {
-    setSearchQuery('');
-    setSelectedCategory('all');
-  };
-
-  const handleClearRemoteFilters = () => {
-    setSearchQuery('');
-    setSelectedKind('all');
-  };
-
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => {
     if (!isAPIAvailable()) {
       logger.error('Download API not available');
@@ -267,28 +267,6 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         setShowHfAuth(true);
       }
     }
-  };
-
-  const handleSearchDeveloper = (developer: string) => {
-    setIsDownloadMode(true);
-    setSearchQuery(developer);
-    setSelectedKind('all');
-    setShowCategoryMenu(false);
-  };
-
-  // Get current filter list
-  const filterList = isDownloadMode ? remoteKinds : categories;
-  const selectedFilter = isDownloadMode ? selectedKind : selectedCategory;
-  const setSelectedFilter = isDownloadMode ? setSelectedKind : setSelectedCategory;
-
-  const handleToggleMode = () => {
-    setIsDownloadMode((prev) => !prev);
-    setShowCategoryMenu(false);
-  };
-
-  const handleFilterSelect = (item: string) => {
-    setSelectedFilter(item);
-    setShowCategoryMenu(false);
   };
 
   // Import handlers (for file picker button)
@@ -367,7 +345,7 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
         isDownloadMode={isDownloadMode}
         onToggleMode={handleToggleMode}
         isCategoryFiltered={isCategoryFiltered}
-        onFilterClick={() => setShowCategoryMenu((prev) => !prev)}
+        onFilterClick={toggleFilterMenu}
         totalModels={totalModels}
         hasActiveDownloads={hasActiveDownloads}
         showCategoryMenu={showCategoryMenu}

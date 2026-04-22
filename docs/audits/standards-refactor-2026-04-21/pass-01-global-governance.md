@@ -120,7 +120,7 @@ Rectification:
 - Completed: module README and audit updates have accompanied standards-impacting implementation commits in this pass.
 
 ### G04 - Tooling Enforcement Is Incomplete
-Status: non-compliant
+Status: partially remediated
 
 Missing or partial enforcement at audit time:
 
@@ -147,6 +147,7 @@ Implementation notes:
 - The existing `.editorconfig` was expanded to cover the standards template's TypeScript, Rust, Python, shell, C#, YAML/JSON, Docker, Make, and Markdown formatting boundaries.
 - Electron linting now uses a package-local ESLint 9 flat config, a command that avoids the legacy `--ext` flat-config pitfall, and CI coverage in the Electron packaging job.
 - The repository uses `pre-commit` instead of Lefthook today; `scripts/dev/check-commit-message.sh` has been added as a commit-msg hook to enforce conventional commit subjects while broader hook migration remains a separate tooling task.
+- Frontend file-size enforcement now uses `frontend/scripts/check-file-size.js` with a committed baseline ratchet and runs in the frontend CI job.
 
 ### G05 - Dependency Ownership Does Not Match Workspace Execution Boundaries
 Status: non-compliant

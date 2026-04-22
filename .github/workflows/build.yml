@@ -138,6 +138,9 @@ jobs:
       - name: Lint
         run: npm run -w frontend lint
 
+      - name: Check file-size ratchet
+        run: npm run -w frontend check:size
+
       - name: Type check
         run: npm run -w frontend check:types
 

@@ -51,15 +51,11 @@ jobs:
 
       - name: Build Rust
         working-directory: ./rust
-        run: cargo build --release --target ${{ matrix.target }}
-
-      - name: Build Rustler NIF
-        working-directory: ./rust
-        run: cargo build --release --target ${{ matrix.target }} -p pumas_rustler
+        run: cargo build --workspace --exclude pumas_rustler --release --target ${{ matrix.target }}
 
       - name: Run Rust tests
         working-directory: ./rust
-        run: cargo test --release --target ${{ matrix.target }}
+        run: cargo test --workspace --exclude pumas_rustler --release --target ${{ matrix.target }}
 
       - name: Upload Rust artifact
         uses: actions/upload-artifact@v4
@@ -69,9 +65,6 @@ jobs:
             rust/target/${{ matrix.target }}/release/libpumas_uniffi.so
             rust/target/${{ matrix.target }}/release/libpumas_uniffi.dylib
             rust/target/${{ matrix.target }}/release/pumas_uniffi.dll
-            rust/target/${{ matrix.target }}/release/libpumas_rustler.so
-            rust/target/${{ matrix.target }}/release/libpumas_rustler.dylib
-            rust/target/${{ matrix.target }}/release/pumas_rustler.dll
           if-no-files-found: ignore
 
       - name: Upload pumas-rpc for Electron packaging
@@ -406,12 +399,12 @@ jobs:
           # --- pumas-core source crate ---
           cp artifacts/pumas-core-crate/pumas-library-*.crate release-artifacts/
 
-          # Collect native libraries by type
-          mkdir -p staging/uniffi staging/rustler
+          # Collect UniFFI native libraries by target.
+          mkdir -p staging/uniffi
 
           for target_dir in artifacts/rust-*/; do
             TARGET=$(basename "$target_dir" | sed 's/^rust-//')
-            mkdir -p "staging/uniffi/${TARGET}" "staging/rustler/${TARGET}"
+            mkdir -p "staging/uniffi/${TARGET}"
 
             for file in "$target_dir"*; do
               [ -f "$file" ] || continue
@@ -419,9 +412,6 @@ jobs:
               case "$BASENAME" in
                 libpumas_uniffi.*|pumas_uniffi.dll)
                   cp "$file" "staging/uniffi/${TARGET}/"
-                  ;;
-                libpumas_rustler.*|pumas_rustler.dll)
-                  cp "$file" "staging/rustler/${TARGET}/"
                   ;;
               esac
             done
@@ -437,11 +427,6 @@ jobs:
             zip -r "../../release-artifacts/pumas-bindings-${lang}-${VERSION}.zip" .
             cd ../..
           done
-
-          # Elixir/Erlang NIF: precompiled native libraries
-          cd staging/rustler
-          zip -r "../../release-artifacts/pumas-nif-elixir-${VERSION}.zip" .
-          cd ../..
 
           # --- Desktop application ---
 

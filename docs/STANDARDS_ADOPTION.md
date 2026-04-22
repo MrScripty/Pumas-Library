@@ -44,6 +44,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Renderer bridge access was centralized through `frontend/src/api/adapter.ts`, including Electron-only window and dropped-file utilities, with browser fallback tests.
 - 2026-04-22: Frontend ESLint scripts now rely on flat-config file globs instead of legacy `--ext` flags.
 - 2026-04-22: The ComfyUI shell template now honors `TMPDIR` for temporary browser profiles instead of hard-coding `/tmp`.
+- 2026-04-22: Release CI now follows the documented Rustler exclusion by building/testing the Rust workspace without `pumas_rustler` and publishing only the supported UniFFI native artifacts.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

@@ -83,6 +83,8 @@ Downstream consumers may assume artifacts with the same version and platform ide
 ## Non-Goals
 Code signing and notarization policy is not defined here. Reason: signing credentials and platform-specific notarization workflows are not present in the repository. Revisit trigger: add signed Windows or macOS release artifacts.
 
+Rustler NIF release artifacts are intentionally excluded from the default release artifact set until a BEAM-aware CI job owns build, test, and packaging responsibilities for `pumas_rustler`.
+
 ## Revisit Triggers
 - Add a new platform target.
 - Change Electron package names or `electron-builder` targets.

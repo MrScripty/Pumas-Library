@@ -12,6 +12,8 @@ This directory holds the workflow and extracted support components behind the mo
 | `useModelImportWorkflow.test.ts` | Hook coverage for classification orchestration, embedded-metadata lookup flow, shard grouping, and import completion state. |
 | `useEmbeddedMetadataToggles.ts` | Owns embedded-metadata visibility and on-demand embedded metadata loading for import review entries. |
 | `useEmbeddedMetadataToggles.test.ts` | Hook coverage for embedded metadata loading, cached states, unsupported files, and all-field toggles. |
+| `useShardedSetDetection.ts` | Owns backend-backed sharded-file detection, sharded-set expansion, and entry annotations for import review files. |
+| `useShardedSetDetection.test.ts` | Hook coverage for shard detection, entry annotation, expansion toggles, and local state clearing. |
 | `metadataUtils.ts` | Pure helpers for security badges, GGUF metadata display priority, and import-review formatting. |
 | `metadataUtils.test.ts` | Regression coverage for the pure metadata helper functions used by the dialog. |
 | `ImportBundleComponents.tsx` | Presentational disclosure for external diffusers bundle component manifests. |
@@ -29,6 +31,7 @@ The import dialog has to review mixed inputs such as single files, single-model 
 ## Decision
 - Keep the workflow orchestration in `useModelImportWorkflow.ts` so one hook owns import lifecycle state, lookup retries, and completion callbacks.
 - Keep embedded-metadata disclosure state in `useEmbeddedMetadataToggles.ts` so optional metadata loading does not grow the import lifecycle state machine.
+- Keep sharded-file detection in `useShardedSetDetection.ts` so backend-backed file grouping is isolated from import execution and metadata lookup state.
 - Keep classification-to-entry shaping and import spec assembly in `modelImportWorkflowHelpers.ts` so the transformation rules stay pure, testable, and separate from React state mutation.
 - Keep display-only logic in `metadataUtils.ts` as pure functions so metadata formatting and badge decisions stay easy to test.
 - Extract bundle-manifest and lookup-card rendering into small components so the dialog can focus on step orchestration instead of carrying every import-entry detail inline.

@@ -9,7 +9,7 @@
   "src/components/app-panels/sections/OllamaModelSection.tsx": 319,
   "src/components/app-panels/sections/TorchModelSlotsSection.tsx": 350,
   "src/components/model-import/ImportLookupCard.tsx": 338,
-  "src/components/model-import/useModelImportWorkflow.ts": 391,
+  "src/components/model-import/useModelImportWorkflow.ts": 354,
   "src/hooks/usePhysicsDrag.ts": 427,
   "src/types/api.ts": 1746
 }

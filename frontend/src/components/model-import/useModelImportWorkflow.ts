@@ -6,16 +6,15 @@ import {
   buildEntries,
   buildImportBatchSpecs,
   buildReviewFindings,
-  buildShardedSetState,
   extractEmbeddedRepoId,
 } from './modelImportWorkflowHelpers';
 import type {
   DirectoryReviewFinding,
   ImportEntryStatus,
   ImportStep,
-  ShardedSetInfo,
 } from './modelImportWorkflowTypes';
 import { useEmbeddedMetadataToggles } from './useEmbeddedMetadataToggles';
+import { useShardedSetDetection } from './useShardedSetDetection';
 
 export type {
   DirectoryReviewFinding,
@@ -43,7 +42,6 @@ export function useModelImportWorkflow({
   const [classificationError, setClassificationError] = useState<string | null>(null);
   const [importedCount, setImportedCount] = useState(0);
   const [failedCount, setFailedCount] = useState(0);
-  const [shardedSets, setShardedSets] = useState<ShardedSetInfo[]>([]);
   const [lookupProgress, setLookupProgress] = useState({ current: 0, total: 0 });
   const [expandedMetadata, setExpandedMetadata] = useState<Set<string>>(new Set());
   const {
@@ -52,6 +50,29 @@ export function useModelImportWorkflow({
     toggleMetadataSource,
     toggleShowAllEmbeddedMetadata,
   } = useEmbeddedMetadataToggles({ setEntries });
+
+  const fileEntries = useMemo(
+    () => entries.filter((entry) => entry.kind === 'single_file'),
+    [entries]
+  );
+
+  const lookupEntries = useMemo(
+    () => entries.filter(
+      (entry) => entry.kind === 'single_file' || entry.kind === 'external_diffusers_bundle'
+    ),
+    [entries]
+  );
+
+  const nonFileEntries = useMemo(
+    () => entries.filter((entry) => entry.kind !== 'single_file'),
+    [entries]
+  );
+
+  const {
+    shardedSets,
+    clearShardedSets,
+    toggleShardedSet,
+  } = useShardedSetDetection({ fileEntries, setEntries });
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +84,7 @@ export function useModelImportWorkflow({
       setReviewFindings([]);
       setImportedCount(0);
       setFailedCount(0);
-      setShardedSets([]);
+      clearShardedSets();
       setLookupProgress({ current: 0, total: 0 });
 
       if (importPaths.length === 0) {
@@ -94,7 +115,7 @@ export function useModelImportWorkflow({
     return () => {
       cancelled = true;
     };
-  }, [importPaths]);
+  }, [clearShardedSets, importPaths]);
 
   const toggleMetadataExpand = useCallback((path: string) => {
     setExpandedMetadata((prev) => {
@@ -107,65 +128,6 @@ export function useModelImportWorkflow({
       return next;
     });
   }, []);
-
-  const fileEntries = useMemo(
-    () => entries.filter((entry) => entry.kind === 'single_file'),
-    [entries]
-  );
-
-  const lookupEntries = useMemo(
-    () => entries.filter(
-      (entry) => entry.kind === 'single_file' || entry.kind === 'external_diffusers_bundle'
-    ),
-    [entries]
-  );
-
-  const nonFileEntries = useMemo(
-    () => entries.filter((entry) => entry.kind !== 'single_file'),
-    [entries]
-  );
-
-  useEffect(() => {
-    if (fileEntries.length === 0) {
-      setShardedSets([]);
-      return;
-    }
-
-    const detectShards = async () => {
-      try {
-        const paths = fileEntries.map((entry) => entry.path);
-        const result = await importAPI.detectShardedSets(paths);
-
-        if (result.success && result.groups) {
-          const { fileToSetMap, sets } = buildShardedSetState(result.groups);
-          setShardedSets(sets);
-          setEntries((prev) => {
-            let changed = false;
-            const next = prev.map((entry) => {
-              const shardedSetKey =
-                entry.kind === 'single_file' ? fileToSetMap[entry.path] : undefined;
-
-              if (entry.shardedSetKey === shardedSetKey) {
-                return entry;
-              }
-
-              changed = true;
-              return {
-                ...entry,
-                shardedSetKey,
-              };
-            });
-
-            return changed ? next : prev;
-          });
-        }
-      } catch (error) {
-        logger.error('Failed to detect sharded sets', { error });
-      }
-    };
-
-    void detectShards();
-  }, [fileEntries]);
 
   const allPickleAcknowledged = entries.every(
     (entry) => entry.securityTier !== 'pickle' || entry.securityAcknowledged
@@ -181,12 +143,6 @@ export function useModelImportWorkflow({
 
   const removeEntry = useCallback((path: string) => {
     setEntries((prev) => prev.filter((entry) => entry.path !== path));
-  }, []);
-
-  const toggleShardedSet = useCallback((key: string) => {
-    setShardedSets((prev) => prev.map((set) => (
-      set.key === key ? { ...set, expanded: !set.expanded } : set
-    )));
   }, []);
 
   const performMetadataLookup = useCallback(async () => {

@@ -150,7 +150,7 @@ Implementation notes:
 - Frontend file-size enforcement now uses `frontend/scripts/check-file-size.js` with a committed baseline ratchet and runs in the frontend CI job.
 
 ### G05 - Dependency Ownership Does Not Match Workspace Execution Boundaries
-Status: non-compliant
+Status: remediated for Node workspaces
 
 The dependency standards require each package to declare the tools it executes. Current problems:
 
@@ -166,6 +166,8 @@ Rectification:
 Implementation notes:
 - Frontend and Electron now declare TypeScript/ESLint tooling in the packages that execute those commands.
 - Electron linting has a package-local flat config and passes through `corepack pnpm --filter ./electron lint`.
+- `scripts/dev/check-workspace-dependency-ownership.mjs` verifies root package manifests remain tool-free and workspace manifests keep the TypeScript, ESLint, Vite, Vitest, Electron, and related tools they execute.
+- CI runs the dependency ownership check in the workflow lint stage before workspace jobs fan out.
 
 ### G06 - Release Governance Is Present but Not Complete
 Status: partially compliant

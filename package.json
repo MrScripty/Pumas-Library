@@ -8,6 +8,7 @@
     "electron"
   ],
   "scripts": {
+    "check:dependency-ownership": "node scripts/dev/check-workspace-dependency-ownership.mjs",
     "test:launcher": "node --test scripts/launcher/*.test.mjs"
   },
   "overrides": {

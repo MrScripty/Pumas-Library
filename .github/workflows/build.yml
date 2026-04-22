@@ -18,6 +18,8 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - uses: rhysd/actionlint@v1.7.8
+      - name: Check workspace dependency ownership
+        run: npm run check:dependency-ownership
 
   # Build and test Rust backend on all platforms
   build-rust:

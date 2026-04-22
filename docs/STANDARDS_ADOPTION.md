@@ -70,6 +70,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Torch sidecar LAN binding now requires both explicit LAN opt-in and an API token, with token middleware enforced for sidecar API routes when configured.
 - 2026-04-22: Frontend file-size checks now use a committed baseline ratchet in local scripts and CI so existing oversized files cannot grow while new files keep the 300-line ceiling.
 - 2026-04-22: Frontend hook and app-panel section READMEs now document polling ownership, timer guardrails, and event-stream replacement triggers for remaining polling paths.
+- 2026-04-22: Root CI now checks workspace dependency ownership so TypeScript, ESLint, Vite, Vitest, Electron, and related tooling stay declared by the packages that execute them.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

@@ -25,6 +25,8 @@ bridge.
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |
 | `LocalModelsList.tsx` | Grouped local-library list with model actions, related-model disclosure, and metadata-modal access. |
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
+| `ModelMetadataModal.tsx` | Modal for stored, embedded, inference, and notes metadata with semantic dialog/backdrop controls. |
+| `ModelMetadataModal.test.tsx` | Dialog naming and dismissal coverage for metadata modal interactions. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `MigrationReportsPanel.test.tsx` | Integration coverage for migration report loading, action dispatch, validation, and operator feedback. |
 | `MigrationReportControls.tsx` | Migration action buttons, prune controls, and flash-message presentation for the report panel. |

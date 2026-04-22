@@ -171,14 +171,18 @@ Positive evidence:
 
 Gaps:
 
-- no visible release CI matrix in repository inventory;
-- no checksum generation workflow found;
-- no release artifact naming policy file tying desktop app, native libraries, generated bindings, and SBOMs together;
+- release CI matrix was not visible in the initial repository inventory;
+- checksum generation needed an explicit self-exclusion guard;
+- release artifact naming policy needed to tie desktop app, native libraries, generated bindings, and SBOMs together;
 - generated C# binding packaging exists, but release identity needs to distinguish product-native library from binding framework artifacts per language-binding standards.
 
 Rectification:
 - Add `docs/release-artifact-contract.md` describing artifact names, platform targets, checksum/SBOM naming, and native-library/binding compatibility.
 - Add CI release jobs or document why release automation is currently manual.
+
+Implementation notes:
+- `docs/contracts/release-artifacts.md` defines the release artifact matrix, checksum file contract, SBOM contract, and native binding compatibility rules.
+- `.github/workflows/build.yml` stages release artifacts and generates `checksums-sha256.txt` without including the checksum file in its own digest list.
 
 ## Pass 01 Refactor Inputs
 These findings feed the synthesis plan as foundation work:

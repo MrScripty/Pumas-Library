@@ -58,6 +58,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: The Rust workspace root now has a standards-complete `README.md`, and `scripts/dev/check-readme-coverage.sh` verifies README coverage for audited source/support roots.
 - 2026-04-22: The existing pre-commit configuration now includes a commit-msg hook that validates conventional commit subjects against the shared commit standards.
 - 2026-04-22: The root `.editorconfig` now matches the standards template across TypeScript, Rust, Python, shell, C#, YAML/JSON, Docker, Make, and Markdown formatting boundaries.
+- 2026-04-22: Release checksum generation now fails when no artifacts are staged and excludes `checksums-sha256.txt` from its own digest list.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

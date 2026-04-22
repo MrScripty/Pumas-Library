@@ -465,7 +465,18 @@ jobs:
 
       - name: Generate checksums
         working-directory: release-artifacts
-        run: sha256sum ./* > checksums-sha256.txt
+        run: |
+          mapfile -d '' artifacts < <(
+            find . -maxdepth 1 -type f ! -name checksums-sha256.txt -printf '%P\0' |
+              sort -z
+          )
+
+          if (( ${#artifacts[@]} == 0 )); then
+            echo "No release artifacts found for checksum generation" >&2
+            exit 1
+          fi
+
+          sha256sum "${artifacts[@]}" > checksums-sha256.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2

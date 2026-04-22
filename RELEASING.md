@@ -28,6 +28,7 @@
 Run the release-facing verification commands from the repo root:
 
 ```bash
+npm run check:release-versions
 npm run test:launcher
 bash launcher.sh --build-release
 bash launcher.sh --release-smoke

@@ -71,6 +71,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Frontend file-size checks now use a committed baseline ratchet in local scripts and CI so existing oversized files cannot grow while new files keep the 300-line ceiling.
 - 2026-04-22: Frontend hook and app-panel section READMEs now document polling ownership, timer guardrails, and event-stream replacement triggers for remaining polling paths.
 - 2026-04-22: Root CI now checks workspace dependency ownership so TypeScript, ESLint, Vite, Vitest, Electron, and related tooling stay declared by the packages that execute them.
+- 2026-04-22: Release-facing version alignment is now checked locally and in CI across root, frontend, Electron, and Rust workspace manifests.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

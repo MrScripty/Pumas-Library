@@ -20,6 +20,8 @@ jobs:
       - uses: rhysd/actionlint@v1.7.8
       - name: Check workspace dependency ownership
         run: npm run check:dependency-ownership
+      - name: Check release version alignment
+        run: npm run check:release-versions
 
   # Build and test Rust backend on all platforms
   build-rust:

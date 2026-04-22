@@ -9,6 +9,7 @@ This directory contains developer-oriented setup, build, run, and SBOM helper sc
 | `build.sh` | Delegates release build behavior to the root launcher contract. |
 | `check-commit-message.sh` | Validates commit subjects against the project conventional commit format. |
 | `check-readme-coverage.sh` | Verifies that standards-controlled source and support directories include `README.md` contracts. |
+| `check-release-version-alignment.mjs` | Verifies release-facing version fields stay aligned across root, frontend, Electron, and the Rust workspace. |
 | `check-workspace-dependency-ownership.mjs` | Verifies that root and workspace package manifests keep executable tools declared by the packages that run them. |
 | `generate-sbom.sh` | Generates dependency SBOM snapshots for supported ecosystems. |
 | `list-audit-files.sh` | Prints the source tree view used by standards audits while excluding generated/runtime paths and retaining tracked plugin manifests. |

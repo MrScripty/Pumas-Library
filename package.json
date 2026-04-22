@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "check:dependency-ownership": "node scripts/dev/check-workspace-dependency-ownership.mjs",
+    "check:release-versions": "node scripts/dev/check-release-version-alignment.mjs",
     "test:launcher": "node --test scripts/launcher/*.test.mjs"
   },
   "overrides": {

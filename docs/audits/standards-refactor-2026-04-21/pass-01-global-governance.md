@@ -170,7 +170,7 @@ Implementation notes:
 - CI runs the dependency ownership check in the workflow lint stage before workspace jobs fan out.
 
 ### G06 - Release Governance Is Present but Not Complete
-Status: partially compliant
+Status: partially remediated
 
 Positive evidence:
 
@@ -192,6 +192,8 @@ Rectification:
 Implementation notes:
 - `docs/contracts/release-artifacts.md` defines the release artifact matrix, checksum file contract, SBOM contract, and native binding compatibility rules.
 - `.github/workflows/build.yml` stages release artifacts and generates `checksums-sha256.txt` without including the checksum file in its own digest list.
+- `scripts/dev/check-release-version-alignment.mjs` verifies release-facing versions stay aligned across root, frontend, Electron, and the Rust workspace; CI runs it before release-capable jobs fan out.
+- Remaining: release-published SBOM generation is still manual and should be automated once the SBOM generator no longer depends on a pre-existing local virtual environment.
 
 ## Pass 01 Refactor Inputs
 These findings feed the synthesis plan as foundation work:

@@ -85,7 +85,8 @@ node --test scripts/launcher/*.test.mjs
   `--run`, `--run-release`, `--test`, and `--release-smoke`.
 - Only `--run` and `--run-release` accept forwarded args after `--`.
 - `--test` runs the Rust workspace, launcher tests, frontend tests and type
-  checks, Electron validation, and Torch sidecar Python unit tests.
+  checks, Electron validation, and Torch sidecar Python lint, format, and unit
+  checks.
 - `--run` launches Electron with the debug backend binary created by
   `--build`; release launch and smoke actions use the release backend binary
   created by `--build-release`.

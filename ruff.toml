@@ -1,0 +1,19 @@
+line-length = 100
+target-version = "py312"
+
+exclude = [
+  ".git",
+  ".mypy_cache",
+  ".pytest_cache",
+  ".ruff_cache",
+  ".venv",
+  "__pycache__",
+  "build",
+  "dist",
+  "venv",
+]
+
+[format]
+indent-style = "space"
+line-ending = "lf"
+quote-style = "double"

@@ -24,38 +24,44 @@ class DeviceManager:
 
         # CPU is always available
         mem = psutil.virtual_memory()
-        devices.append(DeviceInfo(
-            device_id="cpu",
-            name="CPU",
-            memory_total=mem.total,
-            memory_available=mem.available,
-            is_available=True,
-        ))
+        devices.append(
+            DeviceInfo(
+                device_id="cpu",
+                name="CPU",
+                memory_total=mem.total,
+                memory_available=mem.available,
+                is_available=True,
+            )
+        )
 
         # CUDA devices
         if torch.cuda.is_available():
             for i in range(torch.cuda.device_count()):
                 props = torch.cuda.get_device_properties(i)
                 mem_info = torch.cuda.mem_get_info(i)
-                devices.append(DeviceInfo(
-                    device_id=f"cuda:{i}",
-                    name=props.name,
-                    memory_total=props.total_mem,
-                    memory_available=mem_info[0],
-                    is_available=True,
-                ))
+                devices.append(
+                    DeviceInfo(
+                        device_id=f"cuda:{i}",
+                        name=props.name,
+                        memory_total=props.total_mem,
+                        memory_available=mem_info[0],
+                        is_available=True,
+                    )
+                )
 
         # MPS (Apple Silicon)
         if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             # MPS doesn't expose detailed memory info
             mem = psutil.virtual_memory()
-            devices.append(DeviceInfo(
-                device_id="mps",
-                name="Apple Silicon GPU",
-                memory_total=mem.total,
-                memory_available=mem.available,
-                is_available=True,
-            ))
+            devices.append(
+                DeviceInfo(
+                    device_id="mps",
+                    name="Apple Silicon GPU",
+                    memory_total=mem.total,
+                    memory_available=mem.available,
+                    is_available=True,
+                )
+            )
 
         return devices
 

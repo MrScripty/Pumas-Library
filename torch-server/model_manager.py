@@ -216,11 +216,7 @@ class ModelManager:
 
     def list_model_names(self) -> list[str]:
         """List names of all ready models."""
-        return [
-            slot.model_name
-            for slot in self.slots.values()
-            if slot.state == SlotState.READY
-        ]
+        return [slot.model_name for slot in self.slots.values() if slot.state == SlotState.READY]
 
     def _active_slot_count(self) -> int:
         return sum(

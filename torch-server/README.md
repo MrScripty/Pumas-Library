@@ -26,10 +26,18 @@ Tests should create a fresh app instance per test and avoid sharing model manage
 Run the focused sidecar suite from the repository root:
 
 ```bash
+python3 -m ruff check torch-server
+python3 -m ruff format --check torch-server
 python3 -m unittest discover -s torch-server/tests
 ```
 
 The root launcher includes this suite in `launcher.sh --test`.
+
+Install Python development tooling with:
+
+```bash
+python3 -m pip install -r torch-server/requirements-dev.txt
+```
 
 ## Concurrency Contract
 `model_manager.py` owns a manager-level async registry lock for slot reservations, unload transitions, and `max_loaded_models` updates. Expensive model loading still runs outside the registry lock and is serialized per resolved device.

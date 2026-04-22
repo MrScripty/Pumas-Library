@@ -52,8 +52,11 @@ fi
 echo ""
 echo "Recommended verification commands:"
 echo "  corepack pnpm install --frozen-lockfile"
+echo "  python3 -m pip install -r torch-server/requirements-dev.txt"
 echo "  bash ./launcher.sh --install"
 echo "  npm run test:launcher"
+echo "  python3 -m ruff check torch-server"
+echo "  python3 -m ruff format --check torch-server"
 echo "  python3 -m unittest discover -s torch-server/tests"
 echo "  cargo test --manifest-path rust/Cargo.toml --workspace --exclude pumas_rustler"
 

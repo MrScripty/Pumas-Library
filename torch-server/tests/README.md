@@ -12,6 +12,8 @@ Developers and CI may run these tests from the repository root or `torch-server/
 Repository-root command:
 
 ```bash
+python3 -m ruff check torch-server
+python3 -m ruff format --check torch-server
 python3 -m unittest discover -s torch-server/tests
 ```
 

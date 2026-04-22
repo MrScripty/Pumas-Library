@@ -21,6 +21,7 @@ router = APIRouter()
 
 # --- Request/Response Models ---
 
+
 class ChatMessage(BaseModel):
     role: str
     content: str
@@ -84,6 +85,7 @@ class CompletionResponse(BaseModel):
 
 # --- Endpoints ---
 
+
 @router.get("/models")
 async def list_models(request: Request):
     """List loaded models in OpenAI format."""
@@ -126,9 +128,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
         id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
         created=int(time.time()),
         model=req.model,
-        choices=[
-            ChatChoice(message=ChatMessage(role="assistant", content=output_text))
-        ],
+        choices=[ChatChoice(message=ChatMessage(role="assistant", content=output_text))],
     )
 
 
@@ -158,6 +158,7 @@ async def completions(req: CompletionRequest, request: Request):
 
 
 # --- Generation Helpers ---
+
 
 def _format_chat_prompt(messages: list[ChatMessage]) -> str:
     """Format chat messages into a single prompt string."""

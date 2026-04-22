@@ -33,6 +33,7 @@ def _log_and_raise_internal_error(action: str, error: Exception) -> None:
 
 # --- Request Models ---
 
+
 class LoadModelRequest(BaseModel):
     model_path: str
     model_name: str
@@ -90,6 +91,7 @@ class ConfigureRequest(BaseModel):
 
 
 # --- Endpoints ---
+
 
 @router.get("/slots")
 async def list_slots(request: Request):

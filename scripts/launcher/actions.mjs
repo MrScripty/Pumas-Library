@@ -170,6 +170,20 @@ async function runTestSuite(runtime) {
     cwd: context.repoRoot,
   });
 
+  log('[test] linting Torch sidecar Python');
+  await runCommand(
+    platformService.pythonCommand,
+    platformService.pythonModuleArgs('ruff', ['check', 'torch-server']),
+    { cwd: context.repoRoot }
+  );
+
+  log('[test] checking Torch sidecar Python formatting');
+  await runCommand(
+    platformService.pythonCommand,
+    platformService.pythonModuleArgs('ruff', ['format', '--check', 'torch-server']),
+    { cwd: context.repoRoot }
+  );
+
   log('[test] running Torch sidecar Python tests');
   await runCommand(
     platformService.pythonCommand,

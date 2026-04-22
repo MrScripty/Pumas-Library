@@ -31,12 +31,15 @@ def load_model(
 
     if model_type == "dllm":
         from .dllm_loader import load_dllm
+
         return load_dllm(path, device)
     elif model_type == "sherry":
         from .sherry_loader import load_sherry
+
         return load_sherry(path, device)
     else:
         from .safetensors_loader import load_safetensors
+
         return load_safetensors(path, device)
 
 

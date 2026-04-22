@@ -41,6 +41,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Rust RPC CORS policy was narrowed from wildcard origins, methods, and headers to loopback browser origins, `GET`/`POST`, and `Content-Type`.
 - 2026-04-22: Rust RPC server startup now returns an owned server task handle with explicit shutdown instead of discarding the spawned Axum task.
 - 2026-04-22: UniFFI exports were classified by support tier, and launcher-root, import, and download request strings now validate at the binding boundary.
+- 2026-04-22: Renderer bridge access was centralized through `frontend/src/api/adapter.ts`, including Electron-only window and dropped-file utilities, with browser fallback tests.
 
 ## Revisit Triggers
 - Adding or changing an IPC/RPC method.

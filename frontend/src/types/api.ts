@@ -2160,6 +2160,8 @@ export interface ElectronWindowAPI {
   maximizeWindow(): Promise<void>;
   /** Get the current theme (Electron only) */
   getTheme(): Promise<'dark' | 'light'>;
+  /** Resolve a sandboxed dropped file to a filesystem path. */
+  getPathForFile(file: File): string;
 }
 
 export type ElectronAPI = DesktopBridgeAPI & ElectronWindowAPI;

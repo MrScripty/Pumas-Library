@@ -5,7 +5,7 @@
  * The Python backend runs as a sidecar process, accessed via JSON-RPC.
  */
 
-import type { DesktopBridgeAPI } from '../types/api';
+import type { DesktopBridgeAPI, ElectronAPI } from '../types/api';
 import { APIError } from '../errors';
 import { getLogger } from '../utils/logger';
 
@@ -23,12 +23,22 @@ export function detectEnvironment(): RuntimeEnvironment {
   }
 
   // Check for Electron API
-  if ('electronAPI' in window) {
+  if (window.electronAPI) {
     return 'electron';
   }
 
   // Fallback to browser (development mode without backend)
   return 'browser';
+}
+
+/**
+ * Get the canonical Electron bridge when it is available.
+ */
+export function getElectronAPI(): ElectronAPI | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  return window.electronAPI ?? null;
 }
 
 /**
@@ -40,7 +50,7 @@ function getAPIInstance(): DesktopBridgeAPI | null {
   switch (env) {
     case 'electron':
       // In Electron, the API is exposed as window.electronAPI
-      return (window as unknown as { electronAPI: DesktopBridgeAPI }).electronAPI;
+      return getElectronAPI();
 
     case 'browser':
       // In browser mode (no backend), return null
@@ -136,9 +146,8 @@ export const windowAPI = {
    * Minimize the window (Electron only)
    */
   minimize: async (): Promise<void> => {
-    const env = detectEnvironment();
-    if (env === 'electron') {
-      const electronAPI = (window as unknown as { electronAPI: { minimizeWindow: () => Promise<void> } }).electronAPI;
+    const electronAPI = getElectronAPI();
+    if (electronAPI) {
       await electronAPI.minimizeWindow();
     }
   },
@@ -147,9 +156,8 @@ export const windowAPI = {
    * Maximize/restore the window (Electron only)
    */
   maximize: async (): Promise<void> => {
-    const env = detectEnvironment();
-    if (env === 'electron') {
-      const electronAPI = (window as unknown as { electronAPI: { maximizeWindow: () => Promise<void> } }).electronAPI;
+    const electronAPI = getElectronAPI();
+    if (electronAPI) {
       await electronAPI.maximizeWindow();
     }
   },
@@ -158,9 +166,8 @@ export const windowAPI = {
    * Get the current theme (Electron only)
    */
   getTheme: async (): Promise<'dark' | 'light'> => {
-    const env = detectEnvironment();
-    if (env === 'electron') {
-      const electronAPI = (window as unknown as { electronAPI: { getTheme: () => Promise<'dark' | 'light'> } }).electronAPI;
+    const electronAPI = getElectronAPI();
+    if (electronAPI) {
       return await electronAPI.getTheme();
     }
     // Default to dark theme

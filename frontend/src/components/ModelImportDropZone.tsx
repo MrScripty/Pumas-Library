@@ -7,6 +7,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Upload } from 'lucide-react';
+import { getElectronAPI } from '../api/adapter';
 
 interface ModelImportDropZoneProps {
   /** Callback when import paths are dropped */
@@ -31,16 +32,6 @@ function fileUriToPath(uri: string): string {
     return path;
   }
   return uri;
-}
-
-/**
- * Get the Electron API for file path resolution (if available).
- */
-function getElectronAPI(): { getPathForFile: (file: File) => string } | null {
-  if (typeof window !== 'undefined' && 'electronAPI' in window) {
-    return (window as unknown as { electronAPI: { getPathForFile: (file: File) => string } }).electronAPI;
-  }
-  return null;
 }
 
 /**

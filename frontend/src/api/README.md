@@ -67,6 +67,9 @@ if (!res.success) throw new Error(res.error || 'Failed');
   globals directly.
 - `adapter.ts` returns the canonical desktop bridge contract and treats missing
   bridge access as a boundary error.
+- `getElectronAPI()` is the only supported direct bridge accessor for
+  Electron-only utilities such as window controls and dropped-file path
+  resolution.
 - Compatibility expectation: wrappers may grow additively, but existing method
   semantics should remain aligned with the shared type contracts.
 

@@ -13,6 +13,8 @@ The first typed-command pass covers model import/download and process open handl
 
 The HTTP server accepts CORS requests only from loopback browser origins and only for `GET`/`POST` with `Content-Type`. External LAN or internet browser origins are not part of the supported trust boundary.
 
+The CLI host binding policy defaults to loopback-only addresses. Binding to a non-loopback IP now requires explicit `--allow-lan` opt-in at process startup.
+
 `start_server` returns an owned `ServerHandle`; callers must keep it alive for the server lifetime and call `shutdown()` during controlled teardown.
 
 ## Consumer Contract

@@ -13,6 +13,7 @@ use clap::Parser;
 use pumas_app_manager::{CustomNodesManager, SizeCalculator, VersionManager};
 use pumas_library::{AppId, PluginLoader};
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
@@ -29,6 +30,10 @@ struct Args {
     #[arg(long, default_value = "127.0.0.1")]
     host: String,
 
+    /// Allow binding the RPC listener to a non-loopback interface.
+    #[arg(long)]
+    allow_lan: bool,
+
     /// Enable debug logging
     #[arg(short, long)]
     debug: bool,
@@ -41,6 +46,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    validate_rpc_host(&args.host, args.allow_lan)?;
 
     // Set up logging
     let log_level = if args.debug {
@@ -181,4 +187,40 @@ async fn main() -> Result<()> {
     server.shutdown().await;
 
     Ok(())
+}
+
+fn validate_rpc_host(host: &str, allow_lan: bool) -> Result<()> {
+    let ip_addr: IpAddr = host
+        .parse()
+        .map_err(|_| anyhow::anyhow!("RPC host must be an IP address, got '{host}'"))?;
+
+    if ip_addr.is_loopback() || allow_lan {
+        return Ok(());
+    }
+
+    Err(anyhow::anyhow!(
+        "Refusing to bind RPC server to non-loopback host '{host}' without --allow-lan"
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_rpc_host;
+
+    #[test]
+    fn rpc_host_validation_allows_loopback_without_lan_flag() {
+        assert!(validate_rpc_host("127.0.0.1", false).is_ok());
+        assert!(validate_rpc_host("::1", false).is_ok());
+    }
+
+    #[test]
+    fn rpc_host_validation_rejects_non_loopback_without_lan_flag() {
+        let error = validate_rpc_host("0.0.0.0", false).unwrap_err();
+        assert!(error.to_string().contains("without --allow-lan"), "{error}");
+    }
+
+    #[test]
+    fn rpc_host_validation_allows_non_loopback_with_lan_flag() {
+        assert!(validate_rpc_host("0.0.0.0", true).is_ok());
+    }
 }

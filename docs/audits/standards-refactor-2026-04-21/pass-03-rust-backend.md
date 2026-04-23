@@ -91,6 +91,11 @@ Rectification:
 - Generate or test TypeScript and Rust shapes from the same contract artifact.
 - Keep JSON-RPC envelope generic, but method payloads typed.
 
+Compile blocker discovered during later R08 verification:
+- `pumas-rpc/src/server.rs` currently fails to compile because `handle_rpc` does not satisfy
+  Axum's `Handler` bound at `.route("/rpc", post(handle_rpc))`. This needs a contained follow-up
+  step to restore crate compilation before full RPC verification can be considered complete.
+
 ### R04 - Background Task Ownership Is Incomplete
 Status: compliant
 
@@ -317,10 +322,13 @@ Positive:
 
 - RPC default host is `127.0.0.1`.
 - IPC server uses `127.0.0.1:0`.
+- RPC server CORS is restricted to loopback browser origins and `GET`/`POST` with
+  `Content-Type`.
 
 Risks:
 
-- `pumas-rpc` accepts arbitrary `--host`, and server CORS is configured as `Any` for all origins/methods/headers.
+- `pumas-rpc` now requires explicit `--allow-lan` opt-in for non-loopback `--host`, but the LAN
+  mode threat model still needs explicit product documentation and review.
 - Torch LAN access can set host to `0.0.0.0`; this may be product-intended but needs documented security policy and authentication/authorization review.
 - Listener concurrent connection limits are not visible in `pumas-rpc/src/server.rs`.
 
@@ -329,6 +337,13 @@ Rectification:
 - Restrict CORS to renderer/dev origins where possible.
 - Add max connection limits or request concurrency limits.
 - Document LAN mode threat model for Torch server.
+
+Implementation notes:
+- Completed: `pumas-rpc/src/main.rs` now validates `--host` as an IP address and rejects
+  non-loopback binds unless `--allow-lan` is passed, so the CLI boundary enforces the local-only
+  RPC default instead of accepting arbitrary listener addresses.
+- Completed: `pumas-rpc/README.md` now documents the loopback default plus explicit LAN opt-in for
+  the RPC binary.
 
 ### R09 - Language Binding Boundary Is Too Entangled With Core Types
 Status: partially compliant

@@ -1,11 +1,7 @@
-import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useHover } from '@react-aria/interactions';
-import { Anchor, Check, CircleX, Link2 } from 'lucide-react';
-import type { APIError } from '../errors';
-import { getLogger } from '../utils/logger';
-
-const logger = getLogger('VersionSelectorDropdown');
+import { Check, Link2 } from 'lucide-react';
+import { VersionSelectorDefaultButton } from './VersionSelectorDefaultButton';
 
 interface VersionDropdownItemProps {
   version: string;
@@ -35,14 +31,6 @@ function VersionDropdownItem({
   onToggleShortcuts,
 }: VersionDropdownItemProps) {
   const { hoverProps: rowHoverProps, isHovered: isRowHovered } = useHover({});
-  const { hoverProps: anchorHoverProps, isHovered: isAnchorHovered } = useHover({});
-  const [anchorHoverStartedAsDefault, setAnchorHoverStartedAsDefault] = useState(false);
-
-  useEffect(() => {
-    if (isAnchorHovered) {
-      setAnchorHoverStartedAsDefault(isDefault);
-    }
-  }, [isAnchorHovered, isDefault]);
 
   return (
     <div
@@ -58,71 +46,14 @@ function VersionDropdownItem({
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex w-4 flex-shrink-0 items-center justify-center">
           {onMakeDefault ? (
-            <button
-              type="button"
-              {...anchorHoverProps}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (!onMakeDefault) return;
-                if (isDefault) {
-                  onMakeDefault(null).catch((error: unknown) => {
-                    if ((error as APIError)?.message && (error as APIError)?.endpoint) {
-                      const apiError = error as APIError;
-                      logger.error('API error clearing default version', {
-                        error: apiError.message,
-                        endpoint: apiError.endpoint,
-                        version,
-                      });
-                    } else if (error instanceof Error) {
-                      logger.error('Failed to clear default version', {
-                        error: error.message,
-                        version,
-                      });
-                    } else {
-                      logger.error('Unknown error clearing default version', {
-                        error: String(error),
-                        version,
-                      });
-                    }
-                  });
-                } else {
-                  onMakeDefault(version).catch((error: unknown) => {
-                    if ((error as APIError)?.message && (error as APIError)?.endpoint) {
-                      const apiError = error as APIError;
-                      logger.error('API error setting default version', {
-                        error: apiError.message,
-                        endpoint: apiError.endpoint,
-                        version,
-                      });
-                    } else if (error instanceof Error) {
-                      logger.error('Failed to set default version', {
-                        error: error.message,
-                        version,
-                      });
-                    } else {
-                      logger.error('Unknown error setting default version', {
-                        error: String(error),
-                        version,
-                      });
-                    }
-                  });
-                }
-              }}
-              className="flex items-center justify-center"
-              aria-label={isDefault ? `Unset ${version} as default` : `Set ${version} as default`}
-              title={isDefault ? 'Click to unset as default' : 'Click to set as default'}
-              disabled={isSwitching || isLoading}
-            >
-              {isDefault && isAnchorHovered && anchorHoverStartedAsDefault ? (
-                <CircleX size={14} className="text-[hsl(var(--text-tertiary))]" />
-              ) : isDefault ? (
-                <Anchor size={14} className="text-[hsl(var(--accent-success))]" />
-              ) : isRowHovered ? (
-                <Anchor size={14} className="text-[hsl(var(--text-tertiary))]" />
-              ) : (
-                <Anchor size={14} className="text-transparent" />
-              )}
-            </button>
+            <VersionSelectorDefaultButton
+              isDefault={isDefault}
+              isLoading={isLoading}
+              isRowHovered={isRowHovered}
+              isSwitching={isSwitching}
+              onMakeDefault={onMakeDefault}
+              version={version}
+            />
           ) : (
             <div className="w-4" />
           )}

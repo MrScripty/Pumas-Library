@@ -6,11 +6,27 @@ use crate::version_manager::LaunchResult;
 use chrono::Utc;
 use pumas_library::config::{AppId, InstallationConfig};
 use pumas_library::{PumasError, Result};
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
+use tokio::fs;
 use tokio::process::{Child, Command};
 use tracing::{debug, error, info, warn};
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+async fn read_path_string(path: &Path) -> Result<String> {
+    fs::read_to_string(path).await.map_err(|e| PumasError::Io {
+        message: format!("Failed to read {}: {}", path.display(), e),
+        path: Some(path.to_path_buf()),
+        source: Some(e),
+    })
+}
 
 /// Handles launching version instances.
 pub struct VersionLauncher {
@@ -54,14 +70,14 @@ impl VersionLauncher {
         extra_args: Option<Vec<String>>,
     ) -> Result<LaunchResult> {
         let version_path = self.version_path(tag);
-        if !version_path.exists() {
+        if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
         }
 
         let venv_python = self.venv_python(tag);
-        if !venv_python.exists() {
+        if !path_exists(&venv_python).await? {
             return Ok(LaunchResult {
                 success: false,
                 log_file: None,
@@ -71,7 +87,7 @@ impl VersionLauncher {
         }
 
         // Create log file
-        std::fs::create_dir_all(&self.logs_dir).ok();
+        fs::create_dir_all(&self.logs_dir).await.ok();
         let log_file = self.logs_dir.join(format!(
             "launch-{}-{}.log",
             self.slugify_tag(tag),
@@ -107,7 +123,7 @@ impl VersionLauncher {
         let venv_python = self.venv_python(tag);
         let main_py = version_path.join("main.py");
 
-        if !main_py.exists() {
+        if !path_exists(&main_py).await? {
             return Ok(LaunchResult {
                 success: false,
                 log_file: Some(log_file.clone()),
@@ -180,7 +196,7 @@ impl VersionLauncher {
     ) -> Result<LaunchResult> {
         let ollama_bin = version_path.join("ollama");
 
-        if !ollama_bin.exists() {
+        if !path_exists(&ollama_bin).await? {
             return Ok(LaunchResult {
                 success: false,
                 log_file: Some(log_file.clone()),
@@ -311,15 +327,11 @@ impl VersionLauncher {
         let version_path = self.version_path(tag);
         let pid_file = version_path.join("comfyui.pid");
 
-        if !pid_file.exists() {
+        if !path_exists(&pid_file).await? {
             return Ok(false);
         }
 
-        let pid_str = std::fs::read_to_string(&pid_file).map_err(|e| PumasError::Io {
-            message: format!("Failed to read PID file: {}", e),
-            path: Some(pid_file.clone()),
-            source: Some(e),
-        })?;
+        let pid_str = read_path_string(&pid_file).await?;
 
         let pid: i32 = pid_str
             .trim()
@@ -360,7 +372,7 @@ impl VersionLauncher {
         }
 
         // Remove PID file
-        std::fs::remove_file(&pid_file).ok();
+        fs::remove_file(&pid_file).await.ok();
 
         info!("Process {} stopped", pid);
         Ok(true)
@@ -371,11 +383,11 @@ impl VersionLauncher {
         let version_path = self.version_path(tag);
         let pid_file = version_path.join("comfyui.pid");
 
-        if !pid_file.exists() {
+        if !path_exists(&pid_file).await.unwrap_or(false) {
             return false;
         }
 
-        if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+        if let Ok(pid_str) = read_path_string(&pid_file).await {
             if let Ok(_pid) = pid_str.trim().parse::<i32>() {
                 #[cfg(unix)]
                 {

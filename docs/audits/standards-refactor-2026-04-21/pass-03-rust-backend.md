@@ -173,6 +173,10 @@ Implementation notes:
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path
   probes on async runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/launcher.rs` now uses `tokio::fs` for async
+  version/venv/main-script/binary/pid path probes, PID-file reads, log-directory creation, and
+  PID cleanup so the launcher status and stop flows no longer perform those filesystem operations
+  synchronously on async runtime threads before delegating into process control.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

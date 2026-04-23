@@ -15,8 +15,15 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::fs;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, info, warn};
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 /// Ollama version manager specialized for binary-only installation.
 pub struct OllamaVersionManager {
@@ -213,11 +220,13 @@ impl OllamaVersionManager {
 
         // Create version directory
         let version_path = self.version_path(tag);
-        std::fs::create_dir_all(&version_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to create version directory: {}", e),
-            path: Some(version_path.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&version_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create version directory: {}", e),
+                path: Some(version_path.clone()),
+                source: Some(e),
+            })?;
 
         // Send stage update
         if let Some(ref tx) = progress_tx {
@@ -696,12 +705,14 @@ impl OllamaVersionManager {
     pub async fn uninstall_version(&self, tag: &str) -> Result<()> {
         let version_path = self.version_path(tag);
 
-        if version_path.exists() {
-            std::fs::remove_dir_all(&version_path).map_err(|e| PumasError::Io {
-                message: format!("Failed to remove version directory: {}", e),
-                path: Some(version_path),
-                source: Some(e),
-            })?;
+        if path_exists(&version_path).await? {
+            fs::remove_dir_all(&version_path)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to remove version directory: {}", e),
+                    path: Some(version_path),
+                    source: Some(e),
+                })?;
         }
 
         // Update state (this also removes from metadata)

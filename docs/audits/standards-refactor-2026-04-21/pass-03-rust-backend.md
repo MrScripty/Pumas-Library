@@ -181,6 +181,10 @@ Implementation notes:
   launcher-root validation and installed-version directory removal so the async constructor and
   remove flow no longer perform synchronous existence checks or recursive deletion on runtime
   threads.
+- Completed: `pumas-app-manager/src/version_manager/ollama.rs` now uses `tokio::fs` for async
+  version-directory creation during install and recursive directory removal during uninstall so
+  those async Ollama lifecycle entry points no longer perform those filesystem operations directly
+  on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -361,6 +361,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now route diffusers bundle lookup
   hint extraction through `tokio::task::spawn_blocking`, so direct API and mirrored IPC metadata
   lookup no longer perform synchronous `model_index.json` reads inline on async runtime threads.
+- Completed: `pumas-rpc/src/handlers/models/imports.rs` now routes library metadata snapshot reads
+  and diffusers component-manifest extraction through `tokio::task::spawn_blocking`, so the RPC
+  model-details request path no longer performs synchronous metadata reads, primary-file discovery,
+  or bundle manifest scans inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

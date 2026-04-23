@@ -8,6 +8,8 @@ use crate::server::AppState;
 use pumas_library::model_library::get_diffusers_component_manifest;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Debug, Deserialize)]
 struct ImportModelParams {
@@ -55,6 +57,41 @@ async fn extract_gguf_metadata_value(path: std::path::PathBuf) -> pumas_library:
             err
         ))
     })?
+}
+
+async fn load_library_model_snapshot(
+    library: Arc<pumas_library::ModelLibrary>,
+    model_id: String,
+) -> pumas_library::Result<(
+    Option<pumas_library::model_library::ModelMetadata>,
+    Option<PathBuf>,
+)> {
+    tokio::task::spawn_blocking(move || {
+        let model_dir = library.library_root().join(&model_id);
+        let stored_metadata = library.load_metadata(&model_dir)?;
+        let primary_file = library.get_primary_model_file(&model_id);
+        Ok((stored_metadata, primary_file))
+    })
+    .await
+    .map_err(|err| {
+        pumas_library::error::PumasError::Other(format!(
+            "Failed to join library metadata snapshot task: {}",
+            err
+        ))
+    })?
+}
+
+async fn extract_diffusers_component_manifest(
+    entry_path: PathBuf,
+) -> pumas_library::Result<Option<Vec<pumas_library::BundleComponentManifestEntry>>> {
+    tokio::task::spawn_blocking(move || Ok(get_diffusers_component_manifest(&entry_path)))
+        .await
+        .map_err(|err| {
+            pumas_library::error::PumasError::Other(format!(
+                "Failed to join diffusers component manifest task: {}",
+                err
+            ))
+        })?
 }
 
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
@@ -281,15 +318,12 @@ pub async fn get_library_model_metadata(
     let model_id = require_str_param(params, "model_id", "modelId")?;
 
     // Get the library
-    let library = state.api.model_library();
-
-    // Get stored metadata from metadata.json
-    let model_dir = library.library_root().join(&model_id);
-    let stored_metadata = library.load_metadata(&model_dir)?;
+    let library = state.api.model_library().clone();
+    let (stored_metadata, primary_file) =
+        load_library_model_snapshot(library.clone(), model_id.clone()).await?;
     let effective_metadata = state.api.get_effective_model_metadata(&model_id).await?;
 
     // Find primary model file and get embedded metadata
-    let primary_file = library.get_primary_model_file(&model_id);
     let embedded_metadata: Option<pumas_library::EmbeddedMetadataResponse> =
         if let Some(ref file_path) = primary_file {
             let extension = file_path
@@ -324,7 +358,7 @@ pub async fn get_library_model_metadata(
     let primary_file_str =
         primary_file.map(|p: std::path::PathBuf| p.to_string_lossy().to_string());
 
-    let component_manifest = effective_metadata
+    let component_manifest = if let Some(entry_path) = effective_metadata
         .as_ref()
         .filter(|metadata| {
             metadata.bundle_format == Some(pumas_library::BundleFormat::DiffusersDirectory)
@@ -334,9 +368,12 @@ pub async fn get_library_model_metadata(
                 .entry_path
                 .as_deref()
                 .or(primary_file_str.as_deref())
-                .map(std::path::Path::new)
-        })
-        .and_then(get_diffusers_component_manifest);
+                .map(PathBuf::from)
+        }) {
+        extract_diffusers_component_manifest(entry_path).await?
+    } else {
+        None
+    };
 
     let response = pumas_library::LibraryModelMetadataResponse {
         success: true,

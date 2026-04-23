@@ -86,7 +86,7 @@ Status: partially remediated; large workflow owners remain
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
 - `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
-- `frontend/src/components/ModelManager.tsx` at 361 lines after filter, import-picker, existing-library chooser, HF auth prompt, and download-refresh state extraction;
+- `frontend/src/components/ModelManager.tsx` at 307 lines and 282 effective lines after filter, import-picker, existing-library chooser, HF auth prompt, download-refresh, and remote-download starter extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
 - `frontend/src/components/model-import/ImportLookupCard.tsx` at 193 lines and 182 effective lines after expanded metadata details extraction;
@@ -113,6 +113,8 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 361 to 355 effective lines after HF auth prompt extraction.
 - Completed: move delayed model-list refresh scheduling after completed or disappeared downloads into `frontend/src/hooks/useDownloadCompletionRefresh.ts`, with completion, disappeared-download, initial completed no-op, and unmount cleanup tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 355 to 333 effective lines after download-refresh extraction.
+- Completed: move remote Hugging Face download payload shaping, backend result handling, error updates, and auth escalation from `ModelManager.tsx` into `frontend/src/components/ModelManagerRemoteDownload.ts` with successful start, backend failure, and auth-required error tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/ModelManager.tsx` from the oversized-file baseline after it reached 282 effective lines.
 - Completed: move related-model expansion rendering from `LocalModelsList.tsx` into `frontend/src/components/RelatedModelsPanel.tsx` with loading, error, empty, and URL-opening tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/LocalModelsList.tsx` from 455 to 402 effective lines after related-panel extraction.
 - Completed: move empty-library and no-match filter rendering from `LocalModelsList.tsx` into `frontend/src/components/LocalModelsEmptyState.tsx` with picker, disabled, default empty, and clear-filter tests.

@@ -10,6 +10,8 @@ bridge.
 | File/Folder | Description |
 | ----------- | ----------- |
 | `ModelManager.tsx` | Main model management screen and interactions. |
+| `ModelManagerRemoteDownload.ts` | Remote Hugging Face download starter for payload shaping, backend result handling, error state, and auth escalation. |
+| `ModelManagerRemoteDownload.test.ts` | Unit coverage for successful remote download starts, backend failures, and auth-required download errors. |
 | `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
 | `ModelManagerUtils.test.ts` | Unit coverage for model-manager helper behavior such as download overlay merging and remote-kind mapping. |
 | `AppSidebar.tsx` | Sidebar drag/order state owner and app-selection toolbar container. |

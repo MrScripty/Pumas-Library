@@ -6,7 +6,6 @@
  */
 
 import React, { useMemo } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
 import type { ModelCategory, RemoteModelInfo } from '../types/apps';
 import { useDownloadCompletionRefresh } from '../hooks/useDownloadCompletionRefresh';
 import { useExistingLibraryChooser } from '../hooks/useExistingLibraryChooser';
@@ -25,18 +24,14 @@ import { LinkHealthStatus } from './LinkHealthStatus';
 import { MigrationReportsPanel } from './MigrationReportsPanel';
 import { HuggingFaceAuthDialog } from './HuggingFaceAuthDialog';
 import { NetworkStatusBanner } from './NetworkStatusBanner';
-import { getLogger } from '../utils/logger';
-import { APIError, NetworkError } from '../errors';
 import {
   buildDownloadingModels,
   filterLocalModelGroups,
   isAuthRequiredError,
   mergeLocalModelGroups,
-  resolveDownloadModelType,
   sortAndFilterRemoteResults,
 } from './ModelManagerUtils';
-
-const logger = getLogger('ModelManager');
+import { startRemoteModelDownload } from './ModelManagerRemoteDownload';
 
 export interface ModelManagerProps {
   modelGroups: ModelCategory[];
@@ -183,64 +178,14 @@ export const ModelManager: React.FC<ModelManagerProps> = ({
 
   // Handlers
   const handleStartRemoteDownload = async (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => {
-    if (!isAPIAvailable()) {
-      logger.error('Download API not available');
-      return;
-    }
-
-    const repoId = model.repoId;
-    const developer = model.developer || repoId.split('/')[0] || 'huggingface';
-    const officialName = model.name || repoId;
-    const modelType = resolveDownloadModelType(model.kind || '');
-    const pipelineTag = model.kind || '';
-    const releaseDate = model.releaseDate || null;
-    const downloadUrl = model.url || null;
-
-    logger.info('Starting remote model download', { repoId, developer, officialName, modelType, quant, filenames: filenames?.length });
-    // Clear any previous error for this download
-    setDownloadErrors((prev) => {
-      if (!prev[repoId]) return prev;
-      const next = { ...prev };
-      delete next[repoId];
-      return next;
+    await startRemoteModelDownload({
+      filenames,
+      model,
+      quant,
+      openHfAuth,
+      setDownloadErrors,
+      startDownload,
     });
-    try {
-      if (!isAPIAvailable()) return;
-      const result = await api.start_model_download_from_hf(
-        repoId,
-        developer,
-        officialName,
-        modelType,
-        pipelineTag,
-        releaseDate,
-        downloadUrl,
-        quant || null,
-        filenames || null
-      );
-      if (!result.success || !result.download_id) {
-        const errorMsg = result.error || 'Download failed.';
-        logger.error('Remote download failed', { error: errorMsg, repoId });
-        setDownloadErrors((prev) => ({ ...prev, [repoId]: errorMsg }));
-        return;
-      }
-      logger.info('Remote download started successfully', { repoId, downloadId: result.download_id });
-      startDownload(repoId, result.download_id, { modelName: officialName, modelType });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Download failed.';
-      if (error instanceof APIError) {
-        logger.error('API error starting remote download', { error: error.message, endpoint: error.endpoint, repoId });
-      } else if (error instanceof NetworkError) {
-        logger.error('Network error starting remote download', { error: error.message, url: error.url, status: error.status, repoId });
-      } else if (error instanceof Error) {
-        logger.error('Failed to start remote download', { error: error.message, repoId });
-      } else {
-        logger.error('Unknown error starting remote download', { error, repoId });
-      }
-      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
-      if (isAuthRequiredError(message)) {
-        openHfAuth();
-      }
-    }
   };
 
   return (

@@ -153,6 +153,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/reconciliation.rs` now uses `tokio::fs` for partial-download
   marker reads and async existence checks in reconciliation staging/model-scope flows so watcher
   and on-demand reconcile paths no longer rely on synchronous metadata probes for those checks.
+- Completed: `pumas-core/src/api/builder.rs`, `api/mapping.rs`, and `api/state.rs` now use
+  `tokio::fs` for launcher-root/model-mapping directory existence checks and creation so startup
+  and mapping apply/sync request paths do not perform those directory operations synchronously on
+  async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

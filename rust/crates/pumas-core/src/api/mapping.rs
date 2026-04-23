@@ -6,6 +6,13 @@ use crate::models;
 use crate::PumasApi;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
 
 impl PumasApi {
     /// Preview model mapping for a version without applying it.
@@ -29,7 +36,7 @@ impl PumasApi {
                 .await;
         }
 
-        if !models_path.exists() {
+        if !path_exists(models_path).await? {
             return Ok(models::MappingPreviewResponse {
                 success: false,
                 error: Some(format!(
@@ -113,8 +120,10 @@ impl PumasApi {
                 .await;
         }
 
-        if !models_path.exists() {
-            std::fs::create_dir_all(models_path)?;
+        if !path_exists(models_path).await? {
+            fs::create_dir_all(models_path)
+                .await
+                .map_err(|err| crate::error::PumasError::io_with_path(err, models_path))?;
         }
 
         let primary = self.primary();
@@ -186,8 +195,10 @@ impl PumasApi {
                 .await;
         }
 
-        if !models_path.exists() {
-            std::fs::create_dir_all(models_path)?;
+        if !path_exists(models_path).await? {
+            fs::create_dir_all(models_path)
+                .await
+                .map_err(|err| crate::error::PumasError::io_with_path(err, models_path))?;
         }
 
         let primary = self.primary();

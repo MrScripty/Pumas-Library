@@ -30,6 +30,13 @@ use crate::process;
 use crate::registry;
 use crate::system;
 use std::path::{Path, PathBuf};
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> std::result::Result<bool, PumasError> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 /// All state owned by a primary instance.
 ///
@@ -1172,8 +1179,10 @@ async fn apply_model_mapping_response(
     version_tag: &str,
     models_path: &Path,
 ) -> std::result::Result<models::MappingApplyResponse, PumasError> {
-    if !models_path.exists() {
-        std::fs::create_dir_all(models_path)?;
+    if !path_exists(models_path).await? {
+        fs::create_dir_all(models_path)
+            .await
+            .map_err(|err| PumasError::io_with_path(err, models_path))?;
     }
 
     primary
@@ -1200,8 +1209,10 @@ async fn sync_with_resolutions_response(
     models_path: &Path,
     resolutions: std::collections::HashMap<String, model_library::ConflictResolution>,
 ) -> std::result::Result<models::SyncWithResolutionsResponse, PumasError> {
-    if !models_path.exists() {
-        std::fs::create_dir_all(models_path)?;
+    if !path_exists(models_path).await? {
+        fs::create_dir_all(models_path)
+            .await
+            .map_err(|err| PumasError::io_with_path(err, models_path))?;
     }
 
     primary

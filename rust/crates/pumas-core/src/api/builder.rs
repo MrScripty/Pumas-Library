@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::fs;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
@@ -247,9 +248,7 @@ impl PumasApiBuilder {
     }
 
     /// Create the required directory structure.
-    fn create_directory_structure(launcher_root: &Path) -> Result<()> {
-        use std::fs;
-
+    async fn create_directory_structure(launcher_root: &Path) -> Result<()> {
         let dirs = [
             launcher_root.join("launcher-data"),
             launcher_root.join("launcher-data").join("metadata"),
@@ -262,8 +261,11 @@ impl PumasApiBuilder {
         ];
 
         for dir in &dirs {
-            if !dir.exists() {
-                fs::create_dir_all(dir).map_err(|e| PumasError::Io {
+            if !fs::try_exists(dir)
+                .await
+                .map_err(|e| PumasError::io_with_path(e, dir))?
+            {
+                fs::create_dir_all(dir).await.map_err(|e| PumasError::Io {
                     message: format!("Failed to create directory: {}", dir.display()),
                     path: Some(dir.clone()),
                     source: Some(e),
@@ -279,20 +281,28 @@ impl PumasApiBuilder {
         // Auto-create directories if requested
         if self.auto_create_dirs {
             // Create launcher_root if it doesn't exist
-            if !self.launcher_root.exists() {
-                std::fs::create_dir_all(&self.launcher_root).map_err(|e| PumasError::Io {
-                    message: format!(
-                        "Failed to create launcher root: {}",
-                        self.launcher_root.display()
-                    ),
-                    path: Some(self.launcher_root.clone()),
-                    source: Some(e),
-                })?;
+            if !fs::try_exists(&self.launcher_root)
+                .await
+                .map_err(|e| PumasError::io_with_path(e, &self.launcher_root))?
+            {
+                fs::create_dir_all(&self.launcher_root)
+                    .await
+                    .map_err(|e| PumasError::Io {
+                        message: format!(
+                            "Failed to create launcher root: {}",
+                            self.launcher_root.display()
+                        ),
+                        path: Some(self.launcher_root.clone()),
+                        source: Some(e),
+                    })?;
             }
-            Self::create_directory_structure(&self.launcher_root)?;
+            Self::create_directory_structure(&self.launcher_root).await?;
         } else {
             // Ensure the launcher root exists
-            if !self.launcher_root.exists() {
+            if !fs::try_exists(&self.launcher_root)
+                .await
+                .map_err(|e| PumasError::io_with_path(e, &self.launcher_root))?
+            {
                 return Err(PumasError::Config {
                     message: format!(
                         "Launcher root does not exist: {}",

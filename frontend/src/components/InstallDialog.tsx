@@ -20,8 +20,16 @@ import { useInstallationState } from '../hooks/useInstallationState';
 import { ConfirmationDialog } from './ConfirmationDialog';
 import { InstallDialogContent } from './InstallDialogContent';
 import { InstallDialogFrame } from './InstallDialogFrame';
+import {
+  filterVersions,
+  getErrorMessage,
+  getStickyFailure,
+  isInstallationCancellation,
+  reportCancelError,
+  reportInstallationError,
+} from './InstallDialogHelpers';
 import { getLogger } from '../utils/logger';
-import { APIError, NetworkError } from '../errors';
+import { APIError } from '../errors';
 
 const logger = getLogger('InstallDialog');
 
@@ -148,21 +156,13 @@ export function InstallDialog({
     return () => clearTimeout(timer);
   }, [progress, onRefreshProgress, setShowCompletedItems, setViewMode]);
 
-  // Filter versions based on user preferences
-  const filteredVersions = availableVersions.filter((release) => {
-    if (!showPreReleases && release.prerelease) {
-      return false;
-    }
-    if (!showInstalled && installedVersions.includes(release.tagName)) {
-      return false;
-    }
-    return true;
-  });
-
-  const failedTag = progress && progress.completed_at && !progress.success ? progress.tag : null;
-  const failedLogPath = progress && progress.completed_at && !progress.success ? progress.log_path || null : null;
-  const stickyFailedTag = failedTag || failedInstall?.tag || null;
-  const stickyFailedLogPath = failedLogPath || failedInstall?.log || null;
+  const filteredVersions = filterVersions(
+    availableVersions,
+    installedVersions,
+    showPreReleases,
+    showInstalled
+  );
+  const stickyFailure = getStickyFailure(progress, failedInstall);
 
   const handleInstall = async (tag: string) => {
     logger.info('Starting installation', { tag });
@@ -180,21 +180,12 @@ export function InstallDialog({
       }
       logger.info('Installation initiated successfully', { tag });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const isCancellation = cancellationRef.current || message.toLowerCase().includes('cancel');
+      const isCancellation = isInstallationCancellation(error, cancellationRef.current);
 
       if (!isCancellation) {
-        if (error instanceof APIError) {
-          logger.error('API error during installation', { error: error.message, endpoint: error.endpoint, tag });
-        } else if (error instanceof NetworkError) {
-          logger.error('Network error during installation', { error: error.message, url: error.url ?? undefined, status: error.status ?? undefined, tag });
-        } else if (error instanceof Error) {
-          logger.error('Installation failed', { error: error.message, tag });
-        } else {
-          logger.error('Unknown error during installation', { error, tag });
-        }
+        reportInstallationError(tag, error);
         setErrorVersion(tag);
-        setErrorMessage(message);
+        setErrorMessage(getErrorMessage(error));
       } else {
         logger.info('Installation cancelled by user', { tag });
         showCancellationNotice();
@@ -225,13 +216,7 @@ export function InstallDialog({
         logger.error('Failed to cancel installation', { error: result.error });
       }
     } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error cancelling installation', { error: error.message, endpoint: error.endpoint });
-      } else if (error instanceof Error) {
-        logger.error('Error cancelling installation', { error: error.message });
-      } else {
-        logger.error('Unknown error cancelling installation', { error });
-      }
+      reportCancelError(error);
     }
   };
 
@@ -277,8 +262,8 @@ export function InstallDialog({
         rateLimitRetryAfter={rateLimitRetryAfter}
         showCompletedItems={showCompletedItems}
         showProgressDetails={showProgressDetails}
-        stickyFailedLogPath={stickyFailedLogPath}
-        stickyFailedTag={stickyFailedTag}
+        stickyFailedLogPath={stickyFailure.log}
+        stickyFailedTag={stickyFailure.tag}
         onCancelInstallation={handleCancelInstallation}
         onOpenLogPath={openLogPath}
         onOpenReleaseLink={openReleaseLink}

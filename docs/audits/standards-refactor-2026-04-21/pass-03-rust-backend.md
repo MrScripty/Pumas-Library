@@ -150,6 +150,9 @@ Implementation notes:
   relocation marker reads/writes, directory creation/removal, and rename operations so the
   checkpointed migration execute path no longer performs those filesystem calls directly on the
   async request path.
+- Completed: `pumas-core/src/api/reconciliation.rs` now uses `tokio::fs` for partial-download
+  marker reads and async existence checks in reconciliation staging/model-scope flows so watcher
+  and on-demand reconcile paths no longer rely on synchronous metadata probes for those checks.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

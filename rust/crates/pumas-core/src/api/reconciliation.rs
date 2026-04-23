@@ -16,7 +16,7 @@ use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
-use tokio::sync::Mutex;
+use tokio::{fs, sync::Mutex};
 use walkdir::WalkDir;
 
 use crate::config::NetworkConfig;
@@ -810,10 +810,13 @@ async fn stage_partial_candidate(
     primary: &PrimaryState,
     mut candidate: PartialDownloadCandidate,
 ) -> Result<()> {
-    if candidate.model_dir.join("metadata.json").exists() {
+    let metadata_path = candidate.model_dir.join("metadata.json");
+    if path_exists(&metadata_path).await? {
         return Ok(());
     }
-    if !candidate.model_dir.exists() || !has_pending_download_artifacts(&candidate.model_dir) {
+    if !path_exists(&candidate.model_dir).await?
+        || !has_pending_download_artifacts(&candidate.model_dir)
+    {
         let _ = primary.model_library.index().delete(&candidate.model_id);
         return Ok(());
     }
@@ -924,7 +927,7 @@ async fn stage_partial_download_rows(primary: &PrimaryState) -> Result<()> {
 
     for entry in &persisted {
         if let Some(candidate) = candidate_from_persisted(&library_root, entry) {
-            if candidate.model_dir.join("metadata.json").exists() {
+            if path_exists(&candidate.model_dir.join("metadata.json")).await? {
                 continue;
             }
             let key = candidate.model_id.clone();
@@ -939,7 +942,7 @@ async fn stage_partial_download_rows(primary: &PrimaryState) -> Result<()> {
 
     for item in interrupted {
         if let Some(candidate) = candidate_from_interrupted(&library_root, item) {
-            if candidate.model_dir.join("metadata.json").exists() {
+            if path_exists(&candidate.model_dir.join("metadata.json")).await? {
                 continue;
             }
             let key = candidate.model_id.clone();
@@ -958,14 +961,23 @@ async fn stage_partial_download_rows(primary: &PrimaryState) -> Result<()> {
     Ok(())
 }
 
-fn parse_download_marker(model_dir: &Path) -> Option<Value> {
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+async fn parse_download_marker(model_dir: &Path) -> Option<Value> {
     let marker_path = model_dir.join(".pumas_download");
-    let text = std::fs::read_to_string(marker_path).ok()?;
+    let text = fs::read_to_string(marker_path).await.ok()?;
     serde_json::from_str(&text).ok()
 }
 
-fn candidate_from_marker(model_dir: &Path, model_id: &str) -> Option<PartialDownloadCandidate> {
-    let marker = parse_download_marker(model_dir)?;
+async fn candidate_from_marker(
+    model_dir: &Path,
+    model_id: &str,
+) -> Option<PartialDownloadCandidate> {
+    let marker = parse_download_marker(model_dir).await?;
     let (_path_model_type, path_family, _cleaned_name) = split_model_id(model_id);
 
     let repo_id = marker
@@ -1017,22 +1029,24 @@ async fn stage_partial_download_row_for_model(
                 c.model_id = model_id.to_string();
                 c
             })
-        })
-        .or_else(|| candidate_from_marker(model_dir, model_id))
-        .unwrap_or_else(|| {
-            let (_model_type, family, cleaned_name) = split_model_id(model_id);
-            PartialDownloadCandidate {
-                model_id: model_id.to_string(),
-                model_dir: model_dir.to_path_buf(),
-                repo_id: None,
-                model_type_hint: None,
-                pipeline_tag_hint: None,
-                family,
-                official_name: cleaned_name,
-                expected_files: Vec::new(),
-                created_at: None,
-            }
         });
+    if candidate.is_none() {
+        candidate = candidate_from_marker(model_dir, model_id).await;
+    }
+    let mut candidate = candidate.unwrap_or_else(|| {
+        let (_model_type, family, cleaned_name) = split_model_id(model_id);
+        PartialDownloadCandidate {
+            model_id: model_id.to_string(),
+            model_dir: model_dir.to_path_buf(),
+            repo_id: None,
+            model_type_hint: None,
+            pipeline_tag_hint: None,
+            family,
+            official_name: cleaned_name,
+            expected_files: Vec::new(),
+            created_at: None,
+        }
+    });
 
     if candidate.expected_files.is_empty() {
         if let Some(entry) = persisted.iter().find(|entry| entry.dest_dir == model_dir) {
@@ -1086,13 +1100,13 @@ fn is_non_fatal_reclassify_error(message: &str) -> bool {
 async fn reconcile_model_scope(primary: &PrimaryState, model_id: &str) -> Result<()> {
     let model_dir = primary.model_library.library_root().join(model_id);
 
-    if !model_dir.exists() {
+    if !path_exists(&model_dir).await? {
         // Remove stale DB row if the model path no longer exists.
         let _ = primary.model_library.index().delete(model_id)?;
         return Ok(());
     }
 
-    if model_dir.join("metadata.json").exists() {
+    if path_exists(&model_dir.join("metadata.json")).await? {
         if primary
             .model_library
             .model_scope_is_current(&model_dir)

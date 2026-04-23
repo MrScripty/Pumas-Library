@@ -34,73 +34,84 @@ function fileUriToPath(uri: string): string {
   return uri;
 }
 
+function extractElectronFilePaths(dataTransfer: DataTransfer): string[] {
+  const electronAPI = getElectronAPI();
+  if (!electronAPI || dataTransfer.files.length === 0) {
+    return [];
+  }
+
+  const paths: string[] = [];
+  for (const file of Array.from(dataTransfer.files)) {
+    try {
+      const path = electronAPI.getPathForFile(file);
+      if (path) {
+        paths.push(path);
+      }
+    } catch {
+      // Fall through to other methods if getPathForFile fails.
+    }
+  }
+  return paths;
+}
+
+function extractUriListPaths(dataTransfer: DataTransfer): string[] {
+  const uriList = dataTransfer.getData('text/uri-list');
+  if (!uriList) {
+    return [];
+  }
+
+  return uriList
+    .split('\n')
+    .filter((line) => line && !line.startsWith('#'))
+    .map((uri) => fileUriToPath(uri.trim()))
+    .filter(Boolean);
+}
+
+function extractPlainTextPaths(dataTransfer: DataTransfer): string[] {
+  const plainText = dataTransfer.getData('text/plain');
+  if (!plainText) {
+    return [];
+  }
+
+  return plainText
+    .split('\n')
+    .map((line) => fileUriToPath(line.trim()))
+    .filter(Boolean);
+}
+
+function extractFallbackFilePaths(dataTransfer: DataTransfer): string[] {
+  return Array.from(dataTransfer.files)
+    .map((file) => (file as File & { path?: string }).path || file.name)
+    .filter(Boolean);
+}
+
 /**
  * Extract filesystem paths from drag event data.
  * Supports File API, text/uri-list, and text/plain for cross-platform support.
  * In Electron with sandbox, uses webUtils.getPathForFile() via preload.
  */
 function extractDroppedPaths(e: DragEvent): string[] {
-  const paths: string[] = [];
-  const electronAPI = getElectronAPI();
-
-  // In Electron, use the secure getPathForFile API (required for sandbox mode)
-  if (electronAPI && e.dataTransfer?.files && e.dataTransfer.files.length > 0) {
-    for (const file of Array.from(e.dataTransfer.files)) {
-      try {
-        const path = electronAPI.getPathForFile(file);
-        if (path) {
-          paths.push(path);
-        }
-      } catch {
-        // Fall through to other methods if getPathForFile fails
-      }
-    }
-    if (paths.length > 0) {
-      return paths;
-    }
+  const dataTransfer = e.dataTransfer;
+  if (!dataTransfer) {
+    return [];
   }
 
-  // Try text/uri-list first (Linux file managers like Nautilus, Dolphin, Thunar)
-  const uriList = e.dataTransfer?.getData('text/uri-list');
-  if (uriList) {
-    const uris = uriList.split('\n').filter((line) => line && !line.startsWith('#'));
-    for (const uri of uris) {
-      const path = fileUriToPath(uri.trim());
-      if (path) {
-        paths.push(path);
-      }
-    }
+  const electronPaths = extractElectronFilePaths(dataTransfer);
+  if (electronPaths.length > 0) {
+    return electronPaths;
   }
 
-  // Fallback: Try text/plain (some file managers use this)
-  if (paths.length === 0) {
-    const plainText = e.dataTransfer?.getData('text/plain');
-    if (plainText) {
-      const lines = plainText
-        .split('\n')
-        .map((line) => line.trim())
-        .filter((line) => line);
-      for (const line of lines) {
-        const path = fileUriToPath(line);
-        if (path) {
-          paths.push(path);
-        }
-      }
-    }
+  const uriListPaths = extractUriListPaths(dataTransfer);
+  if (uriListPaths.length > 0) {
+    return uriListPaths;
   }
 
-  // Last resort fallback to File API (may have limited path access without Electron)
-  if (paths.length === 0 && e.dataTransfer?.files) {
-    for (const file of Array.from(e.dataTransfer.files)) {
-      // Try to get path property (non-sandboxed environments)
-      const path = (file as File & { path?: string }).path || file.name;
-      if (path) {
-        paths.push(path);
-      }
-    }
+  const plainTextPaths = extractPlainTextPaths(dataTransfer);
+  if (plainTextPaths.length > 0) {
+    return plainTextPaths;
   }
 
-  return paths;
+  return extractFallbackFilePaths(dataTransfer);
 }
 
 export const ModelImportDropZone: React.FC<ModelImportDropZoneProps> = ({

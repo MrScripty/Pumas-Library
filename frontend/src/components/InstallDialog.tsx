@@ -144,7 +144,7 @@ export function InstallDialog({
       return;
     }
 
-    const wasCancelled = progress?.error?.toLowerCase().includes('cancel');
+    const wasCancelled = progress.error?.toLowerCase().includes('cancel');
     const resetDelay = wasCancelled ? 1500 : 3000;
 
     const timer = setTimeout(() => {

@@ -16,7 +16,6 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronUp,
-  Loader2,
   AlertCircle,
   FileText,
 } from 'lucide-react';
@@ -58,7 +57,7 @@ export function ProgressDetailsView({
   onBackToList,
   onOpenLogPath,
 }: ProgressDetailsViewProps) {
-  const CurrentStageIcon = STAGE_ICONS[progress.stage] || Loader2;
+  const CurrentStageIcon = STAGE_ICONS[progress.stage];
 
   return (
     <div className="space-y-3 px-3">

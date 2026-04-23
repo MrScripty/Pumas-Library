@@ -12,8 +12,11 @@ export class ComfyUILauncherError extends Error {
   constructor(message: string, public override cause?: Error) {
     super(message);
     this.name = this.constructor.name;
-    if (Error.captureStackTrace) {
-      Error.captureStackTrace(this, this.constructor);
+    const errorConstructor = Error as typeof Error & {
+      captureStackTrace?: (targetObject: object) => void;
+    };
+    if (typeof errorConstructor.captureStackTrace === 'function') {
+      errorConstructor.captureStackTrace(this);
     }
   }
 }

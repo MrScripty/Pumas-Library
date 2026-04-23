@@ -112,13 +112,12 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
 
   return (
     <AnimatePresence>
-      {isOpen && (
-        <motion.div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-        >
+      <motion.div
+        className="fixed inset-0 z-50 flex items-center justify-center"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
           {/* Backdrop */}
           <button
             type="button"
@@ -250,8 +249,7 @@ export function HuggingFaceAuthDialog({ isOpen, onClose }: HuggingFaceAuthDialog
               )}
             </div>
           </motion.div>
-        </motion.div>
-      )}
+      </motion.div>
     </AnimatePresence>
   );
 }

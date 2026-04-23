@@ -69,7 +69,8 @@ function getStructuredValueSummary(key: string, value: unknown): string {
 function serializeMetadataValue(value: unknown): string {
   if (typeof value === 'string') return value;
   try {
-    return JSON.stringify(value, null, 2) ?? String(value);
+    const serialized: unknown = JSON.stringify(value, null, 2);
+    return typeof serialized === 'string' ? serialized : String(value);
   } catch {
     return String(value);
   }

@@ -52,6 +52,11 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [notesSaveError, setNotesSaveError] = useState<string | null>(null);
   const [notesSaveSuccess, setNotesSaveSuccess] = useState(false);
 
+  const serializeFieldValue = (value: unknown): string => {
+    const serialized: unknown = JSON.stringify(value, null, 2);
+    return typeof serialized === 'string' ? serialized : String(value);
+  };
+
   const handleRefetchFromHF = async () => {
     setRefetching(true);
     setRefetchError(null);
@@ -94,8 +99,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
           setError('Failed to load metadata');
         }
 
-        if (settingsResult?.success) {
-          setInferenceSettings(settingsResult.inference_settings || []);
+        if (settingsResult !== null && settingsResult.success) {
+          setInferenceSettings(settingsResult.inference_settings);
         }
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Unknown error');
@@ -225,10 +230,8 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   };
 
   const handleCopyFieldValue = async (fieldKey: string, value: unknown) => {
-    if (!navigator.clipboard?.writeText) return;
     try {
-      const serialized =
-        typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value);
+      const serialized = typeof value === 'string' ? value : serializeFieldValue(value);
       await navigator.clipboard.writeText(serialized);
       setCopiedFieldKey(fieldKey);
       setTimeout(() => {

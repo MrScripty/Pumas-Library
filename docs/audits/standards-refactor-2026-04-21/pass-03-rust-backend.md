@@ -282,6 +282,10 @@ Implementation notes:
   destination directory setup, temp-file creation, streamed chunk writes, flush, atomic rename, and
   temp-file cleanup, so core download request paths no longer perform blocking filesystem work on
   async runtime threads while transferring or finalizing downloaded files.
+- Completed: `pumas-core/src/launcher/updater.rs` now uses async cache reads and writes for
+  launcher update checks, so the async GitHub release polling path no longer performs synchronous
+  cache-file reads, directory creation, or cache writes on runtime threads before returning cached
+  or fresh launcher update metadata.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

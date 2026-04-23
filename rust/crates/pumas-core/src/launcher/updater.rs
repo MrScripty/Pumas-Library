@@ -12,6 +12,7 @@ use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use tokio::fs;
 use tracing::{debug, error, info, warn};
 
 /// Result of checking for launcher updates.
@@ -218,12 +219,8 @@ impl LauncherUpdater {
     }
 
     /// Read cached update check result.
-    fn get_cached_update_info(&self) -> Option<CachedUpdateCheck> {
-        if !self.cache_file.exists() {
-            return None;
-        }
-
-        match std::fs::read_to_string(&self.cache_file) {
+    async fn get_cached_update_info(&self) -> Option<CachedUpdateCheck> {
+        match fs::read_to_string(&self.cache_file).await {
             Ok(content) => match serde_json::from_str(&content) {
                 Ok(cached) => Some(cached),
                 Err(e) => {
@@ -231,6 +228,7 @@ impl LauncherUpdater {
                     None
                 }
             },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
             Err(e) => {
                 debug!("Failed to read cache file: {}", e);
                 None
@@ -239,14 +237,14 @@ impl LauncherUpdater {
     }
 
     /// Save update check result to cache.
-    fn cache_update_info(&self, result: &UpdateCheckResult) {
+    async fn cache_update_info(&self, result: &UpdateCheckResult) {
         let cached = CachedUpdateCheck {
             last_checked: Utc::now(),
             result: result.clone(),
         };
 
         if let Some(parent) = self.cache_file.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
+            if let Err(e) = fs::create_dir_all(parent).await {
                 debug!("Failed to create cache directory: {}", e);
                 return;
             }
@@ -254,7 +252,7 @@ impl LauncherUpdater {
 
         match serde_json::to_string_pretty(&cached) {
             Ok(content) => {
-                if let Err(e) = std::fs::write(&self.cache_file, content) {
+                if let Err(e) = fs::write(&self.cache_file, content).await {
                     debug!("Failed to write cache file: {}", e);
                 }
             }
@@ -280,7 +278,7 @@ impl LauncherUpdater {
 
         // Check cache first (unless force refresh)
         if !force_refresh {
-            if let Some(cached) = self.get_cached_update_info() {
+            if let Some(cached) = self.get_cached_update_info().await {
                 // Cache valid for 1 hour
                 if Utc::now() - cached.last_checked < Duration::hours(1) {
                     debug!("Using cached update info");
@@ -292,12 +290,14 @@ impl LauncherUpdater {
         let github_client = match GitHubClient::new(self.cache_dir()) {
             Ok(client) => client,
             Err(err) => {
-                return self.return_cached_or_error(
-                    current_commit,
-                    branch,
-                    current_version,
-                    format!("Failed to initialize GitHub client: {}", err),
-                );
+                return self
+                    .return_cached_or_error(
+                        current_commit,
+                        branch,
+                        current_version,
+                        format!("Failed to initialize GitHub client: {}", err),
+                    )
+                    .await;
             }
         };
 
@@ -305,21 +305,25 @@ impl LauncherUpdater {
         let release = match github_client.get_latest_release(&repo, force_refresh).await {
             Ok(Some(release)) => release,
             Ok(None) => {
-                return self.return_cached_or_error(
-                    current_commit,
-                    branch,
-                    current_version,
-                    "No GitHub releases found".to_string(),
-                );
+                return self
+                    .return_cached_or_error(
+                        current_commit,
+                        branch,
+                        current_version,
+                        "No GitHub releases found".to_string(),
+                    )
+                    .await;
             }
             Err(err) => {
                 debug!("GitHub release check failed: {}", err);
-                return self.return_cached_or_error(
-                    current_commit,
-                    branch,
-                    current_version,
-                    format!("GitHub release check failed: {}", err),
-                );
+                return self
+                    .return_cached_or_error(
+                        current_commit,
+                        branch,
+                        current_version,
+                        format!("GitHub release check failed: {}", err),
+                    )
+                    .await;
             }
         };
 
@@ -348,7 +352,7 @@ impl LauncherUpdater {
         };
 
         // Cache the result
-        self.cache_update_info(&result);
+        self.cache_update_info(&result).await;
 
         info!(
             "Update check complete: hasUpdate={}, currentVersion={}, latestVersion={}",
@@ -361,14 +365,14 @@ impl LauncherUpdater {
     }
 
     /// Return cached result if available, or an error result.
-    fn return_cached_or_error(
+    async fn return_cached_or_error(
         &self,
         current_commit: String,
         branch: String,
         current_version: String,
         error_msg: String,
     ) -> UpdateCheckResult {
-        if let Some(cached) = self.get_cached_update_info() {
+        if let Some(cached) = self.get_cached_update_info().await {
             debug!("Using cached update info (offline mode)");
             return cached.result;
         }

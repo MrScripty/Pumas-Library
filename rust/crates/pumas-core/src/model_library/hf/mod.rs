@@ -192,8 +192,14 @@ impl HuggingFaceClient {
     /// Persists to disk at `{pumas_config_dir}/hf_token` and updates the
     /// in-memory token for immediate use by subsequent API calls.
     pub async fn set_auth_token(&self, token: &str) -> Result<()> {
-        auth::save_token(token)?;
-        *self.auth_token.write().await = Some(token.trim().to_string());
+        let token = token.trim().to_string();
+        let token_for_disk = token.clone();
+        tokio::task::spawn_blocking(move || auth::save_token(&token_for_disk))
+            .await
+            .map_err(|e| {
+                PumasError::Other(format!("Failed to join set_auth_token task: {}", e))
+            })??;
+        *self.auth_token.write().await = Some(token);
         info!("HuggingFace auth token saved");
         Ok(())
     }
@@ -202,7 +208,11 @@ impl HuggingFaceClient {
     ///
     /// Removes the persisted token file and clears the in-memory value.
     pub async fn clear_auth_token(&self) -> Result<()> {
-        auth::clear_token()?;
+        tokio::task::spawn_blocking(auth::clear_token)
+            .await
+            .map_err(|e| {
+                PumasError::Other(format!("Failed to join clear_auth_token task: {}", e))
+            })??;
         *self.auth_token.write().await = None;
         info!("HuggingFace auth token cleared");
         Ok(())

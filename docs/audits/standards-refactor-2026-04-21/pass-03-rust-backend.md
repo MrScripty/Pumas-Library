@@ -336,6 +336,9 @@ Implementation notes:
 - Completed: `pumas-core/src/launcher/updater.rs` now dispatches the launcher apply-update
   workflow through `tokio::task::spawn_blocking`, so git pull, pip install, pnpm build, and
   rollback subprocess orchestration no longer execute inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/hf/mod.rs` now dispatches HuggingFace token save/clear
+  persistence through `tokio::task::spawn_blocking`, so RPC auth-token set/clear requests no
+  longer perform synchronous config-file writes inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

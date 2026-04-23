@@ -153,13 +153,15 @@ Rectification:
 
 Implementation notes:
 - Completed: inherited `unsafe_op_in_unsafe_fn = "deny"` across workspace crates.
-- Completed: documented current platform process probes, metadata fsync, launcher `pre_exec`, and
-  Windows long-path FFI with explicit `SAFETY:` comments.
+- Completed: documented current platform process probes, metadata fsync, and Windows long-path FFI
+  with explicit `SAFETY:` comments.
+- Completed: isolated launcher process detachment behind `platform::configure_detached_command` so
+  launcher flows no longer own direct `pre_exec` unsafe blocks.
 - Completed: replaced a direct `libc::kill(pid, 0)` call in process resource aggregation with the
   centralized `platform::is_process_alive` wrapper.
 - Completed: Unix metadata writes now return fsync failures instead of ignoring them before rename.
-- Remaining: isolate process launcher `pre_exec`, conversion-manager raw pointer lifetime bridges,
-  and Windows long-path expansion into smaller governed modules before ratcheting `unsafe_code`.
+- Remaining: isolate conversion-manager raw pointer lifetime bridges and Windows long-path expansion
+  into smaller governed modules before ratcheting `unsafe_code`.
 
 ### R07 - Path Validation Is Not Centralized Around Validated Types
 Status: partially compliant

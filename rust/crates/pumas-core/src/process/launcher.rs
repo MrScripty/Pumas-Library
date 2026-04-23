@@ -10,13 +10,6 @@ use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 use tracing::{debug, error, info, warn};
 
-// Platform-specific imports for process detachment
-#[cfg(unix)]
-use std::os::unix::process::CommandExt;
-
-#[cfg(windows)]
-use std::os::windows::process::CommandExt;
-
 /// Configuration for launching a process.
 #[derive(Debug, Clone)]
 pub struct LaunchConfig {
@@ -270,27 +263,7 @@ impl ProcessLauncher {
         // Detach the process from Pumas so it runs independently.
         // This prevents zombie processes when we kill the child - init will reap it instead.
         // Without this, killed processes become zombies because Pumas doesn't call wait().
-        #[cfg(unix)]
-        {
-            // SAFETY: setsid() is async-signal-safe and creates a new session.
-            // The child becomes a session leader and is no longer our child in
-            // the process tree sense - init will adopt it.
-            unsafe {
-                cmd.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            // CREATE_NEW_PROCESS_GROUP detaches the process on Windows
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
-        }
+        platform::configure_detached_command(&mut cmd);
 
         // Spawn the process
         info!(
@@ -475,27 +448,8 @@ impl ProcessLauncher {
             cmd.stderr(Stdio::null());
         }
 
-        // Detach the process so it runs independently
-        #[cfg(unix)]
-        {
-            // SAFETY: setsid() is async-signal-safe and creates a new session.
-            // The closure only calls setsid and converts errno to io::Error,
-            // which keeps the pre-exec path limited to async-signal-safe work.
-            unsafe {
-                cmd.pre_exec(|| {
-                    if libc::setsid() == -1 {
-                        return Err(std::io::Error::last_os_error());
-                    }
-                    Ok(())
-                });
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
-            cmd.creation_flags(CREATE_NEW_PROCESS_GROUP);
-        }
+        // Detach the process so it runs independently.
+        platform::configure_detached_command(&mut cmd);
 
         // Spawn the process
         info!(

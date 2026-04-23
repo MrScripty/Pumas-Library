@@ -4,6 +4,7 @@
 //! including checking process status and termination.
 
 use crate::error::{PumasError, Result};
+use std::process::Command;
 use tracing::{debug, warn};
 
 /// Check if a process with the given PID is alive.
@@ -50,6 +51,45 @@ pub fn is_process_alive(pid: u32) -> bool {
         // Fallback: assume it exists
         warn!("Process alive check not implemented for this platform");
         true
+    }
+}
+
+/// Configure a command to run independently from the launcher process.
+///
+/// # Platform Behavior
+/// - **Linux/macOS**: Calls `setsid()` in the child after fork and before exec
+/// - **Windows**: Uses `CREATE_NEW_PROCESS_GROUP`
+/// - **Other**: Leaves the command unchanged
+pub fn configure_detached_command(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+
+        // SAFETY: pre_exec runs in the child process after fork and before
+        // exec. The closure only calls async-signal-safe setsid() and converts
+        // errno to io::Error, so it avoids touching shared Rust state in the
+        // post-fork child.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x00000200;
+        command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    }
+
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = command;
     }
 }
 

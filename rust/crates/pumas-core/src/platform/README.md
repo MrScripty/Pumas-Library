@@ -14,7 +14,7 @@ and process management.
 | `mod.rs` | Module root, `current_platform()`, `is_supported_platform()`, re-exports |
 | `paths.rs` | Platform-specific directories: config dir, registry DB path, venv Python path, desktop/apps dirs |
 | `permissions.rs` | `set_executable` - Sets executable bits on Unix, no-op on Windows |
-| `process.rs` | Process utilities: `find_processes_by_cmdline`, `is_process_alive`, `terminate_process_tree` |
+| `process.rs` | Process utilities: `configure_detached_command`, `find_processes_by_cmdline`, `is_process_alive`, `terminate_process_tree` |
 
 ## Design Decisions
 

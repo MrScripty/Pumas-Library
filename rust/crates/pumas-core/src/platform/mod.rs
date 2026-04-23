@@ -25,7 +25,8 @@ pub mod process;
 pub use paths::{apps_dir, desktop_dir, pumas_config_dir, registry_db_path, venv_python};
 pub use permissions::set_executable;
 pub use process::{
-    find_processes_by_cmdline, is_process_alive, terminate_process, terminate_process_tree,
+    configure_detached_command, find_processes_by_cmdline, is_process_alive, terminate_process,
+    terminate_process_tree,
 };
 
 /// Returns the current platform name.

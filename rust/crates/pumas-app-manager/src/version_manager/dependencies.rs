@@ -243,7 +243,11 @@ impl DependencyManager {
         let packages = self.parse_requirements(&requirements_content);
 
         // Try to get or build constraints file
-        let constraints_path = constraints_manager.get_constraints_file(tag).ok().flatten();
+        let constraints_path = constraints_manager
+            .get_constraints_file(tag)
+            .await
+            .ok()
+            .flatten();
 
         // Install with progress tracking
         self.install_with_progress(

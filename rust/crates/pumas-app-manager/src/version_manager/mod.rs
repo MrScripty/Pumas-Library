@@ -527,7 +527,7 @@ impl VersionManager {
             self.pip_cache_dir(),
         );
 
-        let constraints_manager = ConstraintsManager::new(self.constraints_dir());
+        let constraints_manager = ConstraintsManager::new_with_cache(self.constraints_dir()).await;
 
         dep_manager
             .install_dependencies(tag, &constraints_manager, progress_tx)

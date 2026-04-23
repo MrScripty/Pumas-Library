@@ -33,46 +33,69 @@ struct ConstraintsCacheFile {
 impl ConstraintsManager {
     /// Create a new constraints manager.
     pub fn new(constraints_dir: PathBuf) -> Self {
-        let manager = Self {
+        Self {
             constraints_dir,
             pypi_cache: Mutex::new(HashMap::new()),
             constraints_cache: Mutex::new(HashMap::new()),
-        };
-        manager.load_cache();
+        }
+    }
+
+    /// Create a new constraints manager and load cached constraints from disk.
+    pub async fn new_with_cache(constraints_dir: PathBuf) -> Self {
+        let manager = Self::new(constraints_dir);
+        manager.load_cache_async().await;
         manager
     }
 
     /// Load constraints cache from disk.
-    fn load_cache(&self) {
+    async fn load_cache_async(&self) {
         let cache_path = self.constraints_dir.join("constraints-cache.json");
-        if cache_path.exists() {
-            if let Ok(content) = std::fs::read_to_string(&cache_path) {
-                if let Ok(cache) = serde_json::from_str::<ConstraintsCacheFile>(&content) {
-                    *self.constraints_cache.lock().unwrap() = cache.constraints;
-                    debug!(
-                        "Loaded constraints cache with {} entries",
-                        self.constraints_cache.lock().unwrap().len()
-                    );
+        match fs::try_exists(&cache_path).await {
+            Ok(false) => {}
+            Ok(true) => {
+                if let Ok(content) = fs::read_to_string(&cache_path).await {
+                    if let Ok(cache) = serde_json::from_str::<ConstraintsCacheFile>(&content) {
+                        let cache_len = cache.constraints.len();
+                        *self.constraints_cache.lock().unwrap() = cache.constraints;
+                        debug!("Loaded constraints cache with {} entries", cache_len);
+                    }
                 }
+            }
+            Err(e) => {
+                debug!(
+                    "Could not check constraints cache {}: {}",
+                    cache_path.display(),
+                    e
+                );
             }
         }
     }
 
     /// Get or build a constraints file for a tag.
-    pub fn get_constraints_file(&self, tag: &str) -> Result<Option<PathBuf>> {
+    pub async fn get_constraints_file(&self, tag: &str) -> Result<Option<PathBuf>> {
         let constraints_path = self
             .constraints_dir
             .join(format!("{}.txt", self.safe_filename(tag)));
 
         // Check if file already exists
-        if constraints_path.exists() {
+        if fs::try_exists(&constraints_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check constraints file: {}", e),
+                path: Some(constraints_path.clone()),
+                source: Some(e),
+            })?
+        {
             return Ok(Some(constraints_path));
         }
 
         // Check if we have cached constraints
         if self.constraints_cache.lock().unwrap().contains_key(tag) {
             // Write from cache
-            if let Err(e) = self.write_constraints_from_cache(tag, &constraints_path) {
+            if let Err(e) = self
+                .write_constraints_from_cache(tag, &constraints_path)
+                .await
+            {
                 warn!("Failed to write constraints from cache: {}", e);
             } else {
                 return Ok(Some(constraints_path));
@@ -414,23 +437,26 @@ impl ConstraintsManager {
     }
 
     /// Write constraints from cache to a file.
-    fn write_constraints_from_cache(&self, tag: &str, path: &PathBuf) -> Result<()> {
+    async fn write_constraints_from_cache(&self, tag: &str, path: &PathBuf) -> Result<()> {
         let cache = self.constraints_cache.lock().unwrap();
         if let Some(constraints) = cache.get(tag) {
             let mut content = String::new();
             for (package, version) in constraints {
                 content.push_str(&format!("{}=={}\n", package, version));
             }
+            drop(cache);
 
             if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent).ok();
+                fs::create_dir_all(parent).await.ok();
             }
 
-            std::fs::write(path, content).map_err(|e| PumasError::Io {
+            fs::write(path, content).await.map_err(|e| PumasError::Io {
                 message: format!("Failed to write constraints: {}", e),
                 path: Some(path.clone()),
                 source: Some(e),
             })?;
+        } else {
+            drop(cache);
         }
 
         Ok(())

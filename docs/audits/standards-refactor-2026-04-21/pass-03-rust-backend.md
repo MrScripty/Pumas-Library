@@ -213,6 +213,10 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/version_manager/installer.rs` now runs archive extraction and
   Ollama binary finalization through `tokio::task::spawn_blocking`, so zip, tar.gz, tar.zst, and
   binary-permission work no longer execute directly on async runtime threads during install flows.
+- Completed: `pumas-app-manager/src/version_manager/constraints.rs` now loads cached constraints
+  and materializes cached constraint files through async `tokio::fs` helpers in the dependency
+  install path, so `ConstraintsManager` construction and cached-file reuse no longer perform those
+  reads and writes synchronously on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

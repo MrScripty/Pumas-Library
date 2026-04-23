@@ -228,6 +228,10 @@ Implementation notes:
   node install/update path existence checks, requirements detection, and `custom_nodes`
   directory creation so those async lifecycle entry points no longer perform synchronous metadata
   probes or directory setup on runtime threads before invoking git operations.
+- Completed: `pumas-app-manager/src/process/factory.rs` now uses `tokio::fs` for async
+  version/log/pid path checks, async log reads, async pid-file removal, and async log-directory
+  creation so binary and Python process manager lifecycle methods no longer perform synchronous
+  filesystem probes or file reads on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -2,10 +2,12 @@
 
 use super::traits::AppProcessManager;
 use pumas_library::plugins::{InstallationType, PluginConfig, PluginLoader};
-use pumas_library::Result;
+use pumas_library::{PumasError, Result};
 use std::collections::HashMap;
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::fs;
 
 /// Factory for creating app process managers.
 ///
@@ -116,13 +118,12 @@ impl AppProcessManager for BinaryProcessManager {
     }
 
     async fn launch(&self, version_tag: &str) -> Result<super::ProcessHandle> {
-        use pumas_library::PumasError;
         use std::process::Command;
 
         let version_path = self.version_path(version_tag);
         let binary_path = version_path.join(self.binary_name());
 
-        if !binary_path.exists() {
+        if !path_exists(&binary_path).await? {
             return Ok(super::ProcessHandle {
                 success: false,
                 log_file: None,
@@ -133,7 +134,7 @@ impl AppProcessManager for BinaryProcessManager {
 
         // Create log file
         let logs_dir = self.launcher_root.join("launcher-data").join("logs");
-        std::fs::create_dir_all(&logs_dir).ok();
+        let _ = fs::create_dir_all(&logs_dir).await;
         let log_file = logs_dir.join(format!("{}.log", self.plugin.id));
 
         // Launch the binary
@@ -171,8 +172,8 @@ impl AppProcessManager for BinaryProcessManager {
     async fn stop(&self) -> Result<bool> {
         // Find and kill process by name or PID file
         let pid_file = self.launcher_root.join(format!("{}.pid", self.plugin.id));
-        if pid_file.exists() {
-            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+        if path_exists(&pid_file).await? {
+            if let Ok(pid_str) = fs::read_to_string(&pid_file).await {
                 if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
@@ -182,11 +183,14 @@ impl AppProcessManager for BinaryProcessManager {
                     }
                     #[cfg(windows)]
                     {
-                        let _ = std::process::Command::new("taskkill")
-                            .args(["/PID", &pid.to_string(), "/F"])
-                            .output();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            std::process::Command::new("taskkill")
+                                .args(["/PID", &pid.to_string(), "/F"])
+                                .output()
+                        })
+                        .await;
                     }
-                    std::fs::remove_file(&pid_file).ok();
+                    let _ = fs::remove_file(&pid_file).await;
                     return Ok(true);
                 }
             }
@@ -234,7 +238,7 @@ impl AppProcessManager for BinaryProcessManager {
             .join("logs")
             .join(format!("{}.log", self.plugin.id));
 
-        if let Ok(content) = std::fs::read_to_string(&log_file) {
+        if let Ok(content) = fs::read_to_string(&log_file).await {
             content
                 .lines()
                 .rev()
@@ -253,7 +257,7 @@ impl AppProcessManager for BinaryProcessManager {
     async fn is_version_installed(&self, version_tag: &str) -> bool {
         let version_path = self.version_path(version_tag);
         let binary_path = version_path.join(self.binary_name());
-        binary_path.exists()
+        path_exists(&binary_path).await.unwrap_or(false)
     }
 }
 
@@ -289,7 +293,7 @@ impl AppProcessManager for PythonProcessManager {
         // This is a placeholder that can be expanded
         let version_path = self.version_path(version_tag);
 
-        if !version_path.exists() {
+        if !path_exists(&version_path).await? {
             return Ok(super::ProcessHandle {
                 success: false,
                 log_file: None,
@@ -306,7 +310,7 @@ impl AppProcessManager for PythonProcessManager {
         let venv_python = version_path.join(".venv").join("bin").join("python");
         let entry_script = version_path.join(entry_point);
 
-        if !venv_python.exists() {
+        if !path_exists(&venv_python).await? {
             return Ok(super::ProcessHandle {
                 success: false,
                 log_file: None,
@@ -317,7 +321,7 @@ impl AppProcessManager for PythonProcessManager {
 
         // Create log file
         let logs_dir = self.launcher_root.join("launcher-data").join("logs");
-        std::fs::create_dir_all(&logs_dir).ok();
+        let _ = fs::create_dir_all(&logs_dir).await;
         let log_file = logs_dir.join(format!("{}.log", self.plugin.id));
 
         let log_file_clone = log_file.clone();
@@ -355,16 +359,16 @@ impl AppProcessManager for PythonProcessManager {
     async fn stop(&self) -> Result<bool> {
         // Find and kill by PID file
         let pid_file = self.launcher_root.join(format!("{}.pid", self.plugin.id));
-        if pid_file.exists() {
-            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
-                if let Ok(_pid) = pid_str.trim().parse::<i32>() {
+        if path_exists(&pid_file).await? {
+            if let Ok(pid_str) = fs::read_to_string(&pid_file).await {
+                if let Ok(pid) = pid_str.trim().parse::<i32>() {
                     #[cfg(unix)]
                     {
                         use nix::sys::signal::{self, Signal};
                         use nix::unistd::Pid;
-                        let _ = signal::kill(Pid::from_raw(_pid), Signal::SIGTERM);
+                        let _ = signal::kill(Pid::from_raw(pid), Signal::SIGTERM);
                     }
-                    std::fs::remove_file(&pid_file).ok();
+                    let _ = fs::remove_file(&pid_file).await;
                     return Ok(true);
                 }
             }
@@ -412,7 +416,7 @@ impl AppProcessManager for PythonProcessManager {
             .join("logs")
             .join(format!("{}.log", self.plugin.id));
 
-        if let Ok(content) = std::fs::read_to_string(&log_file) {
+        if let Ok(content) = fs::read_to_string(&log_file).await {
             content
                 .lines()
                 .rev()
@@ -430,8 +434,16 @@ impl AppProcessManager for PythonProcessManager {
 
     async fn is_version_installed(&self, version_tag: &str) -> bool {
         let version_path = self.version_path(version_tag);
-        version_path.exists()
+        path_exists(&version_path).await.unwrap_or(false)
     }
+}
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path).await.map_err(|e| PumasError::Io {
+        message: format!("Failed to check path existence: {}", e),
+        path: Some(path.to_path_buf()),
+        source: Some(e),
+    })
 }
 
 #[cfg(test)]

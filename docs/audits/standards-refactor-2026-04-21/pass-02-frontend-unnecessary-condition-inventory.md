@@ -20,13 +20,11 @@ and `errors/index.ts`. A model/version hook batch cleared
 `useInstallationProgress.ts`, `useModelDownloads.ts`,
 `useModelLibraryActions.ts`, `useModels.ts`, and `useVersionFetching.ts`. A
 UI component batch cleared `OllamaModelSection.tsx`,
-`TorchModelSlotsSection.tsx`, `AppIndicator.tsx`, and `AppSidebar.tsx`.
+`TorchModelSlotsSection.tsx`, `AppIndicator.tsx`, and `AppSidebar.tsx`. A
+model-import batch cleared `modelImportMetadataLookup.ts`,
+`useModelImportWorkflow.ts`, and `useShardedSetDetection.ts`.
 
 ## Remaining Findings
-- `frontend/src/components/model-import/modelImportMetadataLookup.ts:84` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/components/model-import/useModelImportWorkflow.ts:248` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/model-import/useShardedSetDetection.ts:31` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/model-import/useShardedSetDetection.ts:51` - Unnecessary conditional, value is always falsy.
 - `frontend/src/hooks/useAppPanelState.ts:23` - Unnecessary conditional, value is always falsy.
 - `frontend/src/hooks/usePhysicsDrag.ts:185` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/usePhysicsDragPointerEvents.ts:97` - Unnecessary optional chain on a non-nullish value.

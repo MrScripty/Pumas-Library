@@ -81,7 +81,7 @@ export async function runMetadataLookup({
               if (candidate.path !== entry.path) return candidate;
               return {
                 ...candidate,
-                embeddedMetadata: metadata ?? undefined,
+                embeddedMetadata: metadata,
                 embeddedMetadataStatus: 'loaded',
               };
             }));

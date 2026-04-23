@@ -28,11 +28,10 @@ export function useShardedSetDetection({
         const paths = fileEntries.map((entry) => entry.path);
         const result = await importAPI.detectShardedSets(paths);
 
-        if (result.success && result.groups) {
+        if (result.success) {
           const { fileToSetMap, sets } = buildShardedSetState(result.groups);
           setShardedSets(sets);
           setEntries((prev) => {
-            let changed = false;
             const next = prev.map((entry) => {
               const shardedSetKey =
                 entry.kind === 'single_file' ? fileToSetMap[entry.path] : undefined;
@@ -41,14 +40,13 @@ export function useShardedSetDetection({
                 return entry;
               }
 
-              changed = true;
               return {
                 ...entry,
                 shardedSetKey,
               };
             });
 
-            return changed ? next : prev;
+            return next.some((entry, index) => entry !== prev[index]) ? next : prev;
           });
         }
       } catch (error) {

@@ -245,7 +245,7 @@ export function useModelImportWorkflow({
   const invalidFileCount = fileEntries.filter((entry) => entry.validFileType === false).length;
   const verifiedCount = fileEntries.filter(
     (entry) => entry.hfMetadata?.match_method === 'hash'
-      && entry.hfMetadata?.match_confidence === 1.0
+      && entry.hfMetadata.match_confidence === 1.0
   ).length;
   const standaloneEntries = useMemo(
     () => entries.filter((entry) => entry.kind !== 'single_file' || !entry.shardedSetKey),

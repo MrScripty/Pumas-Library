@@ -1,8 +1,21 @@
 //! Plugin system handlers.
 
-use super::require_str_param;
+use super::{parse_params, require_str_param, validate_non_empty};
 use crate::server::AppState;
+use pumas_app_manager::PluginApiProxy;
+use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::HashMap;
+
+#[derive(Debug, Deserialize)]
+struct CallPluginEndpointParams {
+    #[serde(alias = "appId")]
+    app_id: String,
+    #[serde(alias = "endpointName")]
+    endpoint_name: String,
+    #[serde(default)]
+    params: HashMap<String, String>,
+}
 
 pub async fn get_plugins(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let plugins = state.plugin_loader.get_enabled();
@@ -63,6 +76,30 @@ pub async fn check_plugin_health(state: &AppState, params: &Value) -> pumas_libr
             "success": false,
             "error": format!("Plugin not found: {}", app_id),
             "healthy": false
+        })),
+    }
+}
+
+pub async fn call_plugin_endpoint(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: CallPluginEndpointParams = parse_params("call_plugin_endpoint", params)?;
+    let app_id = validate_non_empty(command.app_id, "app_id")?;
+    let endpoint_name = validate_non_empty(command.endpoint_name, "endpoint_name")?;
+    let proxy = PluginApiProxy::new(state.plugin_loader.clone())?;
+
+    match proxy
+        .call_endpoint(&app_id, &endpoint_name, command.params)
+        .await
+    {
+        Ok(data) => Ok(json!({
+            "success": true,
+            "data": data
+        })),
+        Err(error) => Ok(json!({
+            "success": false,
+            "error": error.to_string()
         })),
     }
 }

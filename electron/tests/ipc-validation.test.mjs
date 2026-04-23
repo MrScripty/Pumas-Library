@@ -66,6 +66,18 @@ test('validateApiCallPayload enforces method request schemas', () => {
       app_id: undefined,
     },
   });
+  assert.deepEqual(validateApiCallPayload('call_plugin_endpoint', {
+    app_id: 'ollama',
+    endpoint_name: 'loadModel',
+    params: { model_name: 'llama3' },
+  }), {
+    method: 'call_plugin_endpoint',
+    params: {
+      app_id: 'ollama',
+      endpoint_name: 'loadModel',
+      params: { model_name: 'llama3' },
+    },
+  });
 
   assert.throws(
     () => validateApiCallPayload('install_version', { app_id: 'comfyui' }),
@@ -81,6 +93,14 @@ test('validateApiCallPayload enforces method request schemas', () => {
   );
   assert.throws(
     () => validateApiCallPayload('get_installed_versions', { app_id: null }),
+    /Invalid API param/
+  );
+  assert.throws(
+    () => validateApiCallPayload('call_plugin_endpoint', {
+      app_id: 'ollama',
+      endpoint_name: 'loadModel',
+      params: { limit: 10 },
+    }),
     /Invalid API param/
   );
   assert.throws(

@@ -3,9 +3,7 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
-const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [
-  'call_plugin_endpoint',
-];
+const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [];
 
 const PRELOAD_SOURCE = readFileSync(new URL('../src/preload.ts', import.meta.url), 'utf8');
 

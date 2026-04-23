@@ -157,6 +157,7 @@ export const RPC_METHOD_REGISTRY = {
     'setup_quantization_backend',
     'get_plugins',
     'get_plugin',
+    'call_plugin_endpoint',
     'check_plugin_health',
     'get_custom_nodes',
     'install_custom_node',
@@ -310,6 +311,15 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   check_plugin_health: {
     required: {
       app_id: 'string',
+    },
+  },
+  call_plugin_endpoint: {
+    required: {
+      app_id: 'string',
+      endpoint_name: 'string',
+    },
+    optional: {
+      params: 'string-record',
     },
   },
   get_app_status: {

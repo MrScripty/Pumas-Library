@@ -351,6 +351,7 @@ async fn dispatch_method(
         // Plugins
         "get_plugins" => plugins::get_plugins(state, params).await,
         "get_plugin" => plugins::get_plugin(state, params).await,
+        "call_plugin_endpoint" => plugins::call_plugin_endpoint(state, params).await,
         "check_plugin_health" => plugins::check_plugin_health(state, params).await,
 
         // Custom Nodes

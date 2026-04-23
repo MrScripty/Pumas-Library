@@ -15,6 +15,10 @@ import {
   type UsePhysicsDragOptions,
 } from './physicsDragUtils';
 import { usePhysicsDragDelete } from './usePhysicsDragDelete';
+import {
+  useDeleteFallbackCleanup,
+  writePendingUndoSnapshot,
+} from './usePhysicsDragLifecycle';
 import { usePhysicsDragPointerEvents } from './usePhysicsDragPointerEvents';
 import { usePhysicsDragSettle } from './usePhysicsDragSettle';
 import { usePhysicsDragUndo } from './usePhysicsDragUndo';
@@ -75,13 +79,7 @@ export const usePhysicsDrag = ({
     appsRef.current = apps;
   }, [apps]);
 
-  useEffect(() => {
-    return () => {
-      if (deleteFallbackRef.current) {
-        window.clearTimeout(deleteFallbackRef.current);
-      }
-    };
-  }, []);
+  useDeleteFallbackCleanup(deleteFallbackRef);
 
   const resetFloating = useCallback(() => {
     setFloatingId(null);
@@ -152,18 +150,9 @@ export const usePhysicsDrag = ({
     [apps.length, dragX, dragY, listRef, updateActiveAnchor],
   );
 
-  const registerUndoSnapshot = useCallback(() => {
-    const selectedIndex = apps.findIndex(app => app.id === selectedAppId);
-    pendingUndoRef.current = {
-      apps,
-      selectedAppId,
-      selectedIndex: selectedIndex === -1 ? 0 : selectedIndex,
-    };
-  }, [apps, selectedAppId]);
-
   const beginDrag = useCallback(
     (pending: PendingDrag, currentX: number, currentY: number) => {
-      registerUndoSnapshot();
+      writePendingUndoSnapshot(pendingUndoRef, apps, selectedAppId);
       deleteShakeRef.current = 0;
       setDeleteZoneShakeIntensity(0);
       snapProximityRef.current = 0;
@@ -201,7 +190,7 @@ export const usePhysicsDrag = ({
       lastPointerRef.current = { x: currentX, y: currentY, time: performance.now() };
       updateDragPhysics(currentX, currentY);
     },
-    [apps, dragX, dragY, registerUndoSnapshot, updateDragPhysics],
+    [apps, dragX, dragY, selectedAppId, updateDragPhysics],
   );
 
   const commitUndoSnapshot = useCallback(() => {

@@ -3,15 +3,16 @@
 ## Context
 This inventory records the failed trial run for lowering
 `max-lines-per-function` to 80 effective lines. The frontend now enforces a
-coarse 275-line function ratchet after splitting the oversized
-`AppIndicator.test.tsx` suite. The entries below are the next decomposition
-queue before the threshold can be lowered to the 80-line target.
+coarse 260-line function ratchet after splitting the oversized
+`AppIndicator.test.tsx` suite and extracting `usePhysicsDrag` lifecycle
+helpers. The entries below are the next decomposition queue before the
+threshold can be lowered to the 80-line target.
 
 ## Trial Rule
 `max-lines-per-function: ["error", { "max": 80, "skipBlankLines": true, "skipComments": true }]`
 
 ## Findings
-- `frontend/src/hooks/usePhysicsDrag.ts:30` - 271 effective lines.
+- `frontend/src/hooks/usePhysicsDrag.ts:35` - 257 effective lines.
 - `frontend/src/components/MigrationReportsPanel.tsx:39` - 259 effective lines.
 - `frontend/src/components/ModelMetadataModal.tsx:22` - 257 effective lines.
 - `frontend/src/App.tsx:36` - 255 effective lines.

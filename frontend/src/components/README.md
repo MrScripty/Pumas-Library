@@ -34,6 +34,9 @@ bridge.
 | `ProgressDetailsView.tsx` | Detailed install-progress view for stage, speed, package, completed-item, and failure summaries. |
 | `ProgressDetailsView.test.tsx` | Interaction coverage for progress details actions plus cancellation and success summary rendering. |
 | `VersionListItem.tsx` | Presentational install-version row with install, uninstall, cancel, release-note, and log affordances. |
+| `VersionListItemButton.tsx` | Install-version action button states for ready, install, uninstall, pending, progress, and cancel views. |
+| `VersionListItemInfo.tsx` | Install-version title, release/log links, prerelease badge, date, and error presentation. |
+| `VersionListItemState.ts` | Derived install-version display state for sizes, progress rings, package labels, and network indicators. |
 | `VersionListItem.test.tsx` | Interaction coverage for installable, installed, and in-progress version row behaviors. |
 | `ConflictResolutionDialog.tsx` | Accessible conflict-resolution modal for model mapping collisions. |
 | `ConflictResolutionDialog.test.tsx` | Interaction coverage for default and bulk conflict-resolution choices in the mapping workflow. |

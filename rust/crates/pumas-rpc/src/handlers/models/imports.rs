@@ -104,7 +104,7 @@ pub async fn classify_model_import_paths(
         .and_then(|value| serde_json::from_value(value.clone()).ok())
         .unwrap_or_default();
 
-    let result = state.api.classify_model_import_paths(&paths);
+    let result = state.api.classify_model_import_paths(&paths).await?;
     Ok(serde_json::to_value(result)?)
 }
 

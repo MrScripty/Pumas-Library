@@ -343,6 +343,10 @@ Implementation notes:
   cross-filesystem warning request through `tokio::task::spawn_blocking`, so RPC link-warning
   checks no longer perform synchronous filesystem metadata inspection inline on async runtime
   threads.
+- Completed: `pumas-core/src/api/models.rs` and `pumas-rpc/src/handlers/models/imports.rs` now
+  route import-path classification through `tokio::task::spawn_blocking`, so RPC import-path
+  analysis no longer performs synchronous directory walking and model/header inspection inline on
+  async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

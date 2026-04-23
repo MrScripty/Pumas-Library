@@ -574,14 +574,24 @@ impl PumasApi {
     }
 
     /// Classify import paths without creating any library state.
-    pub fn classify_model_import_paths(
+    pub async fn classify_model_import_paths(
         &self,
         paths: &[String],
-    ) -> Vec<model_library::ImportPathClassification> {
-        paths
-            .iter()
-            .map(model_library::classify_import_path)
-            .collect()
+    ) -> Result<Vec<model_library::ImportPathClassification>> {
+        let paths = paths.to_vec();
+        tokio::task::spawn_blocking(move || {
+            Ok(paths
+                .iter()
+                .map(model_library::classify_import_path)
+                .collect())
+        })
+        .await
+        .map_err(|e| {
+            PumasError::Other(format!(
+                "Failed to join classify_model_import_paths task: {}",
+                e
+            ))
+        })?
     }
 
     /// Import a model in-place (files already in library directory).

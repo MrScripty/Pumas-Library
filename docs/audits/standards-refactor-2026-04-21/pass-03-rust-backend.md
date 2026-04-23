@@ -371,6 +371,9 @@ Implementation notes:
 - Completed: `pumas-rpc/src/handlers/models/imports.rs` now routes shard-set detection through
   `tokio::task::spawn_blocking`, so the RPC shard-analysis request path no longer performs
   synchronous shard grouping inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/hf/metadata.rs` now routes local fast-hash computation
+  through `tokio::task::spawn_blocking`, so HuggingFace file metadata lookup no longer performs
+  synchronous file hashing inline on async runtime threads before candidate verification.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

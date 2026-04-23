@@ -15,10 +15,17 @@ use crate::model_library::types::{
     DownloadRequest, HfMetadataResult, HfSearchParams, HuggingFaceEvidence, HuggingFaceModel,
     LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 impl HuggingFaceClient {
+    async fn compute_fast_hash_async(path: PathBuf) -> Option<String> {
+        tokio::task::spawn_blocking(move || compute_fast_hash(&path).ok())
+            .await
+            .ok()
+            .flatten()
+    }
+
     pub(crate) async fn get_model_snapshot(
         &self,
         repo_id: &str,
@@ -253,7 +260,7 @@ impl HuggingFaceClient {
         // If we have a local file, try to verify by hash
         if let Some(path) = file_path {
             // Compute fast hash for filtering
-            let fast_hash = compute_fast_hash(path).ok();
+            let fast_hash = Self::compute_fast_hash_async(path.to_path_buf()).await;
 
             // Try to match against top candidates
             for candidate in candidates.iter().take(2) {

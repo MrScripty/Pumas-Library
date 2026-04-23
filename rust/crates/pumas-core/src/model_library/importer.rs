@@ -105,6 +105,7 @@ fn parse_model_card_json(
 /// - Dual hash computation (SHA256 + BLAKE3)
 /// - Sharded model set detection
 /// - Progress reporting
+#[derive(Clone)]
 pub struct ModelImporter {
     /// Reference to the model library
     library: Arc<ModelLibrary>,

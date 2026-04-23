@@ -702,7 +702,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(downloads)?)
             }
             "list_interrupted_downloads" => {
-                let downloads = list_interrupted_downloads(self);
+                let downloads = list_interrupted_downloads(self).await;
                 Ok(serde_json::to_value(downloads)?)
             }
             "recover_download" => {

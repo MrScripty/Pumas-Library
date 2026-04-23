@@ -44,6 +44,7 @@ struct DownloadStoreData {
 }
 
 /// Manages download persistence to `downloads.json`.
+#[derive(Clone)]
 pub struct DownloadPersistence {
     path: PathBuf,
 }

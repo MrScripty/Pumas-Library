@@ -182,7 +182,7 @@ pub async fn list_interrupted_downloads(
     state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    let interrupted = state.api.list_interrupted_downloads();
+    let interrupted = state.api.list_interrupted_downloads().await;
     Ok(json!({
         "success": true,
         "interrupted": interrupted

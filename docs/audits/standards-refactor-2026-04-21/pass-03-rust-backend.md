@@ -347,6 +347,10 @@ Implementation notes:
   route import-path classification through `tokio::task::spawn_blocking`, so RPC import-path
   analysis no longer performs synchronous directory walking and model/header inspection inline on
   async runtime threads.
+- Completed: `pumas-core/src/api/hf.rs`, `api/state.rs`, and
+  `pumas-rpc/src/handlers/models/downloads.rs` now route interrupted-download discovery through
+  `tokio::task::spawn_blocking`, so RPC and mirrored IPC download-recovery listing no longer
+  perform synchronous persistence reads and library tree scans inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

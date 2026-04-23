@@ -341,35 +341,35 @@ impl PumasApi {
     ///
     /// These are downloads that lost their tracking state (e.g. due to crash).
     /// Use `recover_download()` with the correct repo_id to resume them.
-    pub fn list_interrupted_downloads(&self) -> Vec<model_library::InterruptedDownload> {
+    pub async fn list_interrupted_downloads(&self) -> Vec<model_library::InterruptedDownload> {
         if self.try_client().is_some() {
-            return self.call_client_method_blocking_or_default(
-                "list_interrupted_downloads",
-                serde_json::json!({}),
-            );
+            return self
+                .call_client_method_or_default("list_interrupted_downloads", serde_json::json!({}))
+                .await;
         }
 
         let primary = self.primary();
+        let model_importer = primary.model_importer.clone();
+        let persistence = primary
+            .hf_client
+            .as_ref()
+            .and_then(|client| client.persistence().cloned());
 
-        // Collect dest_dirs of all known persisted downloads
-        let known_dirs: std::collections::HashSet<std::path::PathBuf> =
-            if let Some(ref client) = primary.hf_client {
-                if let Some(persistence) = client.persistence() {
+        tokio::task::spawn_blocking(move || {
+            let known_dirs: std::collections::HashSet<std::path::PathBuf> = persistence
+                .map(|persistence| {
                     persistence
                         .load_all()
                         .into_iter()
                         .map(|e| e.dest_dir)
                         .collect()
-                } else {
-                    std::collections::HashSet::new()
-                }
-            } else {
-                std::collections::HashSet::new()
-            };
+                })
+                .unwrap_or_default();
 
-        primary
-            .model_importer
-            .find_interrupted_downloads(&known_dirs)
+            model_importer.find_interrupted_downloads(&known_dirs)
+        })
+        .await
+        .unwrap_or_default()
     }
 
     /// Recover an interrupted download that lost its persistence state.

@@ -246,26 +246,30 @@ pub(super) async fn list_hf_downloads(
     }
 }
 
-pub(super) fn list_interrupted_downloads(
+pub(super) async fn list_interrupted_downloads(
     primary: &PrimaryState,
 ) -> Vec<model_library::InterruptedDownload> {
-    let known_dirs: HashSet<std::path::PathBuf> = if let Some(ref client) = primary.hf_client {
-        if let Some(persistence) = client.persistence() {
-            persistence
-                .load_all()
-                .into_iter()
-                .map(|entry| entry.dest_dir)
-                .collect()
-        } else {
-            HashSet::new()
-        }
-    } else {
-        HashSet::new()
-    };
+    let model_importer = primary.model_importer.clone();
+    let persistence = primary
+        .hf_client
+        .as_ref()
+        .and_then(|client| client.persistence().cloned());
 
-    primary
-        .model_importer
-        .find_interrupted_downloads(&known_dirs)
+    tokio::task::spawn_blocking(move || {
+        let known_dirs: HashSet<std::path::PathBuf> = persistence
+            .map(|persistence| {
+                persistence
+                    .load_all()
+                    .into_iter()
+                    .map(|entry| entry.dest_dir)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        model_importer.find_interrupted_downloads(&known_dirs)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 pub(super) async fn recover_download(

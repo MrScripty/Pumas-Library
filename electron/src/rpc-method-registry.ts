@@ -166,3 +166,35 @@ export const RPC_METHOD_REGISTRY = {
 } as const;
 
 export type RpcMethodName = (typeof RPC_METHOD_REGISTRY.methods)[number];
+
+export type RpcParamsValidationPolicy = 'record' | 'empty-record';
+
+export const RPC_METHOD_PARAM_VALIDATION = {
+  get_status: 'empty-record',
+  get_disk_space: 'empty-record',
+  get_system_resources: 'empty-record',
+  get_all_shortcut_states: 'empty-record',
+  has_background_fetch_completed: 'empty-record',
+  reset_background_fetch_flag: 'empty-record',
+  get_models: 'empty-record',
+  refresh_model_index: 'empty-record',
+  scan_shared_storage: 'empty-record',
+  list_model_downloads: 'empty-record',
+  list_interrupted_downloads: 'empty-record',
+  get_hf_auth_status: 'empty-record',
+  launch_comfyui: 'empty-record',
+  stop_comfyui: 'empty-record',
+  launch_ollama: 'empty-record',
+  stop_ollama: 'empty-record',
+  launch_torch: 'empty-record',
+  stop_torch: 'empty-record',
+  get_plugins: 'empty-record',
+} as const satisfies Partial<Record<RpcMethodName, RpcParamsValidationPolicy>>;
+
+const RPC_METHOD_PARAM_VALIDATION_BY_METHOD: Partial<
+  Record<RpcMethodName, RpcParamsValidationPolicy>
+> = RPC_METHOD_PARAM_VALIDATION;
+
+export function getRpcParamsValidationPolicy(method: RpcMethodName): RpcParamsValidationPolicy {
+  return RPC_METHOD_PARAM_VALIDATION_BY_METHOD[method] ?? RPC_METHOD_REGISTRY.defaultPolicy.paramsValidation;
+}

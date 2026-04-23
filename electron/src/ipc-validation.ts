@@ -1,5 +1,9 @@
 import type { OpenDialogOptions } from 'electron';
-import { RPC_METHOD_REGISTRY, type RpcMethodName } from './rpc-method-registry';
+import {
+  getRpcParamsValidationPolicy,
+  RPC_METHOD_REGISTRY,
+  type RpcMethodName,
+} from './rpc-method-registry';
 
 export const ALLOWED_RPC_METHODS = RPC_METHOD_REGISTRY.methods;
 
@@ -33,15 +37,30 @@ export function validateApiCallPayload(rawMethod: unknown, rawParams: unknown): 
     throw new Error(`Unknown API method: ${rawMethod}`);
   }
 
+  const method = rawMethod as RpcMethodName;
+  const params = normalizeApiParams(rawParams);
+  validateApiParamsForMethod(method, params);
+
+  return { method, params };
+}
+
+function normalizeApiParams(rawParams: unknown): Record<string, unknown> {
   if (rawParams === undefined || rawParams === null) {
-    return { method: rawMethod as RpcMethodName, params: {} };
+    return {};
   }
 
   if (!isPlainRecord(rawParams)) {
     throw new Error('Invalid API params payload');
   }
 
-  return { method: rawMethod as RpcMethodName, params: rawParams };
+  return rawParams;
+}
+
+function validateApiParamsForMethod(method: RpcMethodName, params: Record<string, unknown>) {
+  const paramsValidation = getRpcParamsValidationPolicy(method);
+  if (paramsValidation === 'empty-record' && Object.keys(params).length > 0) {
+    throw new Error(`Unexpected API params for method: ${method}`);
+  }
 }
 
 export function sanitizeOpenDialogOptions(rawOptions: unknown): OpenDialogOptions {

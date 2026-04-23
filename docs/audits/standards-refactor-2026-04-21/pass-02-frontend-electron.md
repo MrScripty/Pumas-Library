@@ -34,6 +34,7 @@ Rectification:
 - Completed: define `electron/src/rpc-method-registry.ts` as the executable desktop RPC method registry with method name, ownership, stability tier, request-schema, response-schema, and params-validation policy metadata.
 - Completed: make `electron/src/ipc-validation.ts` consume the registry instead of owning a separate inline method list.
 - Completed: add an Electron package test that rejects duplicate registry entries and verifies representative allowed methods still pass runtime validation.
+- Completed: add the first executable per-method request-schema slice by enforcing an `empty-record` params policy for representative no-argument RPC methods at the Electron main-process boundary.
 - Remaining: add per-method request and response schemas.
 - Generate or validate:
   - `frontend/src/types/api.ts`

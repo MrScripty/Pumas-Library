@@ -22,6 +22,14 @@ test('validateApiCallPayload rejects unknown methods and non-record params', () 
     method: 'get_status',
     params: {},
   });
+  assert.deepEqual(validateApiCallPayload('get_status', {}), {
+    method: 'get_status',
+    params: {},
+  });
+  assert.deepEqual(validateApiCallPayload('get_installed_versions', { app_id: 'comfyui' }), {
+    method: 'get_installed_versions',
+    params: { app_id: 'comfyui' },
+  });
 
   assert.throws(
     () => validateApiCallPayload('unknown_method', {}),
@@ -30,6 +38,10 @@ test('validateApiCallPayload rejects unknown methods and non-record params', () 
   assert.throws(
     () => validateApiCallPayload('get_status', []),
     /Invalid API params payload/
+  );
+  assert.throws(
+    () => validateApiCallPayload('get_status', { injected: true }),
+    /Unexpected API params/
   );
 });
 

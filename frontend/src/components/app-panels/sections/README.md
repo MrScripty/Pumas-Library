@@ -9,6 +9,9 @@ Composable section components used by app panels to render status, selectors, de
 | `ModelSelectorSection.tsx` | Model selection section UI. |
 | `DependencyStatusSection.tsx` | Dependency health and missing-packages display. |
 | `StatsSection.tsx` | Runtime/resource/status metrics block. |
+| `OllamaRegisteredModels.tsx` | Presentational registered Ollama model list with load, unload, delete, loaded-state, and VRAM details. |
+| `OllamaRegisteredModels.test.tsx` | Rendering and interaction coverage for registered Ollama model state, actions, disabled controls, and size formatting. |
+| `ollamaModelFormatting.ts` | Shared display formatter for Ollama model and VRAM sizes. |
 | `TorchModelSlotsSection.tsx` | Torch model slot management section. |
 | `TorchActiveSlots.tsx` | Presentational active Torch slot list with unload controls, state badges, and device memory summaries. |
 | `TorchActiveSlots.test.tsx` | Rendering and interaction coverage for active Torch slot badges, memory summaries, unload controls, and size formatting. |

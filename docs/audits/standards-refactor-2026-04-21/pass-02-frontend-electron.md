@@ -178,6 +178,8 @@ Rectification:
 - Completed: `frontend/src/hooks/useDownloadCompletionRefresh.ts` owns the model-manager delayed refresh timer and clears pending refreshes on unmount.
 - Completed: move active Torch slot row, unload control, badge, and device memory rendering from `TorchModelSlotsSection.tsx` into `frontend/src/components/app-panels/sections/TorchActiveSlots.tsx` with slot badge, device memory, unload control, and size-formatting tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/app-panels/sections/TorchModelSlotsSection.tsx` from the oversized-file baseline after it reached 249 effective lines.
+- Completed: move registered Ollama model row, load/unload, delete, loaded-state, and VRAM rendering from `OllamaModelSection.tsx` into `frontend/src/components/app-panels/sections/OllamaRegisteredModels.tsx` with action, disabled-control, loaded-state, and size-formatting tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/app-panels/sections/OllamaModelSection.tsx` from the oversized-file baseline after it reached 246 effective lines.
 - Remaining: consolidate install/download/status polling behind a backend event stream or single scheduler when the backend exposes one.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks

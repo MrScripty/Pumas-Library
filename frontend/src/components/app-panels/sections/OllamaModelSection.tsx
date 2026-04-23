@@ -7,12 +7,14 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box, Loader2, Play, Square, AlertCircle, Cpu, Trash2 } from 'lucide-react';
+import { Box, Loader2, Play, AlertCircle } from 'lucide-react';
 import { api, isAPIAvailable } from '../../../api/adapter';
 import type { ModelCategory } from '../../../types/apps';
 import type { OllamaModelInfo, OllamaRunningModel } from '../../../types/api';
 import { Tooltip } from '../../ui';
 import { getLogger } from '../../../utils/logger';
+import { OllamaRegisteredModels } from './OllamaRegisteredModels';
+import { formatOllamaModelSize } from './ollamaModelFormatting';
 
 const logger = getLogger('OllamaModelSection');
 
@@ -193,89 +195,16 @@ export function OllamaModelSection({
         </div>
       )}
 
-      {/* Ollama-registered models */}
-      {ollamaModels.length > 0 && (
-        <div className="space-y-3">
-          <div className="text-xs uppercase tracking-wider text-[hsl(var(--launcher-text-muted))] flex items-center gap-2">
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Ollama Models</span>
-            {isRefreshing && (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--text-secondary))]" />
-            )}
-          </div>
-
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {ollamaModels.map((model) => {
-              const isLoaded = runningSet.has(model.name);
-              const isToggling = togglingModel === model.name;
-              const isDeleting = deletingModel === model.name;
-              const modelVram = vramMap.get(model.name);
-
-              return (
-                <div
-                  key={model.name}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)] hover:bg-[hsl(var(--launcher-bg-secondary)/0.5)] transition-colors"
-                >
-                  <div className="flex flex-col min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))] truncate">
-                        {model.name}
-                      </span>
-                      {isLoaded && (
-                        <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-[hsl(var(--accent-success)/0.15)] text-[hsl(var(--accent-success))]">
-                          LOADED
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
-                      {formatSize(model.size)}
-                      {isLoaded && modelVram ? ` \u2022 ${formatSize(modelVram)} VRAM` : ''}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    {/* Load / Unload toggle */}
-                    <Tooltip content={isLoaded ? 'Unload from memory' : 'Load into memory'} position="left">
-                      <button
-                        onClick={() => handleToggleLoad(model.name, isLoaded)}
-                        disabled={isToggling || isDeleting}
-                        className={`p-1.5 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                          isLoaded
-                            ? 'bg-[hsl(var(--accent-success)/0.15)] text-[hsl(var(--accent-success))] hover:bg-[hsl(var(--accent-success)/0.25)]'
-                            : 'bg-[hsl(var(--surface-interactive))] text-[hsl(var(--text-secondary))] hover:bg-[hsl(var(--surface-interactive-hover))] hover:text-[hsl(var(--text-primary))]'
-                        }`}
-                      >
-                        {isToggling ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : isLoaded ? (
-                          <Square className="w-4 h-4" />
-                        ) : (
-                          <Play className="w-4 h-4" />
-                        )}
-                      </button>
-                    </Tooltip>
-
-                    {/* Delete from Ollama */}
-                    <Tooltip content="Remove from Ollama" position="left">
-                      <button
-                        onClick={() => handleDelete(model.name)}
-                        disabled={isDeleting || isToggling}
-                        className="p-1.5 rounded transition-colors bg-[hsl(var(--accent-error)/0.15)] text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.25)] disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isDeleting ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Trash2 className="w-4 h-4" />
-                        )}
-                      </button>
-                    </Tooltip>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <OllamaRegisteredModels
+        deletingModel={deletingModel}
+        isRefreshing={isRefreshing}
+        models={ollamaModels}
+        runningSet={runningSet}
+        togglingModel={togglingModel}
+        vramMap={vramMap}
+        onDelete={(modelName) => void handleDelete(modelName)}
+        onToggleLoad={(modelName, isLoaded) => void handleToggleLoad(modelName, isLoaded)}
+      />
 
       {/* Library GGUF models available to load */}
       {ggufModels.length > 0 && (
@@ -300,7 +229,7 @@ export function OllamaModelSection({
                     </span>
                     <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
                       {model.category}
-                      {model.size ? ` \u2022 ${formatSize(model.size)}` : ''}
+                      {model.size ? ` \u2022 ${formatOllamaModelSize(model.size)}` : ''}
                     </span>
                   </div>
 
@@ -348,11 +277,4 @@ function hasGgufFile(path: string): boolean {
   const lower = path.toLowerCase();
   // Check if the path or model ID contains gguf indicators
   return lower.endsWith('.gguf') || lower.includes('/gguf/') || lower.includes('gguf');
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(1)} KB`;
-  return `${bytes} B`;
 }

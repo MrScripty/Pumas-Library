@@ -252,6 +252,7 @@ Rectification:
 - Completed: reduce `frontend/src/components/VersionSelectorDropdown.tsx` item complexity by moving default-version hover state, icon selection, and set/unset error reporting into `frontend/src/components/VersionSelectorDefaultButton.tsx`.
 - Completed: reduce `frontend/src/components/VersionSelectorTrigger.tsx` render complexity by moving first-install, default, active-folder, and version-manager status controls into `frontend/src/components/VersionSelectorTriggerControls.tsx`.
 - Completed: reduce `frontend/src/components/ModelNotesMarkdownPreview.tsx` render complexity by splitting markdown block collection for code fences, headings, lists, quotes, and paragraphs into focused helpers with renderer coverage.
+- Completed: reduce `frontend/src/components/MappingPreviewDetails.tsx` render complexity by extracting cross-filesystem, summary, warning, action-list, apply-result, and control sections into focused mapping preview detail modules with interaction coverage.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

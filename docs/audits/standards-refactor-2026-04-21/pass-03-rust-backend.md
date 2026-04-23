@@ -374,6 +374,10 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/hf/metadata.rs` now routes local fast-hash computation
   through `tokio::task::spawn_blocking`, so HuggingFace file metadata lookup no longer performs
   synchronous file hashing inline on async runtime threads before candidate verification.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes external diffusers bundle
+  validation through `tokio::task::spawn_blocking` and uses async target-directory existence and
+  creation checks, so the external diffusers import request path no longer performs synchronous
+  bundle validation or directory setup inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

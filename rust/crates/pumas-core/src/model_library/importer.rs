@@ -275,7 +275,7 @@ impl ModelImporter {
             .library
             .build_model_path("diffusion", &spec.family, &cleaned_name);
 
-        if target_dir.exists() {
+        if tokio::fs::try_exists(&target_dir).await? {
             return Ok(ModelImportResult {
                 path: spec.source_path.clone(),
                 success: false,
@@ -286,8 +286,18 @@ impl ModelImporter {
             });
         }
 
-        let validation = validate_diffusers_directory_for_import(&source_path);
-        std::fs::create_dir_all(&target_dir)?;
+        let validation_source_path = source_path.clone();
+        let validation = tokio::task::spawn_blocking(move || {
+            validate_diffusers_directory_for_import(&validation_source_path)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join external diffusers validation task: {}",
+                err
+            ))
+        })?;
+        tokio::fs::create_dir_all(&target_dir).await?;
         let model_id = self.library.get_model_id(&target_dir).ok_or_else(|| {
             PumasError::Other(format!(
                 "Could not determine model ID for external registry artifact {:?}",

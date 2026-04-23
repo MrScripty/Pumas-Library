@@ -153,6 +153,7 @@ Rectification:
 - Completed: move remote model metadata summary rendering from `RemoteModelListItem.tsx` into `frontend/src/components/RemoteModelSummary.tsx` with metadata, developer-search, auth, and retry tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/RemoteModelListItem.tsx` from the oversized-file baseline after it reached 225 effective lines.
 - Completed: move physics drag pointer lifecycle, delete completion, undo restoration, and settle animation from `usePhysicsDrag.ts` into `frontend/src/hooks/usePhysicsDragPointerEvents.ts`, `frontend/src/hooks/usePhysicsDragDelete.ts`, `frontend/src/hooks/usePhysicsDragUndo.ts`, and `frontend/src/hooks/usePhysicsDragSettle.ts`, preserving drag/reorder/delete tests.
+- Completed: split `frontend/src/types/api.ts` into domain response modules, bridge-domain interfaces, and Electron global augmentation while keeping `api.ts` as the public re-export barrel.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.
 - Move durable workflow state to backend or a single owning hook.
 - Extract presentational subcomponents only after state ownership is settled.
@@ -235,6 +236,7 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/App.tsx` from the oversized-file baseline after shell, startup-check, selected-version, and panel-prop extraction reached 299 effective lines.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/AppSidebar.tsx` from the oversized-file baseline after it reached 256 effective lines.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/hooks/usePhysicsDrag.ts` from the oversized-file baseline after drag lifecycle helper extraction reached 298 effective lines.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/types/api.ts` from the oversized-file baseline after API contract decomposition left every `api-*` module below 300 effective lines.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.
 

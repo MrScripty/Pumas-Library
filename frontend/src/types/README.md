@@ -9,7 +9,20 @@ one authoritative view of the desktop bridge boundary.
 ## Contents
 | File/Folder | Description |
 | ----------- | ----------- |
-| `api.ts` | Canonical desktop bridge request/response types and renderer globals. |
+| `api.ts` | Compatibility barrel that re-exports the split API contract modules. |
+| `api-common.ts` | Shared response, async status, pagination, validation, and result helpers. |
+| `api-system.ts` | System status, disk-space, and resource response contracts. |
+| `api-models.ts` | Model records, Hugging Face search, inference settings, and download response contracts. |
+| `api-import.ts` | Model-library import, metadata lookup, storage, and validation contracts. |
+| `api-links.ts` | Link registry health and cleanup contracts. |
+| `api-mapping.ts` | Mapping preview, synchronization, sandbox, exclusion, and migration report contracts. |
+| `api-conversion.ts` | Model conversion state, progress, and environment contracts. |
+| `api-versions.ts` | Version, installation-progress, cache, and background-fetch contracts. |
+| `api-processes.ts` | Process, Ollama, Torch, shortcut, and launcher-update contracts. |
+| `api-window.ts` | Renderer utility response contracts for paths, URLs, and window actions. |
+| `api-bridge*.ts` | Domain bridge method interfaces composed into `DesktopBridgeAPI`. |
+| `api-plugins.ts` | Plugin response contracts. |
+| `api-electron.ts` | Electron window API, `ElectronAPI`, and global `window.electronAPI` augmentation. |
 | `apps.ts` | App-level view and capability models consumed by the renderer. |
 | `plugins.ts` | Plugin manifest and capability contracts surfaced to the UI. |
 | `versions.ts` | Version-management and launcher-facing models. |
@@ -27,7 +40,8 @@ lifecycle assumptions, and compatibility aliases.
   possible to avoid cross-layer breakage.
 
 ## Decision
-- Keep bridge, payload, and global-window contracts centralized in `api.ts`.
+- Keep `api.ts` as the public import barrel while splitting bridge, payload,
+  and global-window contracts into domain modules.
 - Use `DesktopBridgeAPI` as the primary bridge interface name.
 
 ## Alternatives Rejected
@@ -69,9 +83,9 @@ import type { DesktopBridgeAPI, LibraryStatusResponse } from './api';
   breaking bridge removals require coordinated migration work.
 
 ## Structured Producer Contract
-- `api.ts` defines stable field names and method signatures expected by the
-  renderer and preload bridge.
+- The split `api-*` modules define stable field names and method signatures
+  expected by the renderer and preload bridge.
 - Optional fields remain optional unless a coordinated migration changes them.
-- Global-window declarations document the canonical renderer bridge surface.
+- Global-window declarations remain isolated in `api-electron.ts`.
 - Revisit trigger: a generated schema or codegen pipeline becomes the producer
   of these contracts.

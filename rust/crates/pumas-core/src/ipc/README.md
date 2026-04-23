@@ -38,8 +38,9 @@ Maximum frame size: 16 MiB (configurable via `RegistryConfig::MAX_IPC_MESSAGE_SI
 
 ## Thread Safety
 
-- **Server**: Runs on the tokio runtime. Each connection is handled in its own
-  spawned task, bounded by `MAX_IPC_CONNECTIONS`.
+- **Server**: Runs on the tokio runtime. Each connection is handled in a tracked
+  spawned task, bounded by `MAX_IPC_CONNECTIONS`; dropping the server handle
+  aborts any remaining connection tasks after broadcasting shutdown.
 - **Client**: Uses `tokio::Mutex` to serialize access to the TCP stream,
   allowing safe concurrent use from multiple async tasks.
 

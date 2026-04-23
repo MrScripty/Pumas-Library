@@ -114,8 +114,10 @@ Implementation notes:
 - Completed: `ConversionManager` stores conversion/quantization task handles by conversion ID,
   prunes finished handles, and aborts tracked tasks during explicit cancellation or manager
   shutdown.
-- Remaining: audit `pumas-core/src/ipc/server.rs` nested connection tasks plus model download
-  background tasks for bounded ownership and cancellation.
+- Completed: `pumas-core/src/ipc/server.rs` tracks nested connection task handles, prunes finished
+  handles when new connections arrive, and aborts remaining connection tasks when the server handle
+  is dropped.
+- Remaining: audit model download background tasks for bounded ownership and cancellation.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

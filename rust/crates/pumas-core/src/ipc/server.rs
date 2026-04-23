@@ -14,10 +14,29 @@ use crate::config::RegistryConfig;
 use crate::{PumasError, Result};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
+
+type ConnectionTasks = Arc<Mutex<Vec<JoinHandle<()>>>>;
+
+struct ActiveConnectionGuard {
+    active_connections: Arc<AtomicUsize>,
+}
+
+impl ActiveConnectionGuard {
+    fn new(active_connections: Arc<AtomicUsize>) -> Self {
+        Self { active_connections }
+    }
+}
+
+impl Drop for ActiveConnectionGuard {
+    fn drop(&mut self) {
+        self.active_connections.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 /// Handle to a running IPC server. Dropping shuts down the server.
 pub struct IpcServerHandle {
@@ -26,6 +45,7 @@ pub struct IpcServerHandle {
     shutdown_tx: Option<oneshot::Sender<()>>,
     conn_shutdown_tx: watch::Sender<bool>,
     task_handle: Option<tokio::task::JoinHandle<()>>,
+    connection_tasks: ConnectionTasks,
 }
 
 impl IpcServerHandle {
@@ -46,6 +66,14 @@ impl IpcServerHandle {
         // Signal all connection handlers to close
         let _ = self.conn_shutdown_tx.send(true);
     }
+
+    #[cfg(test)]
+    fn tracked_connection_tasks(&self) -> usize {
+        self.connection_tasks
+            .lock()
+            .expect("IPC connection task lock poisoned")
+            .len()
+    }
 }
 
 impl Drop for IpcServerHandle {
@@ -54,6 +82,25 @@ impl Drop for IpcServerHandle {
         if let Some(handle) = self.task_handle.take() {
             handle.abort();
         }
+        abort_connection_tasks(&self.connection_tasks);
+    }
+}
+
+fn store_connection_task(tasks: &ConnectionTasks, handle: JoinHandle<()>) {
+    let mut tasks = tasks.lock().expect("IPC connection task lock poisoned");
+    tasks.retain(|handle| !handle.is_finished());
+    tasks.push(handle);
+}
+
+fn abort_connection_tasks(tasks: &ConnectionTasks) {
+    let handles: Vec<JoinHandle<()>> = tasks
+        .lock()
+        .expect("IPC connection task lock poisoned")
+        .drain(..)
+        .collect();
+
+    for handle in handles {
+        handle.abort();
     }
 }
 
@@ -88,6 +135,7 @@ impl IpcServer {
         let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
         let (conn_shutdown_tx, conn_shutdown_rx) = watch::channel(false);
         let active_connections = Arc::new(AtomicUsize::new(0));
+        let connection_tasks = Arc::new(Mutex::new(Vec::new()));
 
         let task_handle = tokio::spawn(Self::accept_loop(
             listener,
@@ -95,6 +143,7 @@ impl IpcServer {
             shutdown_rx,
             conn_shutdown_rx,
             active_connections,
+            connection_tasks.clone(),
         ));
 
         Ok(IpcServerHandle {
@@ -103,6 +152,7 @@ impl IpcServer {
             shutdown_tx: Some(shutdown_tx),
             conn_shutdown_tx,
             task_handle: Some(task_handle),
+            connection_tasks,
         })
     }
 
@@ -112,6 +162,7 @@ impl IpcServer {
         mut shutdown_rx: oneshot::Receiver<()>,
         conn_shutdown_rx: watch::Receiver<bool>,
         active_connections: Arc<AtomicUsize>,
+        connection_tasks: ConnectionTasks,
     ) {
         loop {
             tokio::select! {
@@ -134,16 +185,17 @@ impl IpcServer {
 
                             active_connections.fetch_add(1, Ordering::Relaxed);
                             let dispatch = dispatch.clone();
-                            let conns = active_connections.clone();
+                            let connection_guard = ActiveConnectionGuard::new(active_connections.clone());
                             let mut conn_shutdown = conn_shutdown_rx.clone();
 
-                            tokio::spawn(async move {
+                            let handle = tokio::spawn(async move {
                                 debug!("IPC connection from {}", peer_addr);
                                 if let Err(e) = Self::handle_connection(stream, &*dispatch, &mut conn_shutdown).await {
                                     debug!("IPC connection {} ended: {}", peer_addr, e);
                                 }
-                                conns.fetch_sub(1, Ordering::Relaxed);
+                                drop(connection_guard);
                             });
+                            store_connection_task(&connection_tasks, handle);
                         }
                         Err(e) => {
                             error!("IPC accept error: {}", e);
@@ -222,6 +274,7 @@ impl IpcServer {
 mod tests {
     use super::*;
     use std::io::ErrorKind;
+    use tokio::time::{timeout, Duration};
 
     struct EchoDispatch;
 
@@ -335,5 +388,29 @@ mod tests {
         assert_eq!(response.error.unwrap().code, -32700);
 
         handle.shutdown();
+    }
+
+    #[tokio::test]
+    async fn test_server_drop_aborts_tracked_connection_tasks() {
+        let Some(handle) = start_test_server().await else {
+            return;
+        };
+
+        let mut stream = TcpStream::connect(handle.addr()).await.unwrap();
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if handle.tracked_connection_tasks() > 0 {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("connection task should be tracked");
+
+        drop(handle);
+
+        let read_result = timeout(Duration::from_secs(1), read_frame(&mut stream)).await;
+        assert!(read_result.is_ok(), "connection should close after drop");
     }
 }

@@ -1,10 +1,11 @@
 //! Link management handlers.
 
-use super::{get_str_param, require_str_param};
+use super::{get_str_param, path_exists, require_str_param};
 use crate::server::AppState;
 use pumas_library::model_library::ConflictResolution;
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::path::Path;
 
 fn parse_conflict_resolutions(
     raw_resolutions: HashMap<String, String>,
@@ -220,12 +221,12 @@ pub async fn get_file_link_count(
 ) -> pumas_library::Result<Value> {
     let file_path = require_str_param(params, "file_path", "filePath")?;
     // Count hard links to a file
-    let path = std::path::Path::new(&file_path);
-    if path.exists() {
+    let path = Path::new(&file_path);
+    if path_exists(path).await? {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            if let Ok(metadata) = std::fs::metadata(path) {
+            if let Ok(metadata) = tokio::fs::metadata(path).await {
                 return Ok(json!({
                     "success": true,
                     "count": metadata.nlink()
@@ -250,30 +251,28 @@ pub async fn check_files_writable(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    let results: Vec<_> = file_paths
-        .iter()
-        .map(|p| {
-            let path = std::path::Path::new(p);
-            let writable = if path.exists() {
-                std::fs::metadata(path)
-                    .map(|m| !m.permissions().readonly())
-                    .unwrap_or(false)
-            } else {
-                // Check if parent directory is writable
-                path.parent()
-                    .map(|parent| {
-                        std::fs::metadata(parent)
-                            .map(|m| !m.permissions().readonly())
-                            .unwrap_or(false)
-                    })
-                    .unwrap_or(false)
-            };
-            json!({
-                "path": p,
-                "writable": writable
-            })
-        })
-        .collect();
+    let mut results = Vec::with_capacity(file_paths.len());
+    for file_path in &file_paths {
+        let path = Path::new(file_path);
+        let writable = if path_exists(path).await? {
+            tokio::fs::metadata(path)
+                .await
+                .map(|metadata| !metadata.permissions().readonly())
+                .unwrap_or(false)
+        } else if let Some(parent) = path.parent() {
+            tokio::fs::metadata(parent)
+                .await
+                .map(|metadata| !metadata.permissions().readonly())
+                .unwrap_or(false)
+        } else {
+            false
+        };
+
+        results.push(json!({
+            "path": file_path,
+            "writable": writable
+        }));
+    }
 
     Ok(json!({
         "success": true,

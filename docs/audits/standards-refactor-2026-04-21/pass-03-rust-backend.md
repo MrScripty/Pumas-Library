@@ -261,6 +261,10 @@ Implementation notes:
   install-directory existence checks, so those RPC handler request paths no longer perform
   synchronous file reads or metadata probes on async runtime threads before dispatching UI-facing
   responses.
+- Completed: `pumas-rpc/src/handlers/links.rs` now uses async existence and metadata probes for
+  hard-link counting and writable-path checks, so those RPC link-management request paths no longer
+  perform synchronous filesystem metadata reads on async runtime threads when inspecting files the
+  UI wants to link or validate.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

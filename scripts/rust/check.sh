@@ -9,10 +9,12 @@ workspace_args=(--manifest-path "${MANIFEST_PATH}" --workspace --exclude pumas_r
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/rust/check.sh [all|fmt|check|clippy|test|doc|no-default]
+Usage: scripts/rust/check.sh [all|fmt|check|clippy|test|doc|no-default|test-isolation]
 
 Runs standards-aligned Rust workspace verification. The default `all` mode
 excludes `pumas_rustler` because the Rustler NIF requires BEAM runtime tooling.
+
+Set PUMAS_RUST_TEST_ISOLATION_REPEATS=N to control test-isolation repeats.
 USAGE
 }
 
@@ -38,6 +40,34 @@ run_doc() {
 
 run_no_default() {
   cargo check "${workspace_args[@]}" --no-default-features
+}
+
+run_test_isolation() {
+  local repeats="${PUMAS_RUST_TEST_ISOLATION_REPEATS:-3}"
+  local guarded_lib_tests=(
+    "tests::test_api_creation"
+    "tests::test_api_paths"
+    "tests::test_get_status"
+    "tests::test_get_disk_space"
+    "tests::test_new_returns_client_for_existing_primary"
+    "tests::test_start_ipc_server_is_idempotent"
+    "tests::test_discover_returns_working_client_for_basic_ipc_methods"
+    "tests::test_get_library_status_reconciles_stale_library_state_on_first_read"
+    "tests::test_generate_migration_dry_run_reconciles_before_reporting"
+  )
+
+  if ! [[ "${repeats}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "PUMAS_RUST_TEST_ISOLATION_REPEATS must be a positive integer" >&2
+    exit 2
+  fi
+
+  for ((i = 1; i <= repeats; i++)); do
+    echo "Running pumas-library isolation check ${i}/${repeats}"
+    for test_filter in "${guarded_lib_tests[@]}"; do
+      cargo test -p pumas-library --manifest-path "${MANIFEST_PATH}" --lib "${test_filter}" -- --test-threads=4
+    done
+    cargo test -p pumas-library --manifest-path "${MANIFEST_PATH}" --test api_tests -- --test-threads=4
+  done
 }
 
 run_all() {
@@ -72,6 +102,9 @@ case "${command}" in
     ;;
   no-default)
     run_no_default
+    ;;
+  test-isolation)
+    run_test_isolation
     ;;
   -h|--help|help)
     usage

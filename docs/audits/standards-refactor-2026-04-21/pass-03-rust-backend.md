@@ -198,7 +198,7 @@ Rectification:
 - Keep generated C# artifacts out of hand-edited paths and verify package/native compatibility in CI.
 
 ### R10 - Rust Tooling Baseline Is Missing
-Status: non-compliant
+Status: partially remediated
 
 Required baseline checks from standards are not visibly encoded in CI/hook files:
 
@@ -213,6 +213,11 @@ Rectification:
 - Add `scripts/rust/check.sh` or launcher `--test` extension coverage for these commands.
 - Add CI matrix for required platform targets.
 - Add workspace lints and member opt-ins.
+
+Implementation notes:
+- Completed: `scripts/rust/check.sh` owns standards-aligned fmt, check, clippy, test, doc-test, and no-default-feature commands for the Rust workspace excluding BEAM-dependent `pumas_rustler`.
+- Completed: `scripts/rust/check.sh test-isolation` repeatedly exercises the guarded pumas-core API test surfaces with multiple test threads to support D09 process-global state audits.
+- Remaining: add dedicated BEAM-aware Rustler CI and continue expanding feature/platform matrix coverage.
 
 ## Pass 03 Refactor Inputs
 - Rust crate role map.

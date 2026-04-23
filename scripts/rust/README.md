@@ -6,7 +6,7 @@ Rust workspace verification entrypoints for local development and CI.
 ## Contents
 | File | Description |
 | ---- | ----------- |
-| `check.sh` | Runs standards-aligned Cargo format, check, clippy, test, doc-test, and no-default-feature checks. |
+| `check.sh` | Runs standards-aligned Cargo format, check, clippy, test, doc-test, no-default-feature checks, and focused isolation checks. |
 
 ## Problem
 The Rust workspace needs one documented verification contract so local runs and
@@ -24,7 +24,14 @@ CI cannot drift into different Cargo command sets.
 ./scripts/rust/check.sh
 ./scripts/rust/check.sh clippy
 ./scripts/rust/check.sh no-default
+PUMAS_RUST_TEST_ISOLATION_REPEATS=3 ./scripts/rust/check.sh test-isolation
 ```
+
+## Test Isolation
+`test-isolation` repeatedly runs the `pumas-library` crate's guarded in-crate
+API tests and `api_tests` integration binary with multiple test threads. Use it
+after changing registry overrides, IPC startup ownership, or process-global
+environment guards.
 
 ## Revisit Triggers
 - A dedicated BEAM-aware Rustler CI job is added.

@@ -330,6 +330,9 @@ Implementation notes:
 - Completed: `pumas-rpc/src/handlers/shared.rs`, `handlers/status.rs`, and `handlers/mod.rs` now
   load sandbox status through async path probes, so the RPC sandbox-info request path no longer
   performs synchronous filesystem checks inline on async runtime threads.
+- Completed: `pumas-core/src/launcher/updater.rs` now gathers update-check git metadata through a
+  blocking task boundary, so launcher update polling no longer performs synchronous repository/path
+  inspection inline on async runtime threads before the async GitHub/cache flow begins.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

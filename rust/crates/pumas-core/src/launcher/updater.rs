@@ -83,6 +83,7 @@ struct CachedUpdateCheck {
 }
 
 /// Manages launcher self-updates via git.
+#[derive(Clone)]
 pub struct LauncherUpdater {
     /// Root directory of the launcher repository.
     launcher_root: PathBuf,
@@ -172,6 +173,18 @@ impl LauncherUpdater {
 
     fn current_version(&self) -> String {
         env!("CARGO_PKG_VERSION").to_string()
+    }
+
+    fn collect_git_context(&self) -> (String, String, bool) {
+        let current_commit = self.get_current_commit().unwrap_or_default();
+        let is_git_repo = self.is_git_repo();
+        let branch = if is_git_repo {
+            self.get_current_branch()
+        } else {
+            String::new()
+        };
+
+        (current_commit, branch, is_git_repo)
     }
 
     fn corepack_command(&self) -> &'static str {
@@ -268,12 +281,31 @@ impl LauncherUpdater {
     ///
     /// * `force_refresh` - If true, bypass cache and fetch fresh data
     pub async fn check_for_updates(&self, force_refresh: bool) -> UpdateCheckResult {
-        let current_commit = self.get_current_commit().unwrap_or_default();
-        let branch = if self.is_git_repo() {
-            self.get_current_branch()
-        } else {
-            String::new()
-        };
+        let updater = self.clone();
+        let (current_commit, branch, is_git_repo) =
+            match tokio::task::spawn_blocking(move || updater.collect_git_context()).await {
+                Ok(context) => context,
+                Err(error) => {
+                    return UpdateCheckResult {
+                        has_update: false,
+                        current_commit: String::new(),
+                        latest_commit: String::new(),
+                        commits_behind: 0,
+                        commits: vec![],
+                        branch: String::new(),
+                        current_version: self.current_version(),
+                        latest_version: None,
+                        release_name: None,
+                        release_url: None,
+                        download_url: None,
+                        published_at: None,
+                        error: Some(format!(
+                            "Failed to join launcher update context task: {}",
+                            error
+                        )),
+                    };
+                }
+            };
         let current_version = self.current_version();
 
         // Check cache first (unless force refresh)
@@ -329,7 +361,7 @@ impl LauncherUpdater {
 
         let latest_version = release.tag_name.clone();
         let has_update = is_newer_version(&current_version, &latest_version);
-        let latest_commit = if self.is_git_repo() {
+        let latest_commit = if is_git_repo {
             current_commit.clone()
         } else {
             String::new()

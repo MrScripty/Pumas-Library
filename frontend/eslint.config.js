@@ -81,8 +81,15 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/no-unnecessary-type-conversion': 'off',
 
-      // File size is ratcheted by scripts/check-file-size.js until ESLint limits can be re-enabled.
-      'max-lines': 'off',
+      'max-lines': [
+        'error',
+        {
+          max: 300,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
+      // Audit F07 tracks ratcheting these remaining structural waivers.
       'max-lines-per-function': 'off',
       complexity: 'off',
 

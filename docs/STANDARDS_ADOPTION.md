@@ -27,7 +27,7 @@ This document maps Pumas Library's local standards work to the shared standards 
 Existing broad exceptions are allowed only while they are tracked by the standards refactor audit:
 
 - large files above the 500-line target remain until contract and validation boundaries are extracted;
-- frontend `max-lines`, `max-lines-per-function`, and `complexity` lint rules remain disabled until first decomposition milestones land;
+- frontend `max-lines-per-function` and `complexity` lint rules remain disabled until function-level decomposition milestones land;
 - Rust unsafe code remains tolerated until the workspace lint policy can isolate OS/FFI modules;
 - polling remains tolerated where no backend event stream exists yet.
 
@@ -97,6 +97,7 @@ Existing broad exceptions are allowed only while they are tracked by the standar
 - 2026-04-22: Sidebar app icon motion rendering moved from `AppSidebar.tsx` into `frontend/src/components/SidebarAppIcon.tsx`, preserving existing sidebar selection, background deselection, Escape, and add-button tests; `AppSidebar.tsx` is now below the 300 effective-line standard and has been removed from the oversized file baseline.
 - 2026-04-22: Physics drag pointer lifecycle, delete cleanup, undo handling, and settle animation moved from `usePhysicsDrag.ts` into focused hook helpers; `usePhysicsDrag.ts` is now below the 300 effective-line standard and has been removed from the oversized file baseline.
 - 2026-04-22: The frontend API contract was split from one oversized `api.ts` file into domain response modules, composed bridge interfaces, and an Electron global module while preserving the `api.ts` public barrel; the oversized file baseline is now empty.
+- 2026-04-22: Frontend `max-lines` ESLint enforcement was restored at 300 effective lines after splitting the remaining oversized test files.
 - 2026-04-22: The launcher `--test` action and CI launcher verification now run the Torch sidecar Python unit suite through platform-specific Python module commands.
 - 2026-04-22: Launcher development and release actions now pass explicit backend binary paths into Electron, so `--run` uses the debug artifact from `--build` while release flows use release artifacts from `--build-release`.
 - 2026-04-22: Launcher dependency installation now has injectable plan tests for command checks, workspace install invocation, check/install/recheck behavior, failed installs, and missing runtime dependencies.

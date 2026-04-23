@@ -223,7 +223,6 @@ Status: partially remediated
 
 - `@typescript-eslint/no-unnecessary-condition`
 - `@typescript-eslint/no-non-null-assertion`
-- `max-lines`
 - `max-lines-per-function`
 - `complexity`
 
@@ -237,8 +236,9 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/AppSidebar.tsx` from the oversized-file baseline after it reached 256 effective lines.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/hooks/usePhysicsDrag.ts` from the oversized-file baseline after drag lifecycle helper extraction reached 298 effective lines.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/types/api.ts` from the oversized-file baseline after API contract decomposition left every `api-*` module below 300 effective lines.
+- Completed: split `modelImportWorkflowHelpers.test.ts` and `useRemoteModelSearch.test.ts` by test responsibility, then re-enabled ESLint `max-lines` at 300 effective lines for frontend source files.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
-- Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.
+- Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

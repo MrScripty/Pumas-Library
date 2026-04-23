@@ -63,6 +63,7 @@ bridge.
 | `ModelKindIcon.tsx` | Renders model/task-kind tokens into consistent icons and labels. |
 | `VersionSelector.tsx` | Version install/switch/update UI. |
 | `VersionSelectorTrigger.tsx` | Presentational trigger shell for the active-version selector and action buttons. |
+| `VersionSelectorTriggerControls.tsx` | Extracted trigger buttons and status-icon presentation for version install/open/default actions. |
 | `VersionSelectorDropdown.tsx` | Presentational dropdown menu and row items for installed/selectable versions. |
 | `VersionSelectorDropdown.test.tsx` | Interaction coverage for native version switch, default, and shortcut controls. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |

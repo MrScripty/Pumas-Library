@@ -210,6 +210,9 @@ Implementation notes:
   extract-directory scans, versions-root creation, existing-version removal, rename fallback, and
   recursive copy operations in `move_to_final_location`, so the async install handoff from extract
   to final version placement no longer performs that directory work through blocking std fs calls.
+- Completed: `pumas-app-manager/src/version_manager/installer.rs` now runs archive extraction and
+  Ollama binary finalization through `tokio::task::spawn_blocking`, so zip, tar.gz, tar.zst, and
+  binary-permission work no longer execute directly on async runtime threads during install flows.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

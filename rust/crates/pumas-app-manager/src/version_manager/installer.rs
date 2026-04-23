@@ -349,7 +349,16 @@ impl VersionInstaller {
             })
             .await;
 
-        self.extract_ollama_binary(archive_path, &version_dir, asset_name)?;
+        let archive_path = archive_path.to_path_buf();
+        let version_dir_for_extract = version_dir.clone();
+        let asset_name = asset_name.to_string();
+        tokio::task::spawn_blocking(move || {
+            Self::extract_ollama_binary(&archive_path, &version_dir_for_extract, &asset_name)
+        })
+        .await
+        .map_err(|e| {
+            PumasError::Other(format!("Failed to join Ollama extraction task: {}", e))
+        })??;
 
         {
             let mut tracker = self.progress_tracker.write().await;
@@ -410,7 +419,6 @@ impl VersionInstaller {
     /// - macOS: ollama-darwin-arm64.tar.zst
     /// - Windows: ollama-windows-amd64.zip (containing ollama.exe)
     fn extract_ollama_binary(
-        &self,
         archive_path: &Path,
         version_dir: &Path,
         asset_name: &str,
@@ -419,13 +427,13 @@ impl VersionInstaller {
 
         if asset_name.ends_with(".tar.zst") {
             // Extract tar.zst (Zstandard compressed tar - current Ollama format)
-            self.extract_tar_zst(archive_path, version_dir)?;
+            Self::extract_tar_zst(archive_path, version_dir)?;
         } else if asset_name.ends_with(".tgz") || asset_name.ends_with(".tar.gz") {
             // Extract tar.gz (legacy format)
-            self.extract_tarball(archive_path, version_dir)?;
+            Self::extract_tarball(archive_path, version_dir)?;
         } else if asset_name.ends_with(".zip") {
             // Extract zip
-            self.extract_zip(archive_path, version_dir)?;
+            Self::extract_zip(archive_path, version_dir)?;
         } else {
             // Raw binary (e.g., ollama-linux-amd64 without extension)
             let binary_name = if cfg!(windows) {
@@ -442,14 +450,14 @@ impl VersionInstaller {
         }
 
         // Find and make the binary executable on Unix
-        self.finalize_ollama_binary(version_dir)?;
+        Self::finalize_ollama_binary(version_dir)?;
 
         info!("Ollama binary extraction complete");
         Ok(())
     }
 
     /// Extract a .tar.zst archive (Zstandard compressed tar).
-    fn extract_tar_zst(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
+    fn extract_tar_zst(archive_path: &Path, dest_dir: &Path) -> Result<()> {
         info!("Extracting tar.zst archive to {}", dest_dir.display());
 
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
@@ -475,7 +483,7 @@ impl VersionInstaller {
     }
 
     /// Find the ollama binary in the extracted directory and make it executable.
-    fn finalize_ollama_binary(&self, version_dir: &Path) -> Result<()> {
+    fn finalize_ollama_binary(version_dir: &Path) -> Result<()> {
         // Ollama archives typically extract to bin/ollama or just ollama
         let possible_paths = [
             version_dir.join("bin").join("ollama"),
@@ -806,9 +814,21 @@ impl VersionInstaller {
             })?;
 
         if is_tarball {
-            self.extract_tarball(archive_path, extract_dir)?;
+            let archive_path = archive_path.to_path_buf();
+            let extract_dir = extract_dir.to_path_buf();
+            tokio::task::spawn_blocking(move || Self::extract_tarball(&archive_path, &extract_dir))
+                .await
+                .map_err(|e| {
+                    PumasError::Other(format!("Failed to join tarball extraction task: {}", e))
+                })??;
         } else {
-            self.extract_zip(archive_path, extract_dir)?;
+            let archive_path = archive_path.to_path_buf();
+            let extract_dir = extract_dir.to_path_buf();
+            tokio::task::spawn_blocking(move || Self::extract_zip(&archive_path, &extract_dir))
+                .await
+                .map_err(|e| {
+                    PumasError::Other(format!("Failed to join zip extraction task: {}", e))
+                })??;
         }
 
         // Update progress
@@ -830,7 +850,7 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_zip(&self, archive_path: &Path, extract_dir: &Path) -> Result<()> {
+    fn extract_zip(archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open zip archive: {}", e),
             path: Some(archive_path.to_path_buf()),
@@ -897,7 +917,7 @@ impl VersionInstaller {
         Ok(())
     }
 
-    fn extract_tarball(&self, archive_path: &Path, extract_dir: &Path) -> Result<()> {
+    fn extract_tarball(archive_path: &Path, extract_dir: &Path) -> Result<()> {
         let file = File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open tarball: {}", e),
             path: Some(archive_path.to_path_buf()),

@@ -261,8 +261,9 @@ Rectification:
 - Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.
 - Completed: reduce `frontend/src/App.tsx` orchestration complexity by moving shell state projection and prop construction into `frontend/src/components/AppShellState.ts` while preserving App shell behavior with focused helper coverage.
 - Completed: `frontend/eslint.config.js` enforces ESLint `complexity` at a maximum of 20 after the function-level decomposition wave cleared the full frontend source tree.
+- Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory is recorded in `pass-02-frontend-function-length-inventory.md`.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
-- Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, and `max-lines-per-function` to scoped overrides or enforceable warnings after the next decomposition wave.
+- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` plus `@typescript-eslint/no-non-null-assertion` to scoped overrides or enforceable warnings.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

@@ -89,8 +89,15 @@ export default tseslint.config(
           skipComments: true,
         },
       ],
-      // Audit F07 tracks ratcheting the remaining function-size waiver.
-      'max-lines-per-function': 'off',
+      // Coarse F07 ratchet; lower this as long functions are decomposed.
+      'max-lines-per-function': [
+        'error',
+        {
+          max: 300,
+          skipBlankLines: true,
+          skipComments: true,
+        },
+      ],
       complexity: ['error', 20],
 
       // Prevent generic Error usage and enforce React Aria patterns

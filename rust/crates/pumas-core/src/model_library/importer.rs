@@ -1160,10 +1160,23 @@ impl ModelImporter {
         )?;
 
         // Detect dLLM subtype from config.json
-        let resolved_subtype = if resolved_model_type.model_type == ModelType::Llm
-            && detect_dllm_from_config_json(model_dir)
-        {
-            Some("dllm".to_string())
+        let resolved_subtype = if resolved_model_type.model_type == ModelType::Llm {
+            let model_dir_for_subtype = model_dir.to_path_buf();
+            let is_dllm = tokio::task::spawn_blocking(move || {
+                detect_dllm_from_config_json(&model_dir_for_subtype)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join in-place dLLM subtype detection task: {}",
+                    err
+                ))
+            })?;
+            if is_dllm {
+                Some("dllm".to_string())
+            } else {
+                None
+            }
         } else {
             None
         };

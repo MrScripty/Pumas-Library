@@ -394,6 +394,10 @@ Implementation notes:
   through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption import paths
   no longer perform synchronous directory walks inline on async runtime threads when collecting the
   imported file manifest for metadata and shard validation.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place dLLM subtype
+  detection through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
+  import paths no longer perform synchronous `config.json` reads inline on async runtime threads
+  when refining LLM subtype classification.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

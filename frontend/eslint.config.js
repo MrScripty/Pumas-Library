@@ -89,9 +89,9 @@ export default tseslint.config(
           skipComments: true,
         },
       ],
-      // Audit F07 tracks ratcheting these remaining structural waivers.
+      // Audit F07 tracks ratcheting the remaining function-size waiver.
       'max-lines-per-function': 'off',
-      complexity: 'off',
+      complexity: ['error', 20],
 
       // Prevent generic Error usage and enforce React Aria patterns
       'no-restricted-syntax': [

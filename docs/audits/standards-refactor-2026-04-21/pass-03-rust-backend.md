@@ -310,6 +310,10 @@ Implementation notes:
   and `pumas-rpc/src/handlers/versions/release.rs` now load GitHub release cache status through
   async disk reads, so the RPC cache-status request path no longer performs synchronous cache-file
   inspection inline on async runtime threads.
+- Completed: `pumas-core/src/api/system.rs`, `api/state.rs`, and `pumas-rpc/src/handlers/status.rs`
+  now route launcher-version requests through `tokio::task::spawn_blocking`, so direct API, mirrored
+  IPC, and RPC launcher-version checks no longer run synchronous git/path inspection inline on
+  async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

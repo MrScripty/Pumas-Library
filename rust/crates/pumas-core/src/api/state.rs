@@ -916,9 +916,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::json!({ "success": true }))
             }
             "get_launcher_version" => {
-                let updater =
-                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
-                Ok(updater.get_version_info())
+                let launcher_root = launcher_root_from_primary(self);
+                let response = tokio::task::spawn_blocking(move || {
+                    let updater = crate::launcher::LauncherUpdater::new(&launcher_root);
+                    updater.get_version_info()
+                })
+                .await
+                .map_err(|e| {
+                    crate::error::PumasError::Other(format!(
+                        "Failed to join get_launcher_version task: {}",
+                        e
+                    ))
+                })?;
+                Ok(response)
             }
             "check_launcher_updates" => {
                 let force_refresh = params["force_refresh"].as_bool().unwrap_or(false);

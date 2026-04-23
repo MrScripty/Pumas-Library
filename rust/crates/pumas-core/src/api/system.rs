@@ -375,7 +375,7 @@ impl PumasApi {
     // ========================================
 
     /// Get launcher version information.
-    pub fn get_launcher_version(&self) -> serde_json::Value {
+    pub async fn get_launcher_version(&self) -> serde_json::Value {
         if self.try_client().is_some() {
             return self.call_client_method_blocking_or_default(
                 "get_launcher_version",
@@ -383,8 +383,19 @@ impl PumasApi {
             );
         }
 
-        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
-        updater.get_version_info()
+        let launcher_root = self.launcher_root.clone();
+        match tokio::task::spawn_blocking(move || {
+            let updater = launcher::LauncherUpdater::new(&launcher_root);
+            updater.get_version_info()
+        })
+        .await
+        {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({
+                "success": false,
+                "error": format!("Failed to join get_launcher_version task: {}", error),
+            }),
+        }
     }
 
     /// Check for launcher updates via GitHub.

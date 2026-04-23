@@ -61,7 +61,7 @@ pub async fn get_launcher_version(
     state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    let version_info = state.api.get_launcher_version();
+    let version_info = state.api.get_launcher_version().await;
     Ok(version_info)
 }
 

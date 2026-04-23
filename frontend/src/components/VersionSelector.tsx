@@ -1,9 +1,14 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { APIError } from '../errors';
 import { useVersionShortcutState } from '../hooks/useVersionShortcutState';
 import type { InstallationProgress } from '../hooks/useVersions';
 import { getLogger } from '../utils/logger';
 import { VersionSelectorDropdown } from './VersionSelectorDropdown';
+import {
+  getVersionSelectorDisplayState,
+  reportOpenActiveInstallError,
+  reportToggleDefaultError,
+  reportVersionSwitchError,
+} from './VersionSelectorState';
 import { VersionSelectorTrigger } from './VersionSelectorTrigger';
 
 const logger = getLogger('VersionSelector');
@@ -71,13 +76,7 @@ export function VersionSelector({
       logger.info('Version switched successfully', { version: tag });
       setIsOpen(false);
     } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error switching version', { error: error.message, endpoint: error.endpoint, tag });
-      } else if (error instanceof Error) {
-        logger.error('Failed to switch version', { error: error.message, tag });
-      } else {
-        logger.error('Unknown error switching version', { error, tag });
-      }
+      reportVersionSwitchError(error, tag);
     } finally {
       setIsSwitching(false);
     }
@@ -101,51 +100,45 @@ export function VersionSelector({
       }
       openedIndicatorTimeout.current = setTimeout(() => setShowOpenedIndicator(false), 2000);
     } catch (error) {
-      if (error instanceof APIError) {
-        logger.error('API error opening installation path', { error: error.message, endpoint: error.endpoint, version: activeVersion });
-      } else if (error instanceof Error) {
-        logger.error('Failed to open installation path', { error: error.message, version: activeVersion });
-      } else {
-        logger.error('Unknown error opening installation path', { error, version: activeVersion });
-      }
+      reportOpenActiveInstallError(error, activeVersion);
     } finally {
       setIsOpeningPath(false);
     }
   };
 
-  const combinedVersions = React.useMemo(() => {
-    const unique = new Set(installedVersions);
-    const merged = [...installedVersions];
-    if (installingVersion && !unique.has(installingVersion)) {
-      merged.push(installingVersion);
-    }
-    // Sort by version number - most recent first (reverse sort)
-    return merged.sort((a, b) => b.localeCompare(a, undefined, { numeric: true, sensitivity: 'base' }));
-  }, [installedVersions, installingVersion]);
-
-  const displayVersion = activeVersion || 'No version selected';
-  const hasInstalledVersions = installedVersions.length > 0;
-  const hasVersionsToShow = combinedVersions.length > 0;
-  const emphasizeInstall = !hasInstalledVersions && !isLoading;
-  // Check both installingVersion and that installation is not complete
-  const isInstallComplete = Boolean(installationProgress?.completed_at);
-  const hasInstallActivity = Boolean(installingVersion) && !isInstallComplete;
-  const isInstallFailed = installNetworkStatus === 'failed';
-  const isInstallPending = hasInstallActivity && !isInstallFailed && (
-    !installationProgress
-    || (
-      installationProgress.stage === 'download'
-      && (installationProgress.downloaded_bytes ?? 0) <= 0
-      && (installationProgress.download_speed ?? 0) <= 0
-      && !installationProgress.error
-    )
-  );
-  const progressPercent = installationProgress?.overall_progress ?? 0;
-  const progressDegrees = Math.min(
-    360,
-    Math.max(0, Math.round((Math.min(100, Math.max(0, progressPercent)) / 100) * 360))
-  );
-  const ringDegrees = isInstallPending ? 60 : progressDegrees;
+  const {
+    combinedVersions,
+    displayVersion,
+    emphasizeInstall,
+    folderIconColor,
+    hasInstallActivity,
+    hasInstalledVersions,
+    hasVersionsToShow,
+    isInstallComplete,
+    isInstallFailed,
+    isInstallPending,
+    ringDegrees,
+  } = React.useMemo(() => getVersionSelectorDisplayState({
+    activeVersion,
+    diskSpacePercent,
+    hasNewVersion,
+    installedVersions,
+    installNetworkStatus,
+    installationProgress,
+    installingVersion,
+    isLoading,
+    latestVersion,
+  }), [
+    activeVersion,
+    diskSpacePercent,
+    hasNewVersion,
+    installedVersions,
+    installNetworkStatus,
+    installationProgress,
+    installingVersion,
+    isLoading,
+    latestVersion,
+  ]);
 
   // Debug logging for new version detection
   React.useEffect(() => {
@@ -160,15 +153,6 @@ export function VersionSelector({
     });
   }, [hasNewVersion, latestVersion, activeVersion, installNetworkStatus, emphasizeInstall, isLoading]);
 
-  // Determine folder icon color based on disk space
-  const getFolderIconColor = () => {
-    if (diskSpacePercent >= 95) return 'text-accent-error';
-    if (diskSpacePercent >= 85) return 'text-accent-warning';
-    return 'text-tertiary';
-  };
-
-  const folderIconColor = getFolderIconColor();
-
   const handleToggleDefault = useCallback(() => {
     if (!onMakeDefault || !activeVersion) {
       return;
@@ -176,23 +160,7 @@ export function VersionSelector({
     const isDefault = defaultVersion === activeVersion;
     const target = isDefault ? null : activeVersion;
     onMakeDefault(target).catch((error: unknown) => {
-      if (error instanceof APIError) {
-        logger.error('API error toggling default version', {
-          error: error.message,
-          endpoint: error.endpoint,
-          version: activeVersion,
-        });
-      } else if (error instanceof Error) {
-        logger.error('Failed to toggle default version', {
-          error: error.message,
-          version: activeVersion,
-        });
-      } else {
-        logger.error('Unknown error toggling default version', {
-          error: String(error),
-          version: activeVersion,
-        });
-      }
+      reportToggleDefaultError(error, activeVersion);
     });
   }, [activeVersion, defaultVersion, onMakeDefault]);
 

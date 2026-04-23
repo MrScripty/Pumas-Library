@@ -121,14 +121,18 @@ pub(crate) async fn read_utf8_file(path: &Path) -> pumas_library::Result<String>
 /// Extract the JSON header from a safetensors file.
 ///
 /// Safetensors format: 8-byte header size (little-endian u64) followed by JSON header.
-pub(crate) fn extract_safetensors_header(path: &str) -> std::result::Result<Value, String> {
-    use std::io::Read;
+pub(crate) async fn extract_safetensors_header(path: &str) -> std::result::Result<Value, String> {
+    use tokio::io::AsyncReadExt;
 
-    let mut file = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(|e| e.to_string())?;
 
     // Read header size (8 bytes, little-endian)
     let mut size_buf = [0u8; 8];
-    file.read_exact(&mut size_buf).map_err(|e| e.to_string())?;
+    file.read_exact(&mut size_buf)
+        .await
+        .map_err(|e| e.to_string())?;
     let header_size = u64::from_le_bytes(size_buf) as usize;
 
     // Sanity check
@@ -139,6 +143,7 @@ pub(crate) fn extract_safetensors_header(path: &str) -> std::result::Result<Valu
     // Read JSON header
     let mut header_buf = vec![0u8; header_size];
     file.read_exact(&mut header_buf)
+        .await
         .map_err(|e| e.to_string())?;
 
     // Parse JSON - the header contains tensor metadata, not model metadata
@@ -222,6 +227,7 @@ mod tests {
     use super::*;
     use serde::Deserialize;
     use serde_json::json;
+    use tempfile::TempDir;
 
     #[derive(Debug, Deserialize, PartialEq)]
     struct Command {
@@ -253,5 +259,49 @@ mod tests {
         let error = validate_external_url("file:///tmp/example".to_string()).unwrap_err();
 
         assert!(error.to_string().contains("Unsupported url scheme"));
+    }
+
+    #[tokio::test]
+    async fn extract_safetensors_header_reads_metadata() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("model.safetensors");
+        let header = json!({
+            "__metadata__": {
+                "architecture": "flux",
+                "author": "test"
+            }
+        });
+        let header_bytes = serde_json::to_vec(&header).unwrap();
+        let mut file_bytes = Vec::with_capacity(8 + header_bytes.len());
+        file_bytes.extend_from_slice(&(header_bytes.len() as u64).to_le_bytes());
+        file_bytes.extend_from_slice(&header_bytes);
+        std::fs::write(&path, file_bytes).unwrap();
+
+        let metadata = extract_safetensors_header(path.to_str().unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            metadata,
+            json!({
+                "architecture": "flux",
+                "author": "test"
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_safetensors_header_rejects_large_header() {
+        let temp_dir = TempDir::new().unwrap();
+        let path = temp_dir.path().join("oversized.safetensors");
+        let mut file_bytes = Vec::with_capacity(8);
+        file_bytes.extend_from_slice(&(100_000_001_u64).to_le_bytes());
+        std::fs::write(&path, file_bytes).unwrap();
+
+        let error = extract_safetensors_header(path.to_str().unwrap())
+            .await
+            .unwrap_err();
+
+        assert!(error.contains("Header size too large"));
     }
 }

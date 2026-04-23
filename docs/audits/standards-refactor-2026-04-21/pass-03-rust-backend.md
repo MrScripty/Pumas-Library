@@ -295,6 +295,9 @@ Implementation notes:
   disk-space enumeration through `tokio::task::spawn_blocking`, so direct API calls and mirrored
   IPC disk-space request paths no longer run synchronous `sysinfo::Disks` refresh/enumeration
   inline on async runtime threads.
+- Completed: `pumas-rpc/src/handlers/shared.rs` and `handlers/models/imports.rs` now load
+  safetensors embedded metadata through async file reads, so RPC model import and metadata request
+  paths no longer perform synchronous header reads inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

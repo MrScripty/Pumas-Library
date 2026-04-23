@@ -240,7 +240,7 @@ pub async fn get_embedded_metadata(
         },
         "safetensors" => {
             // Read safetensors JSON header
-            match extract_safetensors_header(&file_path) {
+            match extract_safetensors_header(&file_path).await {
                 Ok(header) => Ok(json!({
                     "success": true,
                     "file_type": "safetensors",
@@ -301,13 +301,15 @@ pub async fn get_library_model_metadata(
                     }
                     Err(_) => None,
                 },
-                "safetensors" => match extract_safetensors_header(&file_path.to_string_lossy()) {
-                    Ok(header) => Some(pumas_library::EmbeddedMetadataResponse {
-                        file_type: "safetensors".to_string(),
-                        metadata: header,
-                    }),
-                    Err(_) => None,
-                },
+                "safetensors" => {
+                    match extract_safetensors_header(&file_path.to_string_lossy()).await {
+                        Ok(header) => Some(pumas_library::EmbeddedMetadataResponse {
+                            file_type: "safetensors".to_string(),
+                            metadata: header,
+                        }),
+                        Err(_) => None,
+                    }
+                }
                 _ => None,
             }
         } else {

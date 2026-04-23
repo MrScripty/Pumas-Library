@@ -15,6 +15,136 @@ async function apiCall<T>(method: string, params: Record<string, unknown> = {}):
   return await ipcRenderer.invoke('api:call', method, params);
 }
 
+type BaseRpcResponse = {
+  success: boolean;
+  error?: string;
+};
+
+type ActiveVersionResponse = BaseRpcResponse & {
+  version?: string | null;
+};
+
+type LaunchRpcResponse = BaseRpcResponse & {
+  log_path?: string | null;
+  ready?: boolean | null;
+};
+
+type VersionShortcutState = {
+  tag?: string;
+  menu: boolean;
+  desktop: boolean;
+};
+
+type VersionShortcutResponse = BaseRpcResponse & {
+  state?: VersionShortcutState;
+};
+
+async function installActiveVersionDependencies(): Promise<BaseRpcResponse> {
+  const activeVersion = await apiCall<ActiveVersionResponse>('get_active_version', {
+    app_id: 'comfyui',
+  });
+
+  if (!activeVersion.success || !activeVersion.version) {
+    return {
+      success: false,
+      error: activeVersion.error ?? 'No active ComfyUI version set',
+    };
+  }
+
+  return await apiCall('install_version_dependencies', {
+    tag: activeVersion.version,
+    app_id: 'comfyui',
+  });
+}
+
+async function setVersionShortcuts(
+  tag: string,
+  enabled: boolean
+): Promise<VersionShortcutResponse> {
+  const current = await apiCall<VersionShortcutResponse>('get_version_shortcuts', { tag });
+  if (!current.success) {
+    return current;
+  }
+
+  const currentState = current.state ?? { tag, menu: false, desktop: false };
+  if (currentState.menu !== enabled) {
+    const menuResult = await apiCall<BaseRpcResponse>('toggle_menu', { tag });
+    if (!menuResult.success) {
+      return {
+        success: false,
+        state: currentState,
+        error: menuResult.error ?? 'Failed to update menu shortcut',
+      };
+    }
+  }
+
+  if (currentState.desktop !== enabled) {
+    const desktopResult = await apiCall<BaseRpcResponse>('toggle_desktop', { tag });
+    if (!desktopResult.success) {
+      return {
+        success: false,
+        state: currentState,
+        error: desktopResult.error ?? 'Failed to update desktop shortcut',
+      };
+    }
+  }
+
+  const refreshed = await apiCall<VersionShortcutResponse>('get_version_shortcuts', { tag });
+  return {
+    success: refreshed.success,
+    state: refreshed.state ?? { tag, menu: enabled, desktop: enabled },
+    error: refreshed.error,
+  };
+}
+
+async function launchAppVersion(
+  appId: string | undefined,
+  versionTag: string
+): Promise<LaunchRpcResponse> {
+  const resolvedAppId = appId ?? 'comfyui';
+  const switchResult = await apiCall<BaseRpcResponse>('switch_version', {
+    tag: versionTag,
+    app_id: resolvedAppId,
+  });
+
+  if (!switchResult.success) {
+    return {
+      success: false,
+      error: switchResult.error ?? `Failed to switch ${resolvedAppId} to ${versionTag}`,
+    };
+  }
+
+  switch (resolvedAppId) {
+    case 'comfyui':
+      return await apiCall('launch_comfyui');
+    case 'ollama':
+      return await apiCall('launch_ollama');
+    case 'torch':
+      return await apiCall('launch_torch');
+    default:
+      return {
+        success: false,
+        error: `Unsupported app launch target: ${resolvedAppId}`,
+      };
+  }
+}
+
+async function stopApp(appId: string): Promise<BaseRpcResponse> {
+  switch (appId) {
+    case 'comfyui':
+      return await apiCall('stop_comfyui');
+    case 'ollama':
+      return await apiCall('stop_ollama');
+    case 'torch':
+      return await apiCall('stop_torch');
+    default:
+      return {
+        success: false,
+        error: `Unsupported app stop target: ${appId}`,
+      };
+  }
+}
+
 /**
  * Electron API exposed to the renderer
  * Matches the canonical desktop bridge contract
@@ -30,7 +160,7 @@ const electronAPI = {
   // ========================================
   // Dependencies
   // ========================================
-  install_deps: () => apiCall('install_deps'),
+  install_deps: () => installActiveVersionDependencies(),
 
   // ========================================
   // Shortcuts
@@ -40,9 +170,9 @@ const electronAPI = {
   get_version_shortcuts: (tag: string) => apiCall('get_version_shortcuts', { tag }),
   get_all_shortcut_states: () => apiCall('get_all_shortcut_states'),
   set_version_shortcuts: (tag: string, enabled: boolean) =>
-    apiCall('set_version_shortcuts', { tag, enabled }),
-  toggle_version_menu: (tag: string) => apiCall('toggle_version_menu', { tag }),
-  toggle_version_desktop: (tag: string) => apiCall('toggle_version_desktop', { tag }),
+    setVersionShortcuts(tag, enabled),
+  toggle_version_menu: (tag: string) => apiCall('toggle_menu', { tag }),
+  toggle_version_desktop: (tag: string) => apiCall('toggle_desktop', { tag }),
 
   // ========================================
   // Version Management
@@ -66,7 +196,12 @@ const electronAPI = {
     apiCall('set_default_version', { tag, app_id: appId }),
   get_version_status: (appId?: string) => apiCall('get_version_status', { app_id: appId }),
   launch_version: (tag: string, extraArgs?: string[], appId?: string) =>
-    apiCall('launch_version', { tag, extra_args: extraArgs, app_id: appId }),
+    extraArgs && extraArgs.length > 0
+      ? Promise.resolve({
+          success: false,
+          error: 'Extra launch arguments are not supported by the desktop RPC bridge',
+        })
+      : launchAppVersion(appId, tag),
   check_version_dependencies: (tag: string, appId?: string) =>
     apiCall('check_version_dependencies', { tag, app_id: appId }),
   install_version_dependencies: (tag: string, appId?: string) =>
@@ -438,8 +573,8 @@ const electronAPI = {
     apiCall('call_plugin_endpoint', { app_id: appId, endpoint_name: endpointName, params }),
   check_plugin_health: (appId: string) => apiCall('check_plugin_health', { app_id: appId }),
   launch_app: (appId: string, versionTag: string) =>
-    apiCall('launch_app', { app_id: appId, version_tag: versionTag }),
-  stop_app: (appId: string) => apiCall('stop_app', { app_id: appId }),
+    launchAppVersion(appId, versionTag),
+  stop_app: (appId: string) => stopApp(appId),
   get_app_status: (appId: string) => apiCall('get_app_status', { app_id: appId }),
 
   // ========================================

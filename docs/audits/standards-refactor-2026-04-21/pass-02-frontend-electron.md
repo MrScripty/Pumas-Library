@@ -37,6 +37,7 @@ Rectification:
 - Completed: add the first executable per-method request-schema slice by enforcing an `empty-record` params policy for representative no-argument RPC methods at the Electron main-process boundary.
 - Completed: add field-level request schemas for representative params-bearing version, shortcut, model-download, process utility, plugin lookup, and custom-node RPC methods.
 - Completed: add a preload-to-registry contract test that prevents new unregistered `apiCall()` drift while D22 tracks the current unresolved preload methods.
+- Completed: replace stale preload aliases for dependency install, shortcut set/toggle, app launch, version launch, and app stop with compositions of registered RPC methods.
 - Remaining: add per-method request and response schemas.
 - Generate or validate:
   - `frontend/src/types/api.ts`

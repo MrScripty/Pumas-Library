@@ -5,13 +5,6 @@ import { RPC_METHOD_REGISTRY } from '../dist/rpc-method-registry.js';
 
 const DEFERRED_UNREGISTERED_PRELOAD_METHODS = [
   'call_plugin_endpoint',
-  'install_deps',
-  'launch_app',
-  'launch_version',
-  'set_version_shortcuts',
-  'stop_app',
-  'toggle_version_desktop',
-  'toggle_version_menu',
 ];
 
 const PRELOAD_SOURCE = readFileSync(new URL('../src/preload.ts', import.meta.url), 'utf8');

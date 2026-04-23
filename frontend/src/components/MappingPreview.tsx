@@ -8,17 +8,15 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
 import { motion, AnimatePresence } from 'framer-motion';
-import {
-  AlertTriangle,
-  CheckCircle,
-  XCircle,
-  RefreshCw,
-  ChevronDown,
-  ChevronUp,
-  FolderSymlink,
-} from 'lucide-react';
 import { getLogger } from '../utils/logger';
 import { MappingPreviewDetails } from './MappingPreviewDetails';
+import { MappingPreviewHeader } from './MappingPreviewHeader';
+import {
+  getMappingPreviewCounts,
+  getMappingPreviewStatus,
+  hasMappingPreviewIssues,
+} from './MappingPreviewState';
+import { MappingPreviewUnavailableState } from './MappingPreviewUnavailableState';
 import type { MappingPreviewResponse } from './MappingPreviewTypes';
 
 const logger = getLogger('MappingPreview');
@@ -153,105 +151,24 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
   };
 
   if (!preview && !isLoading) {
-    if (error) {
-      return (
-        <div className="bg-[hsl(var(--launcher-bg-tertiary)/0.3)] rounded-lg border border-[hsl(var(--accent-error)/0.5)] p-4">
-          <div className="flex items-start gap-3">
-            <XCircle className="w-5 h-5 text-[hsl(var(--accent-error))] flex-shrink-0 mt-0.5" />
-            <div className="flex-1">
-              <div className="text-sm font-medium text-[hsl(var(--accent-error))]">
-                Failed to load mapping preview
-              </div>
-              <div className="text-xs text-[hsl(var(--launcher-text-secondary))] mt-1">
-                {error}
-              </div>
-              <button
-                onClick={() => void fetchPreview()}
-                className="mt-3 flex items-center gap-2 px-3 py-1.5 text-xs bg-[hsl(var(--launcher-bg-secondary))] hover:bg-[hsl(var(--launcher-bg-tertiary))] rounded transition-colors"
-              >
-                <RefreshCw className="w-3 h-3" />
-                Retry
-              </button>
-            </div>
-          </div>
-        </div>
-      );
-    }
-    return null;
+    return <MappingPreviewUnavailableState error={error} onRetry={() => void fetchPreview()} />;
   }
 
-  const toCreateCount = preview?.to_create?.length || 0;
-  const conflictCount = preview?.conflicts?.length || 0;
-  const skipCount = preview?.to_skip_exists?.length || 0;
-  const brokenCount = preview?.broken_to_remove?.length || 0;
-  const warningCount = preview?.warnings?.length || 0;
-  const hasIssues = conflictCount > 0 || warningCount > 0;
-
-  // Determine overall status
-  let status: 'ready' | 'warnings' | 'errors' = 'ready';
-  if (preview?.errors?.length) {
-    status = 'errors';
-  } else if (hasIssues) {
-    status = 'warnings';
-  }
-
-  const statusConfig = {
-    ready: {
-      icon: CheckCircle,
-      color: 'text-[hsl(var(--accent-success))]',
-      label: `${toCreateCount} links ready`,
-    },
-    warnings: {
-      icon: AlertTriangle,
-      color: 'text-[hsl(var(--accent-warning))]',
-      label: `${conflictCount} conflict${conflictCount !== 1 ? 's' : ''}`,
-    },
-    errors: {
-      icon: XCircle,
-      color: 'text-[hsl(var(--accent-error))]',
-      label: 'Configuration error',
-    },
-  };
-
-  const config = statusConfig[status];
-  const StatusIcon = config.icon;
+  const counts = getMappingPreviewCounts(preview);
+  const hasIssues = hasMappingPreviewIssues(counts);
+  const status = getMappingPreviewStatus(preview, counts);
 
   return (
     <div className="bg-[hsl(var(--launcher-bg-tertiary)/0.3)] rounded-lg border border-[hsl(var(--launcher-border)/0.5)]">
-      {/* Header */}
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="w-full px-4 py-3 flex items-center justify-between hover:bg-[hsl(var(--launcher-bg-tertiary)/0.5)] transition-colors rounded-lg"
-      >
-        <div className="flex items-center gap-3">
-          <FolderSymlink className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
-          <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
-            Mapping Preview
-          </span>
-          {isLoading ? (
-            <RefreshCw className="w-4 h-4 animate-spin text-[hsl(var(--launcher-text-secondary))]" />
-          ) : (
-            <div className="flex items-center gap-2">
-              <StatusIcon className={`w-4 h-4 ${config.color}`} />
-              <span className={`text-xs ${config.color}`}>{config.label}</span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          {preview && (
-            <span className="text-xs text-[hsl(var(--launcher-text-tertiary))]">
-              {preview.total_actions} action{preview.total_actions !== 1 ? 's' : ''}
-            </span>
-          )}
-          {isExpanded ? (
-            <ChevronUp className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
-          ) : (
-            <ChevronDown className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
-          )}
-        </div>
-      </button>
+      <MappingPreviewHeader
+        counts={counts}
+        isExpanded={isExpanded}
+        isLoading={isLoading}
+        preview={preview}
+        status={status}
+        onToggleExpanded={() => setIsExpanded(!isExpanded)}
+      />
 
-      {/* Expanded Content */}
       <AnimatePresence>
         {isExpanded && (
           <motion.div
@@ -264,8 +181,8 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
             {preview && (
               <MappingPreviewDetails
                 applyResult={applyResult}
-                brokenCount={brokenCount}
-                conflictCount={conflictCount}
+                brokenCount={counts.brokenCount}
+                conflictCount={counts.conflictCount}
                 crossFsWarning={crossFsWarning}
                 expandedSection={expandedSection}
                 hasIssues={hasIssues}
@@ -273,9 +190,9 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
                 isLoading={isLoading}
                 preview={preview}
                 showApplyButton={showApplyButton}
-                skipCount={skipCount}
+                skipCount={counts.skipCount}
                 status={status}
-                toCreateCount={toCreateCount}
+                toCreateCount={counts.toCreateCount}
                 onApplyMapping={() => void applyMapping()}
                 onFetchPreview={() => void fetchPreview()}
                 onToggleSection={toggleSection}

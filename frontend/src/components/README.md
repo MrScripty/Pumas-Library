@@ -70,6 +70,10 @@ bridge.
 | `VersionSelectorDropdown.test.tsx` | Interaction coverage for native version switch, default, and shortcut controls. |
 | `ModelImportDialog.tsx` | Import flow for local and remote model files. |
 | `MappingPreview.tsx` | Mapping preview and conflict-resolution workflow. |
+| `MappingPreview.test.tsx` | Loading, expansion, apply, and retry coverage for the mapping preview workflow. |
+| `MappingPreviewHeader.tsx` | Header, status badge, action-count, and expansion control for mapping previews. |
+| `MappingPreviewState.ts` | Derived count, issue, and status helpers for mapping preview presentation state. |
+| `MappingPreviewUnavailableState.tsx` | Error and retry state for unavailable mapping preview loads. |
 | `MappingPreviewDetails.tsx` | Mapping preview details coordinator for counts, warnings, action sections, and apply controls. |
 | `MappingPreviewDetailsFeedback.tsx` | Apply-result, refresh/apply control, and all-linked notice rendering for mapping preview details. |
 | `MappingPreviewDetailsSections.tsx` | Cross-filesystem, summary, warning, and action-list sections for mapping preview details. |

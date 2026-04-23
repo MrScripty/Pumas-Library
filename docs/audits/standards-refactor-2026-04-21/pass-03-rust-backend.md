@@ -256,6 +256,11 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/version_manager/state.rs` now uses async binary-path probing in
   Ollama installation validation so version-state refresh no longer performs that completeness
   check with a synchronous metadata probe on async runtime threads.
+- Completed: `pumas-rpc/src/handlers/shared.rs`, `handlers/versions/deps.rs`, and
+  `handlers/process.rs` now use shared `tokio::fs` helpers for async requirements-file reads and
+  install-directory existence checks, so those RPC handler request paths no longer perform
+  synchronous file reads or metadata probes on async runtime threads before dispatching UI-facing
+  responses.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

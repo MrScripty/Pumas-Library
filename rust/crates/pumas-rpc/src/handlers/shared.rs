@@ -5,7 +5,7 @@ use pumas_app_manager::VersionManager;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Parse an RPC params object into a typed command at the handler boundary.
 pub(crate) fn parse_params<T>(method: &str, params: &Value) -> pumas_library::Result<T>
@@ -95,6 +95,26 @@ pub(crate) async fn require_version_manager(
         .await
         .ok_or_else(|| pumas_library::PumasError::Config {
             message: format!("Version manager not initialized for app: {}", app_id),
+        })
+}
+
+pub(crate) async fn path_exists(path: &Path) -> pumas_library::Result<bool> {
+    tokio::fs::try_exists(path)
+        .await
+        .map_err(|source| pumas_library::PumasError::Io {
+            message: format!("Failed to inspect path: {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(source),
+        })
+}
+
+pub(crate) async fn read_utf8_file(path: &Path) -> pumas_library::Result<String> {
+    tokio::fs::read_to_string(path)
+        .await
+        .map_err(|source| pumas_library::PumasError::Io {
+            message: format!("Failed to read file: {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(source),
         })
 }
 

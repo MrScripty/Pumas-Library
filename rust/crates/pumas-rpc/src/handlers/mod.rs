@@ -23,8 +23,9 @@ use tracing::{debug, error, warn};
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
-    get_str_param, get_version_manager, parse_params, require_str_param, require_version_manager,
-    sync_version_paths_to_process_manager, validate_external_url, validate_non_empty,
+    get_str_param, get_version_manager, parse_params, path_exists, read_utf8_file,
+    require_str_param, require_version_manager, sync_version_paths_to_process_manager,
+    validate_external_url, validate_non_empty,
 };
 
 // ============================================================================

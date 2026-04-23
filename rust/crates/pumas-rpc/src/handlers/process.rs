@@ -1,8 +1,8 @@
 //! Process management handlers.
 
 use super::{
-    get_str_param, get_version_manager, parse_params, sync_version_paths_to_process_manager,
-    validate_external_url, validate_non_empty,
+    get_str_param, get_version_manager, parse_params, path_exists,
+    sync_version_paths_to_process_manager, validate_external_url, validate_non_empty,
 };
 use crate::server::AppState;
 use serde::Deserialize;
@@ -161,7 +161,7 @@ pub async fn open_active_install(state: &AppState, params: &Value) -> pumas_libr
     if let Some(vm) = get_version_manager(state, app_id_str).await {
         if let Some(tag) = vm.get_active_version().await? {
             let version_dir = vm.version_path(&tag);
-            if version_dir.exists() {
+            if path_exists(&version_dir).await? {
                 match state.api.open_directory(&version_dir) {
                     Ok(()) => Ok(json!({"success": true})),
                     Err(e) => Ok(json!({"success": false, "error": e.to_string()})),

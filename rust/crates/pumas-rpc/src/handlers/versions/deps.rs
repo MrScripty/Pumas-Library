@@ -1,7 +1,8 @@
 //! Version dependency handlers.
 
 use crate::handlers::{
-    get_str_param, get_version_manager, require_str_param, require_version_manager,
+    get_str_param, get_version_manager, path_exists, read_utf8_file, require_str_param,
+    require_version_manager,
 };
 use crate::server::AppState;
 use serde_json::Value;
@@ -38,17 +39,11 @@ pub async fn get_release_dependencies(
         let version_path = vm.version_path(&tag);
         let requirements_path = version_path.join("requirements.txt");
 
-        if !requirements_path.exists() {
+        if !path_exists(&requirements_path).await? {
             return Ok(serde_json::to_value::<Vec<String>>(vec![])?);
         }
 
-        let content = std::fs::read_to_string(&requirements_path).map_err(|e| {
-            pumas_library::PumasError::Io {
-                message: format!("Failed to read requirements.txt: {}", e),
-                path: Some(requirements_path),
-                source: Some(e),
-            }
-        })?;
+        let content = read_utf8_file(&requirements_path).await?;
 
         // Parse requirements (simple extraction of package names)
         let packages: Vec<String> = content

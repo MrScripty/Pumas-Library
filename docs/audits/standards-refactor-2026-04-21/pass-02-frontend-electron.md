@@ -254,6 +254,7 @@ Rectification:
 - Completed: reduce `frontend/src/components/ModelNotesMarkdownPreview.tsx` render complexity by splitting markdown block collection for code fences, headings, lists, quotes, and paragraphs into focused helpers with renderer coverage.
 - Completed: reduce `frontend/src/components/MappingPreviewDetails.tsx` render complexity by extracting cross-filesystem, summary, warning, action-list, apply-result, and control sections into focused mapping preview detail modules with interaction coverage.
 - Completed: reduce `frontend/src/components/MappingPreview.tsx` render complexity by moving header rendering, unavailable-state rendering, and derived preview count/status calculation into focused modules with workflow coverage.
+- Completed: reduce `frontend/src/components/RemoteModelListItem.tsx` render complexity by extracting remote download flags/options and row action controls into focused modules with action coverage.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 
 /// Generator for version-specific launch scripts.
+#[derive(Clone)]
 pub struct LaunchScriptGenerator {
     /// Directory to store launch scripts.
     scripts_dir: PathBuf,

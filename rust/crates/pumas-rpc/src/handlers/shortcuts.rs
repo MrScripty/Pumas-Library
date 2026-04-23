@@ -10,8 +10,8 @@ pub async fn get_version_shortcuts(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
-    let sm_lock = state.shortcut_manager.read().await;
-    if let Some(ref sm) = *sm_lock {
+    let shortcut_manager = state.shortcut_manager.read().await.clone();
+    if let Some(sm) = shortcut_manager {
         let shortcut_state = sm.get_version_shortcut_state_async(&tag).await?;
         Ok(json!({
             "tag": shortcut_state.tag,
@@ -31,8 +31,8 @@ pub async fn get_all_shortcut_states(
     state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    let sm_lock = state.shortcut_manager.read().await;
-    if let Some(ref sm) = *sm_lock {
+    let shortcut_manager = state.shortcut_manager.read().await.clone();
+    if let Some(sm) = shortcut_manager {
         let states = sm.get_all_shortcut_states_async().await?;
         let result: HashMap<String, serde_json::Value> = states
             .into_iter()
@@ -60,9 +60,18 @@ pub async fn toggle_menu(state: &AppState, params: &Value) -> pumas_library::Res
         if let Some(vm) = managers.get("comfyui") {
             let version_dir = vm.version_path(t);
             drop(managers);
-            let sm_lock = state.shortcut_manager.read().await;
-            if let Some(ref sm) = *sm_lock {
-                match sm.toggle_menu_shortcut(t, &version_dir) {
+            let shortcut_manager = state.shortcut_manager.read().await.clone();
+            if let Some(sm) = shortcut_manager {
+                let tag = t.to_string();
+                let result = tokio::task::spawn_blocking(move || {
+                    sm.toggle_menu_shortcut(&tag, &version_dir)
+                })
+                .await
+                .map_err(|e| pumas_library::PumasError::Config {
+                    message: format!("Shortcut toggle task failed: {}", e),
+                })?;
+
+                match result {
                     Ok(result) => Ok(json!(result.success)),
                     Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
                 }
@@ -84,9 +93,18 @@ pub async fn toggle_desktop(state: &AppState, params: &Value) -> pumas_library::
         if let Some(vm) = managers.get("comfyui") {
             let version_dir = vm.version_path(t);
             drop(managers);
-            let sm_lock = state.shortcut_manager.read().await;
-            if let Some(ref sm) = *sm_lock {
-                match sm.toggle_desktop_shortcut(t, &version_dir) {
+            let shortcut_manager = state.shortcut_manager.read().await.clone();
+            if let Some(sm) = shortcut_manager {
+                let tag = t.to_string();
+                let result = tokio::task::spawn_blocking(move || {
+                    sm.toggle_desktop_shortcut(&tag, &version_dir)
+                })
+                .await
+                .map_err(|e| pumas_library::PumasError::Config {
+                    message: format!("Shortcut toggle task failed: {}", e),
+                })?;
+
+                match result {
                     Ok(result) => Ok(json!(result.success)),
                     Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
                 }
@@ -104,8 +122,8 @@ pub async fn toggle_desktop(state: &AppState, params: &Value) -> pumas_library::
 // Legacy shortcut methods (deprecated but still supported)
 
 pub async fn menu_exists(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let sm_lock = state.shortcut_manager.read().await;
-    if let Some(ref sm) = *sm_lock {
+    let shortcut_manager = state.shortcut_manager.read().await.clone();
+    if let Some(sm) = shortcut_manager {
         Ok(json!(sm.menu_exists_async().await?))
     } else {
         Ok(json!(false))
@@ -113,8 +131,8 @@ pub async fn menu_exists(state: &AppState, _params: &Value) -> pumas_library::Re
 }
 
 pub async fn desktop_exists(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let sm_lock = state.shortcut_manager.read().await;
-    if let Some(ref sm) = *sm_lock {
+    let shortcut_manager = state.shortcut_manager.read().await.clone();
+    if let Some(sm) = shortcut_manager {
         Ok(json!(sm.desktop_exists_async().await?))
     } else {
         Ok(json!(false))

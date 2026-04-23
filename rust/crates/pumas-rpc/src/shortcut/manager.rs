@@ -33,6 +33,7 @@ pub struct ShortcutResult {
 }
 
 /// High-level shortcut manager.
+#[derive(Clone)]
 pub struct ShortcutManager {
     /// Icon manager.
     icon_manager: IconManager,

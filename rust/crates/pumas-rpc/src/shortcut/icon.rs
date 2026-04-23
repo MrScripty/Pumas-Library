@@ -15,6 +15,7 @@ use tracing::debug;
 const ICON_SIZES: [u32; 4] = [256, 128, 64, 48];
 
 /// Icon manager for shortcut icons.
+#[derive(Clone)]
 pub struct IconManager {
     /// Path to the base icon file.
     base_icon: PathBuf,

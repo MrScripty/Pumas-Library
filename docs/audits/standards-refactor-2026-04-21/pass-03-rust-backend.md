@@ -274,6 +274,10 @@ Implementation notes:
   `handlers/status.rs` now use async shortcut-state probes for menu and desktop entries, so RPC
   shortcut state and status request paths no longer perform synchronous existence checks on async
   runtime threads when reporting UI shortcut state.
+- Completed: `pumas-rpc/src/handlers/shortcuts.rs` now clones shortcut manager state out of the
+  shared lock before awaiting async probes, and routes shortcut toggle mutations through
+  `tokio::task::spawn_blocking`, so shortcut create/remove request paths no longer execute their
+  synchronous filesystem and script/icon generation work inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

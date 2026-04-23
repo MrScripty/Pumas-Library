@@ -37,6 +37,80 @@ const listTransition = {
   damping: 32,
 };
 
+interface SidebarIconFaceProps {
+  app: AppConfig;
+  hasInstall: boolean;
+  isOtherDragging: boolean;
+  launchError: boolean;
+  selectedAppId: string | null;
+  shakeStyle: React.CSSProperties;
+  onIconClick: (appId: string) => void;
+  onLaunchApp?: (appId: string) => void;
+  onOpenLog?: (appId: string) => void;
+  onStopApp?: (appId: string) => void;
+}
+
+function SidebarIconFace({
+  app,
+  hasInstall,
+  isOtherDragging,
+  launchError,
+  selectedAppId,
+  shakeStyle,
+  onIconClick,
+  onLaunchApp,
+  onOpenLog,
+  onStopApp,
+}: SidebarIconFaceProps) {
+  const iconProps = {
+    state: app.iconState,
+    isSelected: selectedAppId === app.id,
+    onClick: () => onIconClick(app.id),
+    title: app.displayName,
+    ramUsage: app.ramUsage,
+    gpuUsage: app.gpuUsage,
+    hasInstall,
+    launchError,
+    onLaunch: () => onLaunchApp?.(app.id),
+    onStop: () => onStopApp?.(app.id),
+    onOpenLog: () => onOpenLog?.(app.id),
+    dragOpacity: 1.0,
+    shakeStyle,
+    _disableShake: isOtherDragging,
+  };
+
+  if (app.id === 'comfyui') {
+    return <ComfyUIIcon {...iconProps} />;
+  }
+
+  return <AppIcon appId={app.id} {...iconProps} />;
+}
+
+function DeleteZoneOverlay({
+  deleteZoneShakeIntensity,
+  isDragging,
+  isFloating,
+  isInDeleteZone,
+}: {
+  deleteZoneShakeIntensity: number;
+  isDragging: boolean;
+  isFloating: boolean;
+  isInDeleteZone: boolean;
+}) {
+  if (!isFloating || !isDragging || !isInDeleteZone) {
+    return null;
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+      <X
+        className="h-8 w-8 text-accent-error"
+        style={{ opacity: 0.4 + deleteZoneShakeIntensity * 0.6 }}
+      />
+    </div>
+  );
+}
+
 export function SidebarAppIcon({
   app,
   completeDelete,
@@ -114,51 +188,24 @@ export function SidebarAppIcon({
     // @ts-expect-error - Framer Motion transition type incompatibility
     <motion.div key={app.id} {...motionProps}>
       <div className="relative">
-        {app.id === 'comfyui' ? (
-          <ComfyUIIcon
-            state={app.iconState}
-            isSelected={selectedAppId === app.id}
-            onClick={() => onIconClick(app.id)}
-            title={app.displayName}
-            ramUsage={app.ramUsage}
-            gpuUsage={app.gpuUsage}
-            hasInstall={hasInstall}
-            launchError={launchError}
-            onLaunch={() => onLaunchApp?.(app.id)}
-            onStop={() => onStopApp?.(app.id)}
-            onOpenLog={() => onOpenLog?.(app.id)}
-            dragOpacity={1.0}
-            shakeStyle={shakeStyle}
-            _disableShake={isOtherDragging}
-          />
-        ) : (
-          <AppIcon
-            appId={app.id}
-            state={app.iconState}
-            isSelected={selectedAppId === app.id}
-            onClick={() => onIconClick(app.id)}
-            title={app.displayName}
-            ramUsage={app.ramUsage}
-            gpuUsage={app.gpuUsage}
-            hasInstall={hasInstall}
-            launchError={launchError}
-            onLaunch={() => onLaunchApp?.(app.id)}
-            onStop={() => onStopApp?.(app.id)}
-            onOpenLog={() => onOpenLog?.(app.id)}
-            dragOpacity={1.0}
-            shakeStyle={shakeStyle}
-            _disableShake={isOtherDragging}
-          />
-        )}
-
-        {isFloating && isDragging && isInDeleteZone && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <X
-              className="h-8 w-8 text-accent-error"
-              style={{ opacity: 0.4 + deleteZoneShakeIntensity * 0.6 }}
-            />
-          </div>
-        )}
+        <SidebarIconFace
+          app={app}
+          hasInstall={hasInstall}
+          isOtherDragging={isOtherDragging}
+          launchError={launchError}
+          selectedAppId={selectedAppId}
+          shakeStyle={shakeStyle}
+          onIconClick={onIconClick}
+          onLaunchApp={onLaunchApp}
+          onOpenLog={onOpenLog}
+          onStopApp={onStopApp}
+        />
+        <DeleteZoneOverlay
+          deleteZoneShakeIntensity={deleteZoneShakeIntensity}
+          isDragging={isDragging}
+          isFloating={isFloating}
+          isInDeleteZone={isInDeleteZone}
+        />
       </div>
     </motion.div>
   );

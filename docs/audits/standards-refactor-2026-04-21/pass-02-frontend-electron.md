@@ -242,6 +242,7 @@ Rectification:
 - Completed: reduce `frontend/src/hooks/useStatus.ts` fetch complexity by moving stale system-resource, network-status, and library-status refreshes behind focused callbacks.
 - Completed: reduce `frontend/src/components/ModelImportDropZone.tsx` dropped-path extraction complexity by splitting Electron, URI-list, plain-text, and File API fallback extraction paths.
 - Completed: reduce `frontend/src/components/app-panels/sections/StatsSection.tsx` render complexity by extracting stat mapping, count card, memory card, and loaded-model badge rendering.
+- Completed: reduce `frontend/src/components/SidebarAppIcon.tsx` render complexity by extracting icon-face selection and delete-zone overlay rendering.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

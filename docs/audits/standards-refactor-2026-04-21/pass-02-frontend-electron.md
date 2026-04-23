@@ -218,7 +218,7 @@ Implementation notes:
 - Install cancellation and migration report destructive actions use app-owned confirmation dialogs instead of `window.confirm`.
 
 ### F07 - Frontend Lint Config Has Legacy Waivers That Hide Refactor Pressure
-Status: partially remediated
+Status: remediated for current frontend lint standards
 
 `frontend/eslint.config.js` still disables:
 
@@ -258,9 +258,10 @@ Rectification:
 - Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.
 - Completed: reduce `frontend/src/App.tsx` orchestration complexity by moving shell state projection and prop construction into `frontend/src/components/AppShellState.ts` while preserving App shell behavior with focused helper coverage.
 - Completed: `frontend/eslint.config.js` enforces ESLint `complexity` at a maximum of 20 after the function-level decomposition wave cleared the full frontend source tree.
-- Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory is recorded in `pass-02-frontend-function-length-inventory.md`.
+- Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory was recorded in `pass-02-frontend-function-length-inventory.md`.
 - Completed: split the oversized `AppIndicator.test.tsx` wrapper into rendering/state and interaction/cleanup suites, then lower the enforced `max-lines-per-function` ratchet from 300 to 275 effective lines.
 - Completed: extract `usePhysicsDrag` delete-timeout cleanup and pending undo snapshot creation into a lifecycle helper module, then lower the enforced `max-lines-per-function` ratchet from 275 to 260 effective lines.
+- Completed: revise the function-length plan to the user-approved 500-line threshold and align `frontend/eslint.config.js` with that target; no current frontend functions exceed the adopted threshold.
 - Completed: replace frontend non-null assertions in production helpers and tests with explicit guards, then enforce `@typescript-eslint/no-non-null-assertion`.
 - Completed: clear the first low-risk `@typescript-eslint/no-unnecessary-condition` batch in resource, mapping, migration-summary, and library-model helpers; the remaining queue is recorded in `pass-02-frontend-unnecessary-condition-inventory.md`.
 - Completed: clear a second low-risk `@typescript-eslint/no-unnecessary-condition` batch in link-health, mapping-preview, migration-report, and import-metadata helpers, reducing the remaining inventory from 78 to 66 findings.
@@ -273,7 +274,7 @@ Rectification:
 - Completed: clear the final `@typescript-eslint/no-unnecessary-condition` batch in app-panel state, physics-drag, plugin, and version-shortcut hooks, reducing the remaining inventory from 11 to 0 findings.
 - Completed: `frontend/eslint.config.js` enforces `@typescript-eslint/no-unnecessary-condition` after the inventory reached zero.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
-- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced.
+- Remaining: use `max-lines-per-function` only as a 500-line guardrail; continue decomposition when driven by state ownership, complexity, coupling, testability, or user-facing behavior risk.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

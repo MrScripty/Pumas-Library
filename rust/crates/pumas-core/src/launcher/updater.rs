@@ -431,7 +431,7 @@ impl LauncherUpdater {
     }
 
     /// Apply launcher update by pulling latest changes and rebuilding.
-    pub async fn apply_update(&self) -> UpdateApplyResult {
+    fn apply_update_blocking(&self) -> UpdateApplyResult {
         // Safety checks
         if !self.is_git_repo() {
             return UpdateApplyResult {
@@ -593,6 +593,21 @@ impl LauncherUpdater {
             new_commit: Some(new_commit),
             previous_commit: Some(current_commit),
             error: None,
+        }
+    }
+
+    /// Apply launcher update by pulling latest changes and rebuilding.
+    pub async fn apply_update(&self) -> UpdateApplyResult {
+        let updater = self.clone();
+        match tokio::task::spawn_blocking(move || updater.apply_update_blocking()).await {
+            Ok(result) => result,
+            Err(error) => UpdateApplyResult {
+                success: false,
+                message: None,
+                new_commit: None,
+                previous_commit: None,
+                error: Some(format!("Failed to join apply_update task: {}", error)),
+            },
         }
     }
 

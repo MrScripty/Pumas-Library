@@ -921,96 +921,117 @@ impl VersionInstaller {
 
         // GitHub archives typically wrap content in a single directory
         // Find the actual source directory
-        let entries: Vec<_> = std::fs::read_dir(extract_dir)
+        let mut entries = fs::read_dir(extract_dir)
+            .await
             .map_err(|e| PumasError::Io {
                 message: format!("Failed to read extract directory: {}", e),
                 path: Some(extract_dir.to_path_buf()),
                 source: Some(e),
-            })?
-            .filter_map(|e| e.ok())
-            .collect();
+            })?;
+        let mut entry_paths = Vec::new();
+        while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
+            message: format!("Failed to iterate extract directory: {}", e),
+            path: Some(extract_dir.to_path_buf()),
+            source: Some(e),
+        })? {
+            entry_paths.push(entry.path());
+        }
 
-        let source_dir = if entries.len() == 1 && entries[0].path().is_dir() {
-            entries[0].path()
+        let source_dir = if entry_paths.len() == 1
+            && fs::metadata(&entry_paths[0])
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to inspect extracted entry: {}", e),
+                    path: Some(entry_paths[0].clone()),
+                    source: Some(e),
+                })?
+                .is_dir()
+        {
+            entry_paths[0].clone()
         } else {
             extract_dir.to_path_buf()
         };
 
         // Ensure versions directory exists
         if let Some(parent) = version_dir.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
-                message: format!("Failed to create versions directory: {}", e),
-                path: Some(parent.to_path_buf()),
-                source: Some(e),
-            })?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to create versions directory: {}", e),
+                    path: Some(parent.to_path_buf()),
+                    source: Some(e),
+                })?;
         }
 
         // Remove existing version directory if present
-        if version_dir.exists() {
-            std::fs::remove_dir_all(version_dir).map_err(|e| PumasError::Io {
-                message: format!("Failed to remove existing version directory: {}", e),
-                path: Some(version_dir.to_path_buf()),
-                source: Some(e),
-            })?;
+        if path_exists(version_dir).await? {
+            fs::remove_dir_all(version_dir)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to remove existing version directory: {}", e),
+                    path: Some(version_dir.to_path_buf()),
+                    source: Some(e),
+                })?;
         }
 
         // Move (rename) the directory
-        std::fs::rename(&source_dir, version_dir)
-            .map_err(|e| {
-                // If rename fails (cross-device), fall back to copy + delete
+        match fs::rename(&source_dir, version_dir).await {
+            Ok(()) => Ok(()),
+            Err(e) => {
                 debug!("Rename failed, falling back to copy: {}", e);
-                if let Err(copy_err) = self.copy_dir_recursive(&source_dir, version_dir) {
-                    return copy_err;
-                }
-                if let Err(rm_err) = std::fs::remove_dir_all(&source_dir) {
+                self.copy_dir_recursive(&source_dir, version_dir).await?;
+                if let Err(rm_err) = fs::remove_dir_all(&source_dir).await {
                     warn!("Failed to remove source after copy: {}", rm_err);
                 }
-                PumasError::Io {
-                    message: "Moved via copy".to_string(),
-                    path: None,
-                    source: None,
-                }
-            })
-            .or_else(|e| {
-                if e.to_string().contains("Moved via copy") {
-                    Ok(())
-                } else {
-                    Err(e)
-                }
-            })?;
-
-        Ok(())
+                Ok(())
+            }
+        }
     }
 
-    fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
-        std::fs::create_dir_all(dst).map_err(|e| PumasError::Io {
-            message: format!("Failed to create directory: {}", e),
-            path: Some(dst.to_path_buf()),
-            source: Some(e),
-        })?;
+    async fn copy_dir_recursive(&self, src: &Path, dst: &Path) -> Result<()> {
+        let mut pending_dirs = vec![(src.to_path_buf(), dst.to_path_buf())];
 
-        for entry in std::fs::read_dir(src).map_err(|e| PumasError::Io {
-            message: format!("Failed to read directory: {}", e),
-            path: Some(src.to_path_buf()),
-            source: Some(e),
-        })? {
-            let entry = entry.map_err(|e| PumasError::Io {
+        while let Some((current_src, current_dst)) = pending_dirs.pop() {
+            fs::create_dir_all(&current_dst)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to create directory: {}", e),
+                    path: Some(current_dst.clone()),
+                    source: Some(e),
+                })?;
+
+            let mut entries = fs::read_dir(&current_src)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to read extract directory: {}", e),
+                    path: Some(current_src.clone()),
+                    source: Some(e),
+                })?;
+
+            while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
                 message: format!("Failed to read entry: {}", e),
-                path: Some(src.to_path_buf()),
+                path: Some(current_src.clone()),
                 source: Some(e),
-            })?;
-
-            let src_path = entry.path();
-            let dst_path = dst.join(entry.file_name());
-
-            if src_path.is_dir() {
-                self.copy_dir_recursive(&src_path, &dst_path)?;
-            } else {
-                std::fs::copy(&src_path, &dst_path).map_err(|e| PumasError::Io {
-                    message: format!("Failed to copy file: {}", e),
+            })? {
+                let src_path = entry.path();
+                let dst_path = current_dst.join(entry.file_name());
+                let file_type = entry.file_type().await.map_err(|e| PumasError::Io {
+                    message: format!("Failed to inspect entry: {}", e),
                     path: Some(src_path.clone()),
                     source: Some(e),
                 })?;
+
+                if file_type.is_dir() {
+                    pending_dirs.push((src_path, dst_path));
+                } else {
+                    fs::copy(&src_path, &dst_path)
+                        .await
+                        .map_err(|e| PumasError::Io {
+                            message: format!("Failed to copy file: {}", e),
+                            path: Some(src_path.clone()),
+                            source: Some(e),
+                        })?;
+                }
             }
         }
 

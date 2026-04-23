@@ -206,6 +206,10 @@ Implementation notes:
   async cached-download metadata checks, async archive writes, and async requirements/venv path
   probes so the installer request path no longer performs those filesystem operations directly on
   runtime threads before extraction and finalize steps.
+- Completed: `pumas-app-manager/src/version_manager/installer.rs` now uses `tokio::fs` for async
+  extract-directory scans, versions-root creation, existing-version removal, rename fallback, and
+  recursive copy operations in `move_to_final_location`, so the async install handoff from extract
+  to final version placement no longer performs that directory work through blocking std fs calls.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

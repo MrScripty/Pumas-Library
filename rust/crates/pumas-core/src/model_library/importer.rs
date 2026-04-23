@@ -1138,7 +1138,16 @@ impl ModelImporter {
         let primary_file = primary_file.unwrap();
 
         // Detect file type from primary file.
-        let type_info = identify_model_type(&primary_file)?;
+        let primary_file_for_type = primary_file.clone();
+        let type_info =
+            tokio::task::spawn_blocking(move || identify_model_type(&primary_file_for_type))
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join in-place type detection task: {}",
+                        err
+                    ))
+                })??;
 
         // Resolve model type from hard source signals via SQLite rule tables.
         // Medium hints (pipeline_tag/spec.model_type) only adjust confidence.

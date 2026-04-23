@@ -231,7 +231,15 @@ pub async fn detect_sharded_sets(
     let paths: Vec<std::path::PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
 
     // Detect sharded sets
-    let sets = pumas_library::sharding::detect_sharded_sets(&paths);
+    let sets =
+        tokio::task::spawn_blocking(move || pumas_library::sharding::detect_sharded_sets(&paths))
+            .await
+            .map_err(|err| {
+                pumas_library::error::PumasError::Other(format!(
+                    "Failed to join shard detection task: {}",
+                    err
+                ))
+            })?;
 
     // Convert to serializable format
     let result: std::collections::HashMap<String, Vec<String>> = sets

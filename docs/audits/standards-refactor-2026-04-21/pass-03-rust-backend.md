@@ -368,6 +368,9 @@ Implementation notes:
 - Completed: `pumas-rpc/src/handlers/ollama.rs` now routes primary model-file discovery through
   `tokio::task::spawn_blocking`, so the Ollama create-model request path no longer performs
   synchronous library file discovery inline on async runtime threads before validating GGUF input.
+- Completed: `pumas-rpc/src/handlers/models/imports.rs` now routes shard-set detection through
+  `tokio::task::spawn_blocking`, so the RPC shard-analysis request path no longer performs
+  synchronous shard grouping inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -251,31 +251,39 @@ impl PumasApi {
     }
 
     /// Return whether library and app version paths are on different filesystems.
-    pub fn get_cross_filesystem_warning(
+    pub async fn get_cross_filesystem_warning(
         &self,
         app_models_path: &Path,
     ) -> models::CrossFilesystemWarningResponse {
         let primary = self.primary();
         let library_root = primary.model_library.library_root().display().to_string();
         let app_path = app_models_path.display().to_string();
+        let model_mapper = primary.model_mapper.clone();
+        let app_models_path = app_models_path.to_path_buf();
 
-        match primary.model_mapper.check_cross_filesystem(app_models_path) {
-            Ok(cross_filesystem) if cross_filesystem => models::CrossFilesystemWarningResponse {
-                success: true,
-                error: None,
-                cross_filesystem: true,
-                library_path: Some(library_root),
-                app_path: Some(app_path),
-                warning: Some(
-                    "Model library and app version directory are on different filesystems."
-                        .to_string(),
-                ),
-                recommendation: Some(
-                    "Prefer keeping both directories on the same filesystem for best link behavior."
-                        .to_string(),
-                ),
-            },
-            Ok(_) => models::CrossFilesystemWarningResponse {
+        match tokio::task::spawn_blocking(move || {
+            model_mapper.check_cross_filesystem(&app_models_path)
+        })
+        .await
+        {
+            Ok(Ok(cross_filesystem)) if cross_filesystem => {
+                models::CrossFilesystemWarningResponse {
+                    success: true,
+                    error: None,
+                    cross_filesystem: true,
+                    library_path: Some(library_root),
+                    app_path: Some(app_path),
+                    warning: Some(
+                        "Model library and app version directory are on different filesystems."
+                            .to_string(),
+                    ),
+                    recommendation: Some(
+                        "Prefer keeping both directories on the same filesystem for best link behavior."
+                            .to_string(),
+                    ),
+                }
+            }
+            Ok(Ok(_)) => models::CrossFilesystemWarningResponse {
                 success: true,
                 error: None,
                 cross_filesystem: false,
@@ -284,9 +292,21 @@ impl PumasApi {
                 warning: None,
                 recommendation: None,
             },
-            Err(err) => models::CrossFilesystemWarningResponse {
+            Ok(Err(err)) => models::CrossFilesystemWarningResponse {
                 success: false,
                 error: Some(err.to_string()),
+                cross_filesystem: false,
+                library_path: Some(library_root),
+                app_path: Some(app_path),
+                warning: None,
+                recommendation: None,
+            },
+            Err(err) => models::CrossFilesystemWarningResponse {
+                success: false,
+                error: Some(format!(
+                    "Failed to join get_cross_filesystem_warning task: {}",
+                    err
+                )),
                 cross_filesystem: false,
                 library_path: Some(library_root),
                 app_path: Some(app_path),

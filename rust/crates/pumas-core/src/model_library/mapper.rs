@@ -18,6 +18,7 @@ use tokio::sync::RwLock;
 use walkdir::WalkDir;
 
 /// Model mapper for creating links between library and applications.
+#[derive(Clone)]
 pub struct ModelMapper {
     /// Reference to the model library
     library: Arc<ModelLibrary>,

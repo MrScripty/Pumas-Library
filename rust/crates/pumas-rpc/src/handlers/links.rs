@@ -205,7 +205,7 @@ pub async fn get_cross_filesystem_warning(
         let models_path = version_path.join("models");
         drop(managers);
 
-        let response = state.api.get_cross_filesystem_warning(&models_path);
+        let response = state.api.get_cross_filesystem_warning(&models_path).await;
         Ok(serde_json::to_value(response)?)
     } else {
         Ok(json!({

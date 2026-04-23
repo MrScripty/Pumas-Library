@@ -247,6 +247,7 @@ Rectification:
 - Completed: reduce `frontend/src/components/model-import/modelImportWorkflowHelpers.ts` import-entry complexity by separating single-result and multi-model-container entry construction.
 - Completed: reduce `frontend/src/components/model-import/ImportMetadataDetails.tsx` render complexity by moving metadata state projection and detail-row rendering into focused model-import detail modules.
 - Completed: reduce `frontend/src/components/model-import/ImportLookupCard.tsx` render complexity by extracting repository links, trust/status badges, metadata expand controls, status icons, and non-file card rendering.
+- Completed: reduce `frontend/src/components/ModelManagerRemoteDownload.ts` remote-download complexity by extracting request shaping, stale-error clearing, error recording, and exception reporting helpers.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

@@ -14,6 +14,7 @@ use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use tokio::fs;
 use tracing::{debug, warn};
 
 /// Size information for a release.
@@ -218,7 +219,7 @@ impl SizeCalculator {
 
         // Cache the result
         self.cache.insert(tag.to_string(), result.clone());
-        if let Err(e) = self.save_cache() {
+        if let Err(e) = self.save_cache_async().await {
             warn!("Failed to save size cache: {}", e);
         }
 
@@ -369,6 +370,30 @@ impl SizeCalculator {
             path: Some(self.cache_path.clone()),
             source: Some(e),
         })?;
+
+        debug!("Saved {} release sizes to cache", self.cache.len());
+        Ok(())
+    }
+
+    async fn save_cache_async(&self) -> Result<()> {
+        if let Some(parent) = self.cache_path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to create cache directory: {}", e),
+                    path: Some(parent.to_path_buf()),
+                    source: Some(e),
+                })?;
+        }
+
+        let content = serde_json::to_string_pretty(&self.cache)?;
+        fs::write(&self.cache_path, content)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to write size cache: {}", e),
+                path: Some(self.cache_path.clone()),
+                source: Some(e),
+            })?;
 
         debug!("Saved {} release sizes to cache", self.cache.len());
         Ok(())

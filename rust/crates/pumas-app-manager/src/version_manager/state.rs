@@ -10,6 +10,7 @@ use pumas_library::{PumasError, Result};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs;
 use tracing::{debug, info, warn};
 
 /// Tracks the state of all versions.
@@ -58,7 +59,7 @@ impl VersionState {
         self.default_version = versions.default_version.clone();
 
         // Initialize active version
-        self.active_version = self.determine_active_version(&versions)?;
+        self.active_version = self.determine_active_version(&versions).await?;
 
         debug!(
             "Initialized version state: {} installed, active={:?}, default={:?}",
@@ -77,14 +78,21 @@ impl VersionState {
     /// 2. Default version from metadata
     /// 3. Last selected version from metadata
     /// 4. Newest installed version
-    fn determine_active_version(
+    async fn determine_active_version(
         &self,
         versions: &pumas_library::metadata::VersionsMetadata,
     ) -> Result<Option<String>> {
         // 1. Check .active-version file
         let active_file = self.launcher_root.join(".active-version");
-        if active_file.exists() {
-            if let Ok(tag) = std::fs::read_to_string(&active_file) {
+        if fs::try_exists(&active_file)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check active version file: {}", e),
+                path: Some(active_file.clone()),
+                source: Some(e),
+            })?
+        {
+            if let Ok(tag) = fs::read_to_string(&active_file).await {
                 let tag = tag.trim().to_string();
                 if !tag.is_empty() && self.installed_tags.contains(&tag) {
                     debug!("Active version from file: {}", tag);
@@ -123,7 +131,7 @@ impl VersionState {
     }
 
     /// Refresh state from disk.
-    pub fn refresh(&mut self) -> Result<()> {
+    pub async fn refresh(&mut self) -> Result<()> {
         let versions = self.metadata_manager.load_versions(Some(self.app_id))?;
         self.installed_tags = versions.installed.keys().cloned().collect();
         self.default_version = versions.default_version.clone();
@@ -131,10 +139,10 @@ impl VersionState {
         // Re-validate active version
         if let Some(ref active) = self.active_version {
             if !self.installed_tags.contains(active) {
-                self.active_version = self.determine_active_version(&versions)?;
+                self.active_version = self.determine_active_version(&versions).await?;
             }
         } else {
-            self.active_version = self.determine_active_version(&versions)?;
+            self.active_version = self.determine_active_version(&versions).await?;
         }
 
         Ok(())
@@ -185,7 +193,7 @@ impl VersionState {
     // ========================================
 
     /// Set the active version.
-    pub fn set_active_version(&mut self, tag: &str) -> Result<bool> {
+    pub async fn set_active_version(&mut self, tag: &str) -> Result<bool> {
         if !self.is_installed(tag) {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
@@ -197,11 +205,13 @@ impl VersionState {
 
         // Write to .active-version file
         let active_file = self.launcher_root.join(".active-version");
-        std::fs::write(&active_file, tag).map_err(|e| PumasError::Io {
-            message: format!("Failed to write active version file: {}", e),
-            path: Some(active_file),
-            source: Some(e),
-        })?;
+        fs::write(&active_file, tag)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to write active version file: {}", e),
+                path: Some(active_file),
+                source: Some(e),
+            })?;
 
         // Update last_selected_version in metadata
         self.metadata_manager
@@ -244,7 +254,7 @@ impl VersionState {
     }
 
     /// Remove an installed version.
-    pub fn remove_installed_version(&mut self, tag: &str) -> Result<()> {
+    pub async fn remove_installed_version(&mut self, tag: &str) -> Result<()> {
         self.metadata_manager
             .remove_installed_version(tag, Some(self.app_id))?;
         self.installed_tags.remove(tag);
@@ -254,8 +264,15 @@ impl VersionState {
             self.active_version = None;
             // Clear .active-version file
             let active_file = self.launcher_root.join(".active-version");
-            if active_file.exists() {
-                let _ = std::fs::remove_file(&active_file);
+            if fs::try_exists(&active_file)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to check active version file: {}", e),
+                    path: Some(active_file.clone()),
+                    source: Some(e),
+                })?
+            {
+                let _ = fs::remove_file(&active_file).await;
             }
         }
 
@@ -273,7 +290,7 @@ impl VersionState {
     // ========================================
 
     /// Validate all installations and remove incomplete ones.
-    pub fn validate_installations(&mut self) -> Result<ValidationResult> {
+    pub async fn validate_installations(&mut self) -> Result<ValidationResult> {
         let versions_dir = self.launcher_root.join(self.app_id.versions_dir_name());
         let mut removed_tags = Vec::new();
         let mut orphaned_dirs = Vec::new();
@@ -296,7 +313,7 @@ impl VersionState {
                 versions_dir.join(&info.path)
             };
 
-            if !self.is_version_complete(&version_path) {
+            if !self.is_version_complete(&version_path).await? {
                 warn!(
                     "Incomplete installation found: {} at {}",
                     tag,
@@ -313,24 +330,48 @@ impl VersionState {
                 "Removing stale metadata entry for incomplete installation: {}",
                 tag
             );
-            self.remove_installed_version(tag)?;
+            self.remove_installed_version(tag).await?;
             // NOTE: We no longer delete files automatically to prevent data loss
             // Orphaned directories will be reported but not deleted
         }
 
         // Check for orphaned directories (exist on disk but not in metadata)
-        if versions_dir.exists() {
-            for entry in (std::fs::read_dir(&versions_dir).map_err(|e| PumasError::Io {
-                message: format!("Failed to read versions directory: {}", e),
+        if fs::try_exists(&versions_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check versions directory: {}", e),
                 path: Some(versions_dir.clone()),
                 source: Some(e),
-            })?)
-            .flatten()
-            {
+            })?
+        {
+            let mut entries = fs::read_dir(&versions_dir)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to read versions directory: {}", e),
+                    path: Some(versions_dir.clone()),
+                    source: Some(e),
+                })?;
+
+            while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
+                message: format!("Failed to iterate versions directory: {}", e),
+                path: Some(versions_dir.clone()),
+                source: Some(e),
+            })? {
                 let dir_name = entry.file_name().to_string_lossy().to_string();
-                if entry.path().is_dir() && !self.installed_tags.contains(&dir_name) {
+                let entry_path = entry.path();
+                if entry
+                    .file_type()
+                    .await
+                    .map_err(|e| PumasError::Io {
+                        message: format!("Failed to inspect version entry: {}", e),
+                        path: Some(entry_path.clone()),
+                        source: Some(e),
+                    })?
+                    .is_dir()
+                    && !self.installed_tags.contains(&dir_name)
+                {
                     warn!("Orphaned version directory found: {}", dir_name);
-                    orphaned_dirs.push(entry.path());
+                    orphaned_dirs.push(entry_path);
                 }
             }
         }
@@ -351,9 +392,16 @@ impl VersionState {
     }
 
     /// Check if a version installation is complete.
-    fn is_version_complete(&self, version_path: &Path) -> bool {
-        if !version_path.exists() {
-            return false;
+    async fn is_version_complete(&self, version_path: &Path) -> Result<bool> {
+        if !fs::try_exists(version_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check version path: {}", e),
+                path: Some(version_path.to_path_buf()),
+                source: Some(e),
+            })?
+        {
+            return Ok(false);
         }
 
         // Required files/directories for a complete installation
@@ -380,7 +428,20 @@ impl VersionState {
             }
         };
 
-        required.iter().all(|p| p.exists())
+        for required_path in required {
+            if !fs::try_exists(&required_path)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to check required version path: {}", e),
+                    path: Some(required_path.clone()),
+                    source: Some(e),
+                })?
+            {
+                return Ok(false);
+            }
+        }
+
+        Ok(true)
     }
 }
 
@@ -463,7 +524,7 @@ mod tests {
         state.add_installed_version("v1.0.0", metadata).unwrap();
 
         // Set active
-        state.set_active_version("v1.0.0").unwrap();
+        state.set_active_version("v1.0.0").await.unwrap();
         assert_eq!(state.get_active_version(), Some("v1.0.0".to_string()));
 
         // Check file was written
@@ -476,7 +537,7 @@ mod tests {
     async fn test_set_active_version_not_installed() {
         let (mut state, _temp) = create_test_state().await;
 
-        let result = state.set_active_version("v1.0.0");
+        let result = state.set_active_version("v1.0.0").await;
         assert!(result.is_err());
     }
 
@@ -526,11 +587,11 @@ mod tests {
             ..Default::default()
         };
         state.add_installed_version("v1.0.0", metadata).unwrap();
-        state.set_active_version("v1.0.0").unwrap();
+        state.set_active_version("v1.0.0").await.unwrap();
         state.set_default_version(Some("v1.0.0")).unwrap();
 
         // Remove
-        state.remove_installed_version("v1.0.0").unwrap();
+        state.remove_installed_version("v1.0.0").await.unwrap();
 
         assert!(!state.is_installed("v1.0.0"));
         assert!(state.get_active_version().is_none());
@@ -551,7 +612,7 @@ mod tests {
         state.add_installed_version("v1.0.0", metadata).unwrap();
 
         // Validate - should remove incomplete
-        let result = state.validate_installations().unwrap();
+        let result = state.validate_installations().await.unwrap();
         assert!(result.removed_tags.contains(&"v1.0.0".to_string()));
         assert!(!state.is_installed("v1.0.0"));
     }

@@ -138,7 +138,7 @@ impl VersionManager {
         // Validate installed versions exist on disk (removes stale entries)
         {
             let mut state_guard = state.write().await;
-            match state_guard.validate_installations() {
+            match state_guard.validate_installations().await {
                 Ok(validation) => {
                     if !validation.removed_tags.is_empty() {
                         info!(
@@ -235,7 +235,7 @@ impl VersionManager {
     /// Set the active version.
     pub async fn set_active_version(&self, tag: &str) -> Result<bool> {
         let mut state = self.state.write().await;
-        state.set_active_version(tag)
+        state.set_active_version(tag).await
     }
 
     /// Set the default version.
@@ -288,7 +288,7 @@ impl VersionManager {
     /// Validate all installations and remove incomplete ones.
     pub async fn validate_installations(&self) -> Result<ValidationResult> {
         let mut state = self.state.write().await;
-        state.validate_installations()
+        state.validate_installations().await
     }
 
     // ========================================
@@ -423,7 +423,7 @@ impl VersionManager {
             // Update state on success
             if result.is_ok() {
                 let mut state_guard = state.write().await;
-                if let Err(e) = state_guard.refresh() {
+                if let Err(e) = state_guard.refresh().await {
                     warn!("Failed to refresh state after installation: {}", e);
                 }
             }
@@ -491,7 +491,7 @@ impl VersionManager {
         // Refresh state
         {
             let mut state = self.state.write().await;
-            state.refresh()?;
+            state.refresh().await?;
         }
 
         info!("Removed version: {}", tag);

@@ -194,6 +194,10 @@ Implementation notes:
 - Completed: `pumas-core/src/network/github.rs` now uses `tokio::fs` for async release-cache disk
   reads and writes in the GitHub release fetch path so cache-backed network entry points no longer
   perform blocking cache I/O on runtime threads before or after fetches.
+- Completed: `pumas-app-manager/src/version_manager/state.rs` now uses `tokio::fs` for async
+  active-version file reads/writes/removal and async version-directory scans so version-state
+  initialization, validation, activation, and uninstall refresh paths no longer perform that
+  filesystem work synchronously on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

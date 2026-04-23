@@ -684,7 +684,7 @@ impl OllamaVersionManager {
     /// Set active version.
     pub async fn set_active_version(&self, tag: &str) -> Result<()> {
         let mut state = self.state.write().await;
-        state.set_active_version(tag)?;
+        state.set_active_version(tag).await?;
         Ok(())
     }
 
@@ -718,7 +718,7 @@ impl OllamaVersionManager {
         // Update state (this also removes from metadata)
         {
             let mut state = self.state.write().await;
-            state.remove_installed_version(tag)?;
+            state.remove_installed_version(tag).await?;
         }
 
         info!("Ollama {} uninstalled", tag);

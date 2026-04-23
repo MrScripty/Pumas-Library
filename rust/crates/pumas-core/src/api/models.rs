@@ -9,6 +9,13 @@ use crate::PumasApi;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
 
 impl PumasApi {
     // ========================================
@@ -218,7 +225,7 @@ impl PumasApi {
         let library = &self.primary().model_library;
         let model_dir = library.library_root().join(model_id);
 
-        if !model_dir.exists() {
+        if !path_exists(&model_dir).await? {
             return Err(crate::error::PumasError::Other(format!(
                 "Model not found: {}",
                 model_id
@@ -268,7 +275,7 @@ impl PumasApi {
         let library = &self.primary().model_library;
         let model_dir = library.library_root().join(model_id);
 
-        if !model_dir.exists() {
+        if !path_exists(&model_dir).await? {
             return Err(crate::error::PumasError::Other(format!(
                 "Model not found: {}",
                 model_id
@@ -311,7 +318,7 @@ impl PumasApi {
         let library = &self.primary().model_library;
         let model_dir = library.library_root().join(model_id);
 
-        if !model_dir.exists() {
+        if !path_exists(&model_dir).await? {
             return Ok(models::UpdateModelNotesResponse {
                 success: false,
                 error: Some(format!("Model not found: {}", model_id)),

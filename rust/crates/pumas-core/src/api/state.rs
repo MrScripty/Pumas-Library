@@ -1032,7 +1032,7 @@ async fn load_inference_settings(
     let library = &primary.model_library;
     let model_dir = library.library_root().join(model_id);
 
-    if !model_dir.exists() {
+    if !path_exists(&model_dir).await? {
         return Err(PumasError::Other(format!("Model not found: {}", model_id)));
     }
 
@@ -1061,7 +1061,7 @@ async fn store_inference_settings(
     let library = &primary.model_library;
     let model_dir = library.library_root().join(model_id);
 
-    if !model_dir.exists() {
+    if !path_exists(&model_dir).await? {
         return Err(PumasError::Other(format!("Model not found: {}", model_id)));
     }
 
@@ -1086,7 +1086,7 @@ async fn store_model_notes(
     let library = &primary.model_library;
     let model_dir = library.library_root().join(model_id);
 
-    if !model_dir.exists() {
+    if !path_exists(&model_dir).await? {
         return Ok(models::UpdateModelNotesResponse {
             success: false,
             error: Some(format!("Model not found: {}", model_id)),
@@ -1122,7 +1122,7 @@ async fn preview_model_mapping_response(
     version_tag: &str,
     models_path: &Path,
 ) -> std::result::Result<models::MappingPreviewResponse, PumasError> {
-    if !models_path.exists() {
+    if !path_exists(models_path).await? {
         return Ok(models::MappingPreviewResponse {
             success: false,
             error: Some(format!(

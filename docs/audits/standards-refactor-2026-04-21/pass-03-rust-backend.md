@@ -169,6 +169,10 @@ Implementation notes:
   `api/state.rs` now use async existence/symlink checks and async file removal so those link
   registry health/cleanup paths no longer perform synchronous metadata probes or unlinks on async
   runtime threads.
+- Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
+  helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
+  inference-settings, notes, and mapping-preview entry points no longer perform synchronous path
+  probes on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

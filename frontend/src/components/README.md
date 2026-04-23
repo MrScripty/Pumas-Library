@@ -52,6 +52,8 @@ bridge.
 | `ModelMetadataModal.test.tsx` | Dialog naming and dismissal coverage for metadata modal interactions. |
 | `ModelMetadataModalFrame.tsx` | Metadata modal shell with header actions, backdrop dismissal, Escape handling, and focus restoration. |
 | `ModelMetadataModalFrame.test.tsx` | Rendering, dismissal, and refetch disabled-state coverage for the metadata modal shell. |
+| `ModelNotesMarkdownPreview.tsx` | Lightweight notes markdown renderer for headings, inline marks, lists, quotes, and code fences. |
+| `ModelNotesMarkdownPreview.test.tsx` | Rendering coverage for supported notes markdown blocks and the empty-notes fallback. |
 | `MigrationReportsPanel.tsx` | Displays migration dry-run and execution artifacts and dispatches migration actions. |
 | `MigrationReportsPanel.test.tsx` | Integration coverage for migration report loading, action dispatch, validation, and operator feedback. |
 | `MigrationReportControls.tsx` | Migration action buttons, prune controls, and flash-message presentation for the report panel. |

@@ -46,7 +46,7 @@ export function useStatus(options: UseStatusOptions = {}) {
     if (now - lastResourcesFetch.current < 2000) return;
 
     const resourcesResult = await api.get_system_resources();
-    if (resourcesResult?.success) {
+    if (resourcesResult.success) {
       setSystemResources(resourcesResult.resources);
     }
     lastResourcesFetch.current = now;
@@ -57,7 +57,7 @@ export function useStatus(options: UseStatusOptions = {}) {
 
     try {
       const networkResult = await api.get_network_status();
-      if (networkResult?.success) {
+      if (networkResult.success) {
         setNetworkAvailable(!networkResult.is_offline);
       }
     } catch (error) {
@@ -72,7 +72,7 @@ export function useStatus(options: UseStatusOptions = {}) {
 
     try {
       const libraryResult = await api.get_library_status();
-      setModelLibraryLoaded(Boolean(libraryResult?.success));
+      setModelLibraryLoaded(libraryResult.success);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.debug('Failed to fetch model library status', { error: message });

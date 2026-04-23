@@ -35,7 +35,7 @@ function computeExpectedTotal(
   const release = availableVersions.find((candidate) => candidate.tagName === progress.tag);
   const archiveEstimate = release?.archiveSize ?? null;
   const dependencyEstimate =
-    release?.totalSize && release?.archiveSize
+    release?.totalSize && release.archiveSize
       ? Math.max(release.totalSize - release.archiveSize, 0)
       : null;
 

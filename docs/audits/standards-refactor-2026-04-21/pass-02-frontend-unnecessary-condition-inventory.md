@@ -9,7 +9,9 @@ batch. Subsequent batches cleared `HeaderResourceStrip.tsx`,
 `MigrationReportsPanel.tsx`, `ImportMetadataDetailsState.ts`, and
 `modelImportWorkflowHelpers.ts`. A version-management batch also cleared
 `VersionListItemButton.tsx`, `VersionListItemState.ts`,
-`VersionSelectorDefaultButton.tsx`, and `VersionSelectorState.ts`.
+`VersionSelectorDefaultButton.tsx`, and `VersionSelectorState.ts`. A hook-helper
+batch cleared `installationProgressTracking.ts`, `modelDownloadState.ts`,
+`useInstallDialogLinks.ts`, `useNetworkStatus.ts`, and `useStatus.ts`.
 
 ## Remaining Findings
 - `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:95` - Unnecessary conditional, value is always truthy.
@@ -34,36 +36,22 @@ batch. Subsequent batches cleared `HeaderResourceStrip.tsx`,
 - `frontend/src/components/ModelMetadataModal.tsx:231` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/components/ProgressDetailsView.tsx:61` - Unnecessary conditional, value is always truthy.
 - `frontend/src/errors/index.ts:15` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/installationProgressTracking.ts:38` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/modelDownloadState.ts:65` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/modelDownloadState.ts:66` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/modelDownloadState.ts:77` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/modelDownloadState.ts:78` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/hooks/useActiveModelDownload.ts:53` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useActiveModelDownload.ts:101` - Unnecessary conditional, the types have no overlap.
 - `frontend/src/hooks/useAppPanelState.ts:23` - Unnecessary conditional, value is always falsy.
 - `frontend/src/hooks/useAvailableVersionState.ts:75` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useAvailableVersionState.ts:79` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useInstallationProgress.ts:58` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useInstallDialogLinks.ts:39` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useModelDownloads.ts:46` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useModelDownloads.ts:68` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useModelLibraryActions.ts:104` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/hooks/useModels.ts:55` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useModels.ts:184` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useNetworkStatus.ts:62` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useNetworkStatus.ts:69` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useNetworkStatus.ts:72` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useNetworkStatus.ts:73` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useNetworkStatus.ts:75` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/hooks/usePhysicsDrag.ts:185` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/usePhysicsDragPointerEvents.ts:97` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/usePhysicsDragPointerEvents.ts:151` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/usePlugins.ts:58` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/usePlugins.ts:206` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useStatus.ts:49` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useStatus.ts:60` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useStatus.ts:75` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useVersionFetching.ts:94` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.

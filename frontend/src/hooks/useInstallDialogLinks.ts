@@ -36,7 +36,7 @@ export function useInstallDialogLinks() {
     try {
       if (isAPIAvailable()) {
         const result = await api.open_url(url);
-        if (!result?.success) {
+        if (!result.success) {
           logger.warn('API failed to open URL, falling back to window.open', { url });
           window.open(url, '_blank');
         }

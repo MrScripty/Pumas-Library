@@ -62,8 +62,8 @@ function optionalNumber(value: number | undefined): number | undefined {
 }
 
 function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStatus): boolean {
-  const currentPriority = STATUS_PRIORITY[current.status] ?? 999;
-  const candidatePriority = STATUS_PRIORITY[candidate.status] ?? 999;
+  const currentPriority = STATUS_PRIORITY[current.status];
+  const candidatePriority = STATUS_PRIORITY[candidate.status];
   if (candidatePriority !== currentPriority) {
     return candidatePriority < currentPriority;
   }
@@ -74,8 +74,8 @@ function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStat
     return candidateBytes > currentBytes;
   }
 
-  const currentProgress = current.progress ?? 0;
-  const candidateProgress = candidate.progress ?? 0;
+  const currentProgress = current.progress;
+  const candidateProgress = candidate.progress;
   return candidateProgress > currentProgress;
 }
 

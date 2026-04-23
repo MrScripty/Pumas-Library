@@ -59,20 +59,18 @@ export function useNetworkStatus() {
       const response: NetworkStatusResponse = await importAPI.getNetworkStatus();
 
       if (response.success) {
-        const totalRequests = response.total_requests ?? 0;
+        const totalRequests = response.total_requests;
         const successRate = totalRequests === 0
           ? 100
-          : typeof response.success_rate === 'number'
-            ? response.success_rate
-            : 0;
+          : response.success_rate;
         setStatus({
-          isOffline: response.is_offline ?? false,
+          isOffline: response.is_offline,
           isRateLimited: totalRequests > 0 && successRate < 50,
           successRate,
-          circuitBreakerRejections: response.circuit_breaker_rejections ?? 0,
-          circuitStates: response.circuit_states ?? {},
+          circuitBreakerRejections: response.circuit_breaker_rejections,
+          circuitStates: response.circuit_states,
           totalRequests,
-          failedRequests: response.failed_requests ?? 0,
+          failedRequests: response.failed_requests,
         });
         setError(null);
       } else {

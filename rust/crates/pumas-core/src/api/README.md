@@ -49,6 +49,7 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 
 ## Invariants
 - Only the primary instance starts watcher, reconcile, and other primary-owned background work.
+- Primary-owned watcher and reconciliation tasks stay under `RuntimeTasks` ownership so shutdown can abort outstanding work deterministically.
 - `PumasApi` remains the facade boundary; transport code adapts requests and responses but does not own domain state.
 - Startup establishes runtime ownership, but freshness-sensitive read paths may
   still trigger bounded reconcile work before returning state.

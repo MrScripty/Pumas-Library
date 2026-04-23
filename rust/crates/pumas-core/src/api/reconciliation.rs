@@ -226,7 +226,8 @@ pub(crate) async fn trigger_reconciliation(
         return;
     }
 
-    tokio::spawn(async move {
+    let runtime_tasks = primary.runtime_tasks.clone();
+    runtime_tasks.spawn(async move {
         tracing::debug!(
             "Starting reconciliation: scope={:?} reason={}",
             scope,
@@ -273,8 +274,8 @@ pub(crate) async fn reconcile_on_demand(
 pub(crate) fn start_model_library_watcher(
     primary: Arc<PrimaryState>,
 ) -> Result<ModelLibraryWatcher> {
-    let runtime = tokio::runtime::Handle::current();
     let primary_for_watcher = primary.clone();
+    let runtime_tasks = primary.runtime_tasks.clone();
     let library_root = primary.model_library.library_root().to_path_buf();
 
     ModelLibraryWatcher::new(
@@ -282,8 +283,8 @@ pub(crate) fn start_model_library_watcher(
         NetworkConfig::FILE_WATCHER_DEBOUNCE,
         Box::new(move |paths| {
             let primary = primary_for_watcher.clone();
-            let handle = runtime.clone();
-            handle.spawn(async move {
+            let runtime_tasks = runtime_tasks.clone();
+            runtime_tasks.spawn(async move {
                 notify_filesystem_changes(primary, paths).await;
             });
         }),

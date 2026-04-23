@@ -19,7 +19,7 @@ use super::state_process::{
 use super::state_runtime::{
     disk_space_response, network_status_response, status_response, system_resources_response,
 };
-use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator};
+use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator, RuntimeTasks};
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;
@@ -45,6 +45,8 @@ pub(crate) struct PrimaryState {
     pub(crate) hf_client: Option<model_library::HuggingFaceClient>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
+    /// Shared owner for primary runtime task handles.
+    pub(crate) runtime_tasks: RuntimeTasks,
     /// Internal scheduler for event-driven reconciliation.
     pub(crate) reconciliation: Arc<ReconciliationCoordinator>,
     /// Primary-local suppressor for Pumas-owned watcher feedback paths.

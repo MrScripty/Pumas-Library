@@ -523,6 +523,7 @@ impl PumasApiBuilder {
             hf_client,
             model_importer,
             conversion_manager,
+            runtime_tasks: runtime_tasks.clone(),
             reconciliation: Arc::new(ReconciliationCoordinator::new(
                 Duration::from_secs(5),
                 Duration::from_secs(5),

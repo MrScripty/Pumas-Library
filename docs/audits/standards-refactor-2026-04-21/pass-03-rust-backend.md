@@ -92,7 +92,7 @@ Rectification:
 - Keep JSON-RPC envelope generic, but method payloads typed.
 
 ### R04 - Background Task Ownership Is Incomplete
-Status: partially remediated
+Status: compliant
 
 Examples:
 
@@ -122,8 +122,10 @@ Implementation notes:
   cancel path with a focused task-ownership test.
 - Completed: `pumas-core/src/network/manager.rs` stores the connectivity monitoring task handle and
   aborts it during explicit stop or manager drop.
-- Remaining: audit `pumas-core/src/api/reconciliation.rs` spawned reconciliation work for bounded
-  ownership and shutdown behavior.
+- Completed: `pumas-core/src/api/reconciliation.rs` routes watcher-triggered and scheduled
+  reconciliation tasks through `PrimaryState`-owned `RuntimeTasks`, and `RuntimeTasks` now prunes
+  finished handles before tracking new work so repeated reconcile bursts do not accumulate stale
+  join handles.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

@@ -7,6 +7,8 @@
 //! PumasApi now focuses on model library and system utilities.
 //! Shortcut tests have been moved to pumas-rpc.
 
+#![warn(unsafe_code)]
+
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -20,6 +22,7 @@ struct RegistryTestGuard {
 }
 
 impl RegistryTestGuard {
+    #[allow(unsafe_code)]
     fn new(root: &std::path::Path) -> Self {
         let lock = REGISTRY_TEST_LOCK
             .get_or_init(|| Mutex::new(()))
@@ -40,6 +43,7 @@ impl RegistryTestGuard {
 }
 
 impl Drop for RegistryTestGuard {
+    #[allow(unsafe_code)]
     fn drop(&mut self) {
         // SAFETY: Guarded by the same process-wide mutex as set_var above.
         unsafe {

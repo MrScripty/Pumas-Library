@@ -6,6 +6,8 @@
 //! 3. Atomic rename to target path
 //! 4. Optional backup creation
 
+#![warn(unsafe_code)]
+
 use crate::{PumasError, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use std::fs::{self, File, OpenOptions};
@@ -56,6 +58,7 @@ pub fn atomic_read_json<T: DeserializeOwned>(path: &Path) -> Result<Option<T>> {
 /// 3. Calls fsync to ensure data reaches disk
 /// 4. Optionally creates a .bak backup
 /// 5. Atomically renames temp file to target
+#[allow(unsafe_code)]
 pub fn atomic_write_json<T: Serialize>(path: &Path, data: &T, keep_backup: bool) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = path.parent() {

@@ -130,7 +130,7 @@ Rectification:
 - Add clippy `await_holding_lock`, `blocking_in_async` review where available, or targeted custom checks.
 
 ### R06 - Unsafe Rust Is Not Governed by Workspace Policy
-Status: partially remediated
+Status: compliant
 
 Unsafe usages exist in:
 
@@ -142,8 +142,8 @@ Unsafe usages exist in:
 - `pumas-core/src/platform/process.rs`
 - tests manipulating process-global state
 
-The workspace now inherits `unsafe_op_in_unsafe_fn = "deny"` as the first lint ratchet, but direct
-unsafe usage remains allowed while OS/FFI boundaries are isolated.
+The workspace now denies direct unsafe by default and requires intentional boundary modules to opt
+down locally while documenting every unsafe block.
 
 Rectification:
 - Add workspace lint policy with `unsafe_code = "deny"` by default.
@@ -152,7 +152,12 @@ Rectification:
 - Add Miri/sanitizer plan for pure unsafe and OS FFI wrappers where practical.
 
 Implementation notes:
-- Completed: inherited `unsafe_op_in_unsafe_fn = "deny"` across workspace crates.
+- Completed: inherited `unsafe_code = "deny"` and `unsafe_op_in_unsafe_fn = "deny"` across
+  workspace crates.
+- Completed: `platform::process`, `platform::paths`, and `metadata::atomic` explicitly opt down to
+  `warn(unsafe_code)` as the current intentional unsafe boundary modules.
+- Completed: guarded API integration-test environment mutation opts down only on the serialized
+  registry override helper.
 - Completed: documented current platform process probes, metadata fsync, and Windows long-path FFI
   with explicit `SAFETY:` comments.
 - Completed: isolated launcher process detachment behind `platform::configure_detached_command` so
@@ -164,8 +169,9 @@ Implementation notes:
 - Completed: Unix metadata writes now return fsync failures instead of ignoring them before rename.
 - Completed: replaced conversion-manager raw pointer lifetime bridges with owned `Arc` handles for
   progress tracking and quantization backends.
-- Remaining: add a final `unsafe_code` deny/allow policy for the small set of intentional unsafe
-  boundary modules and document the Miri/sanitizer coverage decision.
+- Completed: Miri/sanitizer coverage decision recorded: current unsafe is OS FFI rather than pure
+  memory manipulation, so focused platform/metadata tests cover the present surface; future pure
+  unsafe must add a Miri or sanitizer target before relaxing the lint.
 
 ### R07 - Path Validation Is Not Centralized Around Validated Types
 Status: partially compliant

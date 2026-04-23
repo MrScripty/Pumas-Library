@@ -3,6 +3,8 @@
 //! This module provides cross-platform abstractions for process management,
 //! including checking process status and termination.
 
+#![warn(unsafe_code)]
+
 use crate::error::{PumasError, Result};
 use std::process::Command;
 use tracing::{debug, warn};
@@ -12,6 +14,7 @@ use tracing::{debug, warn};
 /// # Platform Behavior
 /// - **Linux/macOS**: Uses `kill(pid, 0)` signal check
 /// - **Windows**: Uses `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION`
+#[allow(unsafe_code)]
 pub fn is_process_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
@@ -60,6 +63,7 @@ pub fn is_process_alive(pid: u32) -> bool {
 /// - **Linux/macOS**: Calls `setsid()` in the child after fork and before exec
 /// - **Windows**: Uses `CREATE_NEW_PROCESS_GROUP`
 /// - **Other**: Leaves the command unchanged
+#[allow(unsafe_code)]
 pub fn configure_detached_command(command: &mut Command) {
     #[cfg(unix)]
     {

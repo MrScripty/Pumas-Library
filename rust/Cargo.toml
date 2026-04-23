@@ -13,8 +13,9 @@ license = "MIT"
 repository = "https://github.com/MrScripty/Pumas-Library"
 
 [workspace.lints.rust]
-# Existing OS/FFI unsafe blocks are still being isolated. This first ratchet
-# prevents unsafe functions from hiding unsafe operations in their bodies.
+# Direct unsafe is denied by default. Modules that own intentional OS/FFI
+# boundaries must opt down locally and document each block with `SAFETY:`.
+unsafe_code = "deny"
 unsafe_op_in_unsafe_fn = "deny"
 
 [workspace.dependencies]

@@ -6,6 +6,8 @@
 //! - Desktop directories
 //! - Icon storage locations
 
+#![warn(unsafe_code)]
+
 use crate::error::{PumasError, Result};
 use std::path::{Path, PathBuf};
 #[cfg(test)]
@@ -204,6 +206,7 @@ fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
 }
 
 #[cfg(windows)]
+#[allow(unsafe_code)]
 fn expand_windows_long_path(path: &Path) -> Option<PathBuf> {
     use std::ffi::OsString;
     use std::os::windows::ffi::{OsStrExt, OsStringExt};
@@ -381,6 +384,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(unsafe_code)]
     fn test_registry_db_path_respects_env_override() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let override_path = temp_dir.path().join("custom-registry.db");

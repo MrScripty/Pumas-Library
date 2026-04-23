@@ -23,6 +23,9 @@ PUMAS_RUST_TEST_ISOLATION_REPEATS=3 ./scripts/rust/check.sh test-isolation
 This command repeats the guarded in-crate API tests and `api_tests` integration
 binary with multiple test threads so accidental unguarded process-global state
 is more likely to surface before CI.
+Integration tests that intentionally mutate process-global environment must opt
+down from the workspace `unsafe_code` deny lint only on the guarded helper that
+owns the mutation.
 
 ## Non-Goals
 RPC transport and Electron IPC behavior are out of scope. Reason: those belong to `pumas-rpc` and Electron tests. Revisit trigger: add cross-layer contract tests that intentionally span crates.

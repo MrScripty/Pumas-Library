@@ -7,7 +7,10 @@ use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
 use std::path::Path;
-use tokio::time::{sleep, Duration};
+use tokio::{
+    fs,
+    time::{sleep, Duration},
+};
 
 impl PumasApi {
     /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
@@ -124,16 +127,24 @@ pub(crate) fn split_model_id(model_id: &str) -> Option<(&str, &str, &str)> {
     Some((model_type, family, cleaned_name))
 }
 
-pub(crate) fn update_download_marker(
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+pub(crate) async fn update_download_marker(
     target_dir: &Path,
     target_model_type: &str,
     target_family: &str,
 ) -> Result<()> {
     let marker_path = target_dir.join(".pumas_download");
-    if !marker_path.exists() {
+    if !path_exists(&marker_path).await? {
         return Ok(());
     }
-    let marker_text = std::fs::read_to_string(&marker_path)?;
+    let marker_text = fs::read_to_string(&marker_path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, &marker_path))?;
     let mut marker_json: Value =
         serde_json::from_str(&marker_text).map_err(|err| PumasError::Json {
             message: format!("Failed to parse download marker JSON: {}", err),
@@ -153,17 +164,19 @@ pub(crate) fn update_download_marker(
         "family".to_string(),
         Value::String(target_family.to_string()),
     );
-    std::fs::write(&marker_path, serde_json::to_string_pretty(&marker_json)?)?;
+    fs::write(&marker_path, serde_json::to_string_pretty(&marker_json)?)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, &marker_path))?;
     Ok(())
 }
 
-pub(crate) fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
+pub(crate) async fn cleanup_empty_parent_dirs_after_move(source_dir: &Path, library_root: &Path) {
     let mut current = source_dir.parent();
     while let Some(dir) = current {
         if dir == library_root {
             break;
         }
-        if std::fs::remove_dir(dir).is_err() {
+        if fs::remove_dir(dir).await.is_err() {
             break;
         }
         current = dir.parent();
@@ -225,7 +238,7 @@ pub(crate) async fn relocate_skipped_partial_downloads(
             target_family,
             target_cleaned_name,
         );
-        if !source_dir.exists() {
+        if !path_exists(&source_dir).await? {
             row.action = "missing_source".to_string();
             row.error = Some(format!(
                 "Source directory not found: {}",
@@ -234,7 +247,7 @@ pub(crate) async fn relocate_skipped_partial_downloads(
             mutated = true;
             continue;
         }
-        if target_dir.exists() {
+        if path_exists(&target_dir).await? {
             row.action = "blocked_collision".to_string();
             row.error = Some(format!("Target already exists: {}", target_dir.display()));
             mutated = true;
@@ -274,15 +287,18 @@ pub(crate) async fn relocate_skipped_partial_downloads(
                 (None, false)
             };
             resume_after_move = was_active;
-            std::fs::create_dir_all(
-                target_dir
-                    .parent()
-                    .ok_or_else(|| PumasError::Other("Target parent missing".to_string()))?,
-            )?;
-            std::fs::rename(&source_dir, &target_dir)?;
+            let target_parent = target_dir
+                .parent()
+                .ok_or_else(|| PumasError::Other("Target parent missing".to_string()))?;
+            fs::create_dir_all(target_parent)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, target_parent))?;
+            fs::rename(&source_dir, &target_dir)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, &source_dir))?;
             moved = true;
 
-            update_download_marker(&target_dir, target_model_type, target_family)?;
+            update_download_marker(&target_dir, target_model_type, target_family).await?;
 
             if let Some(download_id) = download_id {
                 if let Some(ref client) = primary.hf_client {
@@ -312,7 +328,8 @@ pub(crate) async fn relocate_skipped_partial_downloads(
                 let _ = primary.model_library.index().delete(&row.model_id)?;
             }
 
-            cleanup_empty_parent_dirs_after_move(&source_dir, primary.model_library.library_root());
+            cleanup_empty_parent_dirs_after_move(&source_dir, primary.model_library.library_root())
+                .await;
             Ok(())
         }
         .await;
@@ -331,8 +348,8 @@ pub(crate) async fn relocate_skipped_partial_downloads(
                 mutated = true;
             }
             Err(err) => {
-                if moved && target_dir.exists() {
-                    let _ = std::fs::rename(&target_dir, &source_dir);
+                if moved && path_exists(&target_dir).await.unwrap_or(false) {
+                    let _ = fs::rename(&target_dir, &source_dir).await;
                 }
                 if let (Some(client), Some(download_id)) =
                     (primary.hf_client.as_ref(), relocated_download_id.as_ref())

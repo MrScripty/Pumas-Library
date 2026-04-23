@@ -146,6 +146,10 @@ Rectification:
 Implementation notes:
 - Completed: `scripts/rust/check.sh blocking-audit` prints blocking-work candidates across
   `pumas-core`, `pumas-app-manager`, and `pumas-rpc` source roots for classification.
+- Completed: `pumas-core/src/api/migration.rs` now uses `tokio::fs` for partial-download
+  relocation marker reads/writes, directory creation/removal, and rename operations so the
+  checkpointed migration execute path no longer performs those filesystem calls directly on the
+  async request path.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

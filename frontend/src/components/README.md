@@ -17,6 +17,9 @@ bridge.
 | `AppShell.tsx` | Rendering-only application shell for import overlays, header, optional sidebar, and app-panel container. |
 | `AppShellPanels.ts` | Pure app-panel prop builder for shared version props and app-specific panel inputs. |
 | `AppShellPanels.test.ts` | Unit coverage for shared and app-specific app-panel prop construction. |
+| `HeaderControls.tsx` | Header update, status badge, and window-control button groups. |
+| `HeaderResourceStrip.tsx` | Header CPU/GPU/RAM/VRAM metric derivation and compact resource strip rendering. |
+| `HeaderStatus.ts` | Header status projection for install progress, model downloads, network, and library states. |
 | `AppSidebar.tsx` | Sidebar drag/order state owner and app-selection toolbar container. |
 | `SidebarAppIcon.tsx` | Motion-wrapped app icon renderer for drag previews, delete-zone overlays, and launch/stop/log controls. |
 | `AppIcon.tsx`, `ComfyUIIcon.tsx`, `AppIndicator.tsx` | Launcher icon controls with sibling native buttons for app selection and launch/stop/status actions. |

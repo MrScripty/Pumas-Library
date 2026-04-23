@@ -352,6 +352,9 @@ Implementation notes:
 - Completed: `pumas-rpc/src/server.rs` now applies a transport-level concurrency cap of 64
   in-flight HTTP requests, and the crate README records that limit as part of the RPC trust and
   availability policy.
+- Completed: `pumas-app-manager/src/torch_client.rs` now validates `TorchServerConfig` so
+  non-loopback bind hosts require explicit `lan_access`, enforcing the local-only default at the
+  Torch configuration boundary before LAN-exposed settings are sent to the inference server.
 
 ### R09 - Language Binding Boundary Is Too Entangled With Core Types
 Status: partially compliant

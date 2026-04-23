@@ -17,6 +17,7 @@
 use pumas_library::config::AppId;
 use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
+use std::net::IpAddr;
 use std::time::Duration;
 use tracing::{debug, info};
 
@@ -159,6 +160,29 @@ impl Default for TorchServerConfig {
             max_loaded_models: 4,
             lan_access: false,
         }
+    }
+}
+
+impl TorchServerConfig {
+    /// Validate host/LAN policy before sending it to the Torch server.
+    pub fn validate(&self) -> Result<()> {
+        let host: IpAddr = self.host.parse().map_err(|_| PumasError::InvalidParams {
+            message: format!(
+                "Torch server host must be an IP address, got '{}'",
+                self.host
+            ),
+        })?;
+
+        if !self.lan_access && !host.is_loopback() {
+            return Err(PumasError::InvalidParams {
+                message: format!(
+                    "Torch LAN access must be enabled for non-loopback host '{}'",
+                    self.host
+                ),
+            });
+        }
+
+        Ok(())
     }
 }
 
@@ -444,6 +468,8 @@ impl TorchClient {
     ///
     /// Note: Changes to `host` or `api_port` require a server restart to take effect.
     pub async fn configure(&self, config: &TorchServerConfig) -> Result<()> {
+        config.validate()?;
+
         let url = format!("{}/api/configure", self.base_url);
         info!("Configuring Torch server: {:?}", config);
 
@@ -507,6 +533,43 @@ mod tests {
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.max_loaded_models, 4);
         assert!(!config.lan_access);
+    }
+
+    #[test]
+    fn test_torch_server_config_allows_loopback_without_lan_access() {
+        let config = TorchServerConfig {
+            host: "127.0.0.1".to_string(),
+            lan_access: false,
+            ..TorchServerConfig::default()
+        };
+
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn test_torch_server_config_rejects_non_loopback_without_lan_access() {
+        let config = TorchServerConfig {
+            host: "0.0.0.0".to_string(),
+            lan_access: false,
+            ..TorchServerConfig::default()
+        };
+
+        let error = config.validate().unwrap_err();
+        assert!(
+            error.to_string().contains("LAN access must be enabled"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn test_torch_server_config_allows_non_loopback_with_lan_access() {
+        let config = TorchServerConfig {
+            host: "0.0.0.0".to_string(),
+            lan_access: true,
+            ..TorchServerConfig::default()
+        };
+
+        assert!(config.validate().is_ok());
     }
 
     #[test]

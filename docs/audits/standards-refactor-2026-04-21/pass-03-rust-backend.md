@@ -224,6 +224,10 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/version_manager/dependencies.rs` now creates the pip cache
   directory with `tokio::fs` inside `install_with_progress`, so that dependency-install request
   path no longer performs that cache-directory creation through blocking std fs calls.
+- Completed: `pumas-app-manager/src/custom_nodes/mod.rs` now uses `tokio::fs` for async custom
+  node install/update path existence checks, requirements detection, and `custom_nodes`
+  directory creation so those async lifecycle entry points no longer perform synchronous metadata
+  probes or directory setup on runtime threads before invoking git operations.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

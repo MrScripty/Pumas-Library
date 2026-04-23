@@ -8,7 +8,8 @@ pub mod types;
 // Re-export types for public API
 pub use types::{InstallResult, InstalledCustomNode, UpdateResult};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, error, info, warn};
 
@@ -198,24 +199,27 @@ impl CustomNodesManager {
         let install_path = custom_nodes_dir.join(&node_name);
 
         // Check if already installed
-        if install_path.exists() {
+        if async_path_exists(&install_path).await? {
             info!("Custom node already installed: {}", node_name);
+            let requirements_path = install_path.join("requirements.txt");
             return Ok(InstallResult {
                 success: false,
                 node_name,
                 install_path: install_path.to_string_lossy().to_string(),
                 error: Some("Custom node already installed".to_string()),
-                has_requirements: install_path.join("requirements.txt").exists(),
+                has_requirements: async_path_exists(&requirements_path).await?,
             });
         }
 
         // Ensure custom_nodes directory exists
-        if !custom_nodes_dir.exists() {
-            std::fs::create_dir_all(&custom_nodes_dir).map_err(|e| PumasError::Io {
-                message: format!("Failed to create custom_nodes directory: {}", e),
-                path: Some(custom_nodes_dir.clone()),
-                source: Some(e),
-            })?;
+        if !async_path_exists(&custom_nodes_dir).await? {
+            fs::create_dir_all(&custom_nodes_dir)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to create custom_nodes directory: {}", e),
+                    path: Some(custom_nodes_dir.clone()),
+                    source: Some(e),
+                })?;
         }
 
         info!("Installing custom node {} for version {}", node_name, tag);
@@ -249,7 +253,7 @@ impl CustomNodesManager {
             });
         }
 
-        let has_requirements = install_path.join("requirements.txt").exists();
+        let has_requirements = async_path_exists(&install_path.join("requirements.txt")).await?;
 
         info!("Successfully installed custom node: {}", node_name);
         if has_requirements {
@@ -281,7 +285,7 @@ impl CustomNodesManager {
     pub async fn update(&self, node_name: &str, tag: &str) -> Result<UpdateResult> {
         let node_path = self.custom_nodes_dir(tag).join(node_name);
 
-        if !node_path.exists() {
+        if !async_path_exists(&node_path).await? {
             warn!("Custom node not found: {}", node_name);
             return Ok(UpdateResult {
                 success: false,
@@ -293,7 +297,7 @@ impl CustomNodesManager {
         }
 
         // Check if it's a git repository
-        if !node_path.join(".git").exists() {
+        if !async_path_exists(&node_path.join(".git")).await? {
             warn!("Not a git repository: {}", node_name);
             return Ok(UpdateResult {
                 success: false,
@@ -453,6 +457,14 @@ fn format_unix_timestamp(secs: u64) -> String {
     } else {
         "1970-01-01T00:00:00Z".to_string()
     }
+}
+
+async fn async_path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path).await.map_err(|e| PumasError::Io {
+        message: format!("Failed to check path existence: {}", e),
+        path: Some(path.to_path_buf()),
+        source: Some(e),
+    })
 }
 
 #[cfg(test)]

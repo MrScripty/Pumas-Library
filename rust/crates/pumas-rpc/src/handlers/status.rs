@@ -26,7 +26,7 @@ pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Res
 
         // Check if active version is patched
         if let Some(ref tag) = active_version {
-            response.patched = state.api.is_patched(Some(tag));
+            response.patched = state.api.is_patched(Some(tag)).await;
         }
 
         // Get shortcut states for active version

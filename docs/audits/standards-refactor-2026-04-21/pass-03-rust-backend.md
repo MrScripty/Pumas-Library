@@ -314,6 +314,11 @@ Implementation notes:
   now route launcher-version requests through `tokio::task::spawn_blocking`, so direct API, mirrored
   IPC, and RPC launcher-version checks no longer run synchronous git/path inspection inline on
   async runtime threads.
+- Completed: `pumas-core/src/api/system.rs`, `pumas-rpc/src/handlers/status.rs`, and
+  `handlers/versions/patch.rs` now route patch-status and patch-toggle requests through
+  `tokio::task::spawn_blocking`, so RPC status polling and patch management no longer run
+  synchronous `main.py` inspection, backup writes, or git/curl fallback work inline on async
+  runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

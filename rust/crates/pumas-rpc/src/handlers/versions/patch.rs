@@ -6,13 +6,13 @@ use serde_json::{json, Value};
 
 pub async fn is_patched(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = get_str_param(params, "tag", "tag");
-    let is_patched = state.api.is_patched(tag);
+    let is_patched = state.api.is_patched(tag).await;
     Ok(json!(is_patched))
 }
 
 pub async fn toggle_patch(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = get_str_param(params, "tag", "tag");
-    match state.api.toggle_patch(tag) {
+    match state.api.toggle_patch(tag).await {
         Ok(is_now_patched) => Ok(json!(is_now_patched)),
         Err(e) => Ok(json!({
             "success": false,

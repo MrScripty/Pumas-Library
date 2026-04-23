@@ -458,25 +458,35 @@ impl PumasApi {
     // ========================================
 
     /// Check if ComfyUI main.py is patched with setproctitle.
-    pub fn is_patched(&self, tag: Option<&str>) -> bool {
+    pub async fn is_patched(&self, tag: Option<&str>) -> bool {
         let comfyui_dir = self.launcher_root.join("ComfyUI");
         let main_py = comfyui_dir.join("main.py");
         let versions_dir = Some(self.versions_dir(AppId::ComfyUI));
+        let tag = tag.map(str::to_owned);
 
-        let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
-        patch_mgr.is_patched(tag)
+        tokio::task::spawn_blocking(move || {
+            let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
+            patch_mgr.is_patched(tag.as_deref())
+        })
+        .await
+        .unwrap_or(false)
     }
 
     /// Toggle the setproctitle patch for a ComfyUI version.
     ///
     /// Returns `true` if now patched, `false` if now unpatched.
-    pub fn toggle_patch(&self, tag: Option<&str>) -> Result<bool> {
+    pub async fn toggle_patch(&self, tag: Option<&str>) -> Result<bool> {
         let comfyui_dir = self.launcher_root.join("ComfyUI");
         let main_py = comfyui_dir.join("main.py");
         let versions_dir = Some(self.versions_dir(AppId::ComfyUI));
+        let tag = tag.map(str::to_owned);
 
-        let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
-        patch_mgr.toggle_patch(tag)
+        tokio::task::spawn_blocking(move || {
+            let patch_mgr = launcher::PatchManager::new(&comfyui_dir, &main_py, versions_dir);
+            patch_mgr.toggle_patch(tag.as_deref())
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join toggle_patch task: {}", e)))?
     }
 
     // ========================================

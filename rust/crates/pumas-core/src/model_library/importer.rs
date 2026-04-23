@@ -1169,7 +1169,18 @@ impl ModelImporter {
         };
 
         // Enumerate existing files (no copy needed)
-        let files = self.enumerate_model_files(model_dir)?;
+        let importer = self.clone();
+        let model_dir_for_enumeration = model_dir.to_path_buf();
+        let files = tokio::task::spawn_blocking(move || {
+            importer.enumerate_model_files(&model_dir_for_enumeration)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join in-place file enumeration task: {}",
+                err
+            ))
+        })??;
 
         // Validate shard completeness — reject if any file is part of an incomplete set.
         // Uses extract_shard_info per file to catch even single-shard-of-set cases

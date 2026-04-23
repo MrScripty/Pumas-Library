@@ -390,6 +390,10 @@ Implementation notes:
   detection through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
   import paths no longer perform synchronous file header inspection inline on async runtime threads
   after selecting the canonical model file.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place file enumeration
+  through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption import paths
+  no longer perform synchronous directory walks inline on async runtime threads when collecting the
+  imported file manifest for metadata and shard validation.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

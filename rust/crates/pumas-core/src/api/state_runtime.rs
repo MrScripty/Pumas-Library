@@ -4,18 +4,40 @@ use super::state::{launcher_root_from_primary, PrimaryState};
 use crate::error::PumasError;
 use crate::{models, network};
 
-pub(super) fn disk_space_response(
+pub(super) async fn disk_space_response(
     primary: &PrimaryState,
 ) -> std::result::Result<models::DiskSpaceResponse, PumasError> {
-    use sysinfo::Disks;
-
     let launcher_root = launcher_root_from_primary(primary);
-    let launcher_root_str = launcher_root.to_string_lossy();
-    let disks = Disks::new_with_refreshed_list();
+    tokio::task::spawn_blocking(move || {
+        use sysinfo::Disks;
 
-    for disk in disks.list() {
-        let mount_point = disk.mount_point().to_string_lossy();
-        if launcher_root_str.starts_with(mount_point.as_ref()) {
+        let launcher_root_str = launcher_root.to_string_lossy();
+        let disks = Disks::new_with_refreshed_list();
+
+        for disk in disks.list() {
+            let mount_point = disk.mount_point().to_string_lossy();
+            if launcher_root_str.starts_with(mount_point.as_ref()) {
+                let total = disk.total_space();
+                let free = disk.available_space();
+                let used = total.saturating_sub(free);
+                let percent = if total > 0 {
+                    (used as f32 / total as f32) * 100.0
+                } else {
+                    0.0
+                };
+
+                return Ok(models::DiskSpaceResponse {
+                    success: true,
+                    error: None,
+                    total,
+                    used,
+                    free,
+                    percent,
+                });
+            }
+        }
+
+        if let Some(disk) = disks.list().first() {
             let total = disk.total_space();
             let free = disk.available_space();
             let used = total.saturating_sub(free);
@@ -34,31 +56,13 @@ pub(super) fn disk_space_response(
                 percent,
             });
         }
-    }
 
-    if let Some(disk) = disks.list().first() {
-        let total = disk.total_space();
-        let free = disk.available_space();
-        let used = total.saturating_sub(free);
-        let percent = if total > 0 {
-            (used as f32 / total as f32) * 100.0
-        } else {
-            0.0
-        };
-
-        return Ok(models::DiskSpaceResponse {
-            success: true,
-            error: None,
-            total,
-            used,
-            free,
-            percent,
-        });
-    }
-
-    Err(PumasError::Other(
-        "Could not determine disk space".to_string(),
-    ))
+        Err(PumasError::Other(
+            "Could not determine disk space".to_string(),
+        ))
+    })
+    .await
+    .map_err(|e| PumasError::Other(format!("Failed to join disk_space_response task: {}", e)))?
 }
 
 pub(super) async fn status_response(

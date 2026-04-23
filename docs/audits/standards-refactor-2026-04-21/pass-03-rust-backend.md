@@ -291,6 +291,10 @@ Implementation notes:
   `tokio::task::spawn_blocking`, so direct API calls and mirrored IPC status/process request paths
   no longer execute synchronous process scans, PID-file inspection, sysinfo refreshes, or GPU
   resource queries inline on async runtime threads.
+- Completed: `pumas-core/src/api/system.rs`, `api/state_runtime.rs`, and `api/state.rs` now route
+  disk-space enumeration through `tokio::task::spawn_blocking`, so direct API calls and mirrored
+  IPC disk-space request paths no longer run synchronous `sysinfo::Disks` refresh/enumeration
+  inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -119,16 +119,40 @@ impl PumasApi {
                 .await;
         }
 
-        use sysinfo::Disks;
+        let launcher_root = self.launcher_root.clone();
+        tokio::task::spawn_blocking(move || {
+            use sysinfo::Disks;
 
-        let disks = Disks::new_with_refreshed_list();
+            let disks = Disks::new_with_refreshed_list();
 
-        // Find the disk containing the launcher root
-        let launcher_root_str = self.launcher_root.to_string_lossy();
+            // Find the disk containing the launcher root
+            let launcher_root_str = launcher_root.to_string_lossy();
 
-        for disk in disks.list() {
-            let mount_point = disk.mount_point().to_string_lossy();
-            if launcher_root_str.starts_with(mount_point.as_ref()) {
+            for disk in disks.list() {
+                let mount_point = disk.mount_point().to_string_lossy();
+                if launcher_root_str.starts_with(mount_point.as_ref()) {
+                    let total = disk.total_space();
+                    let free = disk.available_space();
+                    let used = total.saturating_sub(free);
+                    let percent = if total > 0 {
+                        (used as f32 / total as f32) * 100.0
+                    } else {
+                        0.0
+                    };
+
+                    return Ok(models::DiskSpaceResponse {
+                        success: true,
+                        error: None,
+                        total,
+                        used,
+                        free,
+                        percent,
+                    });
+                }
+            }
+
+            // Fallback: use first disk
+            if let Some(disk) = disks.list().first() {
                 let total = disk.total_space();
                 let free = disk.available_space();
                 let used = total.saturating_sub(free);
@@ -147,30 +171,11 @@ impl PumasApi {
                     percent,
                 });
             }
-        }
 
-        // Fallback: use first disk
-        if let Some(disk) = disks.list().first() {
-            let total = disk.total_space();
-            let free = disk.available_space();
-            let used = total.saturating_sub(free);
-            let percent = if total > 0 {
-                (used as f32 / total as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            return Ok(models::DiskSpaceResponse {
-                success: true,
-                error: None,
-                total,
-                used,
-                free,
-                percent,
-            });
-        }
-
-        Err(PumasError::Other("Could not determine disk space".into()))
+            Err(PumasError::Other("Could not determine disk space".into()))
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join get_disk_space task: {}", e)))?
     }
 
     /// Get system resources (CPU, GPU, RAM, disk).

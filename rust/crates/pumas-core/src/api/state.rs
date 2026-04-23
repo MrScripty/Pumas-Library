@@ -809,7 +809,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(response)?)
             }
             "get_disk_space" => {
-                let response = disk_space_response(self)?;
+                let response = disk_space_response(self).await?;
                 Ok(serde_json::to_value(response)?)
             }
             "get_status_response" => {

@@ -268,8 +268,10 @@ Rectification:
 - Completed: clear a sixth `@typescript-eslint/no-unnecessary-condition` batch in active-download, available-version, installation-progress, model-download, model-library-action, model-list, and version-fetching hooks, reducing the remaining inventory from 33 to 22 findings.
 - Completed: clear a seventh `@typescript-eslint/no-unnecessary-condition` batch in Ollama/Torch app-panel sections, app indicators, and sidebar drag offsets, reducing the remaining inventory from 22 to 15 findings.
 - Completed: clear an eighth `@typescript-eslint/no-unnecessary-condition` batch in model-import metadata lookup, workflow summary, and sharded-set detection helpers, reducing the remaining inventory from 15 to 11 findings.
+- Completed: clear the final `@typescript-eslint/no-unnecessary-condition` batch in app-panel state, physics-drag, plugin, and version-shortcut hooks, reducing the remaining inventory from 11 to 0 findings.
+- Completed: `frontend/eslint.config.js` enforces `@typescript-eslint/no-unnecessary-condition` after the inventory reached zero.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
-- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` to scoped overrides or enforceable warnings.
+- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

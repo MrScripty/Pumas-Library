@@ -5,6 +5,7 @@ import {
   computeAnchorIndex,
   ICON_SIZE,
   LIST_TOP_PADDING,
+  setPointerCaptureIfAvailable,
   reorderAppsAtIndices,
   type FloatingState,
   type PendingDrag,
@@ -182,7 +183,7 @@ export const usePhysicsDrag = ({
 
       pointerIdRef.current = pending.pointerId;
       pointerTargetRef.current = pending.element;
-      pending.element.setPointerCapture?.(pending.pointerId);
+      setPointerCaptureIfAvailable(pending.element, pending.pointerId);
 
       const origin = {
         x: pending.elementRect.left,

@@ -35,8 +35,8 @@ export function useVersionShortcutState({
 
     try {
       const result = await api.get_all_shortcut_states();
-      const states = result?.states?.states;
-      if (result.success && states) {
+      if (result.success) {
+        const states = result.states.states;
         const mapped: Record<string, VersionShortcutState> = {};
         Object.entries(states).forEach(([tag, state]) => {
           const typedState = state as VersionShortcutState & { tag?: string };
@@ -93,7 +93,7 @@ export function useVersionShortcutState({
 
     try {
       const result = await api.set_version_shortcuts(version, next);
-      if (result?.state) {
+      if (result.success) {
         setShortcutState((prev) => ({
           ...prev,
           [version]: {

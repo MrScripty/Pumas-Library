@@ -22,17 +22,11 @@ and `errors/index.ts`. A model/version hook batch cleared
 UI component batch cleared `OllamaModelSection.tsx`,
 `TorchModelSlotsSection.tsx`, `AppIndicator.tsx`, and `AppSidebar.tsx`. A
 model-import batch cleared `modelImportMetadataLookup.ts`,
-`useModelImportWorkflow.ts`, and `useShardedSetDetection.ts`.
+`useModelImportWorkflow.ts`, and `useShardedSetDetection.ts`. A final hook
+batch cleared `useAppPanelState.ts`, `usePhysicsDrag.ts`,
+`usePhysicsDragPointerEvents.ts`, `usePlugins.ts`, and
+`useVersionShortcutState.ts`, allowing the frontend lint rule to be enforced.
 
 ## Remaining Findings
-- `frontend/src/hooks/useAppPanelState.ts:23` - Unnecessary conditional, value is always falsy.
-- `frontend/src/hooks/usePhysicsDrag.ts:185` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/usePhysicsDragPointerEvents.ts:97` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/usePhysicsDragPointerEvents.ts:151` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/usePlugins.ts:58` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/usePlugins.ts:206` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useVersionShortcutState.ts:39` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useVersionShortcutState.ts:96` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useVersionShortcutState.ts:96` - Unnecessary optional chain on a non-nullish value.
+None. `@typescript-eslint/no-unnecessary-condition` is enforced in
+`frontend/eslint.config.js`.

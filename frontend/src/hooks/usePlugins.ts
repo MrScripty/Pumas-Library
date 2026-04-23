@@ -55,7 +55,7 @@ export function usePlugins(): UsePluginsResult {
       // This assumes the API has a get_plugins method
       const result = await api.get_plugins();
 
-      if (result.success && result.plugins) {
+      if (result.success) {
         setPlugins(result.plugins as PluginConfig[]);
         logger.debug('Loaded plugins', { count: result.plugins.length });
       } else {
@@ -203,7 +203,7 @@ export function usePluginProcess(appId: string) {
     try {
       const result = await api.get_app_status(appId);
       if (result.success) {
-        setIsRunning(result.running ?? false);
+        setIsRunning(result.running);
       }
     } catch (err) {
       logger.debug('Failed to check app status', { appId, error: err });

@@ -8,6 +8,7 @@ import {
 } from 'react';
 import {
   DRAG_START_DISTANCE,
+  releasePointerCaptureIfAvailable,
   type FloatingState,
   type PendingDrag,
   type PointerPhase,
@@ -26,6 +27,10 @@ interface UsePhysicsDragPointerEventsOptions {
   setDragVelocity: Dispatch<SetStateAction<number>>;
   setPointerPhase: Dispatch<SetStateAction<PointerPhase>>;
   updateDragPhysics: (clientX: number, clientY: number) => unknown;
+}
+
+function isNonMousePointerType(pointerType: string | undefined) {
+  return pointerType !== undefined && pointerType !== '' && pointerType !== 'mouse';
 }
 
 export function usePhysicsDragPointerEvents({
@@ -47,7 +52,7 @@ export function usePhysicsDragPointerEvents({
 
     const handlePointerMove = (event: PointerEvent) => {
       if (pointerIdRef.current !== null && event.pointerId !== pointerIdRef.current) return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
+      if (isNonMousePointerType(event.pointerType)) return;
 
       if (pointerPhase === 'pending' && pendingDragRef.current) {
         const dx = event.clientX - pendingDragRef.current.startX;
@@ -79,7 +84,7 @@ export function usePhysicsDragPointerEvents({
 
     const handlePointerEnd = (event: PointerEvent) => {
       if (pointerIdRef.current !== null && event.pointerId !== pointerIdRef.current) return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
+      if (isNonMousePointerType(event.pointerType)) return;
 
       if (pointerPhase === 'pending') {
         pendingDragRef.current = null;
@@ -94,7 +99,10 @@ export function usePhysicsDragPointerEvents({
       if (!activeId) return;
 
       pointerIdRef.current = null;
-      pointerTargetRef.current?.releasePointerCapture?.(event.pointerId);
+      const pointerTarget = pointerTargetRef.current;
+      if (pointerTarget) {
+        releasePointerCaptureIfAvailable(pointerTarget, event.pointerId);
+      }
       pointerTargetRef.current = null;
 
       endDrag(activeId, event.clientX, event.clientY);
@@ -148,13 +156,11 @@ export function usePhysicsDragPointerEvents({
   return useCallback(
     (appId: string, event: ReactPointerEvent<HTMLElement>) => {
       if (floatingState !== null || draggedIdRef.current || pointerPhase !== 'idle') return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
+      if (isNonMousePointerType(event.pointerType)) return;
       if ('button' in event && event.button !== 0) return;
 
-      const element = event.currentTarget as HTMLElement | null;
-      const elementRect = element?.getBoundingClientRect();
-
-      if (!elementRect || !element) return;
+      const element = event.currentTarget;
+      const elementRect = element.getBoundingClientRect();
 
       pendingDragRef.current = {
         appId,

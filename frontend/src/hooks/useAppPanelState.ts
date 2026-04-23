@@ -12,15 +12,16 @@ const ensureStateForApps = (
   appIds: string[],
   current: Record<string, AppPanelState>
 ) => {
-  let changed = false;
+  const missingAppIds = appIds.filter((appId) => current[appId] === undefined);
+  if (missingAppIds.length === 0) {
+    return current;
+  }
+
   const next = { ...current };
-  appIds.forEach((appId) => {
-    if (!next[appId]) {
-      next[appId] = { ...DEFAULT_PANEL_STATE };
-      changed = true;
-    }
+  missingAppIds.forEach((appId) => {
+    next[appId] = { ...DEFAULT_PANEL_STATE };
   });
-  return changed ? next : current;
+  return next;
 };
 
 export function useAppPanelState(appIds: string[]) {

@@ -61,8 +61,7 @@ export default tseslint.config(
         'error',
         { ignoreArrowShorthand: true },
       ],
-      // Audit F07 tracks ratcheting this broad legacy waiver after decomposition.
-      '@typescript-eslint/no-unnecessary-condition': 'off',
+      '@typescript-eslint/no-unnecessary-condition': 'error',
       '@typescript-eslint/no-non-null-assertion': 'error',
       // Allow async functions in event handlers and callbacks
       '@typescript-eslint/no-misused-promises': [

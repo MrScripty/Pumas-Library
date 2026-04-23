@@ -118,6 +118,22 @@ export function reorderAppsAtIndices(
   return reordered;
 }
 
+export function setPointerCaptureIfAvailable(element: HTMLElement, pointerId: number) {
+  const setPointerCapture = (element as { setPointerCapture?: (pointerId: number) => void })
+    .setPointerCapture;
+  if (typeof setPointerCapture === 'function') {
+    setPointerCapture.call(element, pointerId);
+  }
+}
+
+export function releasePointerCaptureIfAvailable(element: HTMLElement, pointerId: number) {
+  const releasePointerCapture = (element as { releasePointerCapture?: (pointerId: number) => void })
+    .releasePointerCapture;
+  if (typeof releasePointerCapture === 'function') {
+    releasePointerCapture.call(element, pointerId);
+  }
+}
+
 export function isEditableElement(activeElement: HTMLElement | null) {
   return Boolean(
     activeElement?.tagName === 'INPUT'

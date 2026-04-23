@@ -39,6 +39,7 @@ describe('useVersionShortcutState', () => {
       },
     });
     setVersionShortcutsMock.mockResolvedValue({
+      success: true,
       state: {
         menu: true,
         desktop: true,
@@ -151,6 +152,7 @@ describe('useVersionShortcutState', () => {
 
   it('applies optimistic shortcut toggles and reconciles with backend state', async () => {
     setVersionShortcutsMock.mockResolvedValueOnce({
+      success: true,
       state: {
         menu: true,
         desktop: false,

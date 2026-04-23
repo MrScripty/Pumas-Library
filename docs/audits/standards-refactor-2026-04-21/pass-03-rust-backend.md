@@ -306,6 +306,10 @@ Implementation notes:
   open-path, open-url, and open-directory requests through `tokio::task::spawn_blocking`, so RPC
   system utility requests no longer run synchronous path validation or platform shell launches
   inline on async runtime threads.
+- Completed: `pumas-core/src/network/github.rs`, `pumas-app-manager/src/version_manager/mod.rs`,
+  and `pumas-rpc/src/handlers/versions/release.rs` now load GitHub release cache status through
+  async disk reads, so the RPC cache-status request path no longer performs synchronous cache-file
+  inspection inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

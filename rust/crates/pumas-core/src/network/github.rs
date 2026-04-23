@@ -168,9 +168,9 @@ impl ReleasesCache {
         }
     }
 
-    /// Get cache status for a key.
-    pub fn get_status(&self, key: &str, is_fetching: bool) -> CacheStatus {
-        let disk_cache = self.get_disk(key);
+    /// Get cache status for a key without blocking the async runtime.
+    pub async fn get_status_async(&self, key: &str, is_fetching: bool) -> CacheStatus {
+        let disk_cache = self.get_disk_async(key).await;
         let has_cache = disk_cache.is_some();
         let is_valid = disk_cache
             .as_ref()
@@ -412,9 +412,10 @@ impl GitHubClient {
     }
 
     /// Get cache status for a repository.
-    pub fn get_cache_status(&self, repo: &str) -> CacheStatus {
+    pub async fn get_cache_status(&self, repo: &str) -> CacheStatus {
         self.cache
-            .get_status(repo, self.is_fetching.load(Ordering::SeqCst))
+            .get_status_async(repo, self.is_fetching.load(Ordering::SeqCst))
+            .await
     }
 
     /// Invalidate cache for a repository.
@@ -730,13 +731,13 @@ mod tests {
         assert_eq!(cached[0].tag_name, "v1.0.0");
     }
 
-    #[test]
-    fn test_cache_status() {
+    #[tokio::test]
+    async fn test_cache_status() {
         let temp_dir = TempDir::new().unwrap();
         let cache = ReleasesCache::new(temp_dir.path().to_path_buf(), Duration::from_secs(3600));
 
         // No cache
-        let status = cache.get_status("test/repo", false);
+        let status = cache.get_status_async("test/repo", false).await;
         assert!(!status.has_cache);
         assert!(!status.is_valid);
 
@@ -757,7 +758,7 @@ mod tests {
         }];
         cache.set_disk("test/repo", &releases).unwrap();
 
-        let status = cache.get_status("test/repo", false);
+        let status = cache.get_status_async("test/repo", false).await;
         assert!(status.has_cache);
         assert!(status.is_valid);
         assert_eq!(status.releases_count, Some(1));
@@ -795,7 +796,7 @@ mod tests {
     #[tokio::test]
     async fn test_client_creation() {
         let (client, _temp) = create_test_client();
-        let status = client.get_cache_status("test/repo");
+        let status = client.get_cache_status("test/repo").await;
         assert!(!status.has_cache);
         assert!(!status.is_fetching);
     }

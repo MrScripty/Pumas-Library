@@ -226,7 +226,7 @@ async fn test_open_directory_for_nonexistent_path() {
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening non-existent directory should fail
-    let result = api.open_directory(Path::new("/nonexistent/path"));
+    let result = api.open_directory(Path::new("/nonexistent/path")).await;
     assert!(result.is_err());
 }
 

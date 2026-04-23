@@ -222,7 +222,7 @@ pub async fn get_github_cache_status(
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     // Return cache status in format expected by frontend
     if let Some(vm) = get_version_manager(state, app_id_str).await {
-        let cache_status = vm.get_github_cache_status();
+        let cache_status = vm.get_github_cache_status().await;
         Ok(json!({
             "has_cache": cache_status.has_cache,
             "is_valid": cache_status.is_valid,

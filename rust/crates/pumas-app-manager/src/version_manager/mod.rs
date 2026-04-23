@@ -318,9 +318,10 @@ impl VersionManager {
     }
 
     /// Get cache status for GitHub releases.
-    pub fn get_github_cache_status(&self) -> pumas_library::models::CacheStatus {
+    pub async fn get_github_cache_status(&self) -> pumas_library::models::CacheStatus {
         self.github_client
             .get_cache_status(self.app_id.github_repo())
+            .await
     }
 
     // ========================================

@@ -298,6 +298,10 @@ Implementation notes:
 - Completed: `pumas-rpc/src/handlers/shared.rs` and `handlers/models/imports.rs` now load
   safetensors embedded metadata through async file reads, so RPC model import and metadata request
   paths no longer perform synchronous header reads inline on async runtime threads.
+- Completed: `pumas-core/src/api/models.rs` and `pumas-rpc/src/handlers/models/imports.rs` now
+  route model file-type detection through `tokio::task::spawn_blocking`, so RPC file validation no
+  longer performs synchronous path probes and model header inspection inline on async runtime
+  threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

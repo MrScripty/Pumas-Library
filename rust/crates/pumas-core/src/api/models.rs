@@ -1,7 +1,7 @@
 //! Model library methods on PumasApi.
 
 use super::{reconcile_on_demand, ReconcileScope};
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::index::{ModelRecord, SearchResult};
 use crate::model_library;
 use crate::models;
@@ -155,35 +155,45 @@ impl PumasApi {
     }
 
     /// Validate model file type using content detection (magic bytes/header parsing).
-    pub fn validate_file_type(&self, file_path: &str) -> models::FileTypeValidationResponse {
-        let path = Path::new(file_path);
-        if !path.exists() || !path.is_file() {
-            return models::FileTypeValidationResponse {
-                success: false,
-                error: Some(format!("File not found: {}", file_path)),
-                valid: false,
-                detected_type: "error".to_string(),
-            };
-        }
-
-        match model_library::identify_model_type(path) {
-            Ok(info) => {
-                let detected_type = info.format.as_str().to_string();
-                let valid = info.format != model_library::FileFormat::Unknown;
-                models::FileTypeValidationResponse {
-                    success: true,
-                    error: None,
-                    valid,
-                    detected_type,
-                }
+    pub async fn validate_file_type(
+        &self,
+        file_path: &str,
+    ) -> Result<models::FileTypeValidationResponse> {
+        let file_path = file_path.to_string();
+        tokio::task::spawn_blocking(move || {
+            let path = Path::new(&file_path);
+            if !path.exists() || !path.is_file() {
+                return Ok(models::FileTypeValidationResponse {
+                    success: false,
+                    error: Some(format!("File not found: {}", file_path)),
+                    valid: false,
+                    detected_type: "error".to_string(),
+                });
             }
-            Err(err) => models::FileTypeValidationResponse {
-                success: false,
-                error: Some(err.to_string()),
-                valid: false,
-                detected_type: "error".to_string(),
-            },
-        }
+
+            let response = match model_library::identify_model_type(path) {
+                Ok(info) => {
+                    let detected_type = info.format.as_str().to_string();
+                    let valid = info.format != model_library::FileFormat::Unknown;
+                    models::FileTypeValidationResponse {
+                        success: true,
+                        error: None,
+                        valid,
+                        detected_type,
+                    }
+                }
+                Err(err) => models::FileTypeValidationResponse {
+                    success: false,
+                    error: Some(err.to_string()),
+                    valid: false,
+                    detected_type: "error".to_string(),
+                },
+            };
+
+            Ok(response)
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join validate_file_type task: {}", e)))?
     }
 
     /// Get a single model by ID.

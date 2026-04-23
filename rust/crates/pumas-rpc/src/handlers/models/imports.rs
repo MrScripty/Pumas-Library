@@ -199,7 +199,7 @@ pub async fn detect_sharded_sets(
 
 pub async fn validate_file_type(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let file_path = require_str_param(params, "file_path", "filePath")?;
-    let response = state.api.validate_file_type(&file_path);
+    let response = state.api.validate_file_type(&file_path).await?;
     Ok(serde_json::to_value(response)?)
 }
 

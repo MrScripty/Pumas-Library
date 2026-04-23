@@ -109,6 +109,10 @@ describe('LocalModelsList', () => {
         ],
       },
     };
+    const firstModel = modelGroups[0]?.models[0];
+    if (firstModel === undefined) {
+      throw new TypeError('Expected a model fixture');
+    }
 
     render(
       <LocalModelsList
@@ -117,7 +121,7 @@ describe('LocalModelsList', () => {
             category: 'llm',
             models: [
               {
-                ...modelGroups[0]!.models[0]!,
+                ...firstModel,
                 relatedAvailable: true,
               },
             ],

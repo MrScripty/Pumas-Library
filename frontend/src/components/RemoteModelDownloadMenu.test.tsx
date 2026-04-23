@@ -17,6 +17,14 @@ function createModel(overrides: Partial<RemoteModelInfo> = {}): RemoteModelInfo 
   };
 }
 
+function getDownloadOptions(model: RemoteModelInfo): NonNullable<RemoteModelInfo['downloadOptions']> {
+  if (model.downloadOptions === undefined) {
+    throw new TypeError('Expected download options');
+  }
+
+  return model.downloadOptions;
+}
+
 describe('RemoteModelDownloadMenu', () => {
   it('starts a grouped-file download with the selected filenames and clears selection', () => {
     const onStartDownload = vi.fn().mockResolvedValue(undefined);
@@ -39,7 +47,7 @@ describe('RemoteModelDownloadMenu', () => {
 
     render(
       <RemoteModelDownloadMenu
-        downloadOptions={model.downloadOptions!}
+        downloadOptions={getDownloadOptions(model)}
         hasExactDetails={true}
         hasFileGroups={true}
         isHydratingDetails={false}
@@ -79,7 +87,7 @@ describe('RemoteModelDownloadMenu', () => {
 
     render(
       <RemoteModelDownloadMenu
-        downloadOptions={model.downloadOptions!}
+        downloadOptions={getDownloadOptions(model)}
         hasExactDetails={true}
         hasFileGroups={true}
         isHydratingDetails={false}
@@ -114,7 +122,7 @@ describe('RemoteModelDownloadMenu', () => {
 
     render(
       <RemoteModelDownloadMenu
-        downloadOptions={model.downloadOptions!}
+        downloadOptions={getDownloadOptions(model)}
         hasExactDetails={true}
         hasFileGroups={false}
         isHydratingDetails={false}

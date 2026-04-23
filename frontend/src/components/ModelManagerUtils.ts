@@ -57,8 +57,8 @@ export function mergeLocalModelGroups(
   modelGroups.forEach((group) => {
     const models = group.models.map((model) => {
       const key = model.repoId?.toLowerCase();
-      if (key && downloadByRepoId.has(key)) {
-        const download = downloadByRepoId.get(key)!;
+      const download = key ? downloadByRepoId.get(key) : undefined;
+      if (key && download) {
         mergedRepoKeys.add(key);
         return {
           ...model,

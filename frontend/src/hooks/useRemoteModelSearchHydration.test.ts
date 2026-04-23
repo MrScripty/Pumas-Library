@@ -43,6 +43,14 @@ const baseRemoteModel = (overrides: Partial<RemoteModelInfo> = {}): RemoteModelI
   ...overrides,
 });
 
+function requireRemoteModel(model: RemoteModelInfo | undefined): RemoteModelInfo {
+  if (model === undefined) {
+    throw new TypeError('Expected search result model');
+  }
+
+  return model;
+}
+
 describe('useRemoteModelSearch hydration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -109,14 +117,13 @@ describe('useRemoteModelSearch hydration', () => {
       await Promise.resolve();
     });
 
-    const target = result.current.results[0];
-    expect(target).toBeDefined();
+    const target = requireRemoteModel(result.current.results[0]);
 
     let firstHydration: Promise<void> | undefined;
     let secondHydration: Promise<void> | undefined;
     await act(async () => {
-      firstHydration = result.current.hydrateModelDetails(target!);
-      secondHydration = result.current.hydrateModelDetails(target!);
+      firstHydration = result.current.hydrateModelDetails(target);
+      secondHydration = result.current.hydrateModelDetails(target);
       await Promise.resolve();
     });
 
@@ -213,12 +220,11 @@ describe('useRemoteModelSearch hydration', () => {
       await Promise.resolve();
     });
 
-    const staleTarget = result.current.results[0];
-    expect(staleTarget).toBeDefined();
+    const staleTarget = requireRemoteModel(result.current.results[0]);
 
     let hydrationPromise: Promise<void> | undefined;
     await act(async () => {
-      hydrationPromise = result.current.hydrateModelDetails(staleTarget!);
+      hydrationPromise = result.current.hydrateModelDetails(staleTarget);
       await Promise.resolve();
     });
 

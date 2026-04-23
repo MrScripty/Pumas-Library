@@ -105,9 +105,9 @@ export function InstallDialogContent({
         )}
       </AnimatePresence>
 
-      {showProgressDetails ? (
+      {showProgressDetails && progress ? (
         <ProgressDetailsView
-          progress={progress!}
+          progress={progress}
           installingVersion={installingVersion}
           showCompletedItems={showCompletedItems}
           onToggleCompletedItems={onToggleCompletedItems}

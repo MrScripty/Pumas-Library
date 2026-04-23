@@ -220,12 +220,9 @@ Implementation notes:
 ### F07 - Frontend Lint Config Has Legacy Waivers That Hide Refactor Pressure
 Status: partially remediated
 
-`frontend/eslint.config.js` disables:
+`frontend/eslint.config.js` still disables:
 
 - `@typescript-eslint/no-unnecessary-condition`
-- `@typescript-eslint/no-non-null-assertion`
-- `max-lines-per-function`
-- `complexity`
 
 The file comments say this is due to legacy noise. That is an acceptable temporary explanation, but it should become a tracked ratchet with explicit thresholds and target files.
 
@@ -262,8 +259,9 @@ Rectification:
 - Completed: reduce `frontend/src/App.tsx` orchestration complexity by moving shell state projection and prop construction into `frontend/src/components/AppShellState.ts` while preserving App shell behavior with focused helper coverage.
 - Completed: `frontend/eslint.config.js` enforces ESLint `complexity` at a maximum of 20 after the function-level decomposition wave cleared the full frontend source tree.
 - Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory is recorded in `pass-02-frontend-function-length-inventory.md`.
+- Completed: replace frontend non-null assertions in production helpers and tests with explicit guards, then enforce `@typescript-eslint/no-non-null-assertion`.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
-- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` plus `@typescript-eslint/no-non-null-assertion` to scoped overrides or enforceable warnings.
+- Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` to scoped overrides or enforceable warnings.
 
 ## Pass 02 Refactor Inputs
 - Desktop bridge executable contract.

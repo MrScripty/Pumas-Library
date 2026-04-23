@@ -87,6 +87,10 @@ export function getAppById(id: string): AppConfig | undefined {
  * Get default app (ComfyUI for now)
  */
 export function getDefaultApp(): AppConfig {
-  // DEFAULT_APPS is a static array that always has at least one element
-  return DEFAULT_APPS[0]!;
+  const defaultApp = DEFAULT_APPS[0];
+  if (defaultApp === undefined) {
+    throw new TypeError('DEFAULT_APPS must include at least one app');
+  }
+
+  return defaultApp;
 }

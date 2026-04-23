@@ -99,8 +99,10 @@ describe('ConflictResolutionDialog', () => {
     });
 
     const summaryButton = screen.getByText('Model One').closest('button');
-    expect(summaryButton).not.toBeNull();
-    fireEvent.click(summaryButton!);
+    if (summaryButton === null) {
+      throw new TypeError('Expected conflict summary button');
+    }
+    fireEvent.click(summaryButton);
 
     expect(screen.getByText('Source:')).toBeInTheDocument();
     expect(screen.getByText('source/model-one.gguf')).toBeInTheDocument();

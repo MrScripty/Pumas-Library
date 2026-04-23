@@ -69,10 +69,13 @@ export function groupModelRecords(models: ModelRecord[]): ModelCategory[] {
 
   for (const model of models) {
     const modelInfo = mapModelRecordToInfo(model);
-    if (!categoryMap.has(modelInfo.category)) {
-      categoryMap.set(modelInfo.category, []);
+    const groupedModels = categoryMap.get(modelInfo.category);
+    if (groupedModels) {
+      groupedModels.push(modelInfo);
+      continue;
     }
-    categoryMap.get(modelInfo.category)!.push(modelInfo);
+
+    categoryMap.set(modelInfo.category, [modelInfo]);
   }
 
   return Array.from(categoryMap.entries()).map(([category, groupedModels]) => ({

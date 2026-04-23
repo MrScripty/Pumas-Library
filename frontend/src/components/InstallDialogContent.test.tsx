@@ -46,6 +46,15 @@ const progress: InstallationProgress = {
   log_path: '/tmp/install.log',
 };
 
+function getClosestButton(label: string): HTMLButtonElement {
+  const button = screen.getByText(label).closest('button');
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new TypeError(`Expected ${label} to have a button ancestor`);
+  }
+
+  return button;
+}
+
 function renderInstallDialogContent(overrides: Partial<React.ComponentProps<typeof InstallDialogContent>> = {}) {
   const props: React.ComponentProps<typeof InstallDialogContent> = {
     cancellationNotice: null,
@@ -105,10 +114,10 @@ describe('InstallDialogContent', () => {
       'https://github.com/example/app/releases/tag/v1.2.3'
     );
 
-    fireEvent.click(screen.getByText('1.00 GB').closest('button')!);
+    fireEvent.click(getClosestButton('1.00 GB'));
     expect(props.onInstallVersion).toHaveBeenCalledWith('v1.2.3');
 
-    fireEvent.click(screen.getByText('Uninstall').closest('button')!);
+    fireEvent.click(getClosestButton('Uninstall'));
     await waitFor(() => {
       expect(props.onReportRemoveError).toHaveBeenCalledWith('v2.0.0', removeError);
     });

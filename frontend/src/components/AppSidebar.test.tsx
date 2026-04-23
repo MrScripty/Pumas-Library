@@ -61,7 +61,11 @@ describe('AppSidebar', () => {
     const onSelectApp = vi.fn();
     render(<AppSidebar {...defaultProps} onSelectApp={onSelectApp} />);
 
-    const firstApp = screen.getByRole('button', { name: mockApps[0]!.displayName });
+    const firstMockApp = mockApps[0];
+    if (firstMockApp === undefined) {
+      throw new TypeError('Expected at least one mock app');
+    }
+    const firstApp = screen.getByRole('button', { name: firstMockApp.displayName });
     await user.click(firstApp);
 
     expect(onSelectApp).toHaveBeenCalled();

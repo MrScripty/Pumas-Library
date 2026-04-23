@@ -100,6 +100,15 @@ const classifyResults: ImportPathClassification[] = [
   },
 ];
 
+function getClassifyResult(index: number): ImportPathClassification {
+  const classifyResult = classifyResults[index];
+  if (classifyResult === undefined) {
+    throw new TypeError(`Expected classify result at index ${index}`);
+  }
+
+  return classifyResult;
+}
+
 describe('useModelImportWorkflow', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -155,7 +164,7 @@ describe('useModelImportWorkflow', () => {
   });
 
   it('uses embedded metadata matches for gguf files and still advances lookup progress', async () => {
-    classifyImportPathsMock.mockResolvedValue([classifyResults[0]!]);
+    classifyImportPathsMock.mockResolvedValue([getClassifyResult(0)]);
     detectShardedSetsMock.mockResolvedValue({ success: true, groups: {} });
     validateFileTypeMock.mockResolvedValue({
       success: true,
@@ -199,7 +208,7 @@ describe('useModelImportWorkflow', () => {
   });
 
   it('imports successful batches and reports completion counts', async () => {
-    classifyImportPathsMock.mockResolvedValue([classifyResults[0]!]);
+    classifyImportPathsMock.mockResolvedValue([getClassifyResult(0)]);
     detectShardedSetsMock.mockResolvedValue({ success: true, groups: {} });
     importBatchMock.mockResolvedValue({
       success: true,

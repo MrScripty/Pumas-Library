@@ -29,6 +29,15 @@ const dependencyProgress: InstallationProgress = {
   error: null,
 };
 
+function getClosestButton(label: string): HTMLButtonElement {
+  const button = screen.getByText(label).closest('button');
+  if (!(button instanceof HTMLButtonElement)) {
+    throw new TypeError(`Expected ${label} to have a button ancestor`);
+  }
+
+  return button;
+}
+
 function renderVersionListItem(overrides: Partial<React.ComponentProps<typeof VersionListItem>> = {}) {
   const props: React.ComponentProps<typeof VersionListItem> = {
     release,
@@ -70,7 +79,7 @@ describe('VersionListItem', () => {
     fireEvent.pointerEnter(container.firstChild as Element);
     fireEvent.pointerLeave(container.firstChild as Element);
     fireEvent.click(screen.getByRole('button', { name: 'Release notes' }));
-    fireEvent.click(screen.getByText('1.00 GB').closest('button')!);
+    fireEvent.click(getClosestButton('1.00 GB'));
 
     expect(props.onHoverStart).toHaveBeenCalledTimes(1);
     expect(props.onHoverEnd).toHaveBeenCalledTimes(1);
@@ -93,7 +102,7 @@ describe('VersionListItem', () => {
     expect(screen.getByText('Install failed')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'View log' }));
-    fireEvent.click(screen.getByText('Uninstall').closest('button')!);
+    fireEvent.click(getClosestButton('Uninstall'));
 
     expect(props.onOpenLogPath).toHaveBeenCalledWith('/tmp/install.log');
     expect(props.onRemove).toHaveBeenCalledTimes(1);
@@ -108,9 +117,10 @@ describe('VersionListItem', () => {
 
     expect(screen.getByText('2/4')).toBeInTheDocument();
 
-    fireEvent.pointerEnter(screen.getByText('2/4').closest('button')!);
-    fireEvent.pointerLeave(screen.getByText('2/4').closest('button')!);
-    fireEvent.click(screen.getByText('2/4').closest('button')!);
+    const progressButton = getClosestButton('2/4');
+    fireEvent.pointerEnter(progressButton);
+    fireEvent.pointerLeave(progressButton);
+    fireEvent.click(progressButton);
 
     expect(props.onCancelMouseEnter).toHaveBeenCalledTimes(1);
     expect(props.onCancelMouseLeave).toHaveBeenCalledTimes(1);

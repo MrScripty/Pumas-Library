@@ -244,6 +244,9 @@ Implementation notes:
   progress persistence through the current Tokio runtime when available, falling back to blocking
   writes only outside async contexts, so installer progress updates no longer write state files
   inline on async runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/state.rs` now uses async binary-path probing in
+  Ollama installation validation so version-state refresh no longer performs that completeness
+  check with a synchronous metadata probe on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

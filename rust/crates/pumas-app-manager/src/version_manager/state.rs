@@ -416,7 +416,14 @@ impl VersionState {
                 // Check both locations - if either exists, consider it complete
                 let bin_path = version_path.join("bin").join("ollama");
                 let root_path = version_path.join("ollama");
-                if bin_path.exists() {
+                if fs::try_exists(&bin_path)
+                    .await
+                    .map_err(|e| PumasError::Io {
+                        message: format!("Failed to check binary path: {}", e),
+                        path: Some(bin_path.clone()),
+                        source: Some(e),
+                    })?
+                {
                     vec![bin_path]
                 } else {
                     vec![root_path]

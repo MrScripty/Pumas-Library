@@ -1,9 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, X } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { Plus } from 'lucide-react';
 import { createPortal } from 'react-dom';
-import { AppIcon } from './AppIcon';
-import { ComfyUIIcon } from './ComfyUIIcon';
 import type { AppConfig } from '../types/apps';
 import {
   usePhysicsDrag,
@@ -13,9 +10,9 @@ import {
 } from '../hooks/usePhysicsDrag';
 import {
   useAnimationTimestamp,
-  getDeleteZoneShakeStyle
 } from '../utils/dragAnimations';
 import { Tooltip } from './ui';
+import { SidebarAppIcon } from './SidebarAppIcon';
 
 interface AppSidebarProps {
   apps: AppConfig[];
@@ -180,11 +177,6 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
     }
   };
 
-  const listTransition = {
-    type: 'spring',
-    stiffness: 420,
-    damping: 32
-  };
   const listRect = listRef.current?.getBoundingClientRect();
   const floatingWidth = listRect?.width ?? ICON_SIZE;
 
@@ -212,116 +204,32 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
 
   const floatingApp = floatingId ? apps.find(app => app.id === floatingId) : null;
 
-  const renderAppIcon = (app: AppConfig, isFloating: boolean, offsetY: number) => {
-    const hasInstall = app.iconState !== 'uninstalled';
-    const launchError = app.iconState === 'error';
-    const isOtherDragging = floatingId !== null && !isFloating;
-
-    const shakeStyle: React.CSSProperties = (isFloating && deleteZoneShakeIntensity > 0.01)
-      ? getDeleteZoneShakeStyle(deleteZoneShakeIntensity, timestamp)
-      : {};
-
-    const floatingStyle: React.CSSProperties = isFloating && dragOrigin
-      ? {
-          position: 'fixed',
-          top: dragOrigin.y,
-          left: dragOrigin.x,
-          zIndex: 10000,
-          width: floatingWidth
-        }
-      : {};
-
-    const motionStyle = isFloating
-      ? {
-          x: dragX,
-          y: dragY,
-          scale: isDragging || isSettling ? 1.1 : 1,
-          filter: isDragging || isSettling ? 'drop-shadow(0 12px 24px rgba(0,0,0,0.35))' : 'none',
-          borderRadius: '9999px'
-        }
-      : {};
-
-    const dragProps = {
-      onPointerDown: (event: React.PointerEvent<HTMLElement>) =>
-        onPointerDown(app.id, event),
-    };
-
-    const hideInList = !isFloating && isSettling && app.id === floatingId;
-
-    const motionProps = {
-      transition: isFloating && isDeleting
-        ? { duration: 0.22, ease: 'easeIn' }
-        : { ...listTransition, opacity: { duration: 0.12 } },
-      style: {
-        ...floatingStyle,
-        ...motionStyle,
-        touchAction: 'none' as const,
-        pointerEvents: hideInList ? 'none' as const : undefined,
-      },
-      animate: isFloating
-        ? (isDeleting ? { scale: 0, rotate: -35, opacity: 0 } : undefined)
-        : { y: offsetY, opacity: hideInList ? 0 : 1 },
-      onAnimationComplete: () => {
-        if (isFloating && isDeleting) {
-          completeDelete();
-        }
-      },
-      ...dragProps,
-    };
-
-    return (
-      // @ts-expect-error - Framer Motion transition type incompatibility
-      <motion.div key={app.id} {...motionProps}>
-        <div className="relative">
-          {app.id === 'comfyui' ? (
-            <ComfyUIIcon
-              state={app.iconState}
-              isSelected={selectedAppId === app.id}
-              onClick={() => handleIconClick(app.id)}
-              title={app.displayName}
-              ramUsage={app.ramUsage}
-              gpuUsage={app.gpuUsage}
-              hasInstall={hasInstall}
-              launchError={launchError}
-              onLaunch={() => onLaunchApp?.(app.id)}
-              onStop={() => onStopApp?.(app.id)}
-              onOpenLog={() => onOpenLog?.(app.id)}
-              dragOpacity={1.0}
-              shakeStyle={shakeStyle}
-              _disableShake={isOtherDragging}
-            />
-          ) : (
-            <AppIcon
-              appId={app.id}
-              state={app.iconState}
-              isSelected={selectedAppId === app.id}
-              onClick={() => handleIconClick(app.id)}
-              title={app.displayName}
-              ramUsage={app.ramUsage}
-              gpuUsage={app.gpuUsage}
-              hasInstall={hasInstall}
-              launchError={launchError}
-              onLaunch={() => onLaunchApp?.(app.id)}
-              onStop={() => onStopApp?.(app.id)}
-              onOpenLog={() => onOpenLog?.(app.id)}
-              dragOpacity={1.0}
-              shakeStyle={shakeStyle}
-              _disableShake={isOtherDragging}
-            />
-          )}
-
-          {isFloating && isDragging && isInDeleteZone && (
-            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-              <X
-                className="w-8 h-8 text-accent-error"
-                style={{ opacity: 0.4 + deleteZoneShakeIntensity * 0.6 }}
-              />
-            </div>
-          )}
-        </div>
-      </motion.div>
-    );
-  };
+  const renderAppIcon = (app: AppConfig, isFloating: boolean, offsetY: number) => (
+    <SidebarAppIcon
+      key={app.id}
+      app={app}
+      completeDelete={completeDelete}
+      deleteZoneShakeIntensity={deleteZoneShakeIntensity}
+      dragOrigin={dragOrigin}
+      dragX={dragX}
+      dragY={dragY}
+      floatingId={floatingId}
+      floatingWidth={floatingWidth}
+      isDeleting={isDeleting}
+      isDragging={isDragging}
+      isFloating={isFloating}
+      isInDeleteZone={isInDeleteZone}
+      isSettling={isSettling}
+      offsetY={offsetY}
+      selectedAppId={selectedAppId}
+      timestamp={timestamp}
+      onIconClick={handleIconClick}
+      onLaunchApp={onLaunchApp}
+      onOpenLog={onOpenLog}
+      onPointerDown={onPointerDown}
+      onStopApp={onStopApp}
+    />
+  );
 
   return (
     <div

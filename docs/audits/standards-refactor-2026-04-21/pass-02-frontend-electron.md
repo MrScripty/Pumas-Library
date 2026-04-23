@@ -203,6 +203,7 @@ Rectification:
 Implementation notes:
 - App launcher indicator, version selector controls, and import lookup metadata expansion now use native buttons instead of custom role-button wrappers.
 - Sidebar background deselection now uses pointer handling plus a window Escape listener instead of casting a keyboard event through a generic JSX handler.
+- Sidebar app icon motion rendering now lives in `frontend/src/components/SidebarAppIcon.tsx`, keeping `AppSidebar.tsx` below the 300 effective-line standard while preserving the existing selection, background deselection, Escape, and add-button tests.
 - `InstallDialog`, `ModelMetadataModal`, `ConflictResolutionDialog`, and `MappingPreviewDialog` use named dialogs, native backdrop buttons, Escape handling, and focus-return tests.
 - Install cancellation and migration report destructive actions use app-owned confirmation dialogs instead of `window.confirm`.
 
@@ -223,6 +224,7 @@ Rectification:
 - Completed: `frontend/scripts/check-file-size.js` now enforces a committed baseline ratchet so existing oversized files cannot grow and new files still fail above 300 source lines.
 - Completed: `frontend/scripts/file-size-baseline.json` records the current oversized file baseline for decomposition tracking.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/App.tsx` from 498 to 376 effective lines after the F04 state-owner extractions.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/AppSidebar.tsx` from the oversized-file baseline after it reached 256 effective lines.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.
 

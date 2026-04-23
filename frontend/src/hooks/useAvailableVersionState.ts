@@ -72,11 +72,11 @@ export function useAvailableVersionState({
       logger.debug('Fetching available versions', { forceRefresh });
       const result = await api.get_available_versions(forceRefresh, resolvedAppId);
       logger.debug('Available versions result received', {
-        versionsCount: result.versions?.length,
+        versionsCount: result.versions.length,
       });
 
       if (result.success) {
-        const mapped = (result.versions || []).map(mapVersionRelease);
+        const mapped = result.versions.map(mapVersionRelease);
         setAvailableVersions(mapped);
         setIsRateLimited(false);
         setRateLimitRetryAfter(null);

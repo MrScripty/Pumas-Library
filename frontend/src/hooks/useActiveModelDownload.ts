@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { api, isAPIAvailable } from '../api/adapter';
+import type { ModelDownloadStatusResponse } from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useActiveModelDownload');
 
 const POLL_INTERVAL_MS = 1000;
-const ACTIVE_STATUSES = new Set(['queued', 'downloading', 'pausing', 'cancelling']);
+const ACTIVE_STATUSES = ['queued', 'downloading', 'pausing', 'cancelling'] as const;
+type ActiveDownloadStatus = (typeof ACTIVE_STATUSES)[number];
 
 export interface ActiveModelDownload {
   downloadId: string;
   repoId: string | null;
-  status: 'queued' | 'downloading' | 'pausing' | 'cancelling';
+  status: ActiveDownloadStatus;
   progress: number;
   downloadedBytes: number | null;
   totalBytes: number | null;
@@ -18,9 +20,17 @@ export interface ActiveModelDownload {
   etaSeconds: number | null;
 }
 
-function isActiveStatus(status: string | undefined): status is ActiveModelDownload['status'] {
+interface ActiveDownloadStatusResponse extends ModelDownloadStatusResponse {
+  status: ActiveDownloadStatus;
+}
+
+function isActiveStatus(status: string | undefined): status is ActiveDownloadStatus {
   if (!status) return false;
-  return ACTIVE_STATUSES.has(status);
+  return ACTIVE_STATUSES.some((activeStatus) => activeStatus === status);
+}
+
+function isActiveDownload(download: ModelDownloadStatusResponse): download is ActiveDownloadStatusResponse {
+  return isActiveStatus(download.status);
 }
 
 export function useActiveModelDownload() {
@@ -28,7 +38,6 @@ export function useActiveModelDownload() {
   const [activeDownloadCount, setActiveDownloadCount] = useState(0);
 
   useEffect(() => {
-    let intervalId: number | null = null;
     let cancelled = false;
 
     const poll = async () => {
@@ -50,8 +59,7 @@ export function useActiveModelDownload() {
           return;
         }
 
-        const activeDownloads = (result.downloads || [])
-          .filter((download) => isActiveStatus(download.status));
+        const activeDownloads = result.downloads.filter(isActiveDownload);
 
         if (!cancelled) {
           setActiveDownloadCount(activeDownloads.length);
@@ -69,7 +77,7 @@ export function useActiveModelDownload() {
             return bProgress - aProgress;
           })[0];
 
-        if (!active || !active.downloadId || !isActiveStatus(active.status)) {
+        if (!active || !active.downloadId) {
           if (!cancelled) setActiveDownload(null);
           return;
         }
@@ -92,13 +100,13 @@ export function useActiveModelDownload() {
     };
 
     void poll();
-    intervalId = window.setInterval(() => {
+    const intervalId = window.setInterval(() => {
       void poll();
     }, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
-      if (intervalId !== null) window.clearInterval(intervalId);
+      window.clearInterval(intervalId);
     };
   }, []);
 

@@ -265,6 +265,7 @@ Rectification:
 - Completed: clear a third `@typescript-eslint/no-unnecessary-condition` batch in version display-state and default-version controls, reducing the remaining inventory from 66 to 58 findings.
 - Completed: clear a fourth `@typescript-eslint/no-unnecessary-condition` batch in installation-progress, download-state, network-status, status-refresh, and install-link hooks, reducing the remaining inventory from 58 to 44 findings.
 - Completed: clear a fifth `@typescript-eslint/no-unnecessary-condition` batch in dialog/frame, metadata-modal, progress-detail, and error-constructor components, reducing the remaining inventory from 44 to 33 findings.
+- Completed: clear a sixth `@typescript-eslint/no-unnecessary-condition` batch in active-download, available-version, installation-progress, model-download, model-library-action, model-list, and version-fetching hooks, reducing the remaining inventory from 33 to 22 findings.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` to scoped overrides or enforceable warnings.
 

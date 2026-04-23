@@ -43,7 +43,7 @@ export function useModelDownloads() {
       try {
         const result = await api.list_model_downloads();
         if (!result.success) return;
-        const { statuses, errors } = selectDownloadsByRepo(result.downloads || []);
+        const { statuses, errors } = selectDownloadsByRepo(result.downloads);
         setDownloadStatusByRepo((prev) => ({ ...statuses, ...prev }));
         if (Object.keys(errors).length > 0) {
           setDownloadErrors((prev) => ({ ...prev, ...errors }));
@@ -65,7 +65,7 @@ export function useModelDownloads() {
         const result = await api.list_model_downloads();
         if (!result.success) return;
 
-        const { statuses, errors } = selectDownloadsByRepo(result.downloads || []);
+        const { statuses, errors } = selectDownloadsByRepo(result.downloads);
         setDownloadStatusByRepo(statuses);
 
         setDownloadErrors((prev) => {

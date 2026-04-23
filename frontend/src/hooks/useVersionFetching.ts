@@ -91,7 +91,7 @@ export function useVersionFetching({
     try {
       const result = await api.get_installed_versions(resolvedAppId);
       if (result.success) {
-        setInstalledVersions(result.versions || []);
+        setInstalledVersions(result.versions);
       } else {
         setError(result.error || 'Failed to fetch installed versions');
       }

@@ -15,7 +15,10 @@ batch cleared `installationProgressTracking.ts`, `modelDownloadState.ts`,
 component/modal batch cleared `HuggingFaceAuthDialog.tsx`,
 `InstallDialog.tsx`, `InstallDialogFrame.tsx`, `MappingPreviewDialog.tsx`,
 `ModelMetadataGrid.tsx`, `ModelMetadataModal.tsx`, `ProgressDetailsView.tsx`,
-and `errors/index.ts`.
+and `errors/index.ts`. A model/version hook batch cleared
+`useActiveModelDownload.ts`, `useAvailableVersionState.ts`,
+`useInstallationProgress.ts`, `useModelDownloads.ts`,
+`useModelLibraryActions.ts`, `useModels.ts`, and `useVersionFetching.ts`.
 
 ## Remaining Findings
 - `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:95` - Unnecessary conditional, value is always truthy.
@@ -29,23 +32,12 @@ and `errors/index.ts`.
 - `frontend/src/components/model-import/useModelImportWorkflow.ts:248` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/model-import/useShardedSetDetection.ts:31` - Unnecessary conditional, value is always truthy.
 - `frontend/src/components/model-import/useShardedSetDetection.ts:51` - Unnecessary conditional, value is always falsy.
-- `frontend/src/hooks/useActiveModelDownload.ts:53` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useActiveModelDownload.ts:101` - Unnecessary conditional, the types have no overlap.
 - `frontend/src/hooks/useAppPanelState.ts:23` - Unnecessary conditional, value is always falsy.
-- `frontend/src/hooks/useAvailableVersionState.ts:75` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useAvailableVersionState.ts:79` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useInstallationProgress.ts:58` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/hooks/useModelDownloads.ts:46` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useModelDownloads.ts:68` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useModelLibraryActions.ts:104` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useModels.ts:55` - Unnecessary conditional, value is always truthy.
-- `frontend/src/hooks/useModels.ts:184` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/usePhysicsDrag.ts:185` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/usePhysicsDragPointerEvents.ts:97` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/usePhysicsDragPointerEvents.ts:151` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/usePlugins.ts:58` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/usePlugins.ts:206` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/hooks/useVersionFetching.ts:94` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useVersionShortcutState.ts:38` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/useVersionShortcutState.ts:39` - Unnecessary conditional, value is always truthy.

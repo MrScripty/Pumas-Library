@@ -101,7 +101,7 @@ export function useModelLibraryActions({
           ...prev,
           [modelId]: {
             status: 'loaded',
-            models: result.models ?? [],
+            models: result.models,
           },
         }));
       } else {

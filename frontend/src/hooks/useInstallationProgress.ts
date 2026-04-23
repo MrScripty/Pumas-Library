@@ -55,7 +55,7 @@ export function useInstallationProgress({
           log: externalProgress.log_path || null,
         };
         setFailedInstall((current) => (
-          current?.tag === nextFailedInstall.tag && current?.log === nextFailedInstall.log
+          current?.tag === nextFailedInstall.tag && current.log === nextFailedInstall.log
             ? current
             : nextFailedInstall
         ));

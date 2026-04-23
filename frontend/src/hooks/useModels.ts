@@ -52,7 +52,7 @@ export function useModels() {
 
     try {
       const result = await modelsAPI.getModels();
-      if (result.success && result.models) {
+      if (result.success) {
         setModelGroups(groupModelRecords(Object.values(result.models)));
       }
     } catch (error) {
@@ -181,7 +181,7 @@ export function useModels() {
             return;
           }
 
-          if (result.success && result.models) {
+          if (result.success) {
             const categorizedModels = transformFTSResults(result.models);
 
             // Check if results differ from cached (for notification)

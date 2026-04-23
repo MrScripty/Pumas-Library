@@ -111,7 +111,11 @@ Implementation notes:
 - Completed: `pumas-rpc/src/server.rs` returns an owned `ServerHandle`, logs server task errors, and aborts the task during explicit or drop-based shutdown.
 - Completed: `pumas-core/src/api/runtime_tasks.rs` owns builder-started background task handles and aborts them during `PumasApi` shutdown.
 - Completed: `PumasApiBuilder` routes initial connectivity checks, orphan adoption, download completion callbacks, and startup download/shard recovery tasks through `RuntimeTasks`.
-- Remaining: audit `pumas-core/src/ipc/server.rs` nested connection tasks plus model download and conversion manager background tasks for bounded ownership and cancellation.
+- Completed: `ConversionManager` stores conversion/quantization task handles by conversion ID,
+  prunes finished handles, and aborts tracked tasks during explicit cancellation or manager
+  shutdown.
+- Remaining: audit `pumas-core/src/ipc/server.rs` nested connection tasks plus model download
+  background tasks for bounded ownership and cancellation.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

@@ -25,6 +25,8 @@ Model format conversion between GGUF and Safetensors.
   stdout, which the Rust side parses to update the `ConversionProgressTracker`.
 - **Spawned task ownership**: Background conversion tasks own `Arc` handles for shared
   progress and quantization backends so task lifetimes do not depend on raw pointer bridges.
+- **Tracked cancellation**: Conversion task handles are retained by conversion ID, pruned after
+  completion, and aborted during explicit cancellation or manager shutdown.
 
 ## Dependencies
 

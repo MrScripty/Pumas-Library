@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 use super::llama_cpp::LlamaCppBackend;
@@ -38,6 +39,7 @@ pub struct ConversionManager {
     model_importer: Arc<ModelImporter>,
     progress: Arc<ConversionProgressTracker>,
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
+    task_handles: Mutex<HashMap<String, JoinHandle<()>>>,
     /// Counter for generating unique conversion IDs.
     id_counter: Mutex<u64>,
     /// Registered quantization backends (strategy pattern).
@@ -63,6 +65,7 @@ impl ConversionManager {
             model_importer,
             progress: Arc::new(ConversionProgressTracker::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
+            task_handles: Mutex::new(HashMap::new()),
             id_counter: Mutex::new(0),
             backends,
         }
@@ -216,6 +219,8 @@ impl ConversionManager {
     ///
     /// Returns a conversion ID that can be used to track progress.
     pub async fn start_conversion(&self, request: ConversionRequest) -> Result<String> {
+        self.prune_finished_tasks();
+
         // Check concurrent conversion limit
         let active_count = self
             .progress
@@ -294,7 +299,7 @@ impl ConversionManager {
         let target_quant = request.target_quant.clone();
         let source_model_id = request.model_id.clone();
 
-        match direction {
+        let task_handle = match direction {
             // Existing Python-based format conversions
             ConversionDirection::GgufToSafetensors | ConversionDirection::SafetensorsToGguf => {
                 tokio::spawn(async move {
@@ -317,7 +322,7 @@ impl ConversionManager {
                         error!("Conversion {} failed: {}", conv_id, e);
                         progress.set_error(&conv_id, e.to_string());
                     }
-                });
+                })
             }
             // Quantization via backend — route to the appropriate backend by direction
             ConversionDirection::SafetensorsToQuantizedGguf
@@ -349,7 +354,7 @@ impl ConversionManager {
                         error!("Quantization {} failed: {}", conv_id, e);
                         progress.set_error(&conv_id, e.to_string());
                     }
-                });
+                })
             }
             ConversionDirection::SafetensorsToNvfp4 => {
                 let (backend, params) = self.prepare_backend_quantization(
@@ -379,7 +384,7 @@ impl ConversionManager {
                         error!("Quantization {} failed: {}", conv_id, e);
                         progress.set_error(&conv_id, e.to_string());
                     }
-                });
+                })
             }
             ConversionDirection::SafetensorsToSherryQat => {
                 let (backend, params) = self.prepare_backend_quantization(
@@ -409,11 +414,30 @@ impl ConversionManager {
                         error!("Quantization {} failed: {}", conv_id, e);
                         progress.set_error(&conv_id, e.to_string());
                     }
-                });
+                })
             }
-        }
+        };
+        self.store_task_handle(conversion_id.clone(), task_handle);
 
         Ok(conversion_id)
+    }
+
+    fn store_task_handle(&self, conversion_id: String, handle: JoinHandle<()>) {
+        let mut task_handles = self
+            .task_handles
+            .lock()
+            .expect("conversion task_handles lock poisoned");
+        if let Some(previous) = task_handles.insert(conversion_id, handle) {
+            previous.abort();
+        }
+    }
+
+    fn prune_finished_tasks(&self) {
+        let mut task_handles = self
+            .task_handles
+            .lock()
+            .expect("conversion task_handles lock poisoned");
+        task_handles.retain(|_, handle| !handle.is_finished());
     }
 
     /// Prepare a backend handle and QuantizeParams for a quantization task.
@@ -479,6 +503,14 @@ impl ConversionManager {
 
         if let Some(token) = token {
             token.cancel();
+            if let Some(handle) = self
+                .task_handles
+                .lock()
+                .expect("conversion task_handles lock poisoned")
+                .remove(conversion_id)
+            {
+                handle.abort();
+            }
             self.progress
                 .set_status(conversion_id, ConversionStatus::Cancelled);
             info!("Cancelled conversion {}", conversion_id);
@@ -490,6 +522,7 @@ impl ConversionManager {
 
     /// List all tracked conversions (active and recently completed).
     pub fn list_conversions(&self) -> Vec<ConversionProgress> {
+        self.prune_finished_tasks();
         self.progress.list_all()
     }
 
@@ -506,6 +539,18 @@ impl ConversionManager {
         for (id, token) in tokens {
             token.cancel();
             self.progress.set_status(&id, ConversionStatus::Cancelled);
+        }
+
+        let handles: Vec<JoinHandle<()>> = self
+            .task_handles
+            .lock()
+            .expect("conversion task_handles lock poisoned")
+            .drain()
+            .map(|(_, handle)| handle)
+            .collect();
+
+        for handle in handles {
+            handle.abort();
         }
     }
 }

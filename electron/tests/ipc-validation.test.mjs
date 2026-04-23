@@ -45,6 +45,53 @@ test('validateApiCallPayload rejects unknown methods and non-record params', () 
   );
 });
 
+test('validateApiCallPayload enforces method request schemas', () => {
+  assert.deepEqual(validateApiCallPayload('install_version', {
+    tag: 'v1.2.3',
+    app_id: 'comfyui',
+  }), {
+    method: 'install_version',
+    params: {
+      tag: 'v1.2.3',
+      app_id: 'comfyui',
+    },
+  });
+  assert.deepEqual(validateApiCallPayload('set_default_version', {
+    tag: null,
+    app_id: undefined,
+  }), {
+    method: 'set_default_version',
+    params: {
+      tag: null,
+      app_id: undefined,
+    },
+  });
+
+  assert.throws(
+    () => validateApiCallPayload('install_version', { app_id: 'comfyui' }),
+    /Missing required API param/
+  );
+  assert.throws(
+    () => validateApiCallPayload('install_version', { tag: '' }),
+    /Invalid API param/
+  );
+  assert.throws(
+    () => validateApiCallPayload('get_installed_versions', { app_id: 42 }),
+    /Invalid API param/
+  );
+  assert.throws(
+    () => validateApiCallPayload('get_installed_versions', { app_id: null }),
+    /Invalid API param/
+  );
+  assert.throws(
+    () => validateApiCallPayload('get_installed_versions', {
+      app_id: 'comfyui',
+      extra: true,
+    }),
+    /Unexpected API param/
+  );
+});
+
 test('sanitizeOpenDialogOptions keeps only allowed dialog fields', () => {
   const options = sanitizeOpenDialogOptions({
     title: 'Pick a model',

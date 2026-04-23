@@ -1,8 +1,11 @@
 import type { OpenDialogOptions } from 'electron';
 import {
   getRpcParamsValidationPolicy,
+  getRpcRequestSchema,
   RPC_METHOD_REGISTRY,
+  type RpcParamFieldType,
   type RpcMethodName,
+  type RpcRequestSchema,
 } from './rpc-method-registry';
 
 export const ALLOWED_RPC_METHODS = RPC_METHOD_REGISTRY.methods;
@@ -60,6 +63,106 @@ function validateApiParamsForMethod(method: RpcMethodName, params: Record<string
   const paramsValidation = getRpcParamsValidationPolicy(method);
   if (paramsValidation === 'empty-record' && Object.keys(params).length > 0) {
     throw new Error(`Unexpected API params for method: ${method}`);
+  }
+
+  const requestSchema = getRpcRequestSchema(method);
+  if (requestSchema) {
+    validateRequestSchema(method, params, requestSchema);
+  }
+}
+
+function validateRequestSchema(
+  method: RpcMethodName,
+  params: Record<string, unknown>,
+  schema: RpcRequestSchema
+) {
+  const required = schema.required ?? {};
+  const optional = schema.optional ?? {};
+  const nullable = schema.nullable ?? {};
+  const knownFields = new Set([
+    ...Object.keys(required),
+    ...Object.keys(optional),
+    ...Object.keys(nullable),
+  ]);
+
+  for (const [field, fieldType] of Object.entries(required)) {
+    if (!Object.hasOwn(params, field)) {
+      throw new Error(`Missing required API param for method ${method}: ${field}`);
+    }
+    validateParamField(method, field, params[field], fieldType, {
+      allowNull: false,
+      allowUndefined: false,
+    });
+  }
+
+  for (const [field, value] of Object.entries(params)) {
+    const requiredType = required[field];
+    const optionalType = optional[field];
+    const nullableType = nullable[field];
+
+    if (requiredType) {
+      continue;
+    }
+    if (optionalType) {
+      validateParamField(method, field, value, optionalType, {
+        allowNull: false,
+        allowUndefined: true,
+      });
+      continue;
+    }
+    if (nullableType) {
+      validateParamField(method, field, value, nullableType, {
+        allowNull: true,
+        allowUndefined: true,
+      });
+      continue;
+    }
+    if (!schema.allowUnknown && !knownFields.has(field)) {
+      throw new Error(`Unexpected API param for method ${method}: ${field}`);
+    }
+  }
+}
+
+function validateParamField(
+  method: RpcMethodName,
+  field: string,
+  value: unknown,
+  fieldType: RpcParamFieldType,
+  options: {
+    allowNull: boolean;
+    allowUndefined: boolean;
+  }
+) {
+  if (options.allowUndefined && value === undefined) {
+    return;
+  }
+
+  if (value === null) {
+    if (options.allowNull) {
+      return;
+    }
+    throw new Error(`Invalid API param for method ${method}: ${field}`);
+  }
+
+  if (!isValidParamFieldType(value, fieldType)) {
+    throw new Error(`Invalid API param for method ${method}: ${field}`);
+  }
+}
+
+function isValidParamFieldType(value: unknown, fieldType: RpcParamFieldType): boolean {
+  switch (fieldType) {
+    case 'boolean':
+      return typeof value === 'boolean';
+    case 'number':
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'string':
+      return typeof value === 'string' && value.length > 0;
+    case 'string-array':
+      return Array.isArray(value) && value.every((item) => typeof item === 'string');
+    case 'string-record':
+      return isPlainRecord(value) && Object.values(value).every((item) => typeof item === 'string');
+    case 'unknown-array':
+      return Array.isArray(value);
   }
 }
 

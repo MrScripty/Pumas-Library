@@ -201,6 +201,11 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/version_manager/launcher.rs` now uses `tokio::fs::File` and
   async PID-file writes in the launch path so ComfyUI and Ollama startup no longer create launch
   logs or persist launch PIDs with blocking filesystem calls on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/installer.rs` now uses `tokio::fs` for log,
+  temp, cache-download, version, and extract-directory creation, async cache/archive cleanup,
+  async cached-download metadata checks, async archive writes, and async requirements/venv path
+  probes so the installer request path no longer performs those filesystem operations directly on
+  runtime threads before extraction and finalize steps.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

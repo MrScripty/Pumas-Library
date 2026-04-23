@@ -10,12 +10,22 @@ use pumas_library::models::InstallationStage;
 use pumas_library::network::{GitHubAsset, GitHubRelease};
 use pumas_library::{PumasError, Result};
 use std::fs::File;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, error, info, warn};
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path).await.map_err(|e| PumasError::Io {
+        message: format!("Failed to check path existence: {}", e),
+        path: Some(path.to_path_buf()),
+        source: Some(e),
+    })
+}
 
 /// Handles version installation.
 pub struct VersionInstaller {
@@ -75,11 +85,13 @@ impl VersionInstaller {
 
         // Create log file
         let log_dir = self.logs_dir();
-        std::fs::create_dir_all(&log_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create logs directory: {}", e),
-            path: Some(log_dir.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&log_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create logs directory: {}", e),
+                path: Some(log_dir.clone()),
+                source: Some(e),
+            })?;
         let log_path = log_dir.join(format!(
             "install-{}-{}.log",
             self.slugify_tag(tag),
@@ -110,22 +122,24 @@ impl VersionInstaller {
 
         // Create temp directory
         let temp_dir = self.launcher_root.join("temp");
-        std::fs::create_dir_all(&temp_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create temp directory: {}", e),
-            path: Some(temp_dir.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&temp_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create temp directory: {}", e),
+                path: Some(temp_dir.clone()),
+                source: Some(e),
+            })?;
 
         let archive_ext = if is_tarball { "tar.gz" } else { "zip" };
         let archive_path = temp_dir.join(format!("{}.{}", tag, archive_ext));
         let extract_dir = temp_dir.join(format!("extract-{}", tag));
 
         // Clean up any previous failed attempts
-        if archive_path.exists() {
-            let _ = std::fs::remove_file(&archive_path);
+        if path_exists(&archive_path).await? {
+            let _ = fs::remove_file(&archive_path).await;
         }
-        if extract_dir.exists() {
-            let _ = std::fs::remove_dir_all(&extract_dir);
+        if path_exists(&extract_dir).await? {
+            let _ = fs::remove_dir_all(&extract_dir).await;
         }
 
         // Execute installation steps
@@ -142,8 +156,8 @@ impl VersionInstaller {
             .await;
 
         // Cleanup temp files
-        let _ = std::fs::remove_file(&archive_path);
-        let _ = std::fs::remove_dir_all(&extract_dir);
+        let _ = fs::remove_file(&archive_path).await;
+        let _ = fs::remove_dir_all(&extract_dir).await;
 
         // Update progress tracker
         {
@@ -177,7 +191,7 @@ impl VersionInstaller {
 
         // Create log file
         let log_dir = self.logs_dir();
-        std::fs::create_dir_all(&log_dir).ok();
+        fs::create_dir_all(&log_dir).await.ok();
         let log_path = log_dir.join(format!(
             "install-ollama-{}-{}.log",
             self.slugify_tag(tag),
@@ -201,17 +215,19 @@ impl VersionInstaller {
             .join("launcher-data")
             .join("cache")
             .join("downloads");
-        std::fs::create_dir_all(&cache_downloads).map_err(|e| PumasError::Io {
-            message: format!("Failed to create download cache directory: {}", e),
-            path: Some(cache_downloads.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&cache_downloads)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create download cache directory: {}", e),
+                path: Some(cache_downloads.clone()),
+                source: Some(e),
+            })?;
 
         let archive_path = cache_downloads.join(&asset_name);
 
         // Check if we have a valid cached download
-        let cache_valid = if archive_path.exists() {
-            match std::fs::metadata(&archive_path) {
+        let cache_valid = if path_exists(&archive_path).await? {
+            match fs::metadata(&archive_path).await {
                 Ok(meta) if meta.len() == total_size => {
                     info!(
                         "Using cached download: {} ({} bytes)",
@@ -225,11 +241,11 @@ impl VersionInstaller {
                         meta.len(),
                         total_size
                     );
-                    let _ = std::fs::remove_file(&archive_path);
+                    let _ = fs::remove_file(&archive_path).await;
                     false
                 }
                 Err(_) => {
-                    let _ = std::fs::remove_file(&archive_path);
+                    let _ = fs::remove_file(&archive_path).await;
                     false
                 }
             }
@@ -253,7 +269,7 @@ impl VersionInstaller {
 
         // Keep cached download on success, remove on failure
         if result.is_err() {
-            let _ = std::fs::remove_file(&archive_path);
+            let _ = fs::remove_file(&archive_path).await;
         }
 
         // Update progress tracker
@@ -309,11 +325,13 @@ impl VersionInstaller {
 
         // Step 2: Create version directory
         let version_dir = self.versions_dir().join(tag);
-        std::fs::create_dir_all(&version_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create version directory: {}", e),
-            path: Some(version_dir.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&version_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create version directory: {}", e),
+                path: Some(version_dir.clone()),
+                source: Some(e),
+            })?;
 
         // Step 3: Extract binary from archive
         {
@@ -690,11 +708,13 @@ impl VersionInstaller {
         let total_size = response.content_length();
 
         // Create output file
-        let mut file = File::create(archive_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to create archive file: {}", e),
-            path: Some(archive_path.to_path_buf()),
-            source: Some(e),
-        })?;
+        let mut file = fs::File::create(archive_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create archive file: {}", e),
+                path: Some(archive_path.to_path_buf()),
+                source: Some(e),
+            })?;
 
         // Download with progress
         let mut downloaded: u64 = 0;
@@ -711,7 +731,7 @@ impl VersionInstaller {
                 cause: Some(e.to_string()),
             })?;
 
-            file.write_all(&chunk).map_err(|e| PumasError::Io {
+            file.write_all(&chunk).await.map_err(|e| PumasError::Io {
                 message: format!("Failed to write to archive: {}", e),
                 path: Some(archive_path.to_path_buf()),
                 source: Some(e),
@@ -777,11 +797,13 @@ impl VersionInstaller {
             })
             .await;
 
-        std::fs::create_dir_all(extract_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create extract directory: {}", e),
-            path: Some(extract_dir.to_path_buf()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(extract_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create extract directory: {}", e),
+                path: Some(extract_dir.to_path_buf()),
+                source: Some(e),
+            })?;
 
         if is_tarball {
             self.extract_tarball(archive_path, extract_dir)?;
@@ -1094,7 +1116,7 @@ impl VersionInstaller {
             .await;
 
         let requirements_path = version_dir.join("requirements.txt");
-        if !requirements_path.exists() {
+        if !path_exists(&requirements_path).await? {
             info!("No requirements.txt found, skipping dependency installation");
             return Ok(());
         }
@@ -1103,7 +1125,7 @@ impl VersionInstaller {
 
         // Set up pip environment
         let pip_cache_dir = self.pip_cache_dir();
-        std::fs::create_dir_all(&pip_cache_dir).ok();
+        fs::create_dir_all(&pip_cache_dir).await.ok();
 
         // Install requirements
         let mut cmd = tokio::process::Command::new(&venv_python);
@@ -1183,7 +1205,7 @@ impl VersionInstaller {
 
         // Get Python version
         let venv_python = version_dir.join("venv").join("bin").join("python");
-        let python_version = if venv_python.exists() {
+        let python_version = if path_exists(&venv_python).await? {
             let output = tokio::process::Command::new(&venv_python)
                 .args(["--version"])
                 .output()

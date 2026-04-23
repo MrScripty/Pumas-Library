@@ -494,17 +494,35 @@ impl PumasApi {
     // ========================================
 
     /// Check if git is available on the system.
-    pub fn check_git(&self) -> system::SystemCheckResult {
-        system::check_git()
+    pub async fn check_git(&self) -> system::SystemCheckResult {
+        tokio::task::spawn_blocking(system::check_git)
+            .await
+            .unwrap_or_else(|_| system::SystemCheckResult {
+                available: false,
+                path: None,
+                info: Some("Failed to join check_git task".to_string()),
+            })
     }
 
     /// Check if Brave browser is available on the system.
-    pub fn check_brave(&self) -> system::SystemCheckResult {
-        system::check_brave()
+    pub async fn check_brave(&self) -> system::SystemCheckResult {
+        tokio::task::spawn_blocking(system::check_brave)
+            .await
+            .unwrap_or_else(|_| system::SystemCheckResult {
+                available: false,
+                path: None,
+                info: Some("Failed to join check_brave task".to_string()),
+            })
     }
 
     /// Check if setproctitle Python package is available.
-    pub fn check_setproctitle(&self) -> system::SystemCheckResult {
-        system::check_setproctitle()
+    pub async fn check_setproctitle(&self) -> system::SystemCheckResult {
+        tokio::task::spawn_blocking(system::check_setproctitle)
+            .await
+            .unwrap_or_else(|_| system::SystemCheckResult {
+                available: false,
+                path: None,
+                info: Some("Failed to join check_setproctitle task".to_string()),
+            })
     }
 }

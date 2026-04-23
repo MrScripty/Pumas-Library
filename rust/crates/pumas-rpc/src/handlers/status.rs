@@ -105,17 +105,17 @@ pub async fn get_sandbox_info(_state: &AppState, _params: &Value) -> pumas_libra
 }
 
 pub async fn check_git(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let result = state.api.check_git();
+    let result = state.api.check_git().await;
     Ok(serde_json::to_value(result)?)
 }
 
 pub async fn check_brave(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let result = state.api.check_brave();
+    let result = state.api.check_brave().await;
     Ok(serde_json::to_value(result)?)
 }
 
 pub async fn check_setproctitle(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let result = state.api.check_setproctitle();
+    let result = state.api.check_setproctitle().await;
     Ok(serde_json::to_value(result)?)
 }
 

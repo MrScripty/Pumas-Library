@@ -319,6 +319,10 @@ Implementation notes:
   `tokio::task::spawn_blocking`, so RPC status polling and patch management no longer run
   synchronous `main.py` inspection, backup writes, or git/curl fallback work inline on async
   runtime threads.
+- Completed: `pumas-core/src/api/system.rs` and `pumas-rpc/src/handlers/status.rs` now route
+  git, Brave, and setproctitle system-check requests through `tokio::task::spawn_blocking`, so
+  RPC system-check endpoints no longer run synchronous command execution and path probes inline on
+  async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

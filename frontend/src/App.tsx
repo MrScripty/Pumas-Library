@@ -1,12 +1,8 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Header } from './components/Header';
-import { AppSidebar } from './components/AppSidebar';
-import { ModelImportDropZone } from './components/ModelImportDropZone';
-import { ModelImportDialog } from './components/ModelImportDialog';
-import { AppPanelRenderer } from './components/app-panels/AppPanelRenderer';
+import { useState, useMemo } from 'react';
+import { AppShell } from './components/AppShell';
+import { buildAppShellPanels } from './components/AppShellPanels';
 import type { ModelManagerProps } from './components/ModelManager';
 import type { AppConfig } from './types/apps';
-import { useVersions } from './hooks/useVersions';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
 import { useComfyUIProcess } from './hooks/useComfyUIProcess';
@@ -18,13 +14,13 @@ import { useActiveModelDownload } from './hooks/useActiveModelDownload';
 import { useAppImportDialog } from './hooks/useAppImportDialog';
 import { useAppPanelState } from './hooks/useAppPanelState';
 import { useAppProcessActions } from './hooks/useAppProcessActions';
+import { useAppStartupChecks } from './hooks/useAppStartupChecks';
 import { useAppWindowActions } from './hooks/useAppWindowActions';
 import { useLauncherUpdates } from './hooks/useLauncherUpdates';
 import { useManagedApps } from './hooks/useManagedApps';
 import { useModelPreferences } from './hooks/useModelPreferences';
-import { isAPIAvailable } from './api/adapter';
+import { useSelectedAppVersions } from './hooks/useSelectedAppVersions';
 import { getLogger } from './utils/logger';
-import { getAppVersionState } from './utils/appVersionState';
 
 const logger = getLogger('App');
 
@@ -82,36 +78,14 @@ export default function App() {
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
 
-  const comfyVersions = useVersions({
-    appId: 'comfyui',
-    trackAvailableVersions: selectedAppId === 'comfyui',
-  });
-  const ollamaVersions = useVersions({
-    appId: 'ollama',
-    trackAvailableVersions: selectedAppId === 'ollama',
-  });
-  const torchVersions = useVersions({
-    appId: 'torch',
-    trackAvailableVersions: selectedAppId === 'torch',
-  });
-
-  // Map app IDs to their version hooks - only supported apps have versions
-  const activeVersions = useMemo(() => {
-    if (selectedAppId === 'comfyui') return comfyVersions;
-    if (selectedAppId === 'ollama') return ollamaVersions;
-    if (selectedAppId === 'torch') return torchVersions;
-    // For unsupported apps or no selection, return comfyVersions as placeholder
-    // (getAppVersionState will return UNSUPPORTED_VERSION_STATE anyway)
-    return comfyVersions;
-  }, [selectedAppId, comfyVersions, ollamaVersions, torchVersions]);
-
-  const appVersions = getAppVersionState(selectedAppId, activeVersions);
-
-  const { installedVersions: comfyInstalledVersions, activeVersion: comfyActiveVersion } =
-    comfyVersions;
-  const { installedVersions: ollamaInstalledVersions } = ollamaVersions;
-  const { installedVersions: torchInstalledVersions } = torchVersions;
-  const installationProgress = appVersions.installationProgress;
+  const {
+    appVersions,
+    comfyActiveVersion,
+    comfyInstalledVersions,
+    installationProgress,
+    ollamaInstalledVersions,
+    torchInstalledVersions,
+  } = useSelectedAppVersions(selectedAppId);
 
   const managedAppsState = useMemo(() => ({
     systemResources,
@@ -223,45 +197,12 @@ export default function App() {
     refetchStatus,
   });
 
-  // --- Effects ---
-  useEffect(() => {
-    let waitTimeout: NodeJS.Timeout | null = null;
-    let updateTimeout: NodeJS.Timeout | null = null;
-
-    const startPolling = () => {
-      // Delay update check to not block initial render
-      updateTimeout = setTimeout(() => {
-        checkLauncherVersion(false).catch((err: unknown) => {
-          logger.debug('Background update check failed', { error: err });
-        });
-      }, 3000);
-      void fetchDiskSpace();
-    };
-
-    const waitForApi = () => {
-      if (isAPIAvailable()) {
-        startPolling();
-        return;
-      }
-      waitTimeout = setTimeout(waitForApi, 100);
-    };
-
-    waitForApi();
-
-    return () => {
-      if (waitTimeout) clearTimeout(waitTimeout);
-      if (updateTimeout) clearTimeout(updateTimeout);
-    };
-  }, [checkLauncherVersion, fetchDiskSpace]);
-
-  // Launch error flash effect is handled by AppIndicator component
-
-  // Refetch status when active version changes
-  useEffect(() => {
-    if (comfyActiveVersion && isAPIAvailable()) {
-      void refetchStatus(false);
-    }
-  }, [comfyActiveVersion]);
+  useAppStartupChecks({
+    activeVersion: comfyActiveVersion,
+    checkLauncherVersion,
+    fetchDiskSpace,
+    refetchStatus,
+  });
 
   // --- Handlers ---
   const handleDeleteApp = (appId: string) => {
@@ -306,106 +247,68 @@ export default function App() {
     activeVersion: appVersions.activeVersion,
     onChooseExistingLibrary: chooseLibraryRoot,
   };
+  const panels = buildAppShellPanels({
+    activeShortcutState,
+    appDisplayName,
+    appVersions,
+    comfyUIRunning,
+    connectionUrl: selectedApp?.connectionUrl,
+    depsInstalled,
+    diskSpacePercent,
+    displayStatus,
+    isCheckingDeps,
+    isInstallingDeps,
+    isOllamaRunning: ollamaRunning,
+    isSetupComplete,
+    isTorchRunning: torchRunning,
+    modelGroups,
+    modelManagerProps,
+    panelState,
+    selectedAppId,
+    onInstallDeps: handleInstallDeps,
+    onShowVersionManager: handleShowVersionManager,
+  });
 
   return (
-    <div className="w-full h-screen gradient-bg-blobs flex flex-col relative overflow-hidden font-mono">
-      {/* App-level drag-and-drop import overlay */}
-      <ModelImportDropZone onPathsDropped={handlePathsDropped} enabled={true} />
-
-      {/* Import dialog */}
-      {showImportDialog && importPaths.length > 0 && (
-        <ModelImportDialog
-          importPaths={importPaths}
-          onClose={handleImportDialogClose}
-          onImportComplete={handleImportComplete}
-        />
-      )}
-
-      <Header
-        systemResources={systemResources}
-        appResources={status?.app_resources?.comfyui}
-        launcherUpdateAvailable={launcherUpdateAvailable}
-        launcherLatestVersion={launcherUpdateState?.latestVersion ?? null}
-        isCheckingLauncherUpdates={isCheckingLauncherUpdates}
-        onCheckLauncherUpdates={() => {
+    <AppShell
+      importPaths={importPaths}
+      showImportDialog={showImportDialog}
+      showSidebar={__FEATURE_MULTI_APP__}
+      onImportComplete={handleImportComplete}
+      onImportDialogClose={handleImportDialogClose}
+      onPathsDropped={handlePathsDropped}
+      header={{
+        systemResources,
+        appResources: status?.app_resources?.comfyui,
+        launcherUpdateAvailable,
+        launcherLatestVersion: launcherUpdateState?.latestVersion ?? null,
+        isCheckingLauncherUpdates,
+        onCheckLauncherUpdates: () => {
           void checkLauncherUpdates();
-        }}
-        onDownloadLauncherUpdate={() => {
+        },
+        onDownloadLauncherUpdate: () => {
           void openLauncherUpdate();
-        }}
-        onMinimize={minimizeWindow}
-        onClose={closeWindow}
-        networkAvailable={networkAvailable}
-        modelLibraryLoaded={modelLibraryLoaded}
-        installationProgress={installationProgress}
-        activeModelDownload={activeDownload}
-        activeModelDownloadCount={activeDownloadCount}
-      />
-
-      <div className="flex flex-1 relative z-10 overflow-hidden">
-        {__FEATURE_MULTI_APP__ && (
-          <AppSidebar
-            apps={apps}
-            selectedAppId={selectedAppId}
-            onSelectApp={setSelectedAppId}
-            onLaunchApp={handleLaunchApp}
-            onStopApp={handleStopApp}
-            onOpenLog={handleOpenLog}
-            onDeleteApp={handleDeleteApp}
-            onReorderApps={handleReorderApps}
-            onAddApp={handleAddApp}
-          />
-        )}
-
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <AppPanelRenderer
-            selectedAppId={selectedAppId}
-            comfyUI={{
-              appDisplayName,
-              versions: appVersions,
-              showVersionManager: panelState.showVersionManager,
-              onShowVersionManager: handleShowVersionManager,
-              activeShortcutState,
-              diskSpacePercent,
-              isCheckingDeps,
-              depsInstalled,
-              isInstallingDeps,
-              comfyUIRunning,
-              onInstallDeps: handleInstallDeps,
-              displayStatus,
-              isSetupComplete,
-            }}
-            ollama={{
-              appDisplayName,
-              connectionUrl: selectedApp?.connectionUrl,
-              versions: appVersions,
-              showVersionManager: panelState.showVersionManager,
-              onShowVersionManager: handleShowVersionManager,
-              activeShortcutState,
-              diskSpacePercent,
-              modelManagerProps,
-              isOllamaRunning: ollamaRunning,
-              modelGroups,
-            }}
-            torch={{
-              appDisplayName,
-              connectionUrl: selectedApp?.connectionUrl,
-              versions: appVersions,
-              showVersionManager: panelState.showVersionManager,
-              onShowVersionManager: handleShowVersionManager,
-              activeShortcutState,
-              diskSpacePercent,
-              modelManagerProps,
-              isTorchRunning: torchRunning,
-              modelGroups,
-            }}
-            fallback={{
-              appDisplayName,
-              modelManagerProps,
-            }}
-          />
-        </div>
-      </div>
-    </div>
+        },
+        onMinimize: minimizeWindow,
+        onClose: closeWindow,
+        networkAvailable,
+        modelLibraryLoaded,
+        installationProgress,
+        activeModelDownload: activeDownload,
+        activeModelDownloadCount: activeDownloadCount,
+      }}
+      sidebar={{
+        apps,
+        selectedAppId,
+        onSelectApp: setSelectedAppId,
+        onLaunchApp: handleLaunchApp,
+        onStopApp: handleStopApp,
+        onOpenLog: handleOpenLog,
+        onDeleteApp: handleDeleteApp,
+        onReorderApps: handleReorderApps,
+        onAddApp: handleAddApp,
+      }}
+      panels={panels}
+    />
   );
 }

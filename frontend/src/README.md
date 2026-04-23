@@ -6,7 +6,7 @@ React renderer source for the Pumas desktop UI. This directory contains app comp
 ## Contents
 | File/Folder | Description |
 | ----------- | ----------- |
-| `App.tsx` | Top-level UI composition and page-level orchestration. |
+| `App.tsx` | Top-level state orchestration for app selection, backend hooks, and shell prop wiring. |
 | `api/` | Frontend API wrappers over the exposed Electron preload bridge. |
 | `components/` | Reusable and page-level React components. |
 | `hooks/` | Custom hooks for state, status polling, and domain workflows. |

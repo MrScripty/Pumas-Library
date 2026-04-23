@@ -85,7 +85,7 @@ Status: partially remediated; large workflow owners remain
 
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
-- `frontend/src/App.tsx` at 411 lines after launcher update, model preference, and dependency install state extraction;
+- `frontend/src/App.tsx` at 315 lines and 299 effective lines after launcher update, model preference, dependency install, app shell, startup-check, selected-version, and panel-prop extraction;
 - `frontend/src/components/ModelManager.tsx` at 307 lines and 282 effective lines after filter, import-picker, existing-library chooser, HF auth prompt, download-refresh, and remote-download starter extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
@@ -103,6 +103,11 @@ Rectification:
 - Completed: move model starring and backend-owned link-exclusion preferences from `App.tsx` into `frontend/src/hooks/useModelPreferences.ts` with load, optimistic update, rollback, and API-unavailable tests.
 - Completed: prevent in-flight link-exclusion loads from overwriting newer local optimistic changes by guarding backend load application with an exclusion revision.
 - Completed: move setup dependency installation action state and error classification from `App.tsx` into `frontend/src/hooks/useDependencyInstaller.ts` with success, pending-state, failure, and API-unavailable tests.
+- Completed: move app shell rendering from `App.tsx` into `frontend/src/components/AppShell.tsx`.
+- Completed: move app-panel prop graph construction from `App.tsx` into `frontend/src/components/AppShellPanels.ts` with shared/app-specific panel prop tests.
+- Completed: move startup API readiness wait, delayed launcher update check, disk-space fetch, and active-version status refresh from `App.tsx` into `frontend/src/hooks/useAppStartupChecks.ts` with readiness, cleanup, and refresh tests.
+- Completed: move selected-app version hook routing from `App.tsx` into `frontend/src/hooks/useSelectedAppVersions.ts` with selected-app and unsupported-state tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/App.tsx` from the oversized-file baseline after it reached 299 effective lines.
 - Completed: move model manager search, category, remote-kind, and download-mode filter state into `frontend/src/hooks/useModelManagerFilters.ts` with local/remote/developer-search tests.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/components/ModelManager.tsx` from 401 to 388 effective lines after filter-state extraction.
 - Completed: move model manager file-picker import dialog state into `frontend/src/hooks/useModelImportPicker.ts` with picker success, close/reset, completion callback, and API-unavailable tests.
@@ -226,6 +231,7 @@ Rectification:
 - Completed: `frontend/scripts/check-file-size.js` now enforces a committed baseline ratchet so existing oversized files cannot grow and new files still fail above 300 source lines.
 - Completed: `frontend/scripts/file-size-baseline.json` records the current oversized file baseline for decomposition tracking.
 - Completed: `frontend/scripts/file-size-baseline.json` ratchets `src/App.tsx` from 498 to 376 effective lines after the F04 state-owner extractions.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/App.tsx` from the oversized-file baseline after shell, startup-check, selected-version, and panel-prop extraction reached 299 effective lines.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/AppSidebar.tsx` from the oversized-file baseline after it reached 256 effective lines.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the first decomposition wave.

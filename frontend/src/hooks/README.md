@@ -47,10 +47,14 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useAppImportDialog.test.ts` | Hook coverage for app-level import dialog open/close and completion behavior. |
 | `useAppProcessActions.ts` | Shared launch/stop/log handlers for app process controls at the root shell level. |
 | `useAppProcessActions.test.ts` | Hook coverage for app-process launch/stop routing and delayed refresh behavior. |
+| `useAppStartupChecks.ts` | Root startup API readiness wait, background launcher update check, disk-space fetch, and active-version status refresh. |
+| `useAppStartupChecks.test.ts` | Hook coverage for API readiness waits, update timer cleanup, and active-version status refresh. |
 | `useAppWindowActions.ts` | Root-shell helpers for window controls and shared filesystem open actions. |
 | `useAppWindowActions.test.ts` | Hook coverage for backend/window routing of models-root and window control actions. |
 | `useLauncherUpdates.ts` | Launcher update availability, update-check action state, and update URL opening. |
 | `useLauncherUpdates.test.ts` | Hook coverage for update metadata storage, URL preference, stale-state clearing, and API-unavailable no-ops. |
+| `useSelectedAppVersions.ts` | Selected-app version hook routing for ComfyUI, Ollama, Torch, and unsupported app fallback state. |
+| `useSelectedAppVersions.test.ts` | Hook coverage for selected-app version tracking and unsupported version state. |
 | `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
 | `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |
 | `physicsDragUtils.test.ts` | Unit coverage for drag selection fallback, anchor hysteresis, reorder helpers, and delete-zone math. |

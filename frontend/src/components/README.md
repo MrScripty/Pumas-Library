@@ -14,6 +14,9 @@ bridge.
 | `ModelManagerRemoteDownload.test.ts` | Unit coverage for successful remote download starts, backend failures, and auth-required download errors. |
 | `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
 | `ModelManagerUtils.test.ts` | Unit coverage for model-manager helper behavior such as download overlay merging and remote-kind mapping. |
+| `AppShell.tsx` | Rendering-only application shell for import overlays, header, optional sidebar, and app-panel container. |
+| `AppShellPanels.ts` | Pure app-panel prop builder for shared version props and app-specific panel inputs. |
+| `AppShellPanels.test.ts` | Unit coverage for shared and app-specific app-panel prop construction. |
 | `AppSidebar.tsx` | Sidebar drag/order state owner and app-selection toolbar container. |
 | `SidebarAppIcon.tsx` | Motion-wrapped app icon renderer for drag previews, delete-zone overlays, and launch/stop/log controls. |
 | `AppIcon.tsx`, `ComfyUIIcon.tsx`, `AppIndicator.tsx` | Launcher icon controls with sibling native buttons for app selection and launch/stop/status actions. |

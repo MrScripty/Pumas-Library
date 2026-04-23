@@ -36,12 +36,12 @@ pub struct ConversionManager {
     launcher_root: PathBuf,
     model_library: Arc<ModelLibrary>,
     model_importer: Arc<ModelImporter>,
-    progress: ConversionProgressTracker,
+    progress: Arc<ConversionProgressTracker>,
     cancel_tokens: Mutex<HashMap<String, CancellationToken>>,
     /// Counter for generating unique conversion IDs.
     id_counter: Mutex<u64>,
     /// Registered quantization backends (strategy pattern).
-    backends: Vec<Box<dyn QuantizationBackend>>,
+    backends: Vec<Arc<dyn QuantizationBackend>>,
 }
 
 impl ConversionManager {
@@ -51,17 +51,17 @@ impl ConversionManager {
         model_library: Arc<ModelLibrary>,
         model_importer: Arc<ModelImporter>,
     ) -> Self {
-        let backends: Vec<Box<dyn QuantizationBackend>> = vec![
-            Box::new(LlamaCppBackend::new(&launcher_root)),
-            Box::new(Nvfp4Backend::new(&launcher_root)),
-            Box::new(SherryBackend::new(&launcher_root)),
+        let backends: Vec<Arc<dyn QuantizationBackend>> = vec![
+            Arc::new(LlamaCppBackend::new(&launcher_root)),
+            Arc::new(Nvfp4Backend::new(&launcher_root)),
+            Arc::new(SherryBackend::new(&launcher_root)),
         ];
 
         Self {
             launcher_root,
             model_library,
             model_importer,
-            progress: ConversionProgressTracker::new(),
+            progress: Arc::new(ConversionProgressTracker::new()),
             cancel_tokens: Mutex::new(HashMap::new()),
             id_counter: Mutex::new(0),
             backends,
@@ -289,10 +289,7 @@ impl ConversionManager {
         let model_path = PathBuf::from(&model.path);
         let library = self.model_library.clone();
         let importer = self.model_importer.clone();
-        let progress_tracker = &self.progress as *const ConversionProgressTracker;
-        // SAFETY: ConversionManager is held in an Arc and lives for the duration of
-        // the application. The progress tracker reference is valid as long as the manager exists.
-        let progress_ref = unsafe { &*progress_tracker };
+        let progress = self.progress.clone();
         let direction = request.direction;
         let target_quant = request.target_quant.clone();
         let source_model_id = request.model_id.clone();
@@ -309,7 +306,7 @@ impl ConversionManager {
                         &source_model_id,
                         target_quant.as_deref(),
                         metadata,
-                        progress_ref,
+                        progress.as_ref(),
                         &cancel_token,
                         &library,
                         &importer,
@@ -318,14 +315,14 @@ impl ConversionManager {
 
                     if let Err(e) = result {
                         error!("Conversion {} failed: {}", conv_id, e);
-                        progress_ref.set_error(&conv_id, e.to_string());
+                        progress.set_error(&conv_id, e.to_string());
                     }
                 });
             }
             // Quantization via backend — route to the appropriate backend by direction
             ConversionDirection::SafetensorsToQuantizedGguf
             | ConversionDirection::GgufToQuantizedGguf => {
-                let (backend_ref, params) = self.prepare_backend_quantization(
+                let (backend, params) = self.prepare_backend_quantization(
                     QuantBackend::LlamaCpp,
                     "llama.cpp",
                     &conv_id,
@@ -338,11 +335,11 @@ impl ConversionManager {
                 tokio::spawn(async move {
                     let result = run_quantization(
                         &conv_id,
-                        backend_ref,
+                        backend.as_ref(),
                         params,
                         &source_model_id,
                         metadata,
-                        progress_ref,
+                        progress.as_ref(),
                         &cancel_token,
                         &library,
                     )
@@ -350,12 +347,12 @@ impl ConversionManager {
 
                     if let Err(e) = result {
                         error!("Quantization {} failed: {}", conv_id, e);
-                        progress_ref.set_error(&conv_id, e.to_string());
+                        progress.set_error(&conv_id, e.to_string());
                     }
                 });
             }
             ConversionDirection::SafetensorsToNvfp4 => {
-                let (backend_ref, params) = self.prepare_backend_quantization(
+                let (backend, params) = self.prepare_backend_quantization(
                     QuantBackend::Nvfp4,
                     "nvfp4",
                     &conv_id,
@@ -368,11 +365,11 @@ impl ConversionManager {
                 tokio::spawn(async move {
                     let result = run_quantization(
                         &conv_id,
-                        backend_ref,
+                        backend.as_ref(),
                         params,
                         &source_model_id,
                         metadata,
-                        progress_ref,
+                        progress.as_ref(),
                         &cancel_token,
                         &library,
                     )
@@ -380,12 +377,12 @@ impl ConversionManager {
 
                     if let Err(e) = result {
                         error!("Quantization {} failed: {}", conv_id, e);
-                        progress_ref.set_error(&conv_id, e.to_string());
+                        progress.set_error(&conv_id, e.to_string());
                     }
                 });
             }
             ConversionDirection::SafetensorsToSherryQat => {
-                let (backend_ref, params) = self.prepare_backend_quantization(
+                let (backend, params) = self.prepare_backend_quantization(
                     QuantBackend::Sherry,
                     "sherry",
                     &conv_id,
@@ -398,11 +395,11 @@ impl ConversionManager {
                 tokio::spawn(async move {
                     let result = run_quantization(
                         &conv_id,
-                        backend_ref,
+                        backend.as_ref(),
                         params,
                         &source_model_id,
                         metadata,
-                        progress_ref,
+                        progress.as_ref(),
                         &cancel_token,
                         &library,
                     )
@@ -410,7 +407,7 @@ impl ConversionManager {
 
                     if let Err(e) = result {
                         error!("Quantization {} failed: {}", conv_id, e);
-                        progress_ref.set_error(&conv_id, e.to_string());
+                        progress.set_error(&conv_id, e.to_string());
                     }
                 });
             }
@@ -419,10 +416,10 @@ impl ConversionManager {
         Ok(conversion_id)
     }
 
-    /// Prepare a backend reference and QuantizeParams for a quantization task.
+    /// Prepare a backend handle and QuantizeParams for a quantization task.
     ///
     /// Finds the backend by ID, builds params from the request, and returns
-    /// a static reference suitable for use in a spawned task.
+    /// an owned backend handle suitable for use in a spawned task.
     #[allow(clippy::too_many_arguments)]
     fn prepare_backend_quantization(
         &self,
@@ -433,7 +430,7 @@ impl ConversionManager {
         source_model_id: &str,
         target_quant: Option<String>,
         request: &ConversionRequest,
-    ) -> Result<(&'static dyn QuantizationBackend, QuantizeParams)> {
+    ) -> Result<(Arc<dyn QuantizationBackend>, QuantizeParams)> {
         let quant_type = target_quant.unwrap_or_else(|| match backend_id {
             QuantBackend::LlamaCpp => "Q4_K_M".to_string(),
             QuantBackend::Nvfp4 => "NVFP4".to_string(),
@@ -443,20 +440,15 @@ impl ConversionManager {
         let calibration_file = request.imatrix_calibration_file.as_ref().map(PathBuf::from);
         let force_imatrix = request.force_imatrix.unwrap_or(false);
 
-        let backend_ptr = self
+        let backend = self
             .backends
             .iter()
             .find(|b| b.backend_id() == backend_id)
-            .map(|b| b.as_ref() as *const dyn QuantizationBackend);
-
-        let backend_ptr = backend_ptr.ok_or_else(|| PumasError::QuantizationEnvNotReady {
-            backend: backend_name.to_string(),
-            message: format!("No {} backend registered", backend_name),
-        })?;
-
-        // SAFETY: The backends vec lives as long as ConversionManager which is held
-        // in an Arc for the application lifetime.
-        let backend_ref: &'static dyn QuantizationBackend = unsafe { &*backend_ptr };
+            .cloned()
+            .ok_or_else(|| PumasError::QuantizationEnvNotReady {
+                backend: backend_name.to_string(),
+                message: format!("No {} backend registered", backend_name),
+            })?;
 
         let params = QuantizeParams {
             conversion_id: conv_id.to_string(),
@@ -467,7 +459,7 @@ impl ConversionManager {
             force_imatrix,
         };
 
-        Ok((backend_ref, params))
+        Ok((backend, params))
     }
 
     /// Get progress for a specific conversion.

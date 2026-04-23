@@ -162,8 +162,10 @@ Implementation notes:
 - Completed: replaced a direct `libc::kill(pid, 0)` call in process resource aggregation with the
   centralized `platform::is_process_alive` wrapper.
 - Completed: Unix metadata writes now return fsync failures instead of ignoring them before rename.
-- Remaining: replace conversion-manager raw pointer lifetime bridges before ratcheting
-  `unsafe_code`.
+- Completed: replaced conversion-manager raw pointer lifetime bridges with owned `Arc` handles for
+  progress tracking and quantization backends.
+- Remaining: add a final `unsafe_code` deny/allow policy for the small set of intentional unsafe
+  boundary modules and document the Miri/sanitizer coverage decision.
 
 ### R07 - Path Validation Is Not Centralized Around Validated Types
 Status: partially compliant

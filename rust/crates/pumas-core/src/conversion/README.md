@@ -23,6 +23,8 @@ Model format conversion between GGUF and Safetensors.
   conversion dependencies from ComfyUI or other Python environments.
 - **Progress via stdout JSON**: The Python scripts emit one JSON object per line on
   stdout, which the Rust side parses to update the `ConversionProgressTracker`.
+- **Spawned task ownership**: Background conversion tasks own `Arc` handles for shared
+  progress and quantization backends so task lifetimes do not depend on raw pointer bridges.
 
 ## Dependencies
 

@@ -30,6 +30,94 @@ interface StatsData {
   memoryTotal?: number;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
+  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
+  return `${(bytes / 1e3).toFixed(1)} KB`;
+}
+
+function mapStatsData(data: Record<string, unknown>): StatsData {
+  return {
+    loadedModels: data['models'] as Array<{ name: string; size?: number }> | undefined,
+    memoryUsed: data['memoryUsed'] as number | undefined,
+    memoryTotal: data['memoryTotal'] as number | undefined,
+  };
+}
+
+function LoadedModelsCount({ count }: { count: number }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.4)] border border-[hsl(var(--launcher-border)/0.5)]">
+      <Cpu className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
+      <div className="flex flex-col">
+        <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Loaded Models</span>
+        <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
+          {count}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function MemoryStat({ used, total }: { used: number; total?: number }) {
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.4)] border border-[hsl(var(--launcher-border)/0.5)]">
+      <HardDrive className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
+      <div className="flex flex-col">
+        <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Memory</span>
+        <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
+          {formatBytes(used)}
+          {total && ` / ${formatBytes(total)}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function LoadedModelBadges({ models }: { models: NonNullable<StatsData['loadedModels']> }) {
+  return (
+    <div className="space-y-1.5">
+      <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Loaded:</span>
+      <div className="flex flex-wrap gap-1.5">
+        {models.map((model, i) => (
+          <span
+            key={`${model.name}-${i}`}
+            className="px-2 py-0.5 text-xs rounded bg-[hsl(var(--launcher-accent-primary)/0.15)] text-[hsl(var(--launcher-accent-primary))]"
+          >
+            {model.name}
+            {model.size && ` (${formatBytes(model.size)})`}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function renderStatsPlaceholder(
+  isLoading: boolean,
+  hasStats: boolean,
+  error: string | null
+) {
+  if (isLoading && !hasStats) {
+    return (
+      <div className="w-full flex items-center gap-2 text-[hsl(var(--text-secondary))] py-2">
+        <Loader2 className="w-4 h-4 animate-spin" />
+        <span className="text-sm">Loading stats...</span>
+      </div>
+    );
+  }
+
+  if (error && !hasStats) {
+    return (
+      <div className="w-full flex items-center gap-2 text-[hsl(var(--accent-warning))] py-2">
+        <AlertCircle className="w-4 h-4" />
+        <span className="text-sm">Unable to fetch stats</span>
+      </div>
+    );
+  }
+
+  return null;
+}
+
 export function StatsSection({
   appId,
   config = {},
@@ -60,13 +148,7 @@ export function StatsSection({
       if (result.success && result.data) {
         // Map the response to our stats format
         const data = result.data as Record<string, unknown>;
-        const models = data['models'] as Array<{ name: string; size?: number }> | undefined;
-
-        setStats({
-          loadedModels: models,
-          memoryUsed: data['memoryUsed'] as number | undefined,
-          memoryTotal: data['memoryTotal'] as number | undefined,
-        });
+        setStats(mapStatsData(data));
       } else {
         setError(result.error || 'Failed to fetch stats');
       }
@@ -94,29 +176,10 @@ export function StatsSection({
     return null;
   }
 
-  if (isLoading && !stats) {
-    return (
-      <div className="w-full flex items-center gap-2 text-[hsl(var(--text-secondary))] py-2">
-        <Loader2 className="w-4 h-4 animate-spin" />
-        <span className="text-sm">Loading stats...</span>
-      </div>
-    );
+  const placeholder = renderStatsPlaceholder(isLoading, Boolean(stats), error);
+  if (placeholder) {
+    return placeholder;
   }
-
-  if (error && !stats) {
-    return (
-      <div className="w-full flex items-center gap-2 text-[hsl(var(--accent-warning))] py-2">
-        <AlertCircle className="w-4 h-4" />
-        <span className="text-sm">Unable to fetch stats</span>
-      </div>
-    );
-  }
-
-  const formatBytes = (bytes: number): string => {
-    if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-    if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-    return `${(bytes / 1e3).toFixed(1)} KB`;
-  };
 
   return (
     <div className="w-full space-y-3">
@@ -128,46 +191,16 @@ export function StatsSection({
 
       <div className="grid grid-cols-2 gap-3">
         {showLoadedModels && stats?.loadedModels !== undefined && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.4)] border border-[hsl(var(--launcher-border)/0.5)]">
-            <Cpu className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
-            <div className="flex flex-col">
-              <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Loaded Models</span>
-              <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
-                {stats.loadedModels.length}
-              </span>
-            </div>
-          </div>
+          <LoadedModelsCount count={stats.loadedModels.length} />
         )}
 
         {showMemory && stats?.memoryUsed !== undefined && (
-          <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.4)] border border-[hsl(var(--launcher-border)/0.5)]">
-            <HardDrive className="w-4 h-4 text-[hsl(var(--launcher-text-secondary))]" />
-            <div className="flex flex-col">
-              <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Memory</span>
-              <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))]">
-                {formatBytes(stats.memoryUsed)}
-                {stats.memoryTotal && ` / ${formatBytes(stats.memoryTotal)}`}
-              </span>
-            </div>
-          </div>
+          <MemoryStat used={stats.memoryUsed} total={stats.memoryTotal} />
         )}
       </div>
 
       {showLoadedModels && stats?.loadedModels && stats.loadedModels.length > 0 && (
-        <div className="space-y-1.5">
-          <span className="text-xs text-[hsl(var(--launcher-text-muted))]">Loaded:</span>
-          <div className="flex flex-wrap gap-1.5">
-            {stats.loadedModels.map((model, i) => (
-              <span
-                key={`${model.name}-${i}`}
-                className="px-2 py-0.5 text-xs rounded bg-[hsl(var(--launcher-accent-primary)/0.15)] text-[hsl(var(--launcher-accent-primary))]"
-              >
-                {model.name}
-                {model.size && ` (${formatBytes(model.size)})`}
-              </span>
-            ))}
-          </div>
-        </div>
+        <LoadedModelBadges models={stats.loadedModels} />
       )}
     </div>
   );

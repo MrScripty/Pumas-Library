@@ -198,6 +198,9 @@ Implementation notes:
   active-version file reads/writes/removal and async version-directory scans so version-state
   initialization, validation, activation, and uninstall refresh paths no longer perform that
   filesystem work synchronously on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/launcher.rs` now uses `tokio::fs::File` and
+  async PID-file writes in the launch path so ComfyUI and Ollama startup no longer create launch
+  logs or persist launch PIDs with blocking filesystem calls on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

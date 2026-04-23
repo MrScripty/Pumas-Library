@@ -139,11 +139,15 @@ impl VersionLauncher {
         }
 
         // Create log file handle
-        let log_output = std::fs::File::create(log_file).map_err(|e| PumasError::Io {
-            message: format!("Failed to create log file: {}", e),
-            path: Some(log_file.clone()),
-            source: Some(e),
-        })?;
+        let log_output = fs::File::create(log_file)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create log file: {}", e),
+                path: Some(log_file.clone()),
+                source: Some(e),
+            })?
+            .into_std()
+            .await;
 
         // Spawn process
         let mut cmd = Command::new(&venv_python);
@@ -171,7 +175,7 @@ impl VersionLauncher {
         // Write PID file
         if let Some(pid) = pid {
             let pid_file = version_path.join("comfyui.pid");
-            std::fs::write(&pid_file, pid.to_string()).ok();
+            fs::write(&pid_file, pid.to_string()).await.ok();
         }
 
         // Wait for server to be ready
@@ -212,11 +216,15 @@ impl VersionLauncher {
         }
 
         // Create log file handle
-        let log_output = std::fs::File::create(log_file).map_err(|e| PumasError::Io {
-            message: format!("Failed to create log file: {}", e),
-            path: Some(log_file.clone()),
-            source: Some(e),
-        })?;
+        let log_output = fs::File::create(log_file)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create log file: {}", e),
+                path: Some(log_file.clone()),
+                source: Some(e),
+            })?
+            .into_std()
+            .await;
 
         // Spawn process
         let mut cmd = Command::new(&ollama_bin);

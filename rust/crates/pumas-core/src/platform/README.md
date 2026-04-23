@@ -23,6 +23,9 @@ and process management.
 - **Linux-first, Windows-ready**: Full Linux support is the primary target. Windows paths and
   process management are implemented but macOS remains architecture-ready with pending
   implementation.
+- **Unsafe boundary ownership**: OS FFI for process probes must stay inside this module and include
+  a `SAFETY:` note explaining descriptor, pointer, handle, or PID validity before crossing the
+  platform boundary.
 
 ## Dependencies
 

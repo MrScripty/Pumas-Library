@@ -478,6 +478,9 @@ impl ProcessLauncher {
         // Detach the process so it runs independently
         #[cfg(unix)]
         {
+            // SAFETY: setsid() is async-signal-safe and creates a new session.
+            // The closure only calls setsid and converts errno to io::Error,
+            // which keeps the pre-exec path limited to async-signal-safe work.
             unsafe {
                 cmd.pre_exec(|| {
                     if libc::setsid() == -1 {

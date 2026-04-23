@@ -19,6 +19,8 @@ configuration. Provides crash-safe file writes (write-to-temp then rename) and a
 - **Atomic writes via rename**: Writing to a temporary file then renaming ensures that a crash
   mid-write never leaves a corrupted metadata file. The rename operation is atomic on all
   supported filesystems.
+- **Durability errors are surfaced**: Temp-file flush/sync failures are returned to callers before
+  rename so metadata updates do not silently acknowledge writes that failed to reach the OS.
 - **Single `MetadataManager` instance**: All metadata access goes through one manager to
   ensure consistent directory structure and avoid path duplication across callers.
 

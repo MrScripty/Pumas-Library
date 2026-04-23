@@ -16,7 +16,13 @@ pub fn is_process_alive(pid: u32) -> bool {
     {
         // Use kill(pid, 0) to check if process exists
         // Signal 0 doesn't actually send a signal, just checks if we can
-        unsafe { libc::kill(pid as i32, 0) == 0 }
+        let Ok(pid) = i32::try_from(pid) else {
+            return false;
+        };
+        // SAFETY: libc::kill with signal 0 does not deliver a signal or access
+        // Rust-managed memory. The PID is range-checked before crossing the FFI
+        // boundary.
+        unsafe { libc::kill(pid, 0) == 0 }
     }
 
     #[cfg(windows)]
@@ -26,6 +32,8 @@ pub fn is_process_alive(pid: u32) -> bool {
             OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
         };
 
+        // SAFETY: OpenProcess is called with query-only access. A non-null
+        // handle is closed exactly once before returning.
         unsafe {
             let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             if !handle.is_null() {

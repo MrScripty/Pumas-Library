@@ -604,38 +604,22 @@ impl ProcessManager {
                     if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                         if let Ok(pid) = pid_str.trim().parse::<u32>() {
                             info!("aggregate_ollama_resources: found PID {}", pid);
-                            // Check if process is alive and get resources
-                            #[cfg(unix)]
-                            {
-                                let alive = unsafe { libc::kill(pid as i32, 0) } == 0;
-                                info!("aggregate_ollama_resources: PID {} alive={}", pid, alive);
-                                if alive {
-                                    // Process is alive, get its resources
-                                    match self.resource_tracker.get_process_resources(pid, true) {
-                                        Ok(resources) => {
-                                            info!("aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
-                                                pid, resources.cpu, resources.ram_memory, resources.gpu_memory);
-                                            total_cpu += resources.cpu;
-                                            total_ram += resources.ram_memory;
-                                            total_gpu += resources.gpu_memory;
-                                            found_any = true;
-                                        }
-                                        Err(e) => {
-                                            warn!("aggregate_ollama_resources: failed to get resources for PID {}: {}", pid, e);
-                                        }
+                            let alive = crate::platform::is_process_alive(pid);
+                            info!("aggregate_ollama_resources: PID {} alive={}", pid, alive);
+                            if alive {
+                                // Process is alive, get its resources
+                                match self.resource_tracker.get_process_resources(pid, true) {
+                                    Ok(resources) => {
+                                        info!("aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
+                                            pid, resources.cpu, resources.ram_memory, resources.gpu_memory);
+                                        total_cpu += resources.cpu;
+                                        total_ram += resources.ram_memory;
+                                        total_gpu += resources.gpu_memory;
+                                        found_any = true;
                                     }
-                                }
-                            }
-                            #[cfg(windows)]
-                            {
-                                // On Windows, try to get resources directly
-                                if let Ok(resources) =
-                                    self.resource_tracker.get_process_resources(pid, true)
-                                {
-                                    total_cpu += resources.cpu;
-                                    total_ram += resources.ram_memory;
-                                    total_gpu += resources.gpu_memory;
-                                    found_any = true;
+                                    Err(e) => {
+                                        warn!("aggregate_ollama_resources: failed to get resources for PID {}: {}", pid, e);
+                                    }
                                 }
                             }
                         }

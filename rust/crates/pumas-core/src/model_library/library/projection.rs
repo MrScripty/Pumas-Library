@@ -325,12 +325,18 @@ fn expand_windows_long_path(path: &Path) -> Option<PathBuf> {
     use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
 
     let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `input` is null-terminated and lives for the duration of the
+    // call. Passing a null output pointer with size 0 is the documented query
+    // form for retrieving the required buffer length.
     let required = unsafe { GetLongPathNameW(input.as_ptr(), std::ptr::null_mut(), 0) };
     if required == 0 {
         return None;
     }
 
     let mut buffer = vec![0u16; required as usize + 1];
+    // SAFETY: `buffer` is allocated with the size requested by Windows plus
+    // space for the trailing null. Both input and output buffers remain valid
+    // for the duration of the call.
     let written =
         unsafe { GetLongPathNameW(input.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
     if written == 0 {

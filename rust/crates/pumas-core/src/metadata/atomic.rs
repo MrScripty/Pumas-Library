@@ -114,8 +114,16 @@ pub fn atomic_write_json<T: Serialize>(path: &Path, data: &T, keep_backup: bool)
         // fsync to ensure data reaches disk
         #[cfg(unix)]
         {
-            unsafe {
-                libc::fsync(file.as_raw_fd());
+            // SAFETY: file.as_raw_fd() is a valid descriptor owned by `file`
+            // for the duration of this call. fsync does not retain the
+            // descriptor after returning.
+            let sync_result = unsafe { libc::fsync(file.as_raw_fd()) };
+            if sync_result != 0 {
+                return Err(PumasError::Io {
+                    message: format!("Failed to sync temp file {}", temp_path.display()),
+                    path: Some(temp_path.clone()),
+                    source: Some(std::io::Error::last_os_error()),
+                });
             }
         }
 

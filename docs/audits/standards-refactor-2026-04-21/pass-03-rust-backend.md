@@ -130,7 +130,7 @@ Rectification:
 - Add clippy `await_holding_lock`, `blocking_in_async` review where available, or targeted custom checks.
 
 ### R06 - Unsafe Rust Is Not Governed by Workspace Policy
-Status: non-compliant
+Status: partially remediated
 
 Unsafe usages exist in:
 
@@ -142,13 +142,24 @@ Unsafe usages exist in:
 - `pumas-core/src/platform/process.rs`
 - tests manipulating process-global state
 
-There is no visible `[workspace.lints.rust] unsafe_code = "deny"` or crate-level relaxation policy.
+The workspace now inherits `unsafe_op_in_unsafe_fn = "deny"` as the first lint ratchet, but direct
+unsafe usage remains allowed while OS/FFI boundaries are isolated.
 
 Rectification:
 - Add workspace lint policy with `unsafe_code = "deny"` by default.
 - Move OS/FFI unsafe into thin modules that explicitly relax to `warn`.
 - Add `SAFETY:` comments to every unsafe block.
 - Add Miri/sanitizer plan for pure unsafe and OS FFI wrappers where practical.
+
+Implementation notes:
+- Completed: inherited `unsafe_op_in_unsafe_fn = "deny"` across workspace crates.
+- Completed: documented current platform process probes, metadata fsync, launcher `pre_exec`, and
+  Windows long-path FFI with explicit `SAFETY:` comments.
+- Completed: replaced a direct `libc::kill(pid, 0)` call in process resource aggregation with the
+  centralized `platform::is_process_alive` wrapper.
+- Completed: Unix metadata writes now return fsync failures instead of ignoring them before rename.
+- Remaining: isolate process launcher `pre_exec`, conversion-manager raw pointer lifetime bridges,
+  and Windows long-path expansion into smaller governed modules before ratcheting `unsafe_code`.
 
 ### R07 - Path Validation Is Not Centralized Around Validated Types
 Status: partially compliant

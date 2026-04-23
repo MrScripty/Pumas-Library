@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -290,8 +291,8 @@ impl OllamaVersionManager {
         self.extract_binary(&archive_path, &version_path).await?;
 
         // Clean up archive
-        if archive_path.exists() {
-            std::fs::remove_file(&archive_path).ok();
+        if path_exists(&archive_path).await.unwrap_or(false) {
+            let _ = fs::remove_file(&archive_path).await;
         }
 
         // Record in metadata
@@ -335,8 +336,6 @@ impl OllamaVersionManager {
         dest: &Path,
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<()> {
-        use std::io::Write;
-
         let client = reqwest::Client::builder()
             .timeout(InstallationConfig::URL_FETCH_TIMEOUT)
             .user_agent("pumas-library")
@@ -365,11 +364,9 @@ impl OllamaVersionManager {
         let total_size = response.content_length();
         let mut downloaded: u64 = 0;
         let mut stream = response.bytes_stream();
-        let mut file = std::fs::File::create(dest).map_err(|e| PumasError::Io {
-            message: format!("Failed to create file: {}", e),
-            path: Some(dest.to_path_buf()),
-            source: Some(e),
-        })?;
+        let mut file = fs::File::create(dest)
+            .await
+            .map_err(|e| PumasError::io_with_path(e, dest))?;
 
         use futures::StreamExt;
         while let Some(chunk) = stream.next().await {
@@ -380,11 +377,9 @@ impl OllamaVersionManager {
                 cause: Some(e.to_string()),
             })?;
 
-            file.write_all(&chunk).map_err(|e| PumasError::Io {
-                message: format!("Failed to write: {}", e),
-                path: Some(dest.to_path_buf()),
-                source: Some(e),
-            })?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| PumasError::io_with_path(e, dest))?;
 
             downloaded += chunk.len() as u64;
 
@@ -420,11 +415,13 @@ impl OllamaVersionManager {
         } else if archive_name.ends_with(".exe") || archive_name == "ollama" {
             // Direct binary, just move it
             let dest = version_path.join(Self::binary_name());
-            std::fs::rename(archive_path, &dest).map_err(|e| PumasError::Io {
-                message: format!("Failed to move binary: {}", e),
-                path: Some(dest),
-                source: Some(e),
-            })?;
+            fs::rename(archive_path, &dest)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to move binary: {}", e),
+                    path: Some(dest),
+                    source: Some(e),
+                })?;
         } else {
             return Err(PumasError::InstallationFailed {
                 message: format!("Unknown archive format: {}", archive_name),

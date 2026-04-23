@@ -232,6 +232,10 @@ Implementation notes:
   version/log/pid path checks, async log reads, async pid-file removal, and async log-directory
   creation so binary and Python process manager lifecycle methods no longer perform synchronous
   filesystem probes or file reads on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/ollama.rs` now uses async file creation and
+  writes for streamed downloads plus async archive cleanup and direct-binary rename, so those
+  async install steps no longer perform synchronous file output or archive relocation on runtime
+  threads before extraction/finalization.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -133,6 +133,12 @@ Rectification:
 - Replace blocking calls in request/lifecycle paths with async equivalents or `spawn_blocking`.
 - Add clippy `await_holding_lock`, `blocking_in_async` review where available, or targeted custom checks.
 
+Implementation notes:
+- Completed: `scripts/rust/check.sh blocking-audit` prints blocking-work candidates across
+  `pumas-core`, `pumas-app-manager`, and `pumas-rpc` source roots for classification.
+- Remaining: classify the current audit output and replace blocking work in confirmed async
+  request/lifecycle paths with async equivalents or `spawn_blocking`.
+
 ### R06 - Unsafe Rust Is Not Governed by Workspace Policy
 Status: compliant
 

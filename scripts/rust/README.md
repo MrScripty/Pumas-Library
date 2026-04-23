@@ -6,7 +6,7 @@ Rust workspace verification entrypoints for local development and CI.
 ## Contents
 | File | Description |
 | ---- | ----------- |
-| `check.sh` | Runs standards-aligned Cargo format, check, clippy, test, doc-test, no-default-feature checks, and focused isolation checks. |
+| `check.sh` | Runs standards-aligned Cargo format, check, clippy, test, doc-test, no-default-feature checks, focused isolation checks, and blocking-work audits. |
 
 ## Problem
 The Rust workspace needs one documented verification contract so local runs and
@@ -24,8 +24,15 @@ CI cannot drift into different Cargo command sets.
 ./scripts/rust/check.sh
 ./scripts/rust/check.sh clippy
 ./scripts/rust/check.sh no-default
+./scripts/rust/check.sh blocking-audit
 PUMAS_RUST_TEST_ISOLATION_REPEATS=3 ./scripts/rust/check.sh test-isolation
 ```
+
+## Blocking Audit
+`blocking-audit` prints candidate synchronous filesystem, process, thread, and
+wait calls from Rust production source roots. It is intentionally informational:
+use the output to classify each hit as an async request path, sync service path,
+explicit background worker, or test fixture before making R05 refactors.
 
 ## Test Isolation
 `test-isolation` repeatedly runs the `pumas-library` crate's guarded in-crate

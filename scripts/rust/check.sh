@@ -9,7 +9,7 @@ workspace_args=(--manifest-path "${MANIFEST_PATH}" --workspace --exclude pumas_r
 
 usage() {
   cat <<'USAGE'
-Usage: scripts/rust/check.sh [all|fmt|check|clippy|test|doc|no-default|test-isolation]
+Usage: scripts/rust/check.sh [all|fmt|check|clippy|test|doc|no-default|test-isolation|blocking-audit]
 
 Runs standards-aligned Rust workspace verification. The default `all` mode
 excludes `pumas_rustler` because the Rustler NIF requires BEAM runtime tooling.
@@ -70,6 +70,31 @@ run_test_isolation() {
   done
 }
 
+run_blocking_audit() {
+  local roots=(
+    "rust/crates/pumas-core/src"
+    "rust/crates/pumas-app-manager/src"
+    "rust/crates/pumas-rpc/src"
+  )
+  local patterns=(
+    'std::thread::sleep'
+    'std::thread::spawn'
+    '\.wait\(\)'
+    'std::process::Command'
+    'std::fs::'
+  )
+
+  echo "Blocking-work audit candidates:"
+  echo "  roots: ${roots[*]}"
+  echo "  note: classify hits as async request path, sync service path, explicit background worker, or test fixture"
+
+  for pattern in "${patterns[@]}"; do
+    echo
+    echo "== ${pattern} =="
+    (cd "${REPO_ROOT}" && rg -n --sort path "${pattern}" "${roots[@]}") || true
+  done
+}
+
 run_all() {
   run_fmt
   run_check
@@ -105,6 +130,9 @@ case "${command}" in
     ;;
   test-isolation)
     run_test_isolation
+    ;;
+  blocking-audit)
+    run_blocking_audit
     ;;
   -h|--help|help)
     usage

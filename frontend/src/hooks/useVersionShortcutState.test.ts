@@ -207,4 +207,36 @@ describe('useVersionShortcutState', () => {
       },
     });
   });
+
+  it('restores the exact previous shortcut state when a toggle response is unsuccessful', async () => {
+    setVersionShortcutsMock.mockResolvedValueOnce({
+      success: false,
+      error: 'toggle rejected',
+      state: {
+        menu: false,
+        desktop: false,
+      },
+    });
+
+    const { result } = renderHook(() => useVersionShortcutState({
+      activeVersion: 'v1.0.0',
+      activeShortcutState: { menu: true, desktop: false },
+      installedVersions: ['v1.0.0'],
+      supportsShortcuts: true,
+    }));
+
+    await flushMicrotasks();
+
+    await act(async () => {
+      await result.current.toggleShortcuts('v1.0.0', false);
+    });
+
+    expect(setVersionShortcutsMock).toHaveBeenCalledWith('v1.0.0', false);
+    expect(result.current.shortcutState).toEqual({
+      'v1.0.0': {
+        menu: true,
+        desktop: false,
+      },
+    });
+  });
 });

@@ -93,16 +93,21 @@ export function useVersionShortcutState({
 
     try {
       const result = await api.set_version_shortcuts(version, next);
-      if (result.success) {
-        setShortcutState((prev) => ({
-          ...prev,
-          [version]: {
-            menu: Boolean(result.state.menu),
-            desktop: Boolean(result.state.desktop),
-          },
-        }));
-        logger.info('Shortcuts toggled successfully', { version, state: result.state });
+      if (!result.success) {
+        throw new APIError(
+          result.error || 'Failed to toggle shortcuts',
+          'set_version_shortcuts'
+        );
       }
+
+      setShortcutState((prev) => ({
+        ...prev,
+        [version]: {
+          menu: Boolean(result.state.menu),
+          desktop: Boolean(result.state.desktop),
+        },
+      }));
+      logger.info('Shortcuts toggled successfully', { version, state: result.state });
     } catch (error) {
       if (error instanceof APIError) {
         logger.error('API error toggling shortcuts', {

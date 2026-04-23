@@ -140,7 +140,7 @@ pub async fn is_torch_running(state: &AppState, _params: &Value) -> pumas_librar
 pub async fn open_path(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: OpenPathParams = parse_params("open_path", params)?;
     let path = validate_non_empty(command.path, "path")?;
-    match state.api.open_path(&path) {
+    match state.api.open_path(&path).await {
         Ok(()) => Ok(json!({"success": true})),
         Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
     }
@@ -149,7 +149,7 @@ pub async fn open_path(state: &AppState, params: &Value) -> pumas_library::Resul
 pub async fn open_url(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: OpenUrlParams = parse_params("open_url", params)?;
     let url = validate_external_url(command.url)?;
-    match state.api.open_url(&url) {
+    match state.api.open_url(&url).await {
         Ok(()) => Ok(json!({"success": true})),
         Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
     }
@@ -162,7 +162,7 @@ pub async fn open_active_install(state: &AppState, params: &Value) -> pumas_libr
         if let Some(tag) = vm.get_active_version().await? {
             let version_dir = vm.version_path(&tag);
             if path_exists(&version_dir).await? {
-                match state.api.open_directory(&version_dir) {
+                match state.api.open_directory(&version_dir).await {
                     Ok(()) => Ok(json!({"success": true})),
                     Err(e) => Ok(json!({"success": false, "error": e.to_string()})),
                 }

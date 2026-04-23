@@ -290,28 +290,40 @@ impl PumasApi {
     // ========================================
 
     /// Open a path in the file manager.
-    pub fn open_path(&self, path: &str) -> Result<()> {
-        self.primary().system_utils.open_path(path)
+    pub async fn open_path(&self, path: &str) -> Result<()> {
+        let system_utils = self.primary().system_utils.clone();
+        let path = path.to_string();
+        tokio::task::spawn_blocking(move || system_utils.open_path(&path))
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join open_path task: {}", e)))?
     }
 
     /// Open a URL in the default browser.
-    pub fn open_url(&self, url: &str) -> Result<()> {
-        self.primary().system_utils.open_url(url)
+    pub async fn open_url(&self, url: &str) -> Result<()> {
+        let system_utils = self.primary().system_utils.clone();
+        let url = url.to_string();
+        tokio::task::spawn_blocking(move || system_utils.open_url(&url))
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join open_url task: {}", e)))?
     }
 
     /// Open a directory in the file manager.
     ///
     /// The caller (RPC layer) can use this with a version directory path
     /// obtained from pumas-app-manager's VersionManager.
-    pub fn open_directory(&self, dir: &std::path::Path) -> Result<()> {
-        if !dir.exists() {
-            return Err(PumasError::NotFound {
-                resource: format!("Directory: {}", dir.display()),
-            });
-        }
-        self.primary()
-            .system_utils
-            .open_path(&dir.to_string_lossy())
+    pub async fn open_directory(&self, dir: &std::path::Path) -> Result<()> {
+        let system_utils = self.primary().system_utils.clone();
+        let dir = dir.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            if !dir.exists() {
+                return Err(PumasError::NotFound {
+                    resource: format!("Directory: {}", dir.display()),
+                });
+            }
+            system_utils.open_path(&dir.to_string_lossy())
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join open_directory task: {}", e)))?
     }
 
     // ========================================

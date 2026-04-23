@@ -82,7 +82,7 @@ use serde::de::DeserializeOwned;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use api::PrimaryState;
+use api::{PrimaryState, RuntimeTasks};
 
 /// Main API struct for Pumas operations.
 ///
@@ -103,6 +103,8 @@ pub struct PumasApi {
     inner: ApiInner,
     /// Keeps the filesystem watcher alive for the lifetime of this API.
     model_watcher: Option<model_library::ModelLibraryWatcher>,
+    /// Owns primary background task handles for shutdown.
+    runtime_tasks: RuntimeTasks,
 }
 
 /// Internal dispatch: Primary owns state, Client proxies via IPC.
@@ -305,6 +307,7 @@ impl PumasApi {
                         launcher_root: launcher_root.to_path_buf(),
                         inner: ApiInner::Client(Arc::new(client)),
                         model_watcher: None,
+                        runtime_tasks: RuntimeTasks::default(),
                     }));
                 }
                 Err(err) => {
@@ -393,6 +396,7 @@ impl PumasApi {
 
 impl Drop for PumasApi {
     fn drop(&mut self) {
+        self.runtime_tasks.shutdown();
         let _ = self.model_watcher.take();
         if let ApiInner::Primary(ref state) = self.inner {
             // Best-effort: unregister instance from the global registry

@@ -7,6 +7,7 @@ use std::time::Duration;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
+use crate::api::RuntimeTasks;
 use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
 use crate::{ApiInner, PumasApi};
@@ -69,6 +70,7 @@ impl Drop for InstanceClaimGuard {
 fn start_primary_background_work(
     primary_state: Arc<PrimaryState>,
     known_download_dirs: HashSet<PathBuf>,
+    runtime_tasks: RuntimeTasks,
 ) -> Option<model_library::ModelLibraryWatcher> {
     let model_watcher = match start_model_library_watcher(primary_state.clone()) {
         Ok(watcher) => Some(watcher),
@@ -80,7 +82,7 @@ fn start_primary_background_work(
 
     {
         let ps = primary_state.clone();
-        tokio::spawn(async move {
+        runtime_tasks.spawn(async move {
             let recoveries = ps.model_importer.recover_incomplete_shards();
             if recoveries.is_empty() {
                 return;
@@ -135,7 +137,7 @@ fn start_primary_background_work(
 
     {
         let ps = primary_state;
-        tokio::spawn(async move {
+        runtime_tasks.spawn(async move {
             let interrupted = ps
                 .model_importer
                 .find_interrupted_downloads(&known_download_dirs);
@@ -324,6 +326,7 @@ impl PumasApiBuilder {
         let state = Arc::new(RwLock::new(ApiState {
             background_fetch_completed: false,
         }));
+        let runtime_tasks = RuntimeTasks::default();
 
         // Initialize network manager for connectivity checking
         let network_manager =
@@ -335,7 +338,7 @@ impl PumasApiBuilder {
 
         // Check initial connectivity (non-blocking, will update state)
         let nm_clone = network_manager.clone();
-        tokio::spawn(async move {
+        runtime_tasks.spawn(async move {
             nm_clone.check_connectivity().await;
         });
 
@@ -427,10 +430,11 @@ impl PumasApiBuilder {
         // Wire download completion -> in-place import (metadata + indexing)
         if let Some(ref mut client) = hf_client {
             let lib = model_library.clone();
+            let tasks = runtime_tasks.clone();
             client.set_aux_complete_callback(std::sync::Arc::new(
                 move |info: model_library::AuxFilesCompleteInfo| {
                     let lib = lib.clone();
-                    tokio::spawn(async move {
+                    tasks.spawn(async move {
                         let importer = model_library::ModelImporter::new(lib);
                         if let Err(err) = importer.upsert_download_metadata_stub(&info).await {
                             tracing::warn!(
@@ -444,10 +448,11 @@ impl PumasApiBuilder {
             ));
 
             let lib = model_library.clone();
+            let tasks = runtime_tasks.clone();
             client.set_completion_callback(std::sync::Arc::new(
                 move |info: model_library::DownloadCompletionInfo| {
                     let lib = lib.clone();
-                    tokio::spawn(async move {
+                    tasks.spawn(async move {
                         let importer = model_library::ModelImporter::new(lib);
                         match importer.finalize_downloaded_directory(&info).await {
                             Ok(r) if r.success => {
@@ -477,7 +482,7 @@ impl PumasApiBuilder {
             let lib_clone = model_library.clone();
             let importer = model_library::ModelImporter::new(lib_clone);
             if importer.has_orphan_candidates() {
-                tokio::spawn(async move {
+                runtime_tasks.spawn(async move {
                     let result = importer.adopt_orphans(false).await;
                     if result.orphans_found > 0 {
                         tracing::info!(
@@ -533,10 +538,14 @@ impl PumasApiBuilder {
             launcher_root: self.launcher_root,
             inner: ApiInner::Primary(primary_state),
             model_watcher: None,
+            runtime_tasks: runtime_tasks.clone(),
         };
         api.start_ipc_server().await?;
-        api.model_watcher =
-            start_primary_background_work(api.primary().clone(), known_download_dirs);
+        api.model_watcher = start_primary_background_work(
+            api.primary().clone(),
+            known_download_dirs,
+            runtime_tasks,
+        );
         claim_guard.disarm();
 
         Ok(api)

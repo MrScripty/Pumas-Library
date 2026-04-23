@@ -92,12 +92,12 @@ Rectification:
 - Keep JSON-RPC envelope generic, but method payloads typed.
 
 ### R04 - Background Task Ownership Is Incomplete
-Status: non-compliant with Rust async task lifecycle standards
+Status: partially remediated
 
 Examples:
 
-- `pumas-core/src/api/builder.rs` starts recovery tasks with `tokio::spawn` and discards handles.
-- `pumas-rpc/src/server.rs` starts Axum serving with `tokio::spawn` and no lifecycle owner.
+- `pumas-core/src/api/builder.rs` started recovery tasks with `tokio::spawn` and discarded handles.
+- `pumas-rpc/src/server.rs` started Axum serving with `tokio::spawn` and no lifecycle owner.
 - `pumas-core/src/ipc/server.rs` has a server handle for the accept loop, but nested connection tasks need review for bounded ownership and shutdown.
 - `pumas-core/src/model_library/hf/download.rs` and `conversion/manager.rs` spawn background tasks that need handle/cancellation audit.
 
@@ -106,6 +106,12 @@ Rectification:
 - Store every spawned handle, propagate cancellation, await/abort during shutdown.
 - Convert server startup to return a handle with explicit shutdown.
 - Add tests for shutdown idempotency and task panic handling.
+
+Implementation notes:
+- Completed: `pumas-rpc/src/server.rs` returns an owned `ServerHandle`, logs server task errors, and aborts the task during explicit or drop-based shutdown.
+- Completed: `pumas-core/src/api/runtime_tasks.rs` owns builder-started background task handles and aborts them during `PumasApi` shutdown.
+- Completed: `PumasApiBuilder` routes initial connectivity checks, orphan adoption, download completion callbacks, and startup download/shard recovery tasks through `RuntimeTasks`.
+- Remaining: audit `pumas-core/src/ipc/server.rs` nested connection tasks plus model download and conversion manager background tasks for bounded ownership and cancellation.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

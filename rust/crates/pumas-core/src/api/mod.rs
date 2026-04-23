@@ -13,6 +13,7 @@ mod models;
 mod network;
 mod process;
 mod reconciliation;
+mod runtime_tasks;
 mod state;
 mod state_hf;
 mod state_process;
@@ -24,4 +25,5 @@ pub(crate) use reconciliation::{
     reconcile_on_demand, start_model_library_watcher, ReconcileScope, ReconciliationCoordinator,
     WatcherWriteSuppressor, WATCHER_WRITE_SUPPRESSION_TTL,
 };
+pub(crate) use runtime_tasks::RuntimeTasks;
 pub(crate) use state::PrimaryState;

@@ -278,6 +278,10 @@ Implementation notes:
   shared lock before awaiting async probes, and routes shortcut toggle mutations through
   `tokio::task::spawn_blocking`, so shortcut create/remove request paths no longer execute their
   synchronous filesystem and script/icon generation work inline on async runtime threads.
+- Completed: `pumas-core/src/network/download.rs` now uses `tokio::fs` and async file writes for
+  destination directory setup, temp-file creation, streamed chunk writes, flush, atomic rename, and
+  temp-file cleanup, so core download request paths no longer perform blocking filesystem work on
+  async runtime threads while transferring or finalizing downloaded files.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

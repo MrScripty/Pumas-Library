@@ -11,11 +11,12 @@ use crate::network::client::HttpClient;
 use crate::network::retry::{retry_async, RetryConfig};
 use crate::{PumasError, Result};
 use futures::StreamExt;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::fs;
+use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 use tracing::{debug, info};
 
@@ -150,12 +151,18 @@ impl DownloadManager {
 
         // Ensure parent directory exists
         if let Some(parent) = destination.parent() {
-            if !parent.exists() {
-                std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
-                    message: format!("Failed to create directory: {}", e),
-                    path: Some(parent.to_path_buf()),
-                    source: Some(e),
-                })?;
+            if !fs::try_exists(parent).await.map_err(|e| PumasError::Io {
+                message: format!("Failed to inspect directory: {}", e),
+                path: Some(parent.to_path_buf()),
+                source: Some(e),
+            })? {
+                fs::create_dir_all(parent)
+                    .await
+                    .map_err(|e| PumasError::Io {
+                        message: format!("Failed to create directory: {}", e),
+                        path: Some(parent.to_path_buf()),
+                        source: Some(e),
+                    })?;
             }
         }
 
@@ -167,21 +174,21 @@ impl DownloadManager {
         match result {
             Ok(bytes) => {
                 // Atomic move from temp to final destination
-                std::fs::rename(&temp_path, destination).map_err(|e| {
-                    let _ = std::fs::remove_file(&temp_path);
-                    PumasError::Io {
+                if let Err(e) = fs::rename(&temp_path, destination).await {
+                    let _ = fs::remove_file(&temp_path).await;
+                    return Err(PumasError::Io {
                         message: format!("Failed to move download to final destination: {}", e),
                         path: Some(destination.to_path_buf()),
                         source: Some(e),
-                    }
-                })?;
+                    });
+                }
 
                 info!("Downloaded {} bytes to {}", bytes, destination.display());
                 Ok(bytes)
             }
             Err(e) => {
                 // Cleanup temp file on error
-                let _ = std::fs::remove_file(&temp_path);
+                let _ = fs::remove_file(&temp_path).await;
                 Err(e)
             }
         }
@@ -249,11 +256,13 @@ impl DownloadManager {
         }
 
         let total_bytes = response.content_length();
-        let mut file = std::fs::File::create(temp_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to create temp file: {}", e),
-            path: Some(temp_path.to_path_buf()),
-            source: Some(e),
-        })?;
+        let mut file = fs::File::create(temp_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create temp file: {}", e),
+                path: Some(temp_path.to_path_buf()),
+                source: Some(e),
+            })?;
 
         let mut bytes_downloaded: u64 = 0;
         let mut last_progress_update = Instant::now();
@@ -280,7 +289,7 @@ impl DownloadManager {
                 }
             })?;
 
-            file.write_all(&chunk).map_err(|e| PumasError::Io {
+            file.write_all(&chunk).await.map_err(|e| PumasError::Io {
                 message: format!("Failed to write to temp file: {}", e),
                 path: Some(temp_path.to_path_buf()),
                 source: Some(e),
@@ -301,7 +310,7 @@ impl DownloadManager {
         }
 
         // Ensure data is flushed to disk
-        file.flush().map_err(|e| PumasError::Io {
+        file.flush().await.map_err(|e| PumasError::Io {
             message: format!("Failed to flush temp file: {}", e),
             path: Some(temp_path.to_path_buf()),
             source: Some(e),

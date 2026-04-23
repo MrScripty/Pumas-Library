@@ -85,7 +85,7 @@ Status: partially remediated; large workflow owners remain
 
 Long UI modules combine display, backend calls, local derived state, and workflow transitions:
 
-- `frontend/src/App.tsx` at 315 lines and 299 effective lines after launcher update, model preference, dependency install, app shell, startup-check, selected-version, and panel-prop extraction;
+- `frontend/src/App.tsx` at 302 lines and 288 effective lines after launcher update, model preference, dependency install, app shell, startup-check, selected-version, panel-prop, and shell-state extraction;
 - `frontend/src/components/ModelManager.tsx` at 307 lines and 282 effective lines after filter, import-picker, existing-library chooser, HF auth prompt, download-refresh, and remote-download starter extraction;
 - `frontend/src/components/LocalModelsList.tsx` at 307 lines and 299 effective lines after related-panel, empty-state, metadata-summary, name-button, and group-header extraction;
 - `frontend/src/components/model-import/useModelImportWorkflow.ts` at 295 lines and 259 effective lines after embedded-metadata toggle, sharded-set detection, and metadata lookup extraction;
@@ -105,6 +105,7 @@ Rectification:
 - Completed: move setup dependency installation action state and error classification from `App.tsx` into `frontend/src/hooks/useDependencyInstaller.ts` with success, pending-state, failure, and API-unavailable tests.
 - Completed: move app shell rendering from `App.tsx` into `frontend/src/components/AppShell.tsx`.
 - Completed: move app-panel prop graph construction from `App.tsx` into `frontend/src/components/AppShellPanels.ts` with shared/app-specific panel prop tests.
+- Completed: move App running flags, selected-app display state, setup display state, managed-app inputs, model-manager props, and header/sidebar prop construction from `App.tsx` into `frontend/src/components/AppShellState.ts` with projection and prop-builder tests.
 - Completed: move startup API readiness wait, delayed launcher update check, disk-space fetch, and active-version status refresh from `App.tsx` into `frontend/src/hooks/useAppStartupChecks.ts` with readiness, cleanup, and refresh tests.
 - Completed: move selected-app version hook routing from `App.tsx` into `frontend/src/hooks/useSelectedAppVersions.ts` with selected-app and unsupported-state tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/App.tsx` from the oversized-file baseline after it reached 299 effective lines.
@@ -258,6 +259,8 @@ Rectification:
 - Completed: reduce `frontend/src/components/Header.tsx` render/status complexity by extracting status projection, update/window controls, status badge, and resource strip rendering into focused header modules.
 - Completed: reduce `frontend/src/components/VersionListItem.tsx` render complexity by extracting install-version display-state projection, info rendering, and action-button state rendering into focused modules while preserving install-dialog row coverage.
 - Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.
+- Completed: reduce `frontend/src/App.tsx` orchestration complexity by moving shell state projection and prop construction into `frontend/src/components/AppShellState.ts` while preserving App shell behavior with focused helper coverage.
+- Completed: the frontend source tree passes ESLint with `complexity` temporarily enabled at a maximum of 20 for the full package.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

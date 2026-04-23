@@ -1,7 +1,16 @@
 import { useState, useMemo } from 'react';
 import { AppShell } from './components/AppShell';
 import { buildAppShellPanels } from './components/AppShellPanels';
-import type { ModelManagerProps } from './components/ModelManager';
+import {
+  buildAppShellHeader,
+  buildAppShellSidebar,
+  buildManagedAppsState,
+  buildModelManagerProps,
+  getAppRunningState,
+  getLauncherLatestVersion,
+  getSelectedAppShellState,
+  getSetupDisplayState,
+} from './components/AppShellState';
 import type { AppConfig } from './types/apps';
 import { useStatus } from './hooks/useStatus';
 import { useDiskSpace } from './hooks/useDiskSpace';
@@ -53,10 +62,8 @@ export default function App() {
     launcherUpdateState,
     openLauncherUpdate,
   } = useLauncherUpdates();
-  const comfyUIRunning = status?.comfyui_running || false;
-  const ollamaRunning = status?.ollama_running || false;
-  const torchRunning = status?.torch_running || false;
-  const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess(comfyUIRunning);
+  const runningState = useMemo(() => getAppRunningState(status), [status]);
+  const { launchError, launchLogPath, isStarting, isStopping, launchComfyUI, stopComfyUI, openLogPath } = useComfyUIProcess(runningState.comfyUIRunning);
   const {
     launchError: ollamaLaunchError,
     launchLogPath: ollamaLaunchLogPath,
@@ -65,7 +72,7 @@ export default function App() {
     launchOllama,
     stopOllama,
     openLogPath: openOllamaLogPath
-  } = useOllamaProcess(ollamaRunning);
+  } = useOllamaProcess(runningState.ollamaRunning);
   const {
     launchError: torchLaunchError,
     launchLogPath: torchLaunchLogPath,
@@ -74,7 +81,7 @@ export default function App() {
     launchTorch,
     stopTorch,
     openLogPath: openTorchLogPath
-  } = useTorchProcess(torchRunning);
+  } = useTorchProcess(runningState.torchRunning);
   const { modelGroups, scanModels, fetchModels } = useModels();
   const { activeDownload, activeDownloadCount } = useActiveModelDownload();
 
@@ -87,28 +94,23 @@ export default function App() {
     torchInstalledVersions,
   } = useSelectedAppVersions(selectedAppId);
 
-  const managedAppsState = useMemo(() => ({
+  const managedAppsState = useMemo(() => buildManagedAppsState({
+    running: runningState,
+    status,
     systemResources,
     comfyui: {
-      isRunning: comfyUIRunning,
       isStarting,
       isStopping,
       launchError,
       installedVersions: comfyInstalledVersions,
-      ramMemory: status?.app_resources?.comfyui?.ram_memory,
-      gpuMemory: status?.app_resources?.comfyui?.gpu_memory,
     },
     ollama: {
-      isRunning: ollamaRunning,
       isStarting: ollamaIsStarting,
       isStopping: ollamaIsStopping,
       launchError: ollamaLaunchError,
       installedVersions: ollamaInstalledVersions,
-      ramMemory: status?.app_resources?.ollama?.ram_memory,
-      gpuMemory: status?.app_resources?.ollama?.gpu_memory,
     },
     torch: {
-      isRunning: torchRunning,
       isStarting: torchIsStarting,
       isStopping: torchIsStopping,
       launchError: torchLaunchError,
@@ -116,7 +118,6 @@ export default function App() {
     },
   }), [
     comfyInstalledVersions,
-    comfyUIRunning,
     isStarting,
     isStopping,
     launchError,
@@ -124,17 +125,13 @@ export default function App() {
     ollamaIsStarting,
     ollamaIsStopping,
     ollamaLaunchError,
-    ollamaRunning,
-    status?.app_resources?.comfyui?.gpu_memory,
-    status?.app_resources?.comfyui?.ram_memory,
-    status?.app_resources?.ollama?.gpu_memory,
-    status?.app_resources?.ollama?.ram_memory,
+    runningState,
+    status,
     systemResources,
     torchInstalledVersions,
     torchIsStarting,
     torchIsStopping,
     torchLaunchError,
-    torchRunning,
   ]);
   const {
     apps,
@@ -144,12 +141,14 @@ export default function App() {
   } = useManagedApps(managedAppsState);
   const appIds = useMemo(() => apps.map((app) => app.id), [apps]);
   const { getPanelState, setShowVersionManager } = useAppPanelState(appIds);
-  const depsInstalled = status?.deps_ready ?? null;
-  const isPatched = status?.patched ?? false;
-  const menuShortcut = status?.menu_shortcut ?? false;
-  const desktopShortcut = status?.desktop_shortcut ?? false;
-  const selectedApp = apps.find((app) => app.id === selectedAppId) ?? null;
-  const appDisplayName = selectedApp?.displayName ?? 'App';
+  const selectedAppShellState = useMemo(
+    () => getSelectedAppShellState(apps, selectedAppId),
+    [apps, selectedAppId]
+  );
+  const setupDisplayState = useMemo(
+    () => getSetupDisplayState(status, selectedAppId),
+    [status, selectedAppId]
+  );
   const panelState = getPanelState(selectedAppId);
   const {
     excludedModels,
@@ -157,8 +156,6 @@ export default function App() {
     toggleLink: handleToggleLink,
     toggleStar: handleToggleStar,
   } = useModelPreferences({ selectedAppId });
-  const activeShortcutState =
-    selectedAppId === 'comfyui' ? { menu: menuShortcut, desktop: desktopShortcut } : undefined;
   const {
     closeWindow,
     minimizeWindow,
@@ -179,17 +176,17 @@ export default function App() {
     handleOpenLog,
     handleStopApp,
   } = useAppProcessActions({
-    comfyUIRunning,
+    comfyUIRunning: runningState.comfyUIRunning,
     launchComfyUI,
     stopComfyUI,
     launchLogPath,
     openLogPath,
-    ollamaRunning,
+    ollamaRunning: runningState.ollamaRunning,
     launchOllama,
     stopOllama,
     ollamaLaunchLogPath,
     openOllamaLogPath,
-    torchRunning,
+    torchRunning: runningState.torchRunning,
     launchTorch,
     stopTorch,
     torchLaunchLogPath,
@@ -229,12 +226,7 @@ export default function App() {
     setShowVersionManager(selectedAppId, show);
   };
 
-  // Computed display values
-  const isSetupComplete = depsInstalled === true && isPatched && menuShortcut && desktopShortcut;
-  const statusMessage = status?.message || '';
-  const defaultReadyText = statusMessage?.trim().toLowerCase() === 'system ready. configure options below';
-  const displayStatus = statusMessage === 'Setup complete – everything is ready' || defaultReadyText ? '' : statusMessage;
-  const modelManagerProps: ModelManagerProps = {
+  const modelManagerProps = buildModelManagerProps({
     modelGroups,
     starredModels,
     excludedModels,
@@ -246,21 +238,21 @@ export default function App() {
     onModelsImported: fetchModels,
     activeVersion: appVersions.activeVersion,
     onChooseExistingLibrary: chooseLibraryRoot,
-  };
+  });
   const panels = buildAppShellPanels({
-    activeShortcutState,
-    appDisplayName,
+    activeShortcutState: setupDisplayState.activeShortcutState,
+    appDisplayName: selectedAppShellState.appDisplayName,
     appVersions,
-    comfyUIRunning,
-    connectionUrl: selectedApp?.connectionUrl,
-    depsInstalled,
+    comfyUIRunning: runningState.comfyUIRunning,
+    connectionUrl: selectedAppShellState.connectionUrl,
+    depsInstalled: setupDisplayState.depsInstalled,
     diskSpacePercent,
-    displayStatus,
+    displayStatus: setupDisplayState.displayStatus,
     isCheckingDeps,
     isInstallingDeps,
-    isOllamaRunning: ollamaRunning,
-    isSetupComplete,
-    isTorchRunning: torchRunning,
+    isOllamaRunning: runningState.ollamaRunning,
+    isSetupComplete: setupDisplayState.isSetupComplete,
+    isTorchRunning: runningState.torchRunning,
     modelGroups,
     modelManagerProps,
     panelState,
@@ -277,27 +269,23 @@ export default function App() {
       onImportComplete={handleImportComplete}
       onImportDialogClose={handleImportDialogClose}
       onPathsDropped={handlePathsDropped}
-      header={{
-        systemResources,
-        appResources: status?.app_resources?.comfyui,
-        launcherUpdateAvailable,
-        launcherLatestVersion: launcherUpdateState?.latestVersion ?? null,
-        isCheckingLauncherUpdates,
-        onCheckLauncherUpdates: () => {
-          void checkLauncherUpdates();
-        },
-        onDownloadLauncherUpdate: () => {
-          void openLauncherUpdate();
-        },
-        onMinimize: minimizeWindow,
-        onClose: closeWindow,
-        networkAvailable,
-        modelLibraryLoaded,
-        installationProgress,
+      header={buildAppShellHeader({
         activeModelDownload: activeDownload,
         activeModelDownloadCount: activeDownloadCount,
-      }}
-      sidebar={{
+        installationProgress,
+        isCheckingLauncherUpdates,
+        launcherLatestVersion: getLauncherLatestVersion(launcherUpdateState),
+        launcherUpdateAvailable,
+        modelLibraryLoaded,
+        networkAvailable,
+        status,
+        systemResources,
+        onCheckLauncherUpdates: checkLauncherUpdates,
+        onClose: closeWindow,
+        onDownloadLauncherUpdate: openLauncherUpdate,
+        onMinimize: minimizeWindow,
+      })}
+      sidebar={buildAppShellSidebar({
         apps,
         selectedAppId,
         onSelectApp: setSelectedAppId,
@@ -307,7 +295,7 @@ export default function App() {
         onDeleteApp: handleDeleteApp,
         onReorderApps: handleReorderApps,
         onAddApp: handleAddApp,
-      }}
+      })}
       panels={panels}
     />
   );

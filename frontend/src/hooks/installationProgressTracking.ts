@@ -69,6 +69,28 @@ function computeEtaSeconds(
   return Math.ceil(remaining / etaSpeed);
 }
 
+function synchronizeTrackerState(
+  progress: InstallationProgressSource,
+  trackerState: InstallationProgressTrackerState,
+  downloadedBytes: number,
+  speed: number,
+  now: number
+): void {
+  if (progress.tag !== trackerState.lastDownloadTag) {
+    trackerState.lastDownloadTag = progress.tag || null;
+    trackerState.lastStage = progress.stage || null;
+    resetNetworkStatusState(trackerState.networkState);
+    trackerState.networkState.lastDownload = { bytes: downloadedBytes, speed, ts: now };
+    trackerState.networkState.topSpeed = speed || 0;
+    return;
+  }
+
+  if (progress.stage !== trackerState.lastStage) {
+    trackerState.networkState.downloadSamples = [];
+    trackerState.lastStage = progress.stage || null;
+  }
+}
+
 export function normalizeInstallationProgress(
   progress: InstallationProgressSource,
   availableVersions: VersionRelease[],
@@ -81,17 +103,7 @@ export function normalizeInstallationProgress(
   const downloadedBytes = progress.downloaded_bytes || 0;
   const speed = progress.download_speed || 0;
 
-  if (progress.tag !== trackerState.lastDownloadTag) {
-    trackerState.lastDownloadTag = progress.tag || null;
-    trackerState.lastStage = progress.stage || null;
-    resetNetworkStatusState(trackerState.networkState);
-    trackerState.networkState.lastDownload = { bytes: downloadedBytes, speed, ts: now };
-    trackerState.networkState.topSpeed = speed || 0;
-  } else if (progress.stage !== trackerState.lastStage) {
-    trackerState.networkState.downloadSamples = [];
-    trackerState.lastStage = progress.stage || null;
-  }
-
+  synchronizeTrackerState(progress, trackerState, downloadedBytes, speed, now);
   trackerState.networkState.downloadSamples = updateDownloadSamples(
     trackerState.networkState.downloadSamples,
     now,

@@ -399,42 +399,48 @@ impl OllamaVersionManager {
 
     /// Extract the binary from archive.
     async fn extract_binary(&self, archive_path: &Path, version_path: &Path) -> Result<()> {
+        let archive_path = archive_path.to_path_buf();
+        let version_path = version_path.to_path_buf();
+
+        tokio::task::spawn_blocking(move || {
+            Self::extract_binary_blocking(&archive_path, &version_path)
+        })
+        .await
+        .map_err(|e| PumasError::InstallationFailed {
+            message: format!("Ollama extraction task failed: {}", e),
+        })?
+    }
+
+    fn extract_binary_blocking(archive_path: &Path, version_path: &Path) -> Result<()> {
         let archive_name = archive_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("");
 
-        // Determine archive type
         if archive_name.ends_with(".zip") {
-            self.extract_zip(archive_path, version_path)?;
+            Self::extract_zip(archive_path, version_path)?;
         } else if archive_name.ends_with(".tar.gz")
             || archive_name.ends_with(".tgz")
             || archive_name.ends_with(".tar.zst")
         {
-            self.extract_tarball(archive_path, version_path)?;
+            Self::extract_tarball(archive_path, version_path)?;
         } else if archive_name.ends_with(".exe") || archive_name == "ollama" {
-            // Direct binary, just move it
             let dest = version_path.join(Self::binary_name());
-            fs::rename(archive_path, &dest)
-                .await
-                .map_err(|e| PumasError::Io {
-                    message: format!("Failed to move binary: {}", e),
-                    path: Some(dest),
-                    source: Some(e),
-                })?;
+            std::fs::rename(archive_path, &dest).map_err(|e| PumasError::Io {
+                message: format!("Failed to move binary: {}", e),
+                path: Some(dest),
+                source: Some(e),
+            })?;
         } else {
             return Err(PumasError::InstallationFailed {
                 message: format!("Unknown archive format: {}", archive_name),
             });
         }
 
-        // Find and finalize binary
-        self.finalize_binary(version_path)?;
-
-        Ok(())
+        Self::finalize_binary(version_path)
     }
 
-    fn extract_zip(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
+    fn extract_zip(archive_path: &Path, dest_dir: &Path) -> Result<()> {
         use std::io::Read;
         let file = std::fs::File::open(archive_path).map_err(|e| PumasError::Io {
             message: format!("Failed to open archive: {}", e),
@@ -485,7 +491,7 @@ impl OllamaVersionManager {
         Ok(())
     }
 
-    fn extract_tarball(&self, archive_path: &Path, dest_dir: &Path) -> Result<()> {
+    fn extract_tarball(archive_path: &Path, dest_dir: &Path) -> Result<()> {
         use std::io::BufReader;
 
         let file = std::fs::File::open(archive_path).map_err(|e| PumasError::Io {
@@ -528,7 +534,7 @@ impl OllamaVersionManager {
     }
 
     /// Find and set up the binary in the version directory.
-    fn finalize_binary(&self, version_path: &Path) -> Result<()> {
+    fn finalize_binary(version_path: &Path) -> Result<()> {
         let binary_name = Self::binary_name();
         let final_path = version_path.join(binary_name);
 
@@ -554,7 +560,7 @@ impl OllamaVersionManager {
         }
 
         // Search for binary in extracted directories
-        let binary = self.find_binary_recursive(version_path)?;
+        let binary = Self::find_binary_recursive(version_path)?;
         if let Some(found) = binary {
             std::fs::rename(&found, &final_path).map_err(|e| PumasError::Io {
                 message: format!("Failed to move binary: {}", e),
@@ -580,7 +586,7 @@ impl OllamaVersionManager {
             }
 
             // Clean up extracted directories
-            self.cleanup_extracted_dirs(version_path)?;
+            Self::cleanup_extracted_dirs(version_path)?;
         } else {
             return Err(PumasError::InstallationFailed {
                 message: "Could not find Ollama binary in archive".to_string(),
@@ -590,7 +596,7 @@ impl OllamaVersionManager {
         Ok(())
     }
 
-    fn find_binary_recursive(&self, dir: &Path) -> Result<Option<PathBuf>> {
+    fn find_binary_recursive(dir: &Path) -> Result<Option<PathBuf>> {
         let binary_name = Self::binary_name();
 
         for entry in std::fs::read_dir(dir).map_err(|e| PumasError::Io {
@@ -612,7 +618,7 @@ impl OllamaVersionManager {
                     }
                 }
             } else if path.is_dir() {
-                if let Some(found) = self.find_binary_recursive(&path)? {
+                if let Some(found) = Self::find_binary_recursive(&path)? {
                     return Ok(Some(found));
                 }
             }
@@ -621,7 +627,7 @@ impl OllamaVersionManager {
         Ok(None)
     }
 
-    fn cleanup_extracted_dirs(&self, version_path: &Path) -> Result<()> {
+    fn cleanup_extracted_dirs(version_path: &Path) -> Result<()> {
         let binary_name = Self::binary_name();
 
         for entry in std::fs::read_dir(version_path).map_err(|e| PumasError::Io {

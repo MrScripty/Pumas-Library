@@ -236,6 +236,10 @@ Implementation notes:
   writes for streamed downloads plus async archive cleanup and direct-binary rename, so those
   async install steps no longer perform synchronous file output or archive relocation on runtime
   threads before extraction/finalization.
+- Completed: `pumas-app-manager/src/version_manager/ollama.rs` now routes archive extraction and
+  binary finalization through `tokio::task::spawn_blocking`, so zip, tarball, recursive binary
+  discovery, and permission-fix work no longer execute inline on async runtime threads during
+  Ollama install flows.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

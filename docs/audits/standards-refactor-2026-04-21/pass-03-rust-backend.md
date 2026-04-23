@@ -165,6 +165,10 @@ Implementation notes:
   `requirements.txt` with `tokio::fs` and uses async venv checks in `install_dependencies`, so
   the dependency status/install flows no longer mix synchronous requirement-file reads into those
   async entry points.
+- Completed: `pumas-core/src/api/links.rs` and the mirrored link-health/cleanup IPC dispatch in
+  `api/state.rs` now use async existence/symlink checks and async file removal so those link
+  registry health/cleanup paths no longer perform synchronous metadata probes or unlinks on async
+  runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

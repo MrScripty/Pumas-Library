@@ -29,6 +29,7 @@ use crate::network;
 use crate::process;
 use crate::registry;
 use crate::system;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
@@ -36,6 +37,14 @@ async fn path_exists(path: &Path) -> std::result::Result<bool, PumasError> {
     fs::try_exists(path)
         .await
         .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+async fn path_is_symlink(path: &Path) -> std::result::Result<bool, PumasError> {
+    match fs::symlink_metadata(path).await {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
 }
 
 /// All state owned by a primary instance.
@@ -402,13 +411,13 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let mut broken: Vec<String> = Vec::new();
 
                 for link in &all_links {
-                    if link.target.is_symlink() {
-                        if link.source.exists() {
+                    if path_is_symlink(&link.target).await? {
+                        if path_exists(&link.source).await? {
                             healthy += 1;
                         } else {
                             broken.push(link.target.to_string_lossy().to_string());
                         }
-                    } else if link.target.exists() {
+                    } else if path_exists(&link.target).await? {
                         healthy += 1;
                     } else {
                         broken.push(link.target.to_string_lossy().to_string());
@@ -435,8 +444,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let registry = self.model_library.link_registry().write().await;
                 let broken = registry.cleanup_broken().await?;
                 for entry in &broken {
-                    if entry.target.exists() || entry.target.is_symlink() {
-                        let _ = std::fs::remove_file(&entry.target);
+                    if path_exists(&entry.target).await? || path_is_symlink(&entry.target).await? {
+                        let _ = fs::remove_file(&entry.target).await;
                     }
                 }
                 Ok(serde_json::to_value(models::CleanBrokenLinksResponse {

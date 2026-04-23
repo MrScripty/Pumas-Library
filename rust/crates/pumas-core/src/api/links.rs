@@ -3,6 +3,23 @@
 use crate::error::Result;
 use crate::models;
 use crate::PumasApi;
+use std::io::ErrorKind;
+use std::path::Path;
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
+
+async fn path_is_symlink(path: &Path) -> Result<bool> {
+    match fs::symlink_metadata(path).await {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(crate::error::PumasError::io_with_path(err, path)),
+    }
+}
 
 impl PumasApi {
     /// Get the health status of model links for a version.
@@ -25,13 +42,13 @@ impl PumasApi {
         let mut broken: Vec<String> = Vec::new();
 
         for link in &all_links {
-            if link.target.is_symlink() {
-                if link.source.exists() {
+            if path_is_symlink(&link.target).await? {
+                if path_exists(&link.source).await? {
                     healthy += 1;
                 } else {
                     broken.push(link.target.to_string_lossy().to_string());
                 }
-            } else if link.target.exists() {
+            } else if path_exists(&link.target).await? {
                 healthy += 1;
             } else {
                 broken.push(link.target.to_string_lossy().to_string());
@@ -69,8 +86,8 @@ impl PumasApi {
         let broken = registry.cleanup_broken().await?;
 
         for entry in &broken {
-            if entry.target.exists() || entry.target.is_symlink() {
-                let _ = std::fs::remove_file(&entry.target);
+            if path_exists(&entry.target).await? || path_is_symlink(&entry.target).await? {
+                let _ = fs::remove_file(&entry.target).await;
             }
         }
 

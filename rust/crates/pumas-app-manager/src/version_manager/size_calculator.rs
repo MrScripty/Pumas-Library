@@ -84,6 +84,23 @@ impl SizeCalculator {
         calculator
     }
 
+    /// Create a new size calculator and load the cache asynchronously.
+    pub async fn new_with_cache(cache_dir: PathBuf) -> Self {
+        let cache_path = cache_dir.join("release_sizes.json");
+
+        let mut calculator = Self {
+            cache_path,
+            cache: HashMap::new(),
+            known_packages: Self::default_known_packages(),
+        };
+
+        if let Err(e) = calculator.load_cache_async().await {
+            debug!("Could not load size cache: {}", e);
+        }
+
+        calculator
+    }
+
     /// Get default known package sizes for common ML dependencies.
     ///
     /// These are approximate wheel sizes for common packages used by ComfyUI.
@@ -345,6 +362,31 @@ impl SizeCalculator {
             path: Some(self.cache_path.clone()),
             source: Some(e),
         })?;
+
+        self.cache = serde_json::from_str(&content)?;
+        debug!("Loaded {} cached release sizes", self.cache.len());
+        Ok(())
+    }
+
+    async fn load_cache_async(&mut self) -> Result<()> {
+        if !fs::try_exists(&self.cache_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to check size cache: {}", e),
+                path: Some(self.cache_path.clone()),
+                source: Some(e),
+            })?
+        {
+            return Ok(());
+        }
+
+        let content = fs::read_to_string(&self.cache_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to read size cache: {}", e),
+                path: Some(self.cache_path.clone()),
+                source: Some(e),
+            })?;
 
         self.cache = serde_json::from_str(&content)?;
         debug!("Loaded {} cached release sizes", self.cache.len());

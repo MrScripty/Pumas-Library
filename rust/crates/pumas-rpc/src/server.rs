@@ -195,7 +195,7 @@ mod tests {
 
         // Initialize size calculator
         let cache_dir = launcher_root.join("launcher-data").join("cache");
-        let size_calculator = SizeCalculator::new(cache_dir);
+        let size_calculator = SizeCalculator::new_with_cache(cache_dir).await;
 
         // Initialize plugin loader
         let plugins_dir = launcher_root.join("launcher-data").join("plugins");

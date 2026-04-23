@@ -31,8 +31,34 @@ interface RepoDownloadSelection {
   error?: string;
 }
 
+interface ModelDownloadStatusPayload {
+  repoId?: string;
+  downloadId?: string;
+  status?: string;
+  progress?: number;
+  downloadedBytes?: number;
+  totalBytes?: number;
+  speed?: number;
+  etaSeconds?: number;
+  modelName?: string;
+  modelType?: string;
+  retryAttempt?: number;
+  retryLimit?: number;
+  retrying?: boolean;
+  nextRetryDelaySeconds?: number;
+  error?: string;
+}
+
+interface RepoDownloadCandidate extends RepoDownloadSelection {
+  repoId: string;
+}
+
 function isTrackedStatus(status: string): status is DownloadStatus['status'] {
   return (TRACKED_STATUSES as readonly string[]).includes(status);
+}
+
+function optionalNumber(value: number | undefined): number | undefined {
+  return typeof value === 'number' ? value : undefined;
 }
 
 function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStatus): boolean {
@@ -53,60 +79,53 @@ function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStat
   return candidateProgress > currentProgress;
 }
 
-export function selectDownloadsByRepo(downloads: Array<{
-  repoId?: string;
-  downloadId?: string;
-  status?: string;
-  progress?: number;
-  downloadedBytes?: number;
-  totalBytes?: number;
-  speed?: number;
-  etaSeconds?: number;
-  modelName?: string;
-  modelType?: string;
-  retryAttempt?: number;
-  retryLimit?: number;
-  retrying?: boolean;
-  nextRetryDelaySeconds?: number;
-  error?: string;
-}>): {
+function toRepoDownloadCandidate(
+  download: ModelDownloadStatusPayload
+): RepoDownloadCandidate | null {
+  const repoId = download.repoId;
+  const status = download.status;
+  if (!repoId || !status || !isTrackedStatus(status) || !download.downloadId) {
+    return null;
+  }
+
+  return {
+    repoId,
+    status: {
+      downloadId: download.downloadId,
+      status,
+      progress: typeof download.progress === 'number' ? download.progress : 0,
+      downloadedBytes: optionalNumber(download.downloadedBytes),
+      totalBytes: optionalNumber(download.totalBytes),
+      speed: optionalNumber(download.speed),
+      etaSeconds: optionalNumber(download.etaSeconds),
+      modelName: download.modelName,
+      modelType: download.modelType,
+      retryAttempt: optionalNumber(download.retryAttempt),
+      retryLimit: optionalNumber(download.retryLimit),
+      retrying: typeof download.retrying === 'boolean' ? download.retrying : undefined,
+      nextRetryDelaySeconds: optionalNumber(download.nextRetryDelaySeconds),
+    },
+    error: download.error,
+  };
+}
+
+export function selectDownloadsByRepo(downloads: ModelDownloadStatusPayload[]): {
   statuses: Record<string, DownloadStatus>;
   errors: Record<string, string>;
 } {
   const selected: Record<string, RepoDownloadSelection> = {};
 
   for (const download of downloads) {
-    const repoId = download.repoId;
-    const status = download.status;
-    if (!repoId || !status || !isTrackedStatus(status) || !download.downloadId) {
+    const candidate = toRepoDownloadCandidate(download);
+    if (!candidate) {
       continue;
     }
 
-    const candidate: DownloadStatus = {
-      downloadId: download.downloadId,
-      status,
-      progress: typeof download.progress === 'number' ? download.progress : 0,
-      downloadedBytes:
-        typeof download.downloadedBytes === 'number' ? download.downloadedBytes : undefined,
-      totalBytes: typeof download.totalBytes === 'number' ? download.totalBytes : undefined,
-      speed: typeof download.speed === 'number' ? download.speed : undefined,
-      etaSeconds: typeof download.etaSeconds === 'number' ? download.etaSeconds : undefined,
-      modelName: download.modelName,
-      modelType: download.modelType,
-      retryAttempt: typeof download.retryAttempt === 'number' ? download.retryAttempt : undefined,
-      retryLimit: typeof download.retryLimit === 'number' ? download.retryLimit : undefined,
-      retrying: typeof download.retrying === 'boolean' ? download.retrying : undefined,
-      nextRetryDelaySeconds:
-        typeof download.nextRetryDelaySeconds === 'number'
-          ? download.nextRetryDelaySeconds
-          : undefined,
-    };
-
-    const current = selected[repoId]?.status;
-    if (!current || shouldReplaceSelection(current, candidate)) {
-      selected[repoId] = {
-        status: candidate,
-        error: download.error,
+    const current = selected[candidate.repoId]?.status;
+    if (!current || shouldReplaceSelection(current, candidate.status)) {
+      selected[candidate.repoId] = {
+        status: candidate.status,
+        error: candidate.error,
       };
     }
   }

@@ -239,6 +239,7 @@ Rectification:
 - Completed: split `modelImportWorkflowHelpers.test.ts` and `useRemoteModelSearch.test.ts` by test responsibility, then re-enabled ESLint `max-lines` at 300 effective lines for frontend source files.
 - Completed: reduce `frontend/src/hooks/modelDownloadState.ts` selector complexity by extracting download payload normalization from repo-priority selection.
 - Completed: reduce `frontend/src/hooks/installationProgressTracking.ts` normalizer complexity by extracting tracker tag/stage synchronization from progress projection.
+- Completed: reduce `frontend/src/hooks/useStatus.ts` fetch complexity by moving stale system-resource, network-status, and library-status refreshes behind focused callbacks.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

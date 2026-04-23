@@ -42,6 +42,45 @@ export function useStatus(options: UseStatusOptions = {}) {
     }
   }, []);
 
+  const refreshSystemResources = useCallback(async (now: number) => {
+    if (now - lastResourcesFetch.current < 2000) return;
+
+    const resourcesResult = await api.get_system_resources();
+    if (resourcesResult?.success) {
+      setSystemResources(resourcesResult.resources);
+    }
+    lastResourcesFetch.current = now;
+  }, []);
+
+  const refreshNetworkStatus = useCallback(async (now: number) => {
+    if (now - lastNetworkFetch.current < 5000) return;
+
+    try {
+      const networkResult = await api.get_network_status();
+      if (networkResult?.success) {
+        setNetworkAvailable(!networkResult.is_offline);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.debug('Failed to fetch network status', { error: message });
+    }
+    lastNetworkFetch.current = now;
+  }, []);
+
+  const refreshLibraryStatus = useCallback(async (now: number) => {
+    if (now - lastLibraryFetch.current < 5000) return;
+
+    try {
+      const libraryResult = await api.get_library_status();
+      setModelLibraryLoaded(Boolean(libraryResult?.success));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.debug('Failed to fetch model library status', { error: message });
+      setModelLibraryLoaded(false);
+    }
+    lastLibraryFetch.current = now;
+  }, []);
+
   const runStatusFetch = useCallback(async (isInitialLoad = false) => {
     const startTime = Date.now();
 
@@ -61,42 +100,9 @@ export function useStatus(options: UseStatusOptions = {}) {
       setStatusData(data);
 
       const now = Date.now();
-      if (now - lastResourcesFetch.current >= 2000) {
-        const resourcesResult = await api.get_system_resources();
-        if (resourcesResult?.success) {
-          setSystemResources(resourcesResult.resources);
-        }
-        lastResourcesFetch.current = now;
-      }
-
-      if (now - lastNetworkFetch.current >= 5000) {
-        try {
-          const networkResult = await api.get_network_status();
-          if (networkResult?.success) {
-            setNetworkAvailable(!networkResult.is_offline);
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.debug('Failed to fetch network status', { error: message });
-        }
-        lastNetworkFetch.current = now;
-      }
-
-      if (now - lastLibraryFetch.current >= 5000) {
-        try {
-          const libraryResult = await api.get_library_status();
-          if (libraryResult?.success) {
-            setModelLibraryLoaded(true);
-          } else {
-            setModelLibraryLoaded(false);
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          logger.debug('Failed to fetch model library status', { error: message });
-          setModelLibraryLoaded(false);
-        }
-        lastLibraryFetch.current = now;
-      }
+      await refreshSystemResources(now);
+      await refreshNetworkStatus(now);
+      await refreshLibraryStatus(now);
 
       if (isInitialLoad) {
         const elapsedTime = Date.now() - startTime;
@@ -121,7 +127,7 @@ export function useStatus(options: UseStatusOptions = {}) {
       setIsLoading(false);
       setIsCheckingDeps(false);
     }
-  }, [clearLoadingDelay]);
+  }, [clearLoadingDelay, refreshLibraryStatus, refreshNetworkStatus, refreshSystemResources]);
 
   const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
     if (inFlightRequest.current) {

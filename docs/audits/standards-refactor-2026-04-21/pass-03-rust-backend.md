@@ -191,6 +191,9 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/version_manager/size_calculator.rs` now uses `tokio::fs` for
   async release-size cache persistence so size calculation no longer writes its cache file through
   blocking filesystem calls on runtime threads.
+- Completed: `pumas-core/src/network/github.rs` now uses `tokio::fs` for async release-cache disk
+  reads and writes in the GitHub release fetch path so cache-backed network entry points no longer
+  perform blocking cache I/O on runtime threads before or after fetches.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

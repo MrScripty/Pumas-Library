@@ -21,6 +21,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::fs;
 use tokio::sync::{watch, Mutex, RwLock};
 use tracing::{debug, info, warn};
 
@@ -102,6 +103,57 @@ impl ReleasesCache {
             path: Some(path),
             source: Some(e),
         })?;
+
+        Ok(())
+    }
+
+    /// Get releases from disk cache without blocking the async runtime.
+    pub async fn get_disk_async(&self, key: &str) -> Option<GitHubReleasesCache> {
+        let path = self.disk_cache_path(key);
+
+        match fs::read_to_string(&path).await {
+            Ok(contents) => match serde_json::from_str(&contents) {
+                Ok(cache) => Some(cache),
+                Err(e) => {
+                    warn!("Failed to parse disk cache {}: {}", path.display(), e);
+                    None
+                }
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => {
+                warn!("Failed to read disk cache {}: {}", path.display(), e);
+                None
+            }
+        }
+    }
+
+    /// Store releases in disk cache without blocking the async runtime.
+    pub async fn set_disk_async(&self, key: &str, releases: &[GitHubRelease]) -> Result<()> {
+        let path = self.disk_cache_path(key);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to create cache directory: {}", e),
+                    path: Some(parent.to_path_buf()),
+                    source: Some(e),
+                })?;
+        }
+
+        let cache = GitHubReleasesCache {
+            last_fetched: Utc::now().to_rfc3339(),
+            ttl: self.default_ttl.as_secs(),
+            releases: releases.to_vec(),
+        };
+
+        let contents = serde_json::to_string_pretty(&cache)?;
+        fs::write(&path, contents)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to write disk cache: {}", e),
+                path: Some(path),
+                source: Some(e),
+            })?;
 
         Ok(())
     }
@@ -229,7 +281,7 @@ impl GitHubClient {
         }
 
         // 2. Check disk cache
-        if let Some(disk_cache) = self.cache.get_disk(&cache_key) {
+        if let Some(disk_cache) = self.cache.get_disk_async(&cache_key).await {
             let is_valid = self.cache.is_disk_cache_valid(&disk_cache);
 
             if !force_refresh && is_valid {
@@ -248,7 +300,7 @@ impl GitHubClient {
                 match fetch_result {
                     Ok(releases) => {
                         self.cache.set_memory(&cache_key, releases.clone());
-                        let _ = self.cache.set_disk(&cache_key, &releases);
+                        let _ = self.cache.set_disk_async(&cache_key, &releases).await;
                         return Ok(releases);
                     }
                     Err(e) => {
@@ -267,7 +319,7 @@ impl GitHubClient {
         // 4. No cache or force refresh - fetch from network
         let releases: Vec<GitHubRelease> = self.fetch_releases_from_network(repo).await?;
         self.cache.set_memory(&cache_key, releases.clone());
-        let _ = self.cache.set_disk(&cache_key, &releases);
+        let _ = self.cache.set_disk_async(&cache_key, &releases).await;
         Ok(releases)
     }
 

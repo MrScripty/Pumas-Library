@@ -4,6 +4,20 @@ use super::{get_str_param, require_str_param};
 use crate::server::AppState;
 use serde_json::{json, Value};
 
+async fn get_primary_model_file(
+    library: std::sync::Arc<pumas_library::ModelLibrary>,
+    model_id: String,
+) -> pumas_library::Result<Option<std::path::PathBuf>> {
+    tokio::task::spawn_blocking(move || Ok(library.get_primary_model_file(&model_id)))
+        .await
+        .map_err(|err| {
+            pumas_library::error::PumasError::Other(format!(
+                "Failed to join primary model file lookup task: {}",
+                err
+            ))
+        })?
+}
+
 pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
     let client = pumas_app_manager::OllamaClient::new(connection_url);
@@ -20,8 +34,8 @@ pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_libr
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
     // Resolve GGUF path from library
-    let library = state.api.model_library();
-    let primary_file = library.get_primary_model_file(&model_id);
+    let library = state.api.model_library().clone();
+    let primary_file = get_primary_model_file(library.clone(), model_id.clone()).await?;
     let gguf_path = match primary_file {
         Some(path) => {
             let ext = path

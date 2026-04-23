@@ -7,12 +7,14 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { Box, Loader2, Play, Square, AlertCircle, Monitor } from 'lucide-react';
+import { Box, Loader2, Play, AlertCircle } from 'lucide-react';
 import { api, isAPIAvailable } from '../../../api/adapter';
 import type { ModelCategory } from '../../../types/apps';
 import type { TorchModelSlot, TorchDeviceInfo } from '../../../types/api';
 import { Tooltip } from '../../ui';
 import { getLogger } from '../../../utils/logger';
+import { TorchActiveSlots } from './TorchActiveSlots';
+import { formatTorchModelSize } from './torchModelSlotFormatting';
 
 const logger = getLogger('TorchModelSlotsSection');
 
@@ -170,89 +172,13 @@ export function TorchModelSlotsSection({
         </div>
       )}
 
-      {/* Active model slots */}
-      {slots.length > 0 && (
-        <div className="space-y-3">
-          <div className="text-xs uppercase tracking-wider text-[hsl(var(--launcher-text-muted))] flex items-center gap-2">
-            <Monitor className="w-3.5 h-3.5" />
-            <span>Active Model Slots</span>
-            {isRefreshing && (
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-[hsl(var(--text-secondary))]" />
-            )}
-          </div>
-
-          <div className="space-y-1.5 max-h-48 overflow-y-auto">
-            {slots.map((slot) => {
-              const isUnloading = unloadingSlot === slot.slot_id;
-
-              return (
-                <div
-                  key={slot.slot_id}
-                  className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[hsl(var(--launcher-bg-secondary)/0.3)] border border-[hsl(var(--launcher-border)/0.3)] hover:bg-[hsl(var(--launcher-bg-secondary)/0.5)] transition-colors"
-                >
-                  <div className="flex flex-col min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-[hsl(var(--launcher-text-primary))] truncate">
-                        {slot.model_name}
-                      </span>
-                      <SlotStateBadge state={slot.state} />
-                      <DeviceBadge device={slot.device} />
-                    </div>
-                    <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
-                      {slot.model_type || 'unknown'}
-                      {slot.gpu_memory_bytes ? ` \u2022 ${formatSize(slot.gpu_memory_bytes)} VRAM` : ''}
-                      {slot.ram_memory_bytes ? ` \u2022 ${formatSize(slot.ram_memory_bytes)} RAM` : ''}
-                    </span>
-                  </div>
-
-                  <Tooltip content="Unload model" position="left">
-                    <button
-                      onClick={() => handleUnload(slot.slot_id)}
-                      disabled={isUnloading || slot.state === 'loading' || slot.state === 'unloading'}
-                      className="p-1.5 rounded transition-colors bg-[hsl(var(--accent-error)/0.15)] text-[hsl(var(--accent-error))] hover:bg-[hsl(var(--accent-error)/0.25)] disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isUnloading || slot.state === 'unloading' ? (
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                      ) : (
-                        <Square className="w-4 h-4" />
-                      )}
-                    </button>
-                  </Tooltip>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Per-device memory summary */}
-          {devices.length > 0 && (
-            <div className="space-y-1">
-              {devices.filter(d => d.is_available).map(device => {
-                const usedOnDevice = slots
-                  .filter(s => s.device === device.device_id && s.state === 'ready')
-                  .reduce((sum, s) => sum + (s.gpu_memory_bytes || s.ram_memory_bytes || 0), 0);
-                const percent = device.memory_total > 0
-                  ? Math.round((usedOnDevice / device.memory_total) * 100)
-                  : 0;
-
-                return (
-                  <div key={device.device_id} className="flex items-center gap-2 text-xs text-[hsl(var(--launcher-text-muted))]">
-                    <span className="w-16 truncate">{device.device_id}</span>
-                    <div className="flex-1 h-1.5 bg-[hsl(var(--launcher-bg-secondary)/0.5)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[hsl(var(--accent-primary)/0.6)] rounded-full transition-all"
-                        style={{ width: `${percent}%` }}
-                      />
-                    </div>
-                    <span className="w-20 text-right">
-                      {formatSize(usedOnDevice)} / {formatSize(device.memory_total)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      )}
+      <TorchActiveSlots
+        devices={devices}
+        isRefreshing={isRefreshing}
+        slots={slots}
+        unloadingSlot={unloadingSlot}
+        onUnload={(slotId) => void handleUnload(slotId)}
+      />
 
       {/* Library safetensors models available to load */}
       {safetensorsModels.length > 0 && (
@@ -278,7 +204,7 @@ export function TorchModelSlotsSection({
                     </span>
                     <span className="text-xs text-[hsl(var(--launcher-text-muted))]">
                       {model.category}
-                      {model.size ? ` \u2022 ${formatSize(model.size)}` : ''}
+                      {model.size ? ` \u2022 ${formatTorchModelSize(model.size)}` : ''}
                     </span>
                   </div>
 
@@ -347,45 +273,8 @@ export function TorchModelSlotsSection({
   );
 }
 
-function SlotStateBadge({ state }: { state: string }) {
-  const styles: Record<string, string> = {
-    ready: 'bg-[hsl(var(--accent-success)/0.15)] text-[hsl(var(--accent-success))]',
-    loading: 'bg-[hsl(var(--accent-warning)/0.15)] text-[hsl(var(--accent-warning))]',
-    unloading: 'bg-[hsl(var(--accent-warning)/0.15)] text-[hsl(var(--accent-warning))]',
-    error: 'bg-[hsl(var(--accent-error)/0.15)] text-[hsl(var(--accent-error))]',
-    unloaded: 'bg-[hsl(var(--launcher-bg-secondary)/0.5)] text-[hsl(var(--launcher-text-muted))]',
-  };
-
-  return (
-    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${styles[state] || styles['unloaded']}`}>
-      {state.toUpperCase()}
-    </span>
-  );
-}
-
-function DeviceBadge({ device }: { device: string }) {
-  const isGpu = device.startsWith('cuda') || device === 'mps';
-
-  return (
-    <span className={`shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded ${
-      isGpu
-        ? 'bg-[hsl(var(--accent-success)/0.1)] text-[hsl(var(--accent-success))]'
-        : 'bg-[hsl(var(--accent-primary)/0.1)] text-[hsl(var(--accent-primary))]'
-    }`}>
-      {device.toUpperCase()}
-    </span>
-  );
-}
-
 /** Check if a model path suggests it contains a safetensors file. */
 function hasSafetensorsFile(path: string): boolean {
   const lower = path.toLowerCase();
   return lower.endsWith('.safetensors') || lower.includes('/safetensors/') || lower.includes('safetensors');
-}
-
-function formatSize(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`;
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(1)} MB`;
-  if (bytes >= 1e3) return `${(bytes / 1e3).toFixed(1)} KB`;
-  return `${bytes} B`;
 }

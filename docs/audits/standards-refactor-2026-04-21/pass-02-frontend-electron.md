@@ -176,6 +176,8 @@ Rectification:
 - Completed: existing hook tests cover cleanup or polling behavior for active downloads, model downloads, network status, installation manager/progress, available versions, and status.
 - Completed: `electron/src/python-bridge.ts` accepts an injectable timer controller, and `electron/tests/python-bridge.test.mjs` covers health-check rescheduling, restart backoff replacement, and stop-time timer cleanup without spawning a backend.
 - Completed: `frontend/src/hooks/useDownloadCompletionRefresh.ts` owns the model-manager delayed refresh timer and clears pending refreshes on unmount.
+- Completed: move active Torch slot row, unload control, badge, and device memory rendering from `TorchModelSlotsSection.tsx` into `frontend/src/components/app-panels/sections/TorchActiveSlots.tsx` with slot badge, device memory, unload control, and size-formatting tests.
+- Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/app-panels/sections/TorchModelSlotsSection.tsx` from the oversized-file baseline after it reached 249 effective lines.
 - Remaining: consolidate install/download/status polling behind a backend event stream or single scheduler when the backend exposes one.
 
 ### F06 - Accessibility Is Enforced but Still Has Component-Level Risks

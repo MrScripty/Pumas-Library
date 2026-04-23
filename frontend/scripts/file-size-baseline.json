@@ -3,7 +3,6 @@
   "src/components/AppSidebar.tsx": 339,
   "src/components/ModelManager.tsx": 333,
   "src/components/app-panels/sections/OllamaModelSection.tsx": 319,
-  "src/components/app-panels/sections/TorchModelSlotsSection.tsx": 350,
   "src/hooks/usePhysicsDrag.ts": 427,
   "src/types/api.ts": 1746
 }

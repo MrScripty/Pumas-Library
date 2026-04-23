@@ -10,6 +10,9 @@ Composable section components used by app panels to render status, selectors, de
 | `DependencyStatusSection.tsx` | Dependency health and missing-packages display. |
 | `StatsSection.tsx` | Runtime/resource/status metrics block. |
 | `TorchModelSlotsSection.tsx` | Torch model slot management section. |
+| `TorchActiveSlots.tsx` | Presentational active Torch slot list with unload controls, state badges, and device memory summaries. |
+| `TorchActiveSlots.test.tsx` | Rendering and interaction coverage for active Torch slot badges, memory summaries, unload controls, and size formatting. |
+| `torchModelSlotFormatting.ts` | Shared display formatter for Torch model and device memory sizes. |
 | `TorchServerConfigSection.tsx` | Torch server configuration controls. |
 | `index.ts` | Section exports for panel composition. |
 

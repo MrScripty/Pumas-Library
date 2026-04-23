@@ -398,6 +398,10 @@ Implementation notes:
   detection through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
   import paths no longer perform synchronous `config.json` reads inline on async runtime threads
   when refining LLM subtype classification.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place primary-file hashing
+  through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption import paths
+  no longer perform synchronous dual-hash computation inline on async runtime threads when
+  `compute_hashes` is enabled.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

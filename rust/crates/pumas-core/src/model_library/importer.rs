@@ -1243,7 +1243,17 @@ impl ModelImporter {
                 blake3: String::new(), // Deferred — can be computed later
             })
         } else if spec.compute_hashes {
-            Some(compute_dual_hash(&primary_file)?)
+            let primary_file_for_hash = primary_file.clone();
+            Some(
+                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_file_for_hash))
+                    .await
+                    .map_err(|err| {
+                        PumasError::Other(format!(
+                            "Failed to join in-place hash computation task: {}",
+                            err
+                        ))
+                    })??,
+            )
         } else {
             None
         };

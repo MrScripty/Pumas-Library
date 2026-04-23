@@ -351,6 +351,10 @@ Implementation notes:
   `pumas-rpc/src/handlers/models/downloads.rs` now route interrupted-download discovery through
   `tokio::task::spawn_blocking`, so RPC and mirrored IPC download-recovery listing no longer
   perform synchronous persistence reads and library tree scans inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/importer/recovery.rs` now routes orphan-directory
+  discovery through `tokio::task::spawn_blocking` before the async adoption loop begins, so the
+  orphan-adoption request path no longer performs its initial library tree scan inline on async
+  runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -15,9 +15,12 @@ impl ModelImporter {
     /// (`{library_root}/{model_type}/{family}/{name}/`).
     pub async fn adopt_orphans(&self, compute_hashes: bool) -> OrphanScanResult {
         let mut result = OrphanScanResult::default();
-        let library_root = self.library.library_root();
-
-        let orphan_dirs = self.find_orphan_dirs(library_root, false);
+        let importer = self.clone();
+        let orphan_dirs = tokio::task::spawn_blocking(move || {
+            importer.find_orphan_dirs(importer.library.library_root(), false)
+        })
+        .await
+        .unwrap_or_default();
         result.orphans_found = orphan_dirs.len();
 
         if orphan_dirs.is_empty() {

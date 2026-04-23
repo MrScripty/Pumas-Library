@@ -38,11 +38,10 @@ function MigrationExecutionSummary({
 }: {
   report: MigrationExecutionReport;
 }) {
-  const metadataDirCount = report.metadata_dir_count ?? 0;
-  const metadataIndexCount =
-    report.index_metadata_model_count ?? report.index_model_count;
-  const partialIndexCount = report.index_partial_download_count ?? 0;
-  const staleIndexCount = report.index_stale_model_count ?? 0;
+  const metadataDirCount = report.metadata_dir_count;
+  const metadataIndexCount = report.index_metadata_model_count;
+  const partialIndexCount = report.index_partial_download_count;
+  const staleIndexCount = report.index_stale_model_count;
 
   return (
     <div className="p-3 rounded border border-[hsl(var(--launcher-border)/0.7)] bg-[hsl(var(--launcher-bg-secondary)/0.45)] space-y-2">

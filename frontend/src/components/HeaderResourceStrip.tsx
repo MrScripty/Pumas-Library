@@ -41,8 +41,8 @@ function getLoadColor(load: number): string {
 }
 
 function getRamMetrics(systemResources?: SystemResources): RamMetrics {
-  const ramPercent = Math.round(systemResources?.ram?.usage ?? 0);
-  const ramTotal = systemResources?.ram?.total ?? 0;
+  const ramPercent = Math.round(systemResources?.ram.usage ?? 0);
+  const ramTotal = systemResources?.ram.total ?? 0;
   return {
     ramPercent,
     ramUsed: (ramTotal * ramPercent) / 100,
@@ -53,8 +53,8 @@ function getVramMetrics({
   appResources,
   systemResources,
 }: HeaderResourceStripProps): VramMetrics {
-  const vramTotal = systemResources?.gpu?.memory_total ?? 0;
-  const vramUsedSystem = systemResources?.gpu?.memory ?? 0;
+  const vramTotal = systemResources?.gpu.memory_total ?? 0;
+  const vramUsedSystem = systemResources?.gpu.memory ?? 0;
   const vramUsed = Math.max(vramUsedSystem, appResources?.gpu_memory ?? 0);
 
   return {
@@ -68,8 +68,8 @@ function getHeaderResourceMetrics(props: HeaderResourceStripProps): HeaderResour
   const vram = getVramMetrics(props);
 
   return {
-    cpuUsage: Math.round(props.systemResources?.cpu?.usage ?? 0),
-    gpuUsage: Math.round(props.systemResources?.gpu?.usage ?? 0),
+    cpuUsage: Math.round(props.systemResources?.cpu.usage ?? 0),
+    gpuUsage: Math.round(props.systemResources?.gpu.usage ?? 0),
     ramPercent: ram.ramPercent,
     ramUsed: ram.ramUsed,
     vramPercent: vram.vramPercent,

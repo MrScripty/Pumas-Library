@@ -11,11 +11,11 @@ export interface MappingPreviewCounts {
 
 export function getMappingPreviewCounts(preview: MappingPreviewResponse | null): MappingPreviewCounts {
   return {
-    brokenCount: preview?.broken_to_remove?.length || 0,
-    conflictCount: preview?.conflicts?.length || 0,
-    skipCount: preview?.to_skip_exists?.length || 0,
-    toCreateCount: preview?.to_create?.length || 0,
-    warningCount: preview?.warnings?.length || 0,
+    brokenCount: preview?.broken_to_remove.length || 0,
+    conflictCount: preview?.conflicts.length || 0,
+    skipCount: preview?.to_skip_exists.length || 0,
+    toCreateCount: preview?.to_create.length || 0,
+    warningCount: preview?.warnings.length || 0,
   };
 }
 
@@ -27,7 +27,7 @@ export function getMappingPreviewStatus(
   preview: MappingPreviewResponse | null,
   counts: MappingPreviewCounts
 ): MappingPreviewStatus {
-  if (preview?.errors?.length) {
+  if (preview?.errors.length) {
     return 'errors';
   }
   if (hasMappingPreviewIssues(counts)) {

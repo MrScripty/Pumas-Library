@@ -34,7 +34,7 @@ function getConvertibleFormat(format?: string): ModelInfo['primaryFormat'] {
 }
 
 export function mapModelRecordToInfo(model: ModelRecord): ModelInfo {
-  const metadata = model.metadata ?? {};
+  const metadata = model.metadata;
   const fileName = model.id.split('/').pop() || model.id;
   const displayName = model.officialName ?? model.cleanedName ?? fileName;
   const dependencyBindings = asArray(metadata.dependency_bindings);

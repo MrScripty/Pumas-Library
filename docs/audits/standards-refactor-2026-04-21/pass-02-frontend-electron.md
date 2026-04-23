@@ -260,6 +260,7 @@ Rectification:
 - Completed: `frontend/eslint.config.js` enforces ESLint `complexity` at a maximum of 20 after the function-level decomposition wave cleared the full frontend source tree.
 - Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory is recorded in `pass-02-frontend-function-length-inventory.md`.
 - Completed: replace frontend non-null assertions in production helpers and tests with explicit guards, then enforce `@typescript-eslint/no-non-null-assertion`.
+- Completed: clear the first low-risk `@typescript-eslint/no-unnecessary-condition` batch in resource, mapping, migration-summary, and library-model helpers; the remaining queue is recorded in `pass-02-frontend-unnecessary-condition-inventory.md`.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` to scoped overrides or enforceable warnings.
 

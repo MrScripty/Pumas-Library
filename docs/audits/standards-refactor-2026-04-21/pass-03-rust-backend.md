@@ -355,6 +355,9 @@ Implementation notes:
   discovery through `tokio::task::spawn_blocking` before the async adoption loop begins, so the
   orphan-adoption request path no longer performs its initial library tree scan inline on async
   runtime threads.
+- Completed: `pumas-rpc/src/handlers/models/imports.rs` now routes GGUF embedded-metadata
+  extraction through `tokio::task::spawn_blocking`, so RPC metadata inspection no longer performs
+  synchronous GGUF file reads inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

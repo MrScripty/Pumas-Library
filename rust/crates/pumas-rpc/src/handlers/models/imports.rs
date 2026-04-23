@@ -39,6 +39,24 @@ struct ExternalDiffusersImportParams {
     tags: Option<Vec<String>>,
 }
 
+async fn extract_gguf_metadata_value(path: std::path::PathBuf) -> pumas_library::Result<Value> {
+    tokio::task::spawn_blocking(move || {
+        let metadata = pumas_library::model_library::extract_gguf_metadata(&path)?;
+        let metadata_value: serde_json::Map<String, Value> = metadata
+            .into_iter()
+            .map(|(key, value)| (key, Value::String(value)))
+            .collect();
+        Ok(Value::Object(metadata_value))
+    })
+    .await
+    .map_err(|err| {
+        pumas_library::error::PumasError::Other(format!(
+            "Failed to join GGUF metadata extraction task: {}",
+            err
+        ))
+    })?
+}
+
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: ImportModelParams = parse_params("import_model", params)?;
 
@@ -208,7 +226,7 @@ pub async fn get_embedded_metadata(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let file_path = require_str_param(params, "file_path", "filePath")?;
-    let path = std::path::Path::new(&file_path);
+    let path = std::path::PathBuf::from(&file_path);
 
     // Detect file type from extension
     let extension = path
@@ -218,19 +236,12 @@ pub async fn get_embedded_metadata(
         .unwrap_or_default();
 
     match extension.as_str() {
-        "gguf" => match pumas_library::model_library::extract_gguf_metadata(&file_path) {
-            Ok(metadata) => {
-                // Convert HashMap<String, String> to Value
-                let metadata_value: serde_json::Map<String, Value> = metadata
-                    .into_iter()
-                    .map(|(k, v)| (k, Value::String(v)))
-                    .collect();
-                Ok(json!({
-                    "success": true,
-                    "file_type": "gguf",
-                    "metadata": metadata_value
-                }))
-            }
+        "gguf" => match extract_gguf_metadata_value(path).await {
+            Ok(metadata) => Ok(json!({
+                "success": true,
+                "file_type": "gguf",
+                "metadata": metadata
+            })),
             Err(e) => Ok(json!({
                 "success": false,
                 "file_type": "gguf",
@@ -288,17 +299,11 @@ pub async fn get_library_model_metadata(
                 .unwrap_or_default();
 
             match extension.as_str() {
-                "gguf" => match pumas_library::model_library::extract_gguf_metadata(file_path) {
-                    Ok(metadata) => {
-                        let metadata_value: serde_json::Map<String, Value> = metadata
-                            .into_iter()
-                            .map(|(k, v)| (k, Value::String(v)))
-                            .collect();
-                        Some(pumas_library::EmbeddedMetadataResponse {
-                            file_type: "gguf".to_string(),
-                            metadata: Value::Object(metadata_value),
-                        })
-                    }
+                "gguf" => match extract_gguf_metadata_value(file_path.to_path_buf()).await {
+                    Ok(metadata) => Some(pumas_library::EmbeddedMetadataResponse {
+                        file_type: "gguf".to_string(),
+                        metadata,
+                    }),
                     Err(_) => None,
                 },
                 "safetensors" => {

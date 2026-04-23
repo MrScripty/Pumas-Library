@@ -221,6 +221,9 @@ Implementation notes:
   cleanup during manager initialization and async completed-state file removal in the delayed
   cleanup task, so those installation-progress lifecycle edges no longer perform synchronous
   progress-file reads or removals on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/dependencies.rs` now creates the pip cache
+  directory with `tokio::fs` inside `install_with_progress`, so that dependency-install request
+  path no longer performs that cache-directory creation through blocking std fs calls.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

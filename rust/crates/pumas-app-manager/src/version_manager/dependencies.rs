@@ -326,7 +326,7 @@ impl DependencyManager {
         cmd.args(["setproctitle"]);
 
         // Set environment
-        std::fs::create_dir_all(&self.pip_cache_dir).ok();
+        fs::create_dir_all(&self.pip_cache_dir).await.ok();
         cmd.env("PIP_CACHE_DIR", &self.pip_cache_dir);
         cmd.current_dir(&version_path);
 

@@ -18,16 +18,11 @@ component/modal batch cleared `HuggingFaceAuthDialog.tsx`,
 and `errors/index.ts`. A model/version hook batch cleared
 `useActiveModelDownload.ts`, `useAvailableVersionState.ts`,
 `useInstallationProgress.ts`, `useModelDownloads.ts`,
-`useModelLibraryActions.ts`, `useModels.ts`, and `useVersionFetching.ts`.
+`useModelLibraryActions.ts`, `useModels.ts`, and `useVersionFetching.ts`. A
+UI component batch cleared `OllamaModelSection.tsx`,
+`TorchModelSlotsSection.tsx`, `AppIndicator.tsx`, and `AppSidebar.tsx`.
 
 ## Remaining Findings
-- `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:95` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:98` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/app-panels/sections/TorchModelSlotsSection.tsx:89` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/app-panels/sections/TorchModelSlotsSection.tsx:92` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/AppIndicator.tsx:196` - Unnecessary conditional, comparison is always true, since `"uninstalled" === "uninstalled"` is true.
-- `frontend/src/components/AppSidebar.tsx:264` - Unnecessary conditional, the types have no overlap.
-- `frontend/src/components/AppSidebar.tsx:268` - Unnecessary conditional, the types have no overlap.
 - `frontend/src/components/model-import/modelImportMetadataLookup.ts:84` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/components/model-import/useModelImportWorkflow.ts:248` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/model-import/useShardedSetDetection.ts:31` - Unnecessary conditional, value is always truthy.

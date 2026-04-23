@@ -192,8 +192,8 @@ export const AppIndicator: React.FC<AppIndicatorProps> = ({
       }
     }
 
-    // Offline state with has install (show play button regardless of selection)
-    if ((state === 'offline' || state === 'uninstalled') && hasInstall) {
+    // Offline/uninstalled state with has install (show play button regardless of selection)
+    if (hasInstall) {
       return (
         <div className="relative w-full h-full flex items-center justify-center">
           {/* Circle background that appears on hover */}

@@ -86,10 +86,10 @@ export function TorchModelSlotsSection({
         api.torch_list_slots(connectionUrl),
         api.torch_list_devices(connectionUrl),
       ]);
-      if (slotsResult.success && slotsResult.slots) {
+      if (slotsResult.success) {
         setSlots(slotsResult.slots);
       }
-      if (devicesResult.success && devicesResult.devices) {
+      if (devicesResult.success) {
         setDevices(devicesResult.devices);
       }
     } catch (err) {

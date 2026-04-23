@@ -261,11 +261,11 @@ export const AppSidebar: React.FC<AppSidebarProps> = ({
           const previewIndex = previewIndexRef.current ?? placeholderIndexCollapsed;
           const previewGap = isDragging ? snapProximity : previewGapRef.current;
           const previewOffset =
-            previewIndex !== null && baseIndex >= previewIndex
+            baseIndex >= previewIndex
               ? TOTAL_HEIGHT * previewGap
               : 0;
 
-          if (isDragging && draggedIndex >= 0 && rawPlaceholderIndex !== null) {
+          if (isDragging && draggedIndex >= 0) {
             offsetY = previewOffset;
           } else if (isSettling && visualOrder) {
             const targetIndex = targetIndexById.get(app.id);

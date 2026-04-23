@@ -92,10 +92,10 @@ export function OllamaModelSection({
         api.ollama_list_models(connectionUrl),
         api.ollama_list_running(connectionUrl),
       ]);
-      if (tagsResult.success && tagsResult.models) {
+      if (tagsResult.success) {
         setOllamaModels(tagsResult.models);
       }
-      if (psResult.success && psResult.models) {
+      if (psResult.success) {
         setRunningModels(psResult.models);
       }
     } catch (err) {

@@ -270,6 +270,10 @@ Implementation notes:
   directory scans, async metadata probes, async git command execution, and async directory removal,
   so those custom-node RPC request paths no longer perform blocking directory walks or git/process
   inspection on async runtime threads.
+- Completed: `pumas-rpc/src/shortcut/manager.rs`, `handlers/shortcuts.rs`, and
+  `handlers/status.rs` now use async shortcut-state probes for menu and desktop entries, so RPC
+  shortcut state and status request paths no longer perform synchronous existence checks on async
+  runtime threads when reporting UI shortcut state.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

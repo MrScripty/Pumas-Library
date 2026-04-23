@@ -11,6 +11,7 @@ use pumas_library::platform;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use tokio::fs as tokio_fs;
 use tracing::{info, warn};
 
 /// Shortcut state for a version.
@@ -136,12 +137,30 @@ impl ShortcutManager {
         }
     }
 
-    /// Get shortcut states for all known versions.
-    pub fn get_all_shortcut_states(&self) -> HashMap<String, ShortcutState> {
-        self.version_paths
-            .keys()
-            .map(|tag| (tag.clone(), self.get_version_shortcut_state(tag)))
-            .collect()
+    /// Get shortcut state for a version with async filesystem probes.
+    pub async fn get_version_shortcut_state_async(&self, tag: &str) -> Result<ShortcutState> {
+        let slug = self.slugify_tag(tag);
+
+        let menu_path = self.apps_dir.join(format!("ComfyUI-{}.desktop", slug));
+        let desktop_path = self.desktop_dir.join(format!("ComfyUI-{}.desktop", slug));
+
+        Ok(ShortcutState {
+            tag: tag.to_string(),
+            menu: async_path_exists(&menu_path).await?,
+            desktop: async_path_exists(&desktop_path).await?,
+        })
+    }
+
+    /// Get shortcut states for all known versions with async filesystem probes.
+    pub async fn get_all_shortcut_states_async(&self) -> Result<HashMap<String, ShortcutState>> {
+        let mut states = HashMap::with_capacity(self.version_paths.len());
+        for tag in self.version_paths.keys() {
+            states.insert(
+                tag.clone(),
+                self.get_version_shortcut_state_async(tag).await?,
+            );
+        }
+        Ok(states)
     }
 
     /// Create shortcuts for a version.
@@ -362,15 +381,25 @@ impl ShortcutManager {
         self.set_version_shortcuts(tag, version_dir, !state.desktop, false, true)
     }
 
-    /// Check if menu shortcut exists (legacy API).
-    pub fn menu_exists(&self) -> bool {
-        self.apps_dir.join("ComfyUI.desktop").exists()
+    /// Check if menu shortcut exists with async filesystem probes.
+    pub async fn menu_exists_async(&self) -> Result<bool> {
+        async_path_exists(&self.apps_dir.join("ComfyUI.desktop")).await
     }
 
-    /// Check if desktop shortcut exists (legacy API).
-    pub fn desktop_exists(&self) -> bool {
-        self.desktop_dir.join("ComfyUI.desktop").exists()
+    /// Check if desktop shortcut exists with async filesystem probes.
+    pub async fn desktop_exists_async(&self) -> Result<bool> {
+        async_path_exists(&self.desktop_dir.join("ComfyUI.desktop")).await
     }
+}
+
+async fn async_path_exists(path: &Path) -> Result<bool> {
+    tokio_fs::try_exists(path)
+        .await
+        .map_err(|e| PumasError::Io {
+            message: format!("inspect shortcut path: {}", path.display()),
+            path: Some(path.to_path_buf()),
+            source: Some(e),
+        })
 }
 
 #[cfg(test)]
@@ -406,12 +435,15 @@ mod tests {
         assert_eq!(manager.slugify_tag("V3.0.0"), "v3-0-0");
     }
 
-    #[test]
-    fn test_shortcut_state() {
+    #[tokio::test]
+    async fn test_shortcut_state_async() {
         let temp_dir = TempDir::new().unwrap();
         let manager = test_manager(temp_dir.path());
 
-        let state = manager.get_version_shortcut_state("v1.0.0");
+        let state = manager
+            .get_version_shortcut_state_async("v1.0.0")
+            .await
+            .unwrap();
 
         assert_eq!(state.tag, "v1.0.0");
         assert!(!state.menu);

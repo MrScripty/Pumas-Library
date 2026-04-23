@@ -12,7 +12,7 @@ pub async fn get_version_shortcuts(
     let tag = require_str_param(params, "tag", "tag")?;
     let sm_lock = state.shortcut_manager.read().await;
     if let Some(ref sm) = *sm_lock {
-        let shortcut_state = sm.get_version_shortcut_state(&tag);
+        let shortcut_state = sm.get_version_shortcut_state_async(&tag).await?;
         Ok(json!({
             "tag": shortcut_state.tag,
             "menu": shortcut_state.menu,
@@ -33,7 +33,7 @@ pub async fn get_all_shortcut_states(
 ) -> pumas_library::Result<Value> {
     let sm_lock = state.shortcut_manager.read().await;
     if let Some(ref sm) = *sm_lock {
-        let states = sm.get_all_shortcut_states();
+        let states = sm.get_all_shortcut_states_async().await?;
         let result: HashMap<String, serde_json::Value> = states
             .into_iter()
             .map(|(tag, state)| {
@@ -106,7 +106,7 @@ pub async fn toggle_desktop(state: &AppState, params: &Value) -> pumas_library::
 pub async fn menu_exists(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let sm_lock = state.shortcut_manager.read().await;
     if let Some(ref sm) = *sm_lock {
-        Ok(json!(sm.menu_exists()))
+        Ok(json!(sm.menu_exists_async().await?))
     } else {
         Ok(json!(false))
     }
@@ -115,7 +115,7 @@ pub async fn menu_exists(state: &AppState, _params: &Value) -> pumas_library::Re
 pub async fn desktop_exists(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     let sm_lock = state.shortcut_manager.read().await;
     if let Some(ref sm) = *sm_lock {
-        Ok(json!(sm.desktop_exists()))
+        Ok(json!(sm.desktop_exists_async().await?))
     } else {
         Ok(json!(false))
     }

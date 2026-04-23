@@ -34,7 +34,7 @@ pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Res
             response.shortcut_version = Some(tag.clone());
             let sm_lock = state.shortcut_manager.read().await;
             if let Some(ref sm) = *sm_lock {
-                let shortcut_state = sm.get_version_shortcut_state(tag);
+                let shortcut_state = sm.get_version_shortcut_state_async(tag).await?;
                 response.menu_shortcut = shortcut_state.menu;
                 response.desktop_shortcut = shortcut_state.desktop;
             }

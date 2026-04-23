@@ -83,7 +83,7 @@ pub async fn apply_launcher_update(
 }
 
 pub async fn restart_launcher(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    match state.api.restart_launcher() {
+    match state.api.restart_launcher().await {
         Ok(success) => Ok(json!({
             "success": success
         })),

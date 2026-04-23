@@ -448,9 +448,14 @@ impl PumasApi {
     }
 
     /// Restart the launcher by spawning a new process.
-    pub fn restart_launcher(&self) -> Result<bool> {
-        let updater = launcher::LauncherUpdater::new(&self.launcher_root);
-        updater.restart_launcher()
+    pub async fn restart_launcher(&self) -> Result<bool> {
+        let launcher_root = self.launcher_root.clone();
+        tokio::task::spawn_blocking(move || {
+            let updater = launcher::LauncherUpdater::new(&launcher_root);
+            updater.restart_launcher()
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join restart_launcher task: {}", e)))?
     }
 
     // ========================================

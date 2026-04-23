@@ -1,6 +1,7 @@
 //! Shared handler utilities used across RPC domains.
 
 use crate::server::AppState;
+use pumas_app_manager::VersionManager;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -81,6 +82,22 @@ pub(crate) fn get_i64_param(params: &Value, snake: &str, camel: &str) -> Option<
         .and_then(|v| v.as_i64())
 }
 
+pub(crate) async fn get_version_manager(state: &AppState, app_id: &str) -> Option<VersionManager> {
+    let managers = state.version_managers.read().await;
+    managers.get(app_id).cloned()
+}
+
+pub(crate) async fn require_version_manager(
+    state: &AppState,
+    app_id: &str,
+) -> pumas_library::Result<VersionManager> {
+    get_version_manager(state, app_id)
+        .await
+        .ok_or_else(|| pumas_library::PumasError::Config {
+            message: format!("Version manager not initialized for app: {}", app_id),
+        })
+}
+
 /// Extract the JSON header from a safetensors file.
 ///
 /// Safetensors format: 8-byte header size (little-endian u64) followed by JSON header.
@@ -122,9 +139,7 @@ pub(crate) fn extract_safetensors_header(path: &str) -> std::result::Result<Valu
 /// This ensures the process manager knows about all installed version directories
 /// so it can properly detect and clean up PID files.
 pub(crate) async fn sync_version_paths_to_process_manager(state: &AppState) {
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get("comfyui") {
-        // Get installed versions
+    if let Some(vm) = get_version_manager(state, "comfyui").await {
         if let Ok(installed) = vm.get_installed_versions().await {
             let version_paths: HashMap<String, PathBuf> = installed
                 .into_iter()
@@ -134,8 +149,6 @@ pub(crate) async fn sync_version_paths_to_process_manager(state: &AppState) {
                 })
                 .collect();
 
-            // Update process manager
-            drop(managers); // Release version_managers lock first
             state.api.set_process_version_paths(version_paths).await;
         }
     }

@@ -1,8 +1,8 @@
 //! Process management handlers.
 
 use super::{
-    get_str_param, parse_params, sync_version_paths_to_process_manager, validate_external_url,
-    validate_non_empty,
+    get_str_param, get_version_manager, parse_params, sync_version_paths_to_process_manager,
+    validate_external_url, validate_non_empty,
 };
 use crate::server::AppState;
 use serde::Deserialize;
@@ -37,12 +37,10 @@ pub async fn launch_comfyui(state: &AppState, _params: &Value) -> pumas_library:
     // Ensure process manager has current version paths
     sync_version_paths_to_process_manager(state).await;
     // Get the active version from comfyui version_manager and launch it
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get("comfyui") {
+    if let Some(vm) = get_version_manager(state, "comfyui").await {
         let active = vm.get_active_version().await?;
         if let Some(tag) = active {
             let version_dir = vm.version_path(&tag);
-            drop(managers); // Release lock before calling api
             let response = state.api.launch_version(&tag, &version_dir).await?;
             Ok(serde_json::to_value(response)?)
         } else {
@@ -61,9 +59,8 @@ pub async fn launch_comfyui(state: &AppState, _params: &Value) -> pumas_library:
 
 pub async fn launch_ollama(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
     // Get the active version from ollama version_manager and launch it
-    let managers = state.version_managers.read().await;
     info!("launch_ollama: checking for ollama version manager");
-    if let Some(vm) = managers.get("ollama") {
+    if let Some(vm) = get_version_manager(state, "ollama").await {
         let installed = vm.get_installed_versions().await?;
         info!("launch_ollama: installed versions: {:?}", installed);
         let active = vm.get_active_version().await?;
@@ -74,7 +71,6 @@ pub async fn launch_ollama(state: &AppState, _params: &Value) -> pumas_library::
                 "launch_ollama: launching tag={} from {:?}",
                 tag, version_dir
             );
-            drop(managers); // Release lock before calling api
             let response = state.api.launch_ollama(&tag, &version_dir).await?;
             info!("launch_ollama: result success={}", response.success);
             Ok(serde_json::to_value(response)?)
@@ -105,15 +101,13 @@ pub async fn is_ollama_running(state: &AppState, _params: &Value) -> pumas_libra
 }
 
 pub async fn launch_torch(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let managers = state.version_managers.read().await;
     info!("launch_torch: checking for torch version manager");
-    if let Some(vm) = managers.get("torch") {
+    if let Some(vm) = get_version_manager(state, "torch").await {
         let active = vm.get_active_version().await?;
         info!("launch_torch: active version: {:?}", active);
         if let Some(tag) = active {
             let version_dir = vm.version_path(&tag);
             info!("launch_torch: launching tag={} from {:?}", tag, version_dir);
-            drop(managers);
             let response = state.api.launch_torch(&tag, &version_dir).await?;
             info!("launch_torch: result success={}", response.success);
             Ok(serde_json::to_value(response)?)
@@ -164,11 +158,9 @@ pub async fn open_url(state: &AppState, params: &Value) -> pumas_library::Result
 pub async fn open_active_install(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     // Get the active version from version_manager and open its directory
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         if let Some(tag) = vm.get_active_version().await? {
             let version_dir = vm.version_path(&tag);
-            drop(managers);
             if version_dir.exists() {
                 match state.api.open_directory(&version_dir) {
                     Ok(()) => Ok(json!({"success": true})),

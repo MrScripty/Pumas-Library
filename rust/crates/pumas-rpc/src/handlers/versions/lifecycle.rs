@@ -1,6 +1,8 @@
 //! Version lifecycle handlers.
 
-use crate::handlers::{get_str_param, require_str_param};
+use crate::handlers::{
+    get_str_param, get_version_manager, require_str_param, require_version_manager,
+};
 use crate::server::AppState;
 use serde_json::{json, Value};
 use tracing::warn;
@@ -10,8 +12,7 @@ pub async fn get_installed_versions(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let versions = vm.get_installed_versions().await?;
         // Return raw array - wrapper.rs will add {success, versions} wrapper
         Ok(serde_json::to_value(versions)?)
@@ -22,8 +23,7 @@ pub async fn get_installed_versions(
 
 pub async fn get_active_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let version = vm.get_active_version().await?;
         // Return raw value - wrapper.rs will add {success, version} wrapper
         Ok(serde_json::to_value(version)?)
@@ -34,8 +34,7 @@ pub async fn get_active_version(state: &AppState, params: &Value) -> pumas_libra
 
 pub async fn get_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let version = vm.get_default_version().await?;
         // Return raw value - wrapper.rs will add {success, version} wrapper
         Ok(serde_json::to_value(version)?)
@@ -47,37 +46,24 @@ pub async fn get_default_version(state: &AppState, params: &Value) -> pumas_libr
 pub async fn set_default_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = get_str_param(params, "tag", "tag");
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
-        let result = vm.set_default_version(tag).await?;
-        Ok(serde_json::to_value(result)?)
-    } else {
-        Err(pumas_library::PumasError::Config {
-            message: format!("Version manager not initialized for app: {}", app_id_str),
-        })
-    }
+    let vm = require_version_manager(state, app_id_str).await?;
+    let result = vm.set_default_version(tag).await?;
+    Ok(serde_json::to_value(result)?)
 }
 
 pub async fn switch_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
-        let result = vm.set_active_version(&tag).await?;
-        Ok(serde_json::to_value(result)?)
-    } else {
-        Err(pumas_library::PumasError::Config {
-            message: format!("Version manager not initialized for app: {}", app_id_str),
-        })
-    }
+    let vm = require_version_manager(state, app_id_str).await?;
+    let result = vm.set_active_version(&tag).await?;
+    Ok(serde_json::to_value(result)?)
 }
 
 pub async fn install_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
 
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         // Start the installation (returns a progress receiver)
         match vm.install_version(&tag).await {
             Ok(_rx) => {
@@ -107,21 +93,14 @@ pub async fn install_version(state: &AppState, params: &Value) -> pumas_library:
 pub async fn remove_version(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
-        let result = vm.remove_version(&tag).await?;
-        Ok(serde_json::to_value(result)?)
-    } else {
-        Err(pumas_library::PumasError::Config {
-            message: format!("Version manager not initialized for app: {}", app_id_str),
-        })
-    }
+    let vm = require_version_manager(state, app_id_str).await?;
+    let result = vm.remove_version(&tag).await?;
+    Ok(serde_json::to_value(result)?)
 }
 
 pub async fn cancel_installation(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let result = vm.cancel_installation().await?;
         Ok(serde_json::to_value(result)?)
     } else {
@@ -134,8 +113,7 @@ pub async fn get_installation_progress(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let progress = vm.get_installation_progress().await;
         Ok(serde_json::to_value(progress)?)
     } else {
@@ -150,8 +128,7 @@ pub async fn validate_installations(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let result = vm.validate_installations().await?;
         Ok(serde_json::to_value(result)?)
     } else {

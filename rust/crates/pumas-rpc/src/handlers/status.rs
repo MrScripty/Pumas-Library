@@ -1,7 +1,7 @@
 //! Status & system check handlers.
 
 use super::{
-    detect_sandbox_environment, get_bool_param, require_str_param,
+    detect_sandbox_environment, get_bool_param, get_version_manager, require_str_param,
     sync_version_paths_to_process_manager,
 };
 use crate::server::AppState;
@@ -13,8 +13,7 @@ pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Res
     let mut response = state.api.get_status().await?;
 
     // Enrich with version-specific data from ComfyUI version manager
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get("comfyui") {
+    if let Some(vm) = get_version_manager(state, "comfyui").await {
         // Get active version
         let active_version = vm.get_active_version().await.ok().flatten();
 
@@ -41,7 +40,6 @@ pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Res
             }
         }
     }
-    drop(managers);
 
     Ok(serde_json::to_value(response)?)
 }

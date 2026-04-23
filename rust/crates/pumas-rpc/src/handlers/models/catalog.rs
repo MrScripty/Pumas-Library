@@ -1,6 +1,6 @@
 //! Model catalog and mapping handlers.
 
-use crate::handlers::{get_str_param, require_str_param};
+use crate::handlers::{get_str_param, get_version_manager, require_str_param};
 use crate::server::AppState;
 use serde_json::{json, Value};
 
@@ -37,13 +37,11 @@ pub async fn refresh_model_mappings(
         }));
     }
 
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get("comfyui") {
+    if let Some(vm) = get_version_manager(state, "comfyui").await {
         let active = vm.get_active_version().await?;
         if let Some(version_tag) = active {
             let version_path = vm.version_path(&version_tag);
             let models_path = version_path.join("models");
-            drop(managers);
 
             let response = state
                 .api

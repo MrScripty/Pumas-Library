@@ -80,6 +80,7 @@ async fn path_exists(path: &Path) -> Result<bool> {
 }
 
 /// Main version manager coordinating all version operations.
+#[derive(Clone)]
 pub struct VersionManager {
     /// Root directory for launcher data.
     launcher_root: PathBuf,

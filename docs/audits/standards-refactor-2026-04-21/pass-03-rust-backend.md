@@ -91,10 +91,11 @@ Rectification:
 - Generate or test TypeScript and Rust shapes from the same contract artifact.
 - Keep JSON-RPC envelope generic, but method payloads typed.
 
-Compile blocker discovered during later R08 verification:
-- `pumas-rpc/src/server.rs` currently fails to compile because `handle_rpc` does not satisfy
-  Axum's `Handler` bound at `.route("/rpc", post(handle_rpc))`. This needs a contained follow-up
-  step to restore crate compilation before full RPC verification can be considered complete.
+Implementation notes:
+- Completed: `pumas-rpc` handler futures now clone owned `VersionManager` values out of the shared
+  manager map before awaiting, and the shared size calculator now uses a Tokio mutex in server
+  state so release handlers no longer hold async read/write guards across awaited work. This
+  restores `pumas-rpc` compilation by satisfying Axum's `Handler` bound for `handle_rpc`.
 
 ### R04 - Background Task Ownership Is Incomplete
 Status: compliant

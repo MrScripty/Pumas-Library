@@ -438,13 +438,16 @@ impl ConstraintsManager {
 
     /// Write constraints from cache to a file.
     async fn write_constraints_from_cache(&self, tag: &str, path: &PathBuf) -> Result<()> {
-        let cache = self.constraints_cache.lock().unwrap();
-        if let Some(constraints) = cache.get(tag) {
+        let cached_constraints = {
+            let cache = self.constraints_cache.lock().unwrap();
+            cache.get(tag).cloned()
+        };
+
+        if let Some(constraints) = cached_constraints {
             let mut content = String::new();
             for (package, version) in constraints {
                 content.push_str(&format!("{}=={}\n", package, version));
             }
-            drop(cache);
 
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).await.ok();
@@ -455,8 +458,6 @@ impl ConstraintsManager {
                 path: Some(path.clone()),
                 source: Some(e),
             })?;
-        } else {
-            drop(cache);
         }
 
         Ok(())

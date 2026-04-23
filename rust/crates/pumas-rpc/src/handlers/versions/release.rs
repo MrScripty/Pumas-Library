@@ -1,6 +1,8 @@
 //! Release metadata, sizing, and cache handlers.
 
-use crate::handlers::{get_bool_param, get_i64_param, get_str_param, require_str_param};
+use crate::handlers::{
+    get_bool_param, get_i64_param, get_str_param, get_version_manager, require_str_param,
+};
 use crate::server::AppState;
 use serde_json::{json, Value};
 use tracing::warn;
@@ -12,8 +14,7 @@ pub async fn get_available_versions(
     let force_refresh = get_bool_param(params, "force_refresh", "forceRefresh").unwrap_or(false);
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
 
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         // Handle rate limit errors specially to return structured response
         match vm.get_available_releases(force_refresh).await {
             Ok(releases) => {
@@ -50,8 +51,7 @@ pub async fn get_available_versions(
 
 pub async fn get_version_status(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         // Return version status combining active/default/installed
         let active = vm.get_active_version().await?;
         let default = vm.get_default_version().await?;
@@ -95,8 +95,7 @@ pub async fn get_version_status(state: &AppState, params: &Value) -> pumas_libra
 pub async fn get_version_info(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let tag = require_str_param(params, "tag", "tag")?;
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let installed = vm.get_installed_versions().await?;
         let is_installed = installed.contains(&tag);
         Ok(json!({
@@ -121,7 +120,7 @@ pub async fn get_release_size_info(
     let archive_size = get_i64_param(params, "archive_size", "archiveSize").unwrap_or(0) as u64;
 
     // Calculate release size using size_calculator from state
-    let mut calc = state.size_calculator.write().await;
+    let mut calc = state.size_calculator.lock().await;
     let result = calc
         .calculate_release_size(&tag, archive_size, None)
         .await?;
@@ -135,7 +134,7 @@ pub async fn get_release_size_breakdown(
     let tag = require_str_param(params, "tag", "tag")?;
 
     // Get cached size breakdown
-    let calc = state.size_calculator.read().await;
+    let calc = state.size_calculator.lock().await;
     if let Some(breakdown) = calc.get_size_breakdown(&tag) {
         Ok(serde_json::to_value(breakdown)?)
     } else {
@@ -158,7 +157,7 @@ pub async fn calculate_release_size(
         .get("requirements")
         .and_then(|v| serde_json::from_value(v.clone()).ok());
 
-    let mut calc = state.size_calculator.write().await;
+    let mut calc = state.size_calculator.lock().await;
     let result = calc
         .calculate_release_size(&tag, archive_size, requirements.as_deref())
         .await?;
@@ -171,8 +170,7 @@ pub async fn calculate_all_release_sizes(
 ) -> pumas_library::Result<Value> {
     // Get all available versions and calculate sizes
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
-    let managers = state.version_managers.read().await;
-    let versions = if let Some(vm) = managers.get(app_id_str) {
+    let versions = if let Some(vm) = get_version_manager(state, app_id_str).await {
         let releases = vm.get_available_releases(false).await?;
         releases
             .into_iter()
@@ -181,10 +179,9 @@ pub async fn calculate_all_release_sizes(
     } else {
         vec![]
     };
-    drop(managers);
 
     let mut results = serde_json::Map::new();
-    let mut calc = state.size_calculator.write().await;
+    let mut calc = state.size_calculator.lock().await;
 
     for version in versions.iter().take(20) {
         // Limit to avoid too many calculations
@@ -224,8 +221,7 @@ pub async fn get_github_cache_status(
 ) -> pumas_library::Result<Value> {
     let app_id_str = get_str_param(params, "app_id", "appId").unwrap_or("comfyui");
     // Return cache status in format expected by frontend
-    let managers = state.version_managers.read().await;
-    if let Some(vm) = managers.get(app_id_str) {
+    if let Some(vm) = get_version_manager(state, app_id_str).await {
         let cache_status = vm.get_github_cache_status();
         Ok(json!({
             "has_cache": cache_status.has_cache,

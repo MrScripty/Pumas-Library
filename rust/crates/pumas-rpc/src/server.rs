@@ -13,7 +13,10 @@ use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::{sync::RwLock, task::JoinHandle};
+use tokio::{
+    sync::{Mutex, RwLock},
+    task::JoinHandle,
+};
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
 
@@ -26,7 +29,7 @@ pub struct AppState {
     /// Custom nodes manager (from pumas-app-manager)
     pub custom_nodes_manager: Arc<CustomNodesManager>,
     /// Size calculator for release size estimates
-    pub size_calculator: Arc<RwLock<SizeCalculator>>,
+    pub size_calculator: Arc<Mutex<SizeCalculator>>,
     /// Shortcut manager for desktop/menu shortcuts
     pub shortcut_manager: Arc<RwLock<Option<ShortcutManager>>>,
     /// Plugin configuration loader
@@ -96,7 +99,7 @@ pub async fn start_server(
         api,
         version_managers: Arc::new(RwLock::new(version_managers)),
         custom_nodes_manager: Arc::new(custom_nodes_manager),
-        size_calculator: Arc::new(RwLock::new(size_calculator)),
+        size_calculator: Arc::new(Mutex::new(size_calculator)),
         shortcut_manager: Arc::new(RwLock::new(shortcut_manager)),
         plugin_loader: Arc::new(plugin_loader),
     });

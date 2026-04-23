@@ -658,7 +658,17 @@ impl ModelImporter {
 
         let primary_file = self.choose_primary_file(&temp_dir)?;
         let hashes = if let Some(ref primary) = primary_file {
-            Some(compute_dual_hash(primary)?)
+            let primary_for_hash = primary.clone();
+            Some(
+                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_for_hash))
+                    .await
+                    .map_err(|err| {
+                        PumasError::Other(format!(
+                            "Failed to join import hash computation task: {}",
+                            err
+                        ))
+                    })??,
+            )
         } else {
             None
         };
@@ -842,7 +852,17 @@ impl ModelImporter {
         // Compute hashes for primary file
         let primary_file = self.choose_primary_file(temp_dir)?;
         let hashes = if let Some(ref primary) = primary_file {
-            Some(compute_dual_hash(primary)?)
+            let primary_for_hash = primary.clone();
+            Some(
+                tokio::task::spawn_blocking(move || compute_dual_hash(&primary_for_hash))
+                    .await
+                    .map_err(|err| {
+                        PumasError::Other(format!(
+                            "Failed to join temp import hash computation task: {}",
+                            err
+                        ))
+                    })??,
+            )
         } else {
             None
         };

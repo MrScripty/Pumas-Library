@@ -402,6 +402,10 @@ Implementation notes:
   through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption import paths
   no longer perform synchronous dual-hash computation inline on async runtime threads when
   `compute_hashes` is enabled.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes legacy import-path and temp
+  import hashing through `tokio::task::spawn_blocking`, so file-copy import flows no longer
+  perform synchronous dual-hash computation inline on async runtime threads while finalizing copied
+  model directories.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

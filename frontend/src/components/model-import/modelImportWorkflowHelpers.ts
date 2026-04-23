@@ -60,6 +60,85 @@ export function preferredBundleFamily(entry: ImportEntryStatus): string {
   return entry.hfMetadata?.family || entry.suggestedFamily;
 }
 
+function createSingleResultEntry(result: ImportPathClassification): ImportEntryStatus | null {
+  const suggestedFamily = result.suggested_family || 'imported';
+  const suggestedOfficialName = result.suggested_official_name || pathStem(getFilename(result.path));
+
+  if (result.kind === 'single_file') {
+    return createEntry(
+      result.path,
+      result.path,
+      'single_file',
+      getFilename(result.path),
+      suggestedFamily,
+      suggestedOfficialName,
+      result.model_type || undefined
+    );
+  }
+
+  if (result.kind === 'single_model_directory') {
+    return createEntry(
+      result.path,
+      result.path,
+      'directory_model',
+      getFilename(result.path),
+      suggestedFamily,
+      suggestedOfficialName,
+      result.model_type || undefined
+    );
+  }
+
+  if (result.kind !== 'single_bundle') {
+    return null;
+  }
+
+  return createEntry(
+    result.path,
+    result.path,
+    'external_diffusers_bundle',
+    getFilename(result.path),
+    suggestedFamily,
+    suggestedOfficialName,
+    result.model_type || undefined,
+    result.bundle_format || undefined,
+    result.pipeline_class || undefined,
+    result.component_manifest || undefined
+  );
+}
+
+function candidateEntryKind(kind: ImportPathClassification['candidates'][number]['kind']): ImportEntryKind {
+  if (kind === 'external_diffusers_bundle') {
+    return 'external_diffusers_bundle';
+  }
+  if (kind === 'directory_model') {
+    return 'directory_model';
+  }
+  return 'single_file';
+}
+
+function createContainerEntries(result: ImportPathClassification): ImportEntryStatus[] {
+  if (result.kind !== 'multi_model_container') {
+    return [];
+  }
+
+  return result.candidates.map((candidate) => {
+    const candidateFilename = candidate.display_name || getFilename(candidate.path);
+    return createEntry(
+      candidate.path,
+      result.path,
+      candidateEntryKind(candidate.kind),
+      candidateFilename,
+      'imported',
+      pathStem(candidateFilename),
+      candidate.model_type || undefined,
+      candidate.bundle_format || undefined,
+      candidate.pipeline_class || undefined,
+      candidate.component_manifest || undefined,
+      result.path
+    );
+  });
+}
+
 export function buildEntries(results: ImportPathClassification[]): ImportEntryStatus[] {
   const entries: ImportEntryStatus[] = [];
   const seenPaths = new Set<string>();
@@ -71,84 +150,13 @@ export function buildEntries(results: ImportPathClassification[]): ImportEntrySt
   };
 
   for (const result of results) {
-    const suggestedFamily = result.suggested_family || 'imported';
-    const suggestedOfficialName = result.suggested_official_name || pathStem(getFilename(result.path));
-
-    if (result.kind === 'single_file') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'single_file',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined
-        )
-      );
-      continue;
+    const singleEntry = createSingleResultEntry(result);
+    if (singleEntry) {
+      pushEntry(singleEntry);
     }
 
-    if (result.kind === 'single_model_directory') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'directory_model',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined
-        )
-      );
-      continue;
-    }
-
-    if (result.kind === 'single_bundle') {
-      pushEntry(
-        createEntry(
-          result.path,
-          result.path,
-          'external_diffusers_bundle',
-          getFilename(result.path),
-          suggestedFamily,
-          suggestedOfficialName,
-          result.model_type || undefined,
-          result.bundle_format || undefined,
-          result.pipeline_class || undefined,
-          result.component_manifest || undefined
-        )
-      );
-      continue;
-    }
-
-    if (result.kind !== 'multi_model_container') {
-      continue;
-    }
-
-    for (const candidate of result.candidates) {
-      const candidateKind: ImportEntryKind =
-        candidate.kind === 'external_diffusers_bundle'
-          ? 'external_diffusers_bundle'
-          : candidate.kind === 'directory_model'
-            ? 'directory_model'
-            : 'single_file';
-      const candidateFilename = candidate.display_name || getFilename(candidate.path);
-      pushEntry(
-        createEntry(
-          candidate.path,
-          result.path,
-          candidateKind,
-          candidateFilename,
-          'imported',
-          pathStem(candidateFilename),
-          candidate.model_type || undefined,
-          candidate.bundle_format || undefined,
-          candidate.pipeline_class || undefined,
-          candidate.component_manifest || undefined,
-          result.path
-        )
-      );
+    for (const entry of createContainerEntries(result)) {
+      pushEntry(entry);
     }
   }
 

@@ -378,6 +378,10 @@ Implementation notes:
   validation through `tokio::task::spawn_blocking` and uses async target-directory existence and
   creation checks, so the external diffusers import request path no longer performs synchronous
   bundle validation or directory setup inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place diffusers bundle
+  validation through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
+  import paths no longer perform synchronous bundle validation inline on async runtime threads
+  before deciding between bundle and file-model import flows.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

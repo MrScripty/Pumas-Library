@@ -1095,7 +1095,17 @@ impl ModelImporter {
             return Err(PumasError::FileNotFound(model_dir.clone()));
         }
 
-        let bundle_validation = validate_diffusers_directory_for_import(model_dir);
+        let bundle_validation_dir = model_dir.to_path_buf();
+        let bundle_validation = tokio::task::spawn_blocking(move || {
+            validate_diffusers_directory_for_import(&bundle_validation_dir)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join in-place diffusers validation task: {}",
+                err
+            ))
+        })?;
         if bundle_validation.validation_state == crate::models::AssetValidationState::Valid {
             return self
                 .import_library_owned_diffusers_directory(spec, &bundle_validation)

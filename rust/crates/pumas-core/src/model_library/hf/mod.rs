@@ -38,9 +38,10 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 /// Client for HuggingFace Hub API operations.
@@ -53,6 +54,8 @@ pub struct HuggingFaceClient {
     pub(super) cache_dir: PathBuf,
     /// Active downloads
     pub(super) downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
+    /// Owned background download tasks keyed by download ID.
+    pub(super) download_tasks: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
     /// Per-destination mutexes so downloads targeting the same model folder
     /// execute sequentially instead of racing on shared files.
     pub(super) dest_locks: Arc<RwLock<HashMap<PathBuf, Arc<Mutex<()>>>>>,
@@ -120,6 +123,7 @@ impl HuggingFaceClient {
             download_client,
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
+            download_tasks: Arc::new(StdMutex::new(HashMap::new())),
             dest_locks: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,
             persistence: None,
@@ -288,6 +292,22 @@ impl HuggingFaceClient {
 
     pub(super) fn write_cache<T: Serialize>(&self, path: &Path, data: &T) -> Result<()> {
         atomic_write_json(path, data, false)
+    }
+}
+
+impl Drop for HuggingFaceClient {
+    fn drop(&mut self) {
+        let handles: Vec<JoinHandle<()>> = self
+            .download_tasks
+            .lock()
+            .expect("HF download task lock poisoned")
+            .drain()
+            .map(|(_, handle)| handle)
+            .collect();
+
+        for handle in handles {
+            handle.abort();
+        }
     }
 }
 

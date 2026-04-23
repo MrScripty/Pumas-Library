@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
 /// Regular (non-LFS) filenames that should be automatically fetched alongside
@@ -163,6 +164,36 @@ fn retry_exhausted_message(
 }
 
 impl HuggingFaceClient {
+    fn store_download_task(&self, download_id: String, handle: JoinHandle<()>) {
+        let mut tasks = self
+            .download_tasks
+            .lock()
+            .expect("HF download task lock poisoned");
+        tasks.retain(|_, handle| !handle.is_finished());
+        if let Some(previous) = tasks.insert(download_id, handle) {
+            previous.abort();
+        }
+    }
+
+    fn abort_download_task(&self, download_id: &str) {
+        if let Some(handle) = self
+            .download_tasks
+            .lock()
+            .expect("HF download task lock poisoned")
+            .remove(download_id)
+        {
+            handle.abort();
+        }
+    }
+
+    fn prune_finished_download_tasks(&self) {
+        let mut tasks = self
+            .download_tasks
+            .lock()
+            .expect("HF download task lock poisoned");
+        tasks.retain(|_, handle| !handle.is_finished());
+    }
+
     /// Restore persisted downloads from disk.
     ///
     /// Called during startup to recover paused/errored downloads from a previous session.
@@ -262,6 +293,8 @@ impl HuggingFaceClient {
         dest_dir: &Path,
         remote_evidence: Option<crate::models::HuggingFaceEvidence>,
     ) -> Result<String> {
+        self.prune_finished_download_tasks();
+
         let download_id = uuid::Uuid::new_v4().to_string();
         let cancel_flag = Arc::new(AtomicBool::new(false));
 
@@ -558,7 +591,7 @@ impl HuggingFaceClient {
         let auth_header = self.auth_header_value().await;
         let dest_lock = self.destination_lock(&dest_dir).await;
 
-        tokio::spawn(async move {
+        let task_handle = tokio::spawn(async move {
             // Serialize downloads targeting the same destination directory.
             let _destination_guard = dest_lock.lock().await;
 
@@ -605,6 +638,7 @@ impl HuggingFaceClient {
                 }
             }
         });
+        self.store_download_task(download_id.clone(), task_handle);
 
         Ok(download_id)
     }
@@ -1195,6 +1229,8 @@ impl HuggingFaceClient {
         let downloads = self.downloads.read().await;
         if let Some(state) = downloads.get(download_id) {
             state.cancel_flag.store(true, Ordering::Relaxed);
+            drop(downloads);
+            self.abort_download_task(download_id);
             // Remove from persistence -- cancelled downloads don't survive restart
             if let Some(ref persistence) = self.persistence {
                 let _ = persistence.remove(download_id);
@@ -1207,6 +1243,7 @@ impl HuggingFaceClient {
 
     /// List all downloads (active, paused, completed, etc.).
     pub async fn list_downloads(&self) -> Vec<ModelDownloadProgress> {
+        self.prune_finished_download_tasks();
         let downloads = self.downloads.read().await;
         downloads
             .values()
@@ -1330,6 +1367,8 @@ impl HuggingFaceClient {
 
     /// Resume a paused or errored download from its `.part` file.
     pub async fn resume_download(&self, download_id: &str) -> Result<bool> {
+        self.prune_finished_download_tasks();
+
         let (repo_id, files, dest_dir, cancel_flag, pause_flag) = {
             let mut downloads = self.downloads.write().await;
             let state = match downloads.get_mut(download_id) {
@@ -1372,7 +1411,7 @@ impl HuggingFaceClient {
         let auth_header = self.auth_header_value().await;
         let dest_lock = self.destination_lock(&dest_dir).await;
 
-        tokio::spawn(async move {
+        let task_handle = tokio::spawn(async move {
             let _destination_guard = dest_lock.lock().await;
 
             let result = Self::run_download(
@@ -1412,6 +1451,7 @@ impl HuggingFaceClient {
                 }
             }
         });
+        self.store_download_task(download_id.to_string(), task_handle);
 
         Ok(true)
     }
@@ -1706,5 +1746,69 @@ mod tests {
 
         assert!(Arc::ptr_eq(&lock_a, &lock_b));
         assert!(!Arc::ptr_eq(&lock_a, &lock_c));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_download_aborts_tracked_task() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let download_id = "dl-cancel".to_string();
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/model".to_string(),
+                    status: DownloadStatus::Downloading,
+                    progress: 0.25,
+                    downloaded_bytes: 256,
+                    total_bytes: Some(1024),
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    retry_attempt: 0,
+                    retry_limit: None,
+                    retrying: false,
+                    next_retry_delay_seconds: None,
+                    dest_dir: tmp.path().join("owner-model"),
+                    filename: "model.safetensors".to_string(),
+                    files: vec![FileToDownload {
+                        filename: "model.safetensors".to_string(),
+                        size: Some(1024),
+                        sha256: None,
+                    }],
+                    files_completed: 0,
+                    download_request: None,
+                    known_sha256: None,
+                    huggingface_evidence: None,
+                },
+            );
+        }
+
+        let task_handle = tokio::spawn(async {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+        });
+        client.store_download_task(download_id.clone(), task_handle);
+
+        assert!(client.cancel_download(&download_id).await.unwrap());
+
+        let cancel_flag_set = client
+            .downloads
+            .read()
+            .await
+            .get(&download_id)
+            .unwrap()
+            .cancel_flag
+            .load(Ordering::Relaxed);
+        assert!(cancel_flag_set);
+        assert!(client
+            .download_tasks
+            .lock()
+            .expect("HF download task lock poisoned")
+            .get(&download_id)
+            .is_none());
     }
 }

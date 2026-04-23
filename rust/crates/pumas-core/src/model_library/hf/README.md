@@ -18,6 +18,8 @@ Hugging Face-specific integrations for model discovery, download orchestration, 
   import/reclassification can reuse the same source facts.
 - Download orchestration emits evidence at two stages: auxiliary-files-complete for partial
   metadata persistence and final completion for full in-place import.
+- Background download tasks are tracked by download ID so explicit cancellation, resume, and client
+  drop all operate on owned task handles rather than detached spawned work.
 
 ## Dependencies
 **Internal:** `crate::model_library`, `crate::network`, `crate::models`.

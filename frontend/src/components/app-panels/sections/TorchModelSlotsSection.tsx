@@ -14,6 +14,7 @@ import type { TorchModelSlot, TorchDeviceInfo } from '../../../types/api';
 import { Tooltip } from '../../ui';
 import { getLogger } from '../../../utils/logger';
 import { TorchActiveSlots } from './TorchActiveSlots';
+import { LIBRARY_MODEL_PREVIEW_LIMIT } from './libraryModelPreviewLimit';
 import { formatTorchModelSize } from './torchModelSlotFormatting';
 
 const logger = getLogger('TorchModelSlotsSection');
@@ -72,6 +73,7 @@ export function TorchModelSlotsSection({
     () => new Set(slots.filter(s => s.state === 'ready' || s.state === 'loading').map(s => s.model_path)),
     [slots]
   );
+  const visibleSafetensorsModels = safetensorsModels.slice(0, LIBRARY_MODEL_PREVIEW_LIMIT);
 
   const fetchTorchState = useCallback(async () => {
     if (!isAPIAvailable() || !isRunning) {
@@ -189,7 +191,7 @@ export function TorchModelSlotsSection({
           </div>
 
           <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {safetensorsModels.map((model) => {
+            {visibleSafetensorsModels.map((model) => {
               const isLoading = loadingModel === model.id;
               const isAlreadyLoaded = loadedModelIds.has(model.id);
 
@@ -252,9 +254,9 @@ export function TorchModelSlotsSection({
             })}
           </div>
 
-          {safetensorsModels.length > 20 && (
+          {safetensorsModels.length > LIBRARY_MODEL_PREVIEW_LIMIT && (
             <p className="text-xs text-center text-[hsl(var(--text-muted))]">
-              Showing first 20 of {safetensorsModels.length} models
+              Showing first {LIBRARY_MODEL_PREVIEW_LIMIT} of {safetensorsModels.length} models
             </p>
           )}
         </div>

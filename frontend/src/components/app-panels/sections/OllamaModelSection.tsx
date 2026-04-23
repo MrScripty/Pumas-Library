@@ -13,6 +13,7 @@ import type { ModelCategory } from '../../../types/apps';
 import type { OllamaModelInfo, OllamaRunningModel } from '../../../types/api';
 import { Tooltip } from '../../ui';
 import { getLogger } from '../../../utils/logger';
+import { LIBRARY_MODEL_PREVIEW_LIMIT } from './libraryModelPreviewLimit';
 import { OllamaRegisteredModels } from './OllamaRegisteredModels';
 import { formatOllamaModelSize } from './ollamaModelFormatting';
 
@@ -63,6 +64,7 @@ export function OllamaModelSection({
       }
     }
   }
+  const visibleGgufModels = ggufModels.slice(0, LIBRARY_MODEL_PREVIEW_LIMIT);
 
   // Set of model names currently loaded in memory
   const runningSet = useMemo(
@@ -215,7 +217,7 @@ export function OllamaModelSection({
           </div>
 
           <div className="space-y-1.5 max-h-64 overflow-y-auto">
-            {ggufModels.map((model) => {
+            {visibleGgufModels.map((model) => {
               const isLoading = loadingModel === model.id;
 
               return (
@@ -251,9 +253,9 @@ export function OllamaModelSection({
             })}
           </div>
 
-          {ggufModels.length > 20 && (
+          {ggufModels.length > LIBRARY_MODEL_PREVIEW_LIMIT && (
             <p className="text-xs text-center text-[hsl(var(--text-muted))]">
-              Showing first 20 of {ggufModels.length} models
+              Showing first {LIBRARY_MODEL_PREVIEW_LIMIT} of {ggufModels.length} models
             </p>
           )}
         </div>

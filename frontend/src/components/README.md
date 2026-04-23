@@ -46,6 +46,11 @@ bridge.
 | `LocalModelsList.test.tsx` | Interaction coverage for local-library formatting, ctrl-click metadata access, and related-model actions. |
 | `LocalModelGroupHeader.tsx` | Presentational category header and count for local model groups. |
 | `LocalModelGroupHeader.test.tsx` | Rendering coverage for local model group labels and counts. |
+| `LocalModelRow.tsx` | Local model row coordinator for metadata, relationship disclosure, and action controls. |
+| `LocalModelRowActions.tsx` | Local model related/download/installed action switcher. |
+| `LocalModelDownloadActions.tsx` | Active local download pause/resume/cancel progress controls. |
+| `LocalModelInstalledActions.tsx` | Local model link, recover, convert, and delete controls. |
+| `LocalModelRowState.ts` | Derived local model row state for link, download, related, partial, and conversion capabilities. |
 | `LocalModelsEmptyState.tsx` | Empty local-library and no-match filter states for the local model list. |
 | `LocalModelsEmptyState.test.tsx` | Rendering and action coverage for local model empty states. |
 | `LocalModelMetadataSummary.tsx` | Presentational format, quant, size, dependency, and partial-error metadata for local model rows. |

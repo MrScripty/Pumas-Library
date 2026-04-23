@@ -257,6 +257,7 @@ Rectification:
 - Completed: reduce `frontend/src/components/RemoteModelListItem.tsx` render complexity by extracting remote download flags/options and row action controls into focused modules with action coverage.
 - Completed: reduce `frontend/src/components/Header.tsx` render/status complexity by extracting status projection, update/window controls, status badge, and resource strip rendering into focused header modules.
 - Completed: reduce `frontend/src/components/VersionListItem.tsx` render complexity by extracting install-version display-state projection, info rendering, and action-button state rendering into focused modules while preserving install-dialog row coverage.
+- Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: convert `@typescript-eslint/no-unnecessary-condition`, `@typescript-eslint/no-non-null-assertion`, `max-lines-per-function`, and `complexity` to scoped overrides or enforceable warnings after the function-level decomposition wave.
 

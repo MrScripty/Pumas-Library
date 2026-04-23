@@ -463,30 +463,66 @@ impl InstallationProgressTracker {
         ((stage_start + stage_contribution) * 100.0).clamp(0.0, 100.0)
     }
 
+    fn snapshot_persist_payload(&self) -> Result<Option<(PathBuf, String)>> {
+        let guard = self.state.lock().unwrap();
+        let Some(state) = guard.as_ref() else {
+            return Ok(None);
+        };
+
+        let state_path = self.cache_dir.join(&self.state_filename);
+        let json = serde_json::to_string_pretty(state)?;
+        Ok(Some((state_path, json)))
+    }
+
+    async fn persist_payload_async(state_path: PathBuf, json: String) {
+        if let Some(parent) = state_path.parent() {
+            if let Err(err) = fs::create_dir_all(parent).await {
+                warn!("Failed to create progress cache directory: {}", err);
+                return;
+            }
+        }
+
+        if let Err(err) = fs::write(&state_path, json).await {
+            warn!(
+                "Failed to write progress state {}: {}",
+                state_path.display(),
+                err
+            );
+        }
+    }
+
+    fn persist_payload_blocking(state_path: &PathBuf, json: &str) -> Result<()> {
+        if let Some(parent) = state_path.parent() {
+            if !parent.exists() {
+                std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
+                    message: format!("Failed to create cache directory: {}", e),
+                    path: Some(parent.to_path_buf()),
+                    source: Some(e),
+                })?;
+            }
+        }
+
+        std::fs::write(state_path, json).map_err(|e| PumasError::Io {
+            message: format!("Failed to write progress state: {}", e),
+            path: Some(state_path.clone()),
+            source: Some(e),
+        })?;
+
+        Ok(())
+    }
+
     /// Persist state to disk.
     fn persist_state(&self) -> Result<()> {
-        let guard = self.state.lock().unwrap();
-        if let Some(ref state) = *guard {
-            let state_path = self.cache_dir.join(&self.state_filename);
+        let Some((state_path, json)) = self.snapshot_persist_payload()? else {
+            return Ok(());
+        };
 
-            // Ensure cache directory exists
-            if let Some(parent) = state_path.parent() {
-                if !parent.exists() {
-                    std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
-                        message: format!("Failed to create cache directory: {}", e),
-                        path: Some(parent.to_path_buf()),
-                        source: Some(e),
-                    })?;
-                }
-            }
-
-            let json = serde_json::to_string_pretty(state)?;
-            std::fs::write(&state_path, json).map_err(|e| PumasError::Io {
-                message: format!("Failed to write progress state: {}", e),
-                path: Some(state_path),
-                source: Some(e),
-            })?;
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(Self::persist_payload_async(state_path, json));
+            return Ok(());
         }
+
+        Self::persist_payload_blocking(&state_path, &json)?;
         Ok(())
     }
 

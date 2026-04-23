@@ -240,6 +240,10 @@ Implementation notes:
   binary finalization through `tokio::task::spawn_blocking`, so zip, tarball, recursive binary
   discovery, and permission-fix work no longer execute inline on async runtime threads during
   Ollama install flows.
+- Completed: `pumas-app-manager/src/version_manager/progress.rs` now snapshots state and dispatches
+  progress persistence through the current Tokio runtime when available, falling back to blocking
+  writes only outside async contexts, so installer progress updates no longer write state files
+  inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -161,6 +161,10 @@ Implementation notes:
   `pumas-app-manager/src/version_manager/dependencies.rs` now use `tokio::fs` for async
   version/venv/requirements path probes so launch and dependency-management entry points no longer
   perform synchronous existence checks before handing work to blocking launch/install helpers.
+- Completed: `pumas-app-manager/src/version_manager/dependencies.rs` now reads
+  `requirements.txt` with `tokio::fs` and uses async venv checks in `install_dependencies`, so
+  the dependency status/install flows no longer mix synchronous requirement-file reads into those
+  async entry points.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

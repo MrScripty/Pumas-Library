@@ -58,9 +58,14 @@ impl DependencyManager {
             .join("python")
     }
 
-    /// Check if a venv exists for a version.
-    fn has_venv(&self, tag: &str) -> bool {
-        self.venv_python(tag).exists()
+    async fn read_requirements_file(&self, requirements_path: &Path) -> Result<String> {
+        fs::read_to_string(requirements_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to read requirements.txt: {}", e),
+                path: Some(requirements_path.to_path_buf()),
+                source: Some(e),
+            })
     }
 
     /// Check dependencies for a version.
@@ -91,12 +96,7 @@ impl DependencyManager {
         }
 
         // Read requirements
-        let requirements_content =
-            std::fs::read_to_string(&requirements_path).map_err(|e| PumasError::Io {
-                message: format!("Failed to read requirements.txt: {}", e),
-                path: Some(requirements_path.clone()),
-                source: Some(e),
-            })?;
+        let requirements_content = self.read_requirements_file(&requirements_path).await?;
 
         let required = self.parse_requirements(&requirements_content);
 
@@ -228,7 +228,7 @@ impl DependencyManager {
         }
 
         // Create venv if needed
-        if !self.has_venv(tag) {
+        if !path_exists(&self.venv_python(tag)).await? {
             self.create_venv(tag).await?;
         }
 
@@ -239,7 +239,7 @@ impl DependencyManager {
         }
 
         // Parse requirements for progress tracking
-        let requirements_content = std::fs::read_to_string(&requirements_path)?;
+        let requirements_content = self.read_requirements_file(&requirements_path).await?;
         let packages = self.parse_requirements(&requirements_content);
 
         // Try to get or build constraints file

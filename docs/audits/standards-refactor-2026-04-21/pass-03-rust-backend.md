@@ -185,6 +185,9 @@ Implementation notes:
   version-directory creation during install and recursive directory removal during uninstall so
   those async Ollama lifecycle entry points no longer perform those filesystem operations directly
   on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/constraints.rs` now uses `tokio::fs` for the
+  async constraints build/write path, including async constraints-cache persistence, so constraint
+  generation no longer performs direct directory creation or file writes on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

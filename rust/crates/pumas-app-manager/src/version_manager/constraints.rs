@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tokio::fs;
 use tracing::{debug, info, warn};
 
 /// Manages dependency constraints for reproducible installations.
@@ -57,29 +58,6 @@ impl ConstraintsManager {
         }
     }
 
-    /// Save constraints cache to disk.
-    fn save_cache(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.constraints_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create constraints directory: {}", e),
-            path: Some(self.constraints_dir.clone()),
-            source: Some(e),
-        })?;
-
-        let cache_path = self.constraints_dir.join("constraints-cache.json");
-        let cache = ConstraintsCacheFile {
-            constraints: self.constraints_cache.lock().unwrap().clone(),
-        };
-
-        let json = serde_json::to_string_pretty(&cache)?;
-        std::fs::write(&cache_path, json).map_err(|e| PumasError::Io {
-            message: format!("Failed to write constraints cache: {}", e),
-            path: Some(cache_path),
-            source: Some(e),
-        })?;
-
-        Ok(())
-    }
-
     /// Get or build a constraints file for a tag.
     pub fn get_constraints_file(&self, tag: &str) -> Result<Option<PathBuf>> {
         let constraints_path = self
@@ -122,11 +100,13 @@ impl ConstraintsManager {
             .join(format!("{}.txt", self.safe_filename(tag)));
 
         // Ensure directory exists
-        std::fs::create_dir_all(&self.constraints_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to create constraints directory: {}", e),
-            path: Some(self.constraints_dir.clone()),
-            source: Some(e),
-        })?;
+        fs::create_dir_all(&self.constraints_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create constraints directory: {}", e),
+                path: Some(self.constraints_dir.clone()),
+                source: Some(e),
+            })?;
 
         // Parse requirements and resolve versions
         let mut constraints = HashMap::new();
@@ -157,18 +137,20 @@ impl ConstraintsManager {
         }
 
         // Write constraints file
-        std::fs::write(&constraints_path, &constraints_content).map_err(|e| PumasError::Io {
-            message: format!("Failed to write constraints file: {}", e),
-            path: Some(constraints_path.clone()),
-            source: Some(e),
-        })?;
+        fs::write(&constraints_path, &constraints_content)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to write constraints file: {}", e),
+                path: Some(constraints_path.clone()),
+                source: Some(e),
+            })?;
 
         // Update cache
         self.constraints_cache
             .lock()
             .unwrap()
             .insert(tag.to_string(), constraints);
-        let _ = self.save_cache();
+        let _ = self.save_cache_async().await;
 
         info!(
             "Built constraints for {} with {} packages",
@@ -182,6 +164,32 @@ impl ConstraintsManager {
         );
 
         Ok(constraints_path)
+    }
+
+    async fn save_cache_async(&self) -> Result<()> {
+        fs::create_dir_all(&self.constraints_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to create constraints directory: {}", e),
+                path: Some(self.constraints_dir.clone()),
+                source: Some(e),
+            })?;
+
+        let cache_path = self.constraints_dir.join("constraints-cache.json");
+        let cache = ConstraintsCacheFile {
+            constraints: self.constraints_cache.lock().unwrap().clone(),
+        };
+
+        let json = serde_json::to_string_pretty(&cache)?;
+        fs::write(&cache_path, json)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to write constraints cache: {}", e),
+                path: Some(cache_path),
+                source: Some(e),
+            })?;
+
+        Ok(())
     }
 
     /// Parse a requirement line into (package, spec).

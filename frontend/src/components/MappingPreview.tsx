@@ -71,7 +71,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
       // Fetch both preview and cross-filesystem warning in parallel
       const [previewResult, crossFsResult] = await Promise.all([
         api.preview_model_mapping(versionTag),
-        api.get_cross_filesystem_warning?.(versionTag),
+        api.get_cross_filesystem_warning(versionTag),
       ]);
 
       if (previewResult.success) {
@@ -83,7 +83,7 @@ export const MappingPreview: React.FC<MappingPreviewProps> = ({
         setError(previewResult.error || 'Preview returned an error');
       }
 
-      if (crossFsResult?.success && crossFsResult.cross_filesystem) {
+      if (crossFsResult.success && crossFsResult.cross_filesystem) {
         setCrossFsWarning(crossFsResult as typeof crossFsWarning);
       } else {
         setCrossFsWarning(null);

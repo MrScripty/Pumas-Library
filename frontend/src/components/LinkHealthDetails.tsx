@@ -41,13 +41,13 @@ export function LinkHealthDetails({
         </div>
         <div className="p-2 bg-[hsl(var(--launcher-bg-secondary)/0.5)] rounded">
           <div className={`text-lg font-semibold ${hasBrokenLinks ? 'text-[hsl(var(--accent-error))]' : 'text-[hsl(var(--launcher-text-primary))]'}`}>
-            {health.broken_links?.length || 0}
+            {health.broken_links.length}
           </div>
           <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">Broken</div>
         </div>
         <div className="p-2 bg-[hsl(var(--launcher-bg-secondary)/0.5)] rounded">
           <div className={`text-lg font-semibold ${hasOrphanedLinks ? 'text-[hsl(var(--accent-warning))]' : 'text-[hsl(var(--launcher-text-primary))]'}`}>
-            {health.orphaned_links?.length || 0}
+            {health.orphaned_links.length}
           </div>
           <div className="text-xs text-[hsl(var(--launcher-text-secondary))]">Orphaned</div>
         </div>
@@ -60,7 +60,7 @@ export function LinkHealthDetails({
             Broken Links
           </div>
           <div className="max-h-32 overflow-y-auto space-y-1">
-            {health.broken_links?.map((link: BrokenLinkInfo) => (
+            {health.broken_links.map((link: BrokenLinkInfo) => (
               <div
                 key={link.link_id}
                 className="text-xs p-2 bg-[hsl(var(--accent-error)/0.1)] rounded border border-[hsl(var(--accent-error)/0.2)]"
@@ -84,7 +84,7 @@ export function LinkHealthDetails({
             Orphaned Links
           </div>
           <div className="max-h-32 overflow-y-auto space-y-1">
-            {health.orphaned_links?.map((path: string, index: number) => (
+            {health.orphaned_links.map((path: string, index: number) => (
               <div
                 key={index}
                 className="text-xs p-2 bg-[hsl(var(--accent-warning)/0.1)] rounded border border-[hsl(var(--accent-warning)/0.2)] font-mono truncate"

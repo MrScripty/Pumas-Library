@@ -141,10 +141,10 @@ export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
   }
 
   const status = health?.status || 'healthy';
-  const config = statusConfig[status] ?? statusConfig['healthy'];
+  const config = statusConfig[status];
   const StatusIcon = config.icon;
-  const hasBrokenLinks = (health?.broken_links?.length || 0) > 0;
-  const hasOrphanedLinks = (health?.orphaned_links?.length || 0) > 0;
+  const hasBrokenLinks = (health?.broken_links.length || 0) > 0;
+  const hasOrphanedLinks = (health?.orphaned_links.length || 0) > 0;
   const hasIssues = hasBrokenLinks || hasOrphanedLinks;
 
   return (

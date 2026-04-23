@@ -3,8 +3,11 @@
 ## Context
 This inventory records the remaining trial failures for enabling
 `@typescript-eslint/no-unnecessary-condition` after the first low-risk cleanup
-batch. The batch cleared `HeaderResourceStrip.tsx`, `MappingPreviewState.ts`,
-`MigrationReportSummaries.tsx`, and `libraryModels.ts`.
+batch. Subsequent batches cleared `HeaderResourceStrip.tsx`,
+`MappingPreviewState.ts`, `MigrationReportSummaries.tsx`, `libraryModels.ts`,
+`LinkHealthDetails.tsx`, `LinkHealthStatus.tsx`, `MappingPreview.tsx`,
+`MigrationReportsPanel.tsx`, `ImportMetadataDetailsState.ts`, and
+`modelImportWorkflowHelpers.ts`.
 
 ## Remaining Findings
 - `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:95` - Unnecessary conditional, value is always truthy.
@@ -17,20 +20,8 @@ batch. The batch cleared `HeaderResourceStrip.tsx`, `MappingPreviewState.ts`,
 - `frontend/src/components/HuggingFaceAuthDialog.tsx:115` - Unnecessary conditional, value is always truthy.
 - `frontend/src/components/InstallDialog.tsx:147` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/InstallDialogFrame.tsx:96` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/LinkHealthDetails.tsx:44` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/LinkHealthDetails.tsx:50` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/LinkHealthDetails.tsx:63` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/LinkHealthDetails.tsx:87` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/LinkHealthStatus.tsx:144` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/components/LinkHealthStatus.tsx:146` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/LinkHealthStatus.tsx:147` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/MappingPreview.tsx:74` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/MappingPreview.tsx:86` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/MappingPreviewDialog.tsx:136` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/MigrationReportsPanel.tsx:66` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/components/model-import/ImportMetadataDetailsState.ts:41` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/model-import/modelImportMetadataLookup.ts:84` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/components/model-import/modelImportWorkflowHelpers.ts:56` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/model-import/useModelImportWorkflow.ts:248` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/model-import/useShardedSetDetection.ts:31` - Unnecessary conditional, value is always truthy.
 - `frontend/src/components/model-import/useShardedSetDetection.ts:51` - Unnecessary conditional, value is always falsy.

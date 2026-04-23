@@ -53,7 +53,7 @@ function createEntry(
 }
 
 export function preferredBundleFamily(entry: ImportEntryStatus): string {
-  const repoOwner = entry.hfMetadata?.repo_id?.split('/')[0]?.trim();
+  const repoOwner = entry.hfMetadata?.repo_id.split('/')[0]?.trim();
   if (repoOwner) {
     return repoOwner;
   }

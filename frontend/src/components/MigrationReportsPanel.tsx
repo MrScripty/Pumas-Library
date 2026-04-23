@@ -63,7 +63,7 @@ export const MigrationReportsPanel: React.FC = () => {
         setMessage({ type: 'error', text: result.error ?? 'Failed to load migration reports.' });
         return;
       }
-      setReports(result.reports ?? []);
+      setReports(result.reports);
     } catch (error) {
       logger.error('Failed to list migration reports', { error });
       setMessage({ type: 'error', text: 'Failed to load migration reports.' });

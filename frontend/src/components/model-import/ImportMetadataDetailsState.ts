@@ -33,17 +33,19 @@ function buildHfMetadataEntries(entry: ImportEntryStatus, hasMetadata: boolean):
     return [];
   }
 
+  const hfMetadata = entry.hfMetadata;
+
   return sortMetadataFields(
-    Object.keys(entry.hfMetadata).filter(
+    Object.keys(hfMetadata).filter(
       (key) =>
         !EXCLUDED_FIELDS.has(key) &&
-        entry.hfMetadata?.[key as keyof HFMetadataLookupResult] != null &&
-        entry.hfMetadata?.[key as keyof HFMetadataLookupResult] !== ''
+        hfMetadata[key as keyof HFMetadataLookupResult] != null &&
+        hfMetadata[key as keyof HFMetadataLookupResult] !== ''
     )
   ).map((key) => ({
     key,
     label: formatFieldName(key),
-    value: formatMetadataValue(key, entry.hfMetadata?.[key as keyof HFMetadataLookupResult]),
+    value: formatMetadataValue(key, hfMetadata[key as keyof HFMetadataLookupResult]),
   }));
 }
 

@@ -8,6 +8,7 @@ use pumas_library::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use tokio::fs;
 use tracing::{debug, warn};
 
 /// Progress update sent through channels.
@@ -129,27 +130,33 @@ struct InstallationProgressState {
 impl InstallationProgressTracker {
     /// Create a new progress tracker.
     pub fn new(cache_dir: PathBuf) -> Self {
-        let tracker = Self {
+        Self {
             cache_dir,
             state_filename: "installation-state.json".to_string(),
             state: Mutex::new(None),
-        };
+        }
+    }
 
-        // Clear any stale completed installation state from previous sessions
-        tracker.clear_stale_state_file();
-
+    /// Create a new progress tracker and clear stale completed state asynchronously.
+    pub async fn new_with_stale_cleanup(cache_dir: PathBuf) -> Self {
+        let tracker = Self::new(cache_dir);
+        tracker.clear_stale_state_file_async().await;
         tracker
     }
 
     /// Clear the state file if it contains a completed installation.
     /// This prevents stale "completed" states from persisting across restarts.
-    fn clear_stale_state_file(&self) {
+    async fn clear_stale_state_file_async(&self) {
         let state_path = self.cache_dir.join(&self.state_filename);
-        if !state_path.exists() {
+        let exists = match fs::try_exists(&state_path).await {
+            Ok(exists) => exists,
+            Err(_) => false,
+        };
+        if !exists {
             return;
         }
 
-        match std::fs::read_to_string(&state_path) {
+        match fs::read_to_string(&state_path).await {
             Ok(json) => {
                 if let Ok(state) = serde_json::from_str::<InstallationProgressState>(&json) {
                     if state.completed_at.is_some() {
@@ -157,13 +164,13 @@ impl InstallationProgressTracker {
                             "Clearing stale completed installation state for {} from previous session",
                             state.tag
                         );
-                        let _ = std::fs::remove_file(&state_path);
+                        let _ = fs::remove_file(&state_path).await;
                     }
                 }
             }
             Err(_) => {
                 // If we can't read the file, remove it to be safe
-                let _ = std::fs::remove_file(&state_path);
+                let _ = fs::remove_file(&state_path).await;
             }
         }
     }
@@ -419,6 +426,25 @@ impl InstallationProgressTracker {
         if should_clear {
             debug!("Clearing completed installation state");
             self.clear();
+        }
+    }
+
+    /// Clear completed state without blocking the async runtime on file removal.
+    pub async fn clear_completed_state_async(&mut self) {
+        let should_clear = {
+            let guard = self.state.lock().unwrap();
+            guard
+                .as_ref()
+                .map(|s| s.completed_at.is_some())
+                .unwrap_or(false)
+        };
+        if should_clear {
+            debug!("Clearing completed installation state");
+            *self.state.lock().unwrap() = None;
+            let state_path = self.cache_dir.join(&self.state_filename);
+            if fs::try_exists(&state_path).await.unwrap_or(false) {
+                let _ = fs::remove_file(&state_path).await;
+            }
         }
     }
 

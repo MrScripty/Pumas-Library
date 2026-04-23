@@ -217,6 +217,10 @@ Implementation notes:
   and materializes cached constraint files through async `tokio::fs` helpers in the dependency
   install path, so `ConstraintsManager` construction and cached-file reuse no longer perform those
   reads and writes synchronously on runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/progress.rs` now uses async stale-state
+  cleanup during manager initialization and async completed-state file removal in the delayed
+  cleanup task, so those installation-progress lifecycle edges no longer perform synchronous
+  progress-file reads or removals on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

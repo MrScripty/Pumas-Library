@@ -126,9 +126,9 @@ impl VersionManager {
             .join(PathsConfig::CACHE_DIR_NAME);
         let github_client = Arc::new(GitHubClient::new(cache_dir.clone())?);
 
-        let progress_tracker = Arc::new(RwLock::new(InstallationProgressTracker::new(
-            cache_dir.clone(),
-        )));
+        let progress_tracker = Arc::new(RwLock::new(
+            InstallationProgressTracker::new_with_stale_cleanup(cache_dir.clone()).await,
+        ));
 
         // Initialize state
         let state = Arc::new(RwLock::new(
@@ -442,7 +442,7 @@ impl VersionManager {
             tokio::spawn(async move {
                 tokio::time::sleep(Duration::from_secs(5)).await;
                 let mut tracker = progress_tracker.write().await;
-                tracker.clear_completed_state();
+                tracker.clear_completed_state_async().await;
             });
         });
 

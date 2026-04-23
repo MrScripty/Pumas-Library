@@ -1,9 +1,9 @@
 //! App-facing model-mapping methods on `PumasApi`.
 
-use crate::PumasApi;
 use crate::error::Result;
 use crate::model_library;
 use crate::models;
+use crate::PumasApi;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

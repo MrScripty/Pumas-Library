@@ -1,8 +1,8 @@
 //! Link-registry and link-health methods on `PumasApi`.
 
-use crate::PumasApi;
 use crate::error::Result;
 use crate::models;
+use crate::PumasApi;
 
 impl PumasApi {
     /// Get the health status of model links for a version.

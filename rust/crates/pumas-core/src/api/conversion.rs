@@ -1,8 +1,8 @@
 //! Model format conversion methods on PumasApi.
 
-use crate::PumasApi;
 use crate::conversion;
 use crate::error::Result;
+use crate::PumasApi;
 
 impl PumasApi {
     // ========================================

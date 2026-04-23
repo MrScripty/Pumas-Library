@@ -10,8 +10,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 /// HuggingFace API base URL.
 pub(crate) const HF_API_BASE: &str = "https://huggingface.co/api";

@@ -1,9 +1,9 @@
 //! HuggingFace methods on PumasApi.
 
-use crate::PumasApi;
 use crate::error::{PumasError, Result};
 use crate::model_library;
 use crate::models;
+use crate::PumasApi;
 use std::collections::HashSet;
 use std::path::Path;
 use tracing::{info, warn};

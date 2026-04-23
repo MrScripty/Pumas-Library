@@ -5,11 +5,12 @@
 
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
-    DiffusersBundleMetadataSpec, DiffusersValidationResult, build_diffusers_bundle_metadata,
-    build_external_diffusers_metadata, validate_diffusers_directory_for_import,
+    build_diffusers_bundle_metadata, build_external_diffusers_metadata,
+    validate_diffusers_directory_for_import, DiffusersBundleMetadataSpec,
+    DiffusersValidationResult,
 };
-use crate::model_library::hashing::{DualHash, compute_dual_hash};
-use crate::model_library::identifier::{ModelTypeInfo, identify_model_type};
+use crate::model_library::hashing::{compute_dual_hash, DualHash};
+use crate::model_library::identifier::{identify_model_type, ModelTypeInfo};
 use crate::model_library::library::ModelLibrary;
 use crate::model_library::naming::{normalize_filename, normalize_name};
 use crate::model_library::sharding;
@@ -19,9 +20,9 @@ use crate::model_library::types::{
     SecurityTier,
 };
 use crate::model_library::{
-    AuxFilesCompleteInfo, DownloadCompletionInfo, TaskNormalizationStatus,
     normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index,
+    validate_metadata_v2_with_index, AuxFilesCompleteInfo, DownloadCompletionInfo,
+    TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -2085,12 +2086,10 @@ mod tests {
         let model_dir = library.build_model_path("diffusion", "cc-nms", "tiny-sd-turbo");
         assert!(model_dir.exists());
         assert!(model_dir.join("model_index.json").exists());
-        assert!(
-            model_dir
-                .join("unet")
-                .join("diffusion_pytorch_model.safetensors")
-                .exists()
-        );
+        assert!(model_dir
+            .join("unet")
+            .join("diffusion_pytorch_model.safetensors")
+            .exists());
         assert!(bundle_root.join("model_index.json").exists());
 
         let metadata = library.load_metadata(&model_dir).unwrap().unwrap();

@@ -4,7 +4,7 @@ use super::{
 };
 use crate::model_library::dependency_pins::parse_and_canonicalize_profile_spec;
 use crate::{PumasError, Result};
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{params, OptionalExtension};
 
 impl ModelIndex {
     /// Insert or update a dependency profile row.

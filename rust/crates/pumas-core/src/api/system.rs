@@ -1,11 +1,11 @@
 //! System utility methods on PumasApi.
 
-use crate::PumasApi;
 use crate::config::AppId;
 use crate::error::{PumasError, Result};
 use crate::launcher;
 use crate::models;
 use crate::system;
+use crate::PumasApi;
 
 impl PumasApi {
     // ========================================

@@ -5,7 +5,7 @@ mod governance;
 mod metadata_overlays;
 
 use crate::{PumasError, Result};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json::Value;
@@ -1017,17 +1017,13 @@ mod tests {
 
         let violations = index.list_foreign_key_violations().unwrap();
         assert_eq!(violations.len(), 2);
-        assert!(
-            violations
-                .iter()
-                .any(|violation| violation.table == "model_dependency_bindings")
-        );
-        assert!(
-            violations
-                .iter()
-                .all(|violation| violation.parent == "models"
-                    || violation.parent == "dependency_profiles")
-        );
+        assert!(violations
+            .iter()
+            .any(|violation| violation.table == "model_dependency_bindings"));
+        assert!(violations
+            .iter()
+            .all(|violation| violation.parent == "models"
+                || violation.parent == "dependency_profiles"));
     }
 
     #[test]
@@ -1085,28 +1081,20 @@ mod tests {
         assert!(arch_rules.iter().any(|r| r.pattern == "ForCausalLM"));
         assert!(arch_rules.iter().any(|r| r.pattern == "MossTTSDelayModel"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llama"));
-        assert!(
-            config_rules
-                .iter()
-                .any(|r| r.config_model_type == "moss_tts_delay")
-        );
-        assert!(
-            config_rules
-                .iter()
-                .any(|r| r.config_model_type == "text-generation")
-        );
-        assert!(
-            config_rules
-                .iter()
-                .any(|r| r.config_model_type == "text-ranking")
-        );
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "moss_tts_delay"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "text-generation"));
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "text-ranking"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "vlm"));
         assert!(config_rules.iter().any(|r| r.config_model_type == "llm"));
-        assert!(
-            config_rules
-                .iter()
-                .any(|r| r.config_model_type == "reranker")
-        );
+        assert!(config_rules
+            .iter()
+            .any(|r| r.config_model_type == "reranker"));
     }
 
     #[test]
@@ -1265,32 +1253,24 @@ mod tests {
         assert!(effective.get("new_flag").is_none());
 
         let history = index.list_model_metadata_history(model_id).unwrap();
-        assert!(
-            history
-                .iter()
-                .any(|event| event.action == "baseline_created")
-        );
-        assert!(
-            history
-                .iter()
-                .any(|event| event.action == "overlay_created")
-        );
-        assert!(
-            history
-                .iter()
-                .any(|event| event.action == "overlay_superseded")
-        );
+        assert!(history
+            .iter()
+            .any(|event| event.action == "baseline_created"));
+        assert!(history
+            .iter()
+            .any(|event| event.action == "overlay_created"));
+        assert!(history
+            .iter()
+            .any(|event| event.action == "overlay_superseded"));
 
         let reset = index
             .reset_metadata_overlay(model_id, "tester-3", Some("reset"))
             .unwrap();
         assert!(reset);
-        assert!(
-            index
-                .get_active_metadata_overlay(model_id)
-                .unwrap()
-                .is_none()
-        );
+        assert!(index
+            .get_active_metadata_overlay(model_id)
+            .unwrap()
+            .is_none());
 
         let effective = index
             .get_effective_metadata_json(model_id)
@@ -1301,11 +1281,9 @@ mod tests {
         assert_eq!(effective.get("description").unwrap(), "A test model");
 
         let history = index.list_model_metadata_history(model_id).unwrap();
-        assert!(
-            history
-                .iter()
-                .any(|event| event.action == "reset_to_original")
-        );
+        assert!(history
+            .iter()
+            .any(|event| event.action == "reset_to_original"));
     }
 
     #[test]
@@ -1435,18 +1413,16 @@ mod tests {
             })
             .unwrap();
 
-        assert!(
-            !index
-                .upsert_dependency_profile(&DependencyProfileRecord {
-                    profile_id: "p1".to_string(),
-                    profile_version: 1,
-                    profile_hash: Some("still-ignored".to_string()),
-                    environment_kind: "python-venv".to_string(),
-                    spec_json: pinned_profile_spec("torch", "==2.5.1"),
-                    created_at: second_created_at,
-                })
-                .unwrap()
-        );
+        assert!(!index
+            .upsert_dependency_profile(&DependencyProfileRecord {
+                profile_id: "p1".to_string(),
+                profile_version: 1,
+                profile_hash: Some("still-ignored".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: pinned_profile_spec("torch", "==2.5.1"),
+                created_at: second_created_at,
+            })
+            .unwrap());
 
         let persisted = index.get_dependency_profile("p1", 1).unwrap().unwrap();
         assert_eq!(persisted.created_at, first_created_at);

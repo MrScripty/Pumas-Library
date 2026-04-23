@@ -19,7 +19,7 @@ use super::state_process::{
 use super::state_runtime::{
     disk_space_response, network_status_response, status_response, system_resources_response,
 };
-use super::{ReconcileScope, ReconciliationCoordinator, reconcile_on_demand};
+use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator};
 use crate::conversion;
 use crate::error::PumasError;
 use crate::ipc;

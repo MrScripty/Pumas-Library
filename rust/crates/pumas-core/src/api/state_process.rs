@@ -1,6 +1,6 @@
 //! Process lifecycle helpers used by primary-state IPC dispatch.
 
-use super::state::{PrimaryState, launcher_root_from_primary};
+use super::state::{launcher_root_from_primary, PrimaryState};
 use crate::error::PumasError;
 use crate::{models, process};
 use std::path::{Path, PathBuf};

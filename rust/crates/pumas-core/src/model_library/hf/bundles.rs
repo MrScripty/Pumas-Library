@@ -1,5 +1,5 @@
-use super::HuggingFaceClient;
 use super::types::HF_HUB_BASE;
+use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::external_assets::{
     is_diffusers_component_entry, is_optional_component_marker,
@@ -119,7 +119,7 @@ pub(crate) fn classify_repo_bundle_from_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model_library::types::{LfsFileInfo, REPO_FILE_TREE_VERSION, RepoFileTree};
+    use crate::model_library::types::{LfsFileInfo, RepoFileTree, REPO_FILE_TREE_VERSION};
 
     fn repo_tree(regular_files: &[&str], lfs_files: &[&str]) -> RepoFileTree {
         RepoFileTree {

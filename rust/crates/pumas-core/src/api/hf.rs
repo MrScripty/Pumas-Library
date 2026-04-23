@@ -761,8 +761,19 @@ impl PumasApi {
             return Ok(None);
         };
 
-        let bundle_root = Path::new(dir_path);
-        let Some(hints) = model_library::get_diffusers_bundle_lookup_hints(bundle_root) else {
+        let dir_path = dir_path.to_string();
+        let dir_path_for_lookup = dir_path.clone();
+        let hints = tokio::task::spawn_blocking(move || {
+            model_library::get_diffusers_bundle_lookup_hints(Path::new(&dir_path_for_lookup))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join bundle lookup hint extraction task: {}",
+                err
+            ))
+        })?;
+        let Some(hints) = hints else {
             return Ok(None);
         };
 

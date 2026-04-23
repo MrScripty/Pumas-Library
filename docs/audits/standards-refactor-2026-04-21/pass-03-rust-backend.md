@@ -334,7 +334,8 @@ Risks:
 - `pumas-rpc` now requires explicit `--allow-lan` opt-in for non-loopback `--host`, but the LAN
   mode threat model still needs explicit product documentation and review.
 - Torch LAN access can set host to `0.0.0.0`; this may be product-intended but needs documented security policy and authentication/authorization review.
-- Listener concurrent connection limits are not visible in `pumas-rpc/src/server.rs`.
+- RPC request concurrency is now capped in transport, but broader listener/backpressure policy for
+  Torch LAN mode still needs explicit product documentation and review.
 
 Rectification:
 - Validate host binding policy at CLI/config boundary.
@@ -348,6 +349,9 @@ Implementation notes:
   RPC default instead of accepting arbitrary listener addresses.
 - Completed: `pumas-rpc/README.md` now documents the loopback default plus explicit LAN opt-in for
   the RPC binary.
+- Completed: `pumas-rpc/src/server.rs` now applies a transport-level concurrency cap of 64
+  in-flight HTTP requests, and the crate README records that limit as part of the RPC trust and
+  availability policy.
 
 ### R09 - Language Binding Boundary Is Too Entangled With Core Types
 Status: partially compliant

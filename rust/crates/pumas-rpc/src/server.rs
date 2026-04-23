@@ -17,8 +17,11 @@ use tokio::{
     sync::{Mutex, RwLock},
     task::JoinHandle,
 };
+use tower::limit::ConcurrencyLimitLayer;
 use tower_http::cors::{AllowOrigin, CorsLayer};
 use tracing::{error, info, warn};
+
+const MAX_IN_FLIGHT_RPC_REQUESTS: usize = 64;
 
 /// Application state shared across handlers.
 pub struct AppState {
@@ -116,6 +119,7 @@ pub async fn start_server(
     let app = Router::new()
         .route("/health", get(handle_health))
         .route("/rpc", post(handle_rpc))
+        .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)
         .with_state(state);
 
@@ -126,7 +130,10 @@ pub async fn start_server(
     let listener = tokio::net::TcpListener::bind(addr).await?;
     let actual_addr = listener.local_addr()?;
 
-    info!("Server listening on {}", actual_addr);
+    info!(
+        "Server listening on {} with max {} in-flight requests",
+        actual_addr, MAX_IN_FLIGHT_RPC_REQUESTS
+    );
 
     // Spawn the server in the background and retain ownership of the task.
     let task = tokio::spawn(async move {

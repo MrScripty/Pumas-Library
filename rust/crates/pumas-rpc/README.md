@@ -15,6 +15,8 @@ The HTTP server accepts CORS requests only from loopback browser origins and onl
 
 The CLI host binding policy defaults to loopback-only addresses. Binding to a non-loopback IP now requires explicit `--allow-lan` opt-in at process startup.
 
+The server caps total in-flight HTTP requests at 64 to keep local renderer or automation bursts from turning into unbounded concurrent handler work.
+
 `start_server` returns an owned `ServerHandle`; callers must keep it alive for the server lifetime and call `shutdown()` during controlled teardown.
 
 ## Consumer Contract

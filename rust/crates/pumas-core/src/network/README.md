@@ -27,6 +27,9 @@ for release fetching and a download manager with progress tracking.
   rather than failing, controlled by each source's `CacheStrategy`.
 - **Trait-based web sources**: The `WebSource` trait allows new external services to be registered
   with the `NetworkManager` without modifying core networking code.
+- **Owned monitoring lifecycle**: Background connectivity monitoring keeps an owned task handle so
+  explicit stop and manager drop can terminate the monitor immediately instead of waiting for the
+  next sleep interval.
 
 ## Dependencies
 

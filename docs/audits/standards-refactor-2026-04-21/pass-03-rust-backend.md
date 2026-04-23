@@ -120,9 +120,10 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/hf/download.rs` tracks download task handles by
   download ID, aborts tracked tasks during explicit cancellation and client drop, and covers the
   cancel path with a focused task-ownership test.
-- Remaining: audit `pumas-core/src/network/manager.rs` background monitoring and
-  `pumas-core/src/api/reconciliation.rs` spawned reconciliation work for bounded ownership and
-  shutdown behavior.
+- Completed: `pumas-core/src/network/manager.rs` stores the connectivity monitoring task handle and
+  aborts it during explicit stop or manager drop.
+- Remaining: audit `pumas-core/src/api/reconciliation.rs` spawned reconciliation work for bounded
+  ownership and shutdown behavior.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

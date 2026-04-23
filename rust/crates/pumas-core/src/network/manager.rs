@@ -14,9 +14,10 @@ use crate::{PumasError, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
 /// Network connectivity state.
@@ -117,6 +118,8 @@ pub struct NetworkManager {
     config: ConnectivityConfig,
     /// Whether background monitoring is active.
     monitoring_active: AtomicBool,
+    /// Owned background monitoring task handle.
+    monitoring_task: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl NetworkManager {
@@ -138,6 +141,7 @@ impl NetworkManager {
             sources: RwLock::new(HashMap::new()),
             config,
             monitoring_active: AtomicBool::new(false),
+            monitoring_task: Mutex::new(None),
         })
     }
 
@@ -453,7 +457,7 @@ impl NetworkManager {
         }
 
         let manager = Arc::clone(self);
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             info!("Starting background connectivity monitoring");
 
             while manager.monitoring_active.load(Ordering::SeqCst) {
@@ -475,16 +479,40 @@ impl NetworkManager {
 
             info!("Background connectivity monitoring stopped");
         });
+
+        let mut monitoring_task = self
+            .monitoring_task
+            .lock()
+            .expect("network monitoring task lock poisoned");
+        if let Some(previous) = monitoring_task.replace(handle) {
+            previous.abort();
+        }
     }
 
     /// Stop background monitoring.
     pub fn stop_monitoring(&self) {
         self.monitoring_active.store(false, Ordering::SeqCst);
+        if let Some(handle) = self
+            .monitoring_task
+            .lock()
+            .expect("network monitoring task lock poisoned")
+            .take()
+        {
+            handle.abort();
+        }
     }
 
     /// Check if background monitoring is active.
     pub fn is_monitoring(&self) -> bool {
         self.monitoring_active.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    fn has_monitoring_task(&self) -> bool {
+        self.monitoring_task
+            .lock()
+            .expect("network monitoring task lock poisoned")
+            .is_some()
     }
 
     // === Accessors ===
@@ -517,6 +545,20 @@ impl NetworkManager {
             circuit_breakers: self.circuit_breaker_stats().await,
             registered_sources: self.source_ids().await,
             monitoring_active: self.is_monitoring(),
+        }
+    }
+}
+
+impl Drop for NetworkManager {
+    fn drop(&mut self) {
+        self.monitoring_active.store(false, Ordering::SeqCst);
+        if let Some(handle) = self
+            .monitoring_task
+            .lock()
+            .expect("network monitoring task lock poisoned")
+            .take()
+        {
+            handle.abort();
         }
     }
 }
@@ -602,5 +644,25 @@ mod tests {
         assert_eq!(status.connectivity, ConnectivityState::Unknown);
         assert!(status.registered_sources.is_empty());
         assert!(!status.monitoring_active);
+    }
+
+    #[tokio::test]
+    async fn test_start_and_stop_monitoring_tracks_task_handle() {
+        let manager = Arc::new(
+            NetworkManager::with_config(ConnectivityConfig {
+                online_verify_interval: Duration::from_secs(60),
+                offline_recheck_interval: Duration::from_secs(60),
+                ..ConnectivityConfig::default()
+            })
+            .unwrap(),
+        );
+
+        manager.start_monitoring();
+        assert!(manager.is_monitoring());
+        assert!(manager.has_monitoring_task());
+
+        manager.stop_monitoring();
+        assert!(!manager.is_monitoring());
+        assert!(!manager.has_monitoring_task());
     }
 }

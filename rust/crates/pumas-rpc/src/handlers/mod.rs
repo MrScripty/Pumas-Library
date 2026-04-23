@@ -395,9 +395,9 @@ mod tests {
         assert_eq!(response.error.unwrap().code, -32600);
     }
 
-    #[test]
-    fn test_detect_sandbox() {
-        let (is_sandboxed, sandbox_type, _) = detect_sandbox_environment();
+    #[tokio::test]
+    async fn test_detect_sandbox() {
+        let (is_sandboxed, sandbox_type, _) = detect_sandbox_environment().await;
         // In normal development, we're not sandboxed
         // This test verifies the function runs without error
         assert!(!is_sandboxed || ["flatpak", "snap", "docker", "appimage"].contains(&sandbox_type));

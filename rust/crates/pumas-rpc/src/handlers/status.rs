@@ -95,7 +95,7 @@ pub async fn restart_launcher(state: &AppState, _params: &Value) -> pumas_librar
 }
 
 pub async fn get_sandbox_info(_state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let (is_sandboxed, sandbox_type, limitations) = detect_sandbox_environment();
+    let (is_sandboxed, sandbox_type, limitations) = detect_sandbox_environment().await;
     Ok(json!({
         "success": true,
         "is_sandboxed": is_sandboxed,

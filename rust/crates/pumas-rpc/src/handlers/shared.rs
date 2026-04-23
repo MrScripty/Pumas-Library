@@ -180,9 +180,12 @@ pub(crate) async fn sync_version_paths_to_process_manager(state: &AppState) {
 }
 
 /// Detect if running in a sandbox environment.
-pub(crate) fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static str>) {
+pub(crate) async fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static str>) {
     // Check for Flatpak
-    if std::path::Path::new("/.flatpak-info").exists() {
+    if tokio::fs::try_exists("/.flatpak-info")
+        .await
+        .unwrap_or(false)
+    {
         return (
             true,
             "flatpak",
@@ -206,7 +209,7 @@ pub(crate) fn detect_sandbox_environment() -> (bool, &'static str, Vec<&'static 
     }
 
     // Check for Docker
-    if std::path::Path::new("/.dockerenv").exists() {
+    if tokio::fs::try_exists("/.dockerenv").await.unwrap_or(false) {
         return (
             true,
             "docker",

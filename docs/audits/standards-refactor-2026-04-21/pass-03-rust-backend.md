@@ -327,6 +327,9 @@ Implementation notes:
   launcher restart request through `tokio::task::spawn_blocking`, so RPC restart requests no longer
   run synchronous launcher-script existence checks and process spawning inline on async runtime
   threads.
+- Completed: `pumas-rpc/src/handlers/shared.rs`, `handlers/status.rs`, and `handlers/mod.rs` now
+  load sandbox status through async path probes, so the RPC sandbox-info request path no longer
+  performs synchronous filesystem checks inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

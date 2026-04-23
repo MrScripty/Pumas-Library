@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useHover } from '@react-aria/interactions';
 import { Anchor, CircleX } from 'lucide-react';
-import type { APIError } from '../errors';
+import { APIError } from '../errors';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('VersionSelectorDropdown');
@@ -17,11 +17,10 @@ interface VersionSelectorDefaultButtonProps {
 
 function reportDefaultVersionError(error: unknown, version: string, isDefault: boolean): void {
   const action = isDefault ? 'clearing' : 'setting';
-  if ((error as APIError)?.message && (error as APIError)?.endpoint) {
-    const apiError = error as APIError;
+  if (error instanceof APIError && error.endpoint) {
     logger.error(`API error ${action} default version`, {
-      error: apiError.message,
-      endpoint: apiError.endpoint,
+      error: error.message,
+      endpoint: error.endpoint,
       version,
     });
   } else if (error instanceof Error) {

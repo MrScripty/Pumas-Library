@@ -262,6 +262,7 @@ Rectification:
 - Completed: replace frontend non-null assertions in production helpers and tests with explicit guards, then enforce `@typescript-eslint/no-non-null-assertion`.
 - Completed: clear the first low-risk `@typescript-eslint/no-unnecessary-condition` batch in resource, mapping, migration-summary, and library-model helpers; the remaining queue is recorded in `pass-02-frontend-unnecessary-condition-inventory.md`.
 - Completed: clear a second low-risk `@typescript-eslint/no-unnecessary-condition` batch in link-health, mapping-preview, migration-report, and import-metadata helpers, reducing the remaining inventory from 78 to 66 findings.
+- Completed: clear a third `@typescript-eslint/no-unnecessary-condition` batch in version display-state and default-version controls, reducing the remaining inventory from 66 to 58 findings.
 - Completed: broad lint waiver comments now point at audit F07 instead of an untracked “for now” note.
 - Remaining: lower `max-lines-per-function` toward the 80-line decomposition target after the inventory queue is reduced, and convert `@typescript-eslint/no-unnecessary-condition` to scoped overrides or enforceable warnings.
 

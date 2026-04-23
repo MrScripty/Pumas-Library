@@ -52,7 +52,7 @@ function isPendingInstallProgress(progress?: InstallationProgress | null): boole
   return !progress
     || (
       progress.stage === 'download'
-      && (progress.downloaded_bytes ?? 0) <= 0
+      && progress.downloaded_bytes <= 0
       && (progress.download_speed ?? 0) <= 0
       && !progress.error
     );

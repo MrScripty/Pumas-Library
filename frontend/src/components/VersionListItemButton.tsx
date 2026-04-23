@@ -190,7 +190,7 @@ export function VersionListItemButton({
       onCancel();
       return;
     }
-    if (isInstalled && !isInstalling) {
+    if (isInstalled) {
       onRemove();
       return;
     }

@@ -7,7 +7,9 @@ batch. Subsequent batches cleared `HeaderResourceStrip.tsx`,
 `MappingPreviewState.ts`, `MigrationReportSummaries.tsx`, `libraryModels.ts`,
 `LinkHealthDetails.tsx`, `LinkHealthStatus.tsx`, `MappingPreview.tsx`,
 `MigrationReportsPanel.tsx`, `ImportMetadataDetailsState.ts`, and
-`modelImportWorkflowHelpers.ts`.
+`modelImportWorkflowHelpers.ts`. A version-management batch also cleared
+`VersionListItemButton.tsx`, `VersionListItemState.ts`,
+`VersionSelectorDefaultButton.tsx`, and `VersionSelectorState.ts`.
 
 ## Remaining Findings
 - `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:95` - Unnecessary conditional, value is always truthy.
@@ -31,14 +33,6 @@ batch. Subsequent batches cleared `HeaderResourceStrip.tsx`,
 - `frontend/src/components/ModelMetadataModal.tsx:228` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/components/ModelMetadataModal.tsx:231` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/components/ProgressDetailsView.tsx:61` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/VersionListItemButton.tsx:193` - Unnecessary conditional, value is always truthy.
-- `frontend/src/components/VersionListItemState.ts:40` - Unnecessary conditional, the types have no overlap.
-- `frontend/src/components/VersionListItemState.ts:40` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/VersionListItemState.ts:63` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
-- `frontend/src/components/VersionListItemState.ts:110` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/VersionSelectorDefaultButton.tsx:20` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/VersionSelectorDefaultButton.tsx:20` - Unnecessary optional chain on a non-nullish value.
-- `frontend/src/components/VersionSelectorState.ts:55` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.
 - `frontend/src/errors/index.ts:15` - Unnecessary conditional, value is always truthy.
 - `frontend/src/hooks/installationProgressTracking.ts:38` - Unnecessary optional chain on a non-nullish value.
 - `frontend/src/hooks/modelDownloadState.ts:65` - Unnecessary conditional, expected left-hand side of `??` operator to be possibly null or undefined.

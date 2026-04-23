@@ -34,11 +34,7 @@ function getRingPercent(progress: InstallationProgress | null): number | null {
 }
 
 function getPackageLabel(progress: InstallationProgress | null): string {
-  if (
-    progress?.dependency_count !== null &&
-    progress?.dependency_count !== undefined &&
-    progress?.completed_dependencies !== null
-  ) {
+  if (progress && progress.dependency_count !== null) {
     return `${progress.completed_dependencies}/${progress.dependency_count}`;
   }
   if (progress?.stage === 'dependencies') {
@@ -60,7 +56,7 @@ function isPendingDownload(
   }
   return (
     progress.stage === 'download' &&
-    (progress.downloaded_bytes ?? 0) <= 0 &&
+    progress.downloaded_bytes <= 0 &&
     (progress.download_speed ?? 0) <= 0
   );
 }
@@ -107,7 +103,7 @@ export function getVersionInstallDisplayState({
   const isInstallFailed = installNetworkStatus === 'failed' || Boolean(progress?.error);
 
   return {
-    displayTag: release.tagName?.replace(/^v/i, '') || release.tagName,
+    displayTag: release.tagName.replace(/^v/i, '') || release.tagName,
     downloadIconClass: getDownloadIconClass(installNetworkStatus),
     downloadIconStyle: getDownloadIconStyle(installNetworkStatus),
     isComplete: isInstalled || (isInstalling && Boolean(progress?.success) && Boolean(progress?.completed_at)),

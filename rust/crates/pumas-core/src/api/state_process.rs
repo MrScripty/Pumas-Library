@@ -4,6 +4,13 @@ use super::state::{launcher_root_from_primary, PrimaryState};
 use crate::error::PumasError;
 use crate::{models, process};
 use std::path::{Path, PathBuf};
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> std::result::Result<bool, PumasError> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 pub(super) async fn is_comfyui_running(primary: &PrimaryState) -> bool {
     let mgr_lock = primary.process_manager.read().await;
@@ -79,7 +86,7 @@ pub(super) async fn launch_ollama(
     tag: &str,
     version_dir: &Path,
 ) -> std::result::Result<models::LaunchResponse, PumasError> {
-    if !version_dir.exists() {
+    if !path_exists(version_dir).await? {
         return Ok(models::LaunchResponse {
             success: false,
             error: Some(format!(
@@ -153,7 +160,7 @@ pub(super) async fn launch_torch(
     tag: &str,
     version_dir: &Path,
 ) -> std::result::Result<models::LaunchResponse, PumasError> {
-    if !version_dir.exists() {
+    if !path_exists(version_dir).await? {
         return Ok(models::LaunchResponse {
             success: false,
             error: Some(format!(
@@ -203,7 +210,7 @@ pub(super) async fn launch_version(
     tag: &str,
     version_dir: &Path,
 ) -> std::result::Result<models::LaunchResponse, PumasError> {
-    if !version_dir.exists() {
+    if !path_exists(version_dir).await? {
         return Ok(models::LaunchResponse {
             success: false,
             error: Some(format!(

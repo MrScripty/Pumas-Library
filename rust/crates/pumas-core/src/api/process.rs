@@ -4,6 +4,14 @@ use crate::error::{PumasError, Result};
 use crate::models;
 use crate::process;
 use crate::PumasApi;
+use std::path::Path;
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 impl PumasApi {
     // ========================================
@@ -158,7 +166,7 @@ impl PumasApi {
                 .await;
         }
 
-        if !version_dir.exists() {
+        if !path_exists(version_dir).await? {
             return Ok(models::LaunchResponse {
                 success: false,
                 error: Some(format!(
@@ -261,7 +269,7 @@ impl PumasApi {
                 .await;
         }
 
-        if !version_dir.exists() {
+        if !path_exists(version_dir).await? {
             return Ok(models::LaunchResponse {
                 success: false,
                 error: Some(format!(
@@ -326,7 +334,7 @@ impl PumasApi {
                 .await;
         }
 
-        if !version_dir.exists() {
+        if !path_exists(version_dir).await? {
             return Ok(models::LaunchResponse {
                 success: false,
                 error: Some(format!(

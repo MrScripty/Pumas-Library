@@ -157,6 +157,10 @@ Implementation notes:
   `tokio::fs` for launcher-root/model-mapping directory existence checks and creation so startup
   and mapping apply/sync request paths do not perform those directory operations synchronously on
   async runtime threads.
+- Completed: `pumas-core/src/api/process.rs`, `api/state_process.rs`, and
+  `pumas-app-manager/src/version_manager/dependencies.rs` now use `tokio::fs` for async
+  version/venv/requirements path probes so launch and dependency-management entry points no longer
+  perform synchronous existence checks before handing work to blocking launch/install helpers.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

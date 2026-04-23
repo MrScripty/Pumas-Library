@@ -9,11 +9,19 @@ use pumas_library::models::DependencyStatus;
 use pumas_library::{PumasError, Result};
 use regex::Regex;
 use std::collections::HashSet;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 /// Manages Python dependencies for versions.
 pub struct DependencyManager {
@@ -58,14 +66,14 @@ impl DependencyManager {
     /// Check dependencies for a version.
     pub async fn check_dependencies(&self, tag: &str) -> Result<DependencyStatus> {
         let version_path = self.version_path(tag);
-        if !version_path.exists() {
+        if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
         }
 
         let venv_python = self.venv_python(tag);
-        if !venv_python.exists() {
+        if !path_exists(&venv_python).await? {
             return Ok(DependencyStatus {
                 installed: vec![],
                 missing: vec!["Virtual environment not created".to_string()],
@@ -74,7 +82,7 @@ impl DependencyManager {
         }
 
         let requirements_path = version_path.join("requirements.txt");
-        if !requirements_path.exists() {
+        if !path_exists(&requirements_path).await? {
             return Ok(DependencyStatus {
                 installed: vec![],
                 missing: vec![],
@@ -213,7 +221,7 @@ impl DependencyManager {
         progress_tx: Option<mpsc::Sender<ProgressUpdate>>,
     ) -> Result<bool> {
         let version_path = self.version_path(tag);
-        if !version_path.exists() {
+        if !path_exists(&version_path).await? {
             return Err(PumasError::VersionNotFound {
                 tag: tag.to_string(),
             });
@@ -225,7 +233,7 @@ impl DependencyManager {
         }
 
         let requirements_path = version_path.join("requirements.txt");
-        if !requirements_path.exists() {
+        if !path_exists(&requirements_path).await? {
             info!("No requirements.txt found for {}", tag);
             return Ok(true);
         }
@@ -406,7 +414,7 @@ impl DependencyManager {
     /// Get the Python version for a venv.
     pub async fn get_python_version(&self, tag: &str) -> Result<Option<String>> {
         let venv_python = self.venv_python(tag);
-        if !venv_python.exists() {
+        if !path_exists(&venv_python).await? {
             return Ok(None);
         }
 
@@ -479,5 +487,21 @@ optional-package
         assert_eq!(manager.canonicalize_name("PyTorch"), "pytorch");
         assert_eq!(manager.canonicalize_name("scikit_learn"), "scikit-learn");
         assert_eq!(manager.canonicalize_name("PIL"), "pil");
+    }
+
+    #[tokio::test]
+    async fn test_check_dependencies_returns_version_not_found_for_missing_version() {
+        let (manager, _temp) = create_test_manager();
+
+        let result = manager.check_dependencies("missing-version").await;
+        assert!(matches!(result, Err(PumasError::VersionNotFound { .. })));
+    }
+
+    #[tokio::test]
+    async fn test_get_python_version_returns_none_without_venv() {
+        let (manager, _temp) = create_test_manager();
+
+        let version = manager.get_python_version("missing-version").await.unwrap();
+        assert_eq!(version, None);
     }
 }

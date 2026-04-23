@@ -259,6 +259,7 @@ Rectification:
 - Completed: reduce `frontend/src/App.tsx` orchestration complexity by moving shell state projection and prop construction into `frontend/src/components/AppShellState.ts` while preserving App shell behavior with focused helper coverage.
 - Completed: `frontend/eslint.config.js` enforces ESLint `complexity` at a maximum of 20 after the function-level decomposition wave cleared the full frontend source tree.
 - Completed: `frontend/eslint.config.js` enforces a coarse `max-lines-per-function` ratchet at 300 effective lines; the failed 80-line trial inventory is recorded in `pass-02-frontend-function-length-inventory.md`.
+- Completed: split the oversized `AppIndicator.test.tsx` wrapper into rendering/state and interaction/cleanup suites, then lower the enforced `max-lines-per-function` ratchet from 300 to 275 effective lines.
 - Completed: replace frontend non-null assertions in production helpers and tests with explicit guards, then enforce `@typescript-eslint/no-non-null-assertion`.
 - Completed: clear the first low-risk `@typescript-eslint/no-unnecessary-condition` batch in resource, mapping, migration-summary, and library-model helpers; the remaining queue is recorded in `pass-02-frontend-unnecessary-condition-inventory.md`.
 - Completed: clear a second low-risk `@typescript-eslint/no-unnecessary-condition` batch in link-health, mapping-preview, migration-report, and import-metadata helpers, reducing the remaining inventory from 78 to 66 findings.

@@ -7,24 +7,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, act, screen } from '@testing-library/react';
 import { AppIndicator } from './AppIndicator';
 
-describe('AppIndicator', () => {
-  const defaultProps = {
-    appId: 'test-app',
-    state: 'offline' as const,
-    isSelected: false,
-    hasInstall: true,
-    launchError: false,
-  };
+const defaultProps = {
+  appId: 'test-app',
+  state: 'offline' as const,
+  isSelected: false,
+  hasInstall: true,
+  launchError: false,
+};
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
+beforeEach(() => {
+  vi.useFakeTimers();
+});
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+});
 
+describe('AppIndicator rendering and states', () => {
   describe('Rendering', () => {
     it('should render without crashing', () => {
       const { container } = render(<AppIndicator {...defaultProps} />);
@@ -297,7 +297,9 @@ describe('AppIndicator', () => {
       }
     });
   });
+});
 
+describe('AppIndicator interactions and cleanup', () => {
   describe('Event Handling', () => {
     it('should stop event propagation on click', () => {
       const onLaunch = vi.fn();

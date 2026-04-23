@@ -3,14 +3,14 @@
 ## Context
 This inventory records the failed trial run for lowering
 `max-lines-per-function` to 80 effective lines. The frontend now enforces a
-coarse 300-line function ratchet, and the entries below are the next
-decomposition queue before the threshold can be lowered.
+coarse 275-line function ratchet after splitting the oversized
+`AppIndicator.test.tsx` suite. The entries below are the next decomposition
+queue before the threshold can be lowered to the 80-line target.
 
 ## Trial Rule
 `max-lines-per-function: ["error", { "max": 80, "skipBlankLines": true, "skipComments": true }]`
 
 ## Findings
-- `frontend/src/components/AppIndicator.test.tsx:10` - 286 effective lines.
 - `frontend/src/hooks/usePhysicsDrag.ts:30` - 271 effective lines.
 - `frontend/src/components/MigrationReportsPanel.tsx:39` - 259 effective lines.
 - `frontend/src/components/ModelMetadataModal.tsx:22` - 257 effective lines.
@@ -22,6 +22,7 @@ decomposition queue before the threshold can be lowered.
 - `frontend/src/hooks/useModelDownloads.test.ts:36` - 226 effective lines.
 - `frontend/src/hooks/useVersionFetching.ts:46` - 222 effective lines.
 - `frontend/src/components/AppIndicator.tsx:19` - 221 effective lines.
+- `frontend/src/components/AppIndicator.test.tsx:27` - 203 effective lines.
 - `frontend/src/components/app-panels/sections/TorchModelSlotsSection.tsx:35` - 215 effective lines.
 - `frontend/src/hooks/useModelLibraryActions.ts:50` - 215 effective lines.
 - `frontend/src/components/app-panels/sections/OllamaModelSection.tsx:35` - 212 effective lines.

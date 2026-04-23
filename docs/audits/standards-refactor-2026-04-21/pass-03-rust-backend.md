@@ -286,6 +286,11 @@ Implementation notes:
   launcher update checks, so the async GitHub release polling path no longer performs synchronous
   cache-file reads, directory creation, or cache writes on runtime threads before returning cached
   or fresh launcher update metadata.
+- Completed: `pumas-core/src/api/process.rs`, `api/system.rs`, `api/state_process.rs`, and
+  `api/state_runtime.rs` now route process detection and resource aggregation through
+  `tokio::task::spawn_blocking`, so direct API calls and mirrored IPC status/process request paths
+  no longer execute synchronous process scans, PID-file inspection, sysinfo refreshes, or GPU
+  resource queries inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

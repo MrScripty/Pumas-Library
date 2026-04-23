@@ -13,18 +13,30 @@ async fn path_exists(path: &Path) -> std::result::Result<bool, PumasError> {
 }
 
 pub(super) async fn is_comfyui_running(primary: &PrimaryState) -> bool {
-    let mgr_lock = primary.process_manager.read().await;
-    if let Some(ref mgr) = *mgr_lock {
-        mgr.is_running()
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.is_running())
+            .await
+            .unwrap_or(false)
     } else {
         false
     }
 }
 
 pub(super) async fn get_running_processes(primary: &PrimaryState) -> Vec<process::ProcessInfo> {
-    let mgr_lock = primary.process_manager.read().await;
-    if let Some(ref mgr) = *mgr_lock {
-        mgr.get_processes_with_resources()
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.get_processes_with_resources())
+            .await
+            .unwrap_or_default()
     } else {
         vec![]
     }
@@ -58,9 +70,15 @@ pub(super) async fn stop_comfyui(primary: &PrimaryState) -> std::result::Result<
 }
 
 pub(super) async fn is_ollama_running(primary: &PrimaryState) -> bool {
-    let mgr_lock = primary.process_manager.read().await;
-    if let Some(ref mgr) = *mgr_lock {
-        mgr.is_ollama_running()
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.is_ollama_running())
+            .await
+            .unwrap_or(false)
     } else {
         false
     }
@@ -132,9 +150,15 @@ pub(super) async fn launch_ollama(
 }
 
 pub(super) async fn is_torch_running(primary: &PrimaryState) -> bool {
-    let mgr_lock = primary.process_manager.read().await;
-    if let Some(ref mgr) = *mgr_lock {
-        mgr.is_torch_running()
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
+    };
+
+    if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || mgr.is_torch_running())
+            .await
+            .unwrap_or(false)
     } else {
         false
     }

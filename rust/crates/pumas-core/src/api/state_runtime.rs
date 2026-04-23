@@ -64,49 +64,71 @@ pub(super) fn disk_space_response(
 pub(super) async fn status_response(
     primary: &PrimaryState,
 ) -> std::result::Result<models::StatusResponse, PumasError> {
-    let mgr_lock = primary.process_manager.read().await;
-    let comfyui_running = mgr_lock.as_ref().is_some_and(|mgr| mgr.is_running());
-    let ollama_running = mgr_lock.as_ref().is_some_and(|mgr| mgr.is_ollama_running());
-    let torch_running = mgr_lock.as_ref().is_some_and(|mgr| mgr.is_torch_running());
-    let last_launch_error = mgr_lock.as_ref().and_then(|mgr| mgr.last_launch_error());
-    let last_launch_log = mgr_lock.as_ref().and_then(|mgr| {
-        mgr.last_launch_log()
-            .map(|p| p.to_string_lossy().to_string())
-    });
-
-    let app_resources = if let Some(ref mgr) = *mgr_lock {
-        let comfyui_resources = if comfyui_running {
-            mgr.aggregate_app_resources()
-                .map(|r| models::AppResourceUsage {
-                    gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                    ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                })
-        } else {
-            None
-        };
-
-        let ollama_resources = if ollama_running {
-            mgr.aggregate_ollama_resources()
-                .map(|r| models::AppResourceUsage {
-                    gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                    ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
-                })
-        } else {
-            None
-        };
-
-        if comfyui_resources.is_some() || ollama_resources.is_some() {
-            Some(models::AppResources {
-                comfyui: comfyui_resources,
-                ollama: ollama_resources,
-            })
-        } else {
-            None
-        }
-    } else {
-        None
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
     };
-    drop(mgr_lock);
+
+    let (
+        comfyui_running,
+        ollama_running,
+        torch_running,
+        last_launch_error,
+        last_launch_log,
+        app_resources,
+    ) = if let Some(mgr) = process_manager {
+        tokio::task::spawn_blocking(move || {
+            let comfyui_running = mgr.is_running();
+            let ollama_running = mgr.is_ollama_running();
+            let torch_running = mgr.is_torch_running();
+            let last_launch_error = mgr.last_launch_error();
+            let last_launch_log = mgr
+                .last_launch_log()
+                .map(|p| p.to_string_lossy().to_string());
+
+            let comfyui_resources = if comfyui_running {
+                mgr.aggregate_app_resources()
+                    .map(|r| models::AppResourceUsage {
+                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                    })
+            } else {
+                None
+            };
+
+            let ollama_resources = if ollama_running {
+                mgr.aggregate_ollama_resources()
+                    .map(|r| models::AppResourceUsage {
+                        gpu_memory: Some((r.gpu_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                        ram_memory: Some((r.ram_memory * 1024.0 * 1024.0 * 1024.0) as u64),
+                    })
+            } else {
+                None
+            };
+
+            let app_resources = if comfyui_resources.is_some() || ollama_resources.is_some() {
+                Some(models::AppResources {
+                    comfyui: comfyui_resources,
+                    ollama: ollama_resources,
+                })
+            } else {
+                None
+            };
+
+            (
+                comfyui_running,
+                ollama_running,
+                torch_running,
+                last_launch_error,
+                last_launch_log,
+                app_resources,
+            )
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join status_response task: {}", e)))?
+    } else {
+        (false, false, false, None, None, None)
+    };
 
     Ok(models::StatusResponse {
         success: true,
@@ -138,56 +160,76 @@ pub(super) async fn status_response(
 pub(super) async fn system_resources_response(
     primary: &PrimaryState,
 ) -> std::result::Result<models::SystemResourcesResponse, PumasError> {
-    use sysinfo::{Disks, System};
-
-    let mut sys = System::new_all();
-    sys.refresh_all();
-
-    let cpu_usage = sys.global_cpu_usage();
-    let total_memory = sys.total_memory();
-    let used_memory = sys.used_memory();
-    let ram_usage = if total_memory > 0 {
-        (used_memory as f32 / total_memory as f32) * 100.0
-    } else {
-        0.0
+    let process_manager = {
+        let mgr_lock = primary.process_manager.read().await;
+        mgr_lock.clone()
     };
 
-    let disks = Disks::new_with_refreshed_list();
-    let (disk_total, disk_free) = if let Some(disk) = disks.list().first() {
-        (disk.total_space(), disk.available_space())
-    } else {
-        (0, 0)
-    };
-    let disk_usage = if disk_total > 0 {
-        ((disk_total - disk_free) as f32 / disk_total as f32) * 100.0
-    } else {
-        0.0
-    };
+    let (cpu_usage, total_memory, ram_usage, disk_total, disk_free, disk_usage, gpu) =
+        tokio::task::spawn_blocking(move || {
+            use sysinfo::{Disks, System};
 
-    let gpu = if let Some(ref mgr) = *primary.process_manager.read().await {
-        let tracker = mgr.resource_tracker();
-        match tracker.get_system_resources() {
-            Ok(snapshot) => models::GpuResources {
-                usage: snapshot.gpu_usage,
-                memory: snapshot.gpu_memory_used,
-                memory_total: snapshot.gpu_memory_total,
-                temp: snapshot.gpu_temp,
-            },
-            Err(_) => models::GpuResources {
-                usage: 0.0,
-                memory: 0,
-                memory_total: 0,
-                temp: None,
-            },
-        }
-    } else {
-        models::GpuResources {
-            usage: 0.0,
-            memory: 0,
-            memory_total: 0,
-            temp: None,
-        }
-    };
+            let mut sys = System::new_all();
+            sys.refresh_all();
+
+            let cpu_usage = sys.global_cpu_usage();
+            let total_memory = sys.total_memory();
+            let used_memory = sys.used_memory();
+            let ram_usage = if total_memory > 0 {
+                (used_memory as f32 / total_memory as f32) * 100.0
+            } else {
+                0.0
+            };
+
+            let disks = Disks::new_with_refreshed_list();
+            let (disk_total, disk_free) = if let Some(disk) = disks.list().first() {
+                (disk.total_space(), disk.available_space())
+            } else {
+                (0, 0)
+            };
+            let disk_usage = if disk_total > 0 {
+                ((disk_total - disk_free) as f32 / disk_total as f32) * 100.0
+            } else {
+                0.0
+            };
+
+            let gpu = if let Some(mgr) = process_manager {
+                let tracker = mgr.resource_tracker();
+                match tracker.get_system_resources() {
+                    Ok(snapshot) => models::GpuResources {
+                        usage: snapshot.gpu_usage,
+                        memory: snapshot.gpu_memory_used,
+                        memory_total: snapshot.gpu_memory_total,
+                        temp: snapshot.gpu_temp,
+                    },
+                    Err(_) => models::GpuResources {
+                        usage: 0.0,
+                        memory: 0,
+                        memory_total: 0,
+                        temp: None,
+                    },
+                }
+            } else {
+                models::GpuResources {
+                    usage: 0.0,
+                    memory: 0,
+                    memory_total: 0,
+                    temp: None,
+                }
+            };
+
+            (
+                cpu_usage,
+                total_memory,
+                ram_usage,
+                disk_total,
+                disk_free,
+                disk_usage,
+                gpu,
+            )
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join system_resources task: {}", e)))?;
 
     Ok(models::SystemResourcesResponse {
         success: true,

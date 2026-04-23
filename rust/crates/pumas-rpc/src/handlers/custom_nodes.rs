@@ -6,7 +6,10 @@ use serde_json::{json, Value};
 
 pub async fn get_custom_nodes(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let version_tag = require_str_param(params, "version_tag", "versionTag")?;
-    let nodes = state.custom_nodes_manager.list_custom_nodes(&version_tag)?;
+    let nodes = state
+        .custom_nodes_manager
+        .list_custom_nodes(&version_tag)
+        .await?;
     Ok(serde_json::to_value(nodes)?)
 }
 
@@ -35,6 +38,7 @@ pub async fn remove_custom_node(state: &AppState, params: &Value) -> pumas_libra
     let version_tag = require_str_param(params, "version_tag", "versionTag")?;
     let result = state
         .custom_nodes_manager
-        .remove(&node_name, &version_tag)?;
+        .remove(&node_name, &version_tag)
+        .await?;
     Ok(json!({"success": result}))
 }

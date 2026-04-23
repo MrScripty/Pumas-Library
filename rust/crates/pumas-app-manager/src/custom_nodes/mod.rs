@@ -47,10 +47,10 @@ impl CustomNodesManager {
     /// # Returns
     ///
     /// A list of installed custom nodes with their metadata.
-    pub fn list_custom_nodes(&self, tag: &str) -> Result<Vec<InstalledCustomNode>> {
+    pub async fn list_custom_nodes(&self, tag: &str) -> Result<Vec<InstalledCustomNode>> {
         let custom_nodes_dir = self.custom_nodes_dir(tag);
 
-        if !custom_nodes_dir.exists() {
+        if !async_path_exists(&custom_nodes_dir).await? {
             debug!(
                 "Custom nodes directory does not exist: {}",
                 custom_nodes_dir.display()
@@ -60,25 +60,34 @@ impl CustomNodesManager {
 
         let mut nodes = Vec::new();
 
-        let entries = std::fs::read_dir(&custom_nodes_dir).map_err(|e| PumasError::Io {
-            message: format!("Failed to read custom_nodes directory: {}", e),
+        let mut entries = fs::read_dir(&custom_nodes_dir)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to read custom_nodes directory: {}", e),
+                path: Some(custom_nodes_dir.clone()),
+                source: Some(e),
+            })?;
+
+        while let Some(entry) = entries.next_entry().await.map_err(|e| PumasError::Io {
+            message: format!("Failed to read directory entry: {}", e),
             path: Some(custom_nodes_dir.clone()),
             source: Some(e),
-        })?;
-
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(e) => {
-                    warn!("Failed to read directory entry: {}", e);
-                    continue;
-                }
-            };
-
+        })? {
             let path = entry.path();
 
             // Skip hidden directories and non-directories
-            if !path.is_dir() {
+            let file_type = match entry.file_type().await {
+                Ok(file_type) => file_type,
+                Err(e) => {
+                    warn!(
+                        "Failed to inspect custom node entry {}: {}",
+                        path.display(),
+                        e
+                    );
+                    continue;
+                }
+            };
+            if !file_type.is_dir() {
                 continue;
             }
 
@@ -95,74 +104,50 @@ impl CustomNodesManager {
             let mut node = InstalledCustomNode::new(name, path.to_string_lossy().to_string());
 
             // Check for requirements.txt
-            node.has_requirements = path.join("requirements.txt").exists();
+            node.has_requirements = async_path_exists(&path.join("requirements.txt")).await?;
 
             // Check if it's a git repository
             let git_dir = path.join(".git");
-            node.is_git_repo = git_dir.exists();
+            node.is_git_repo = async_path_exists(&git_dir).await?;
 
-            // If it's a git repo, try to get more info synchronously
+            // If it's a git repo, try to get more info.
             if node.is_git_repo {
                 // Get remote URL
-                if let Ok(output) = std::process::Command::new("git")
-                    .args([
-                        "-C",
-                        &path.to_string_lossy(),
-                        "config",
-                        "--get",
-                        "remote.origin.url",
-                    ])
-                    .output()
+                if let Some(url) = git_stdout(
+                    &path,
+                    &["config", "--get", "remote.origin.url"],
+                    "custom node remote URL",
+                )
+                .await
                 {
-                    if output.status.success() {
-                        let url = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        if !url.is_empty() {
-                            node.git_url = Some(url);
-                        }
-                    }
+                    node.git_url = Some(url);
                 }
 
                 // Get current branch
-                if let Ok(output) = std::process::Command::new("git")
-                    .args([
-                        "-C",
-                        &path.to_string_lossy(),
-                        "rev-parse",
-                        "--abbrev-ref",
-                        "HEAD",
-                    ])
-                    .output()
+                if let Some(branch) = git_stdout(
+                    &path,
+                    &["rev-parse", "--abbrev-ref", "HEAD"],
+                    "custom node branch",
+                )
+                .await
                 {
-                    if output.status.success() {
-                        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        if !branch.is_empty() {
-                            node.git_branch = Some(branch);
-                        }
-                    }
+                    node.git_branch = Some(branch);
                 }
 
                 // Get current commit (short hash)
-                if let Ok(output) = std::process::Command::new("git")
-                    .args([
-                        "-C",
-                        &path.to_string_lossy(),
-                        "rev-parse",
-                        "--short",
-                        "HEAD",
-                    ])
-                    .output()
+                if let Some(commit) = git_stdout(
+                    &path,
+                    &["rev-parse", "--short", "HEAD"],
+                    "custom node commit",
+                )
+                .await
                 {
-                    if output.status.success() {
-                        let commit = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                        if !commit.is_empty() {
-                            node.git_commit = Some(commit);
-                        }
-                    }
+                    node.git_commit = Some(commit);
                 }
             }
 
             // Try to get install date from directory creation time
-            if let Ok(metadata) = std::fs::metadata(&path) {
+            if let Ok(metadata) = fs::metadata(&path).await {
                 if let Ok(created) = metadata.created() {
                     if let Ok(datetime) = created.duration_since(std::time::UNIX_EPOCH) {
                         // Format as ISO 8601
@@ -359,21 +344,23 @@ impl CustomNodesManager {
     /// # Returns
     ///
     /// `true` if the node was successfully removed, `false` otherwise.
-    pub fn remove(&self, node_name: &str, tag: &str) -> Result<bool> {
+    pub async fn remove(&self, node_name: &str, tag: &str) -> Result<bool> {
         let node_path = self.custom_nodes_dir(tag).join(node_name);
 
-        if !node_path.exists() {
+        if !async_path_exists(&node_path).await? {
             warn!("Custom node not found: {}", node_name);
             return Ok(false);
         }
 
         info!("Removing custom node: {} from version {}", node_name, tag);
 
-        std::fs::remove_dir_all(&node_path).map_err(|e| PumasError::Io {
-            message: format!("Failed to remove custom node directory: {}", e),
-            path: Some(node_path),
-            source: Some(e),
-        })?;
+        fs::remove_dir_all(&node_path)
+            .await
+            .map_err(|e| PumasError::Io {
+                message: format!("Failed to remove custom node directory: {}", e),
+                path: Some(node_path),
+                source: Some(e),
+            })?;
 
         info!("Successfully removed custom node: {}", node_name);
         Ok(true)
@@ -419,6 +406,43 @@ fn extract_node_name_from_url(url: &str) -> String {
     let name = name.strip_suffix(".git").unwrap_or(name);
 
     name.to_string()
+}
+
+async fn git_stdout(path: &Path, args: &[&str], description: &str) -> Option<String> {
+    match Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(args)
+        .output()
+        .await
+    {
+        Ok(output) if output.status.success() => {
+            let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if value.is_empty() {
+                None
+            } else {
+                Some(value)
+            }
+        }
+        Ok(output) => {
+            debug!(
+                "Failed to resolve {} for {}: {}",
+                description,
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            None
+        }
+        Err(error) => {
+            debug!(
+                "Failed to execute git for {} at {}: {}",
+                description,
+                path.display(),
+                error
+            );
+            None
+        }
+    }
 }
 
 /// Format a Unix timestamp as an ISO 8601 string.
@@ -499,8 +523,8 @@ mod tests {
         assert_eq!(dir, PathBuf::from("/path/to/versions/v0.2.0/custom_nodes"));
     }
 
-    #[test]
-    fn test_list_custom_nodes_empty_dir() {
+    #[tokio::test]
+    async fn test_list_custom_nodes_empty_dir() {
         let temp_dir = TempDir::new().unwrap();
         let versions_dir = temp_dir.path();
 
@@ -508,13 +532,13 @@ mod tests {
         std::fs::create_dir_all(versions_dir.join("v0.2.0")).unwrap();
 
         let manager = CustomNodesManager::new(versions_dir);
-        let nodes = manager.list_custom_nodes("v0.2.0").unwrap();
+        let nodes = manager.list_custom_nodes("v0.2.0").await.unwrap();
 
         assert!(nodes.is_empty());
     }
 
-    #[test]
-    fn test_list_custom_nodes_with_nodes() {
+    #[tokio::test]
+    async fn test_list_custom_nodes_with_nodes() {
         let temp_dir = TempDir::new().unwrap();
         let versions_dir = temp_dir.path();
         let custom_nodes_dir = versions_dir.join("v0.2.0").join("custom_nodes");
@@ -535,7 +559,7 @@ mod tests {
         std::fs::create_dir(custom_nodes_dir.join(".hidden")).unwrap();
 
         let manager = CustomNodesManager::new(versions_dir);
-        let nodes = manager.list_custom_nodes("v0.2.0").unwrap();
+        let nodes = manager.list_custom_nodes("v0.2.0").await.unwrap();
 
         assert_eq!(nodes.len(), 2);
 
@@ -563,8 +587,8 @@ mod tests {
         assert!(!manager.node_exists("NonExistingNode", "v0.2.0"));
     }
 
-    #[test]
-    fn test_remove_custom_node() {
+    #[tokio::test]
+    async fn test_remove_custom_node() {
         let temp_dir = TempDir::new().unwrap();
         let versions_dir = temp_dir.path();
         let custom_nodes_dir = versions_dir.join("v0.2.0").join("custom_nodes");
@@ -581,14 +605,14 @@ mod tests {
 
         assert!(manager.node_exists("NodeToRemove", "v0.2.0"));
 
-        let result = manager.remove("NodeToRemove", "v0.2.0").unwrap();
+        let result = manager.remove("NodeToRemove", "v0.2.0").await.unwrap();
         assert!(result);
 
         assert!(!manager.node_exists("NodeToRemove", "v0.2.0"));
     }
 
-    #[test]
-    fn test_remove_nonexistent_node() {
+    #[tokio::test]
+    async fn test_remove_nonexistent_node() {
         let temp_dir = TempDir::new().unwrap();
         let versions_dir = temp_dir.path();
 
@@ -596,7 +620,7 @@ mod tests {
 
         let manager = CustomNodesManager::new(versions_dir);
 
-        let result = manager.remove("NonExistentNode", "v0.2.0").unwrap();
+        let result = manager.remove("NonExistentNode", "v0.2.0").await.unwrap();
         assert!(!result);
     }
 

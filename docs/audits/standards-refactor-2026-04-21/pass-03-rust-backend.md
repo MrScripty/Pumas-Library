@@ -265,6 +265,11 @@ Implementation notes:
   hard-link counting and writable-path checks, so those RPC link-management request paths no longer
   perform synchronous filesystem metadata reads on async runtime threads when inspecting files the
   UI wants to link or validate.
+- Completed: `pumas-app-manager/src/custom_nodes/mod.rs` and
+  `pumas-rpc/src/handlers/custom_nodes.rs` now list and remove custom nodes through async
+  directory scans, async metadata probes, async git command execution, and async directory removal,
+  so those custom-node RPC request paths no longer perform blocking directory walks or git/process
+  inspection on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

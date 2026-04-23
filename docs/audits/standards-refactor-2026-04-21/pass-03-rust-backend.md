@@ -177,6 +177,10 @@ Implementation notes:
   version/venv/main-script/binary/pid path probes, PID-file reads, log-directory creation, and
   PID cleanup so the launcher status and stop flows no longer perform those filesystem operations
   synchronously on async runtime threads before delegating into process control.
+- Completed: `pumas-app-manager/src/version_manager/mod.rs` now uses `tokio::fs` for async
+  launcher-root validation and installed-version directory removal so the async constructor and
+  remove flow no longer perform synchronous existence checks or recursive deletion on runtime
+  threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

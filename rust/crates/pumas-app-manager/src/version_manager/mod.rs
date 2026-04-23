@@ -65,12 +65,19 @@ use pumas_library::metadata::MetadataManager;
 use pumas_library::models::InstallationProgress;
 use pumas_library::network::GitHubClient;
 use pumas_library::{PumasError, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::fs;
 use tokio::sync::{mpsc, Mutex, RwLock};
 use tracing::{info, warn};
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
 
 /// Main version manager coordinating all version operations.
 pub struct VersionManager {
@@ -104,7 +111,7 @@ impl VersionManager {
     pub async fn new(launcher_root: impl Into<PathBuf>, app_id: AppId) -> Result<Self> {
         let launcher_root = launcher_root.into();
 
-        if !launcher_root.exists() {
+        if !path_exists(&launcher_root).await? {
             return Err(PumasError::Config {
                 message: format!("Launcher root does not exist: {}", launcher_root.display()),
             });
@@ -466,13 +473,15 @@ impl VersionManager {
 
         // Remove directory
         let version_path = self.version_path(tag);
-        if version_path.exists() {
+        if path_exists(&version_path).await? {
             info!("Removing version directory: {}", version_path.display());
-            std::fs::remove_dir_all(&version_path).map_err(|e| PumasError::Io {
-                message: format!("Failed to remove version directory: {}", e),
-                path: Some(version_path),
-                source: Some(e),
-            })?;
+            fs::remove_dir_all(&version_path)
+                .await
+                .map_err(|e| PumasError::Io {
+                    message: format!("Failed to remove version directory: {}", e),
+                    path: Some(version_path),
+                    source: Some(e),
+                })?;
         }
 
         // Remove from metadata

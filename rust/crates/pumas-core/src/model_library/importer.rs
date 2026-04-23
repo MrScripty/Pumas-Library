@@ -1113,7 +1113,18 @@ impl ModelImporter {
         }
 
         // Find primary model file
-        let primary_file = self.choose_primary_file(model_dir)?;
+        let importer = self.clone();
+        let model_dir_for_primary = model_dir.to_path_buf();
+        let primary_file = tokio::task::spawn_blocking(move || {
+            importer.choose_primary_file(&model_dir_for_primary)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join in-place primary file selection task: {}",
+                err
+            ))
+        })??;
         if primary_file.is_none() {
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),

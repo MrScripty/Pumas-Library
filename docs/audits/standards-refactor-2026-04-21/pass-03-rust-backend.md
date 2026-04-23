@@ -382,6 +382,10 @@ Implementation notes:
   validation through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
   import paths no longer perform synchronous bundle validation inline on async runtime threads
   before deciding between bundle and file-model import flows.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place primary model-file
+  discovery through `tokio::task::spawn_blocking`, so download finalization and orphan-adoption
+  import paths no longer perform synchronous directory walks inline on async runtime threads when
+  selecting the canonical file for type detection and hashing.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

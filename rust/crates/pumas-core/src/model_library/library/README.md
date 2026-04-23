@@ -36,7 +36,8 @@ Model type migrations, library repair passes, and derived index/display projecti
 - Report index entries remain sufficient to list, delete, and prune report pairs without rescanning arbitrary filesystem paths.
 - Execution-report rewrites update the recorded artifact pair rather than creating orphaned duplicates.
 - Metadata-derived projection fields are recomputed from canonical metadata/filesystem inputs rather than stored as independent mutable state.
-- Display-path normalization must preserve a user-readable path while stripping Windows verbatim prefixes from surfaced paths.
+- Display-path normalization must use `platform::platform_display_path` so Windows verbatim-prefix
+  handling and long-path FFI remain inside the platform boundary.
 
 ## Revisit Triggers
 - A second migration family requires a distinct report schema or retention policy.

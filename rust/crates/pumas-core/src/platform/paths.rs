@@ -168,6 +168,70 @@ pub fn script_extension() -> &'static str {
     }
 }
 
+/// Render a filesystem path for user-facing display.
+///
+/// # Platform Behavior
+/// - **Windows**: Strips verbatim prefixes and expands short names when Windows can resolve them
+/// - **Linux/macOS**: Uses the path's native display form
+pub fn platform_display_path(path: &Path) -> String {
+    #[cfg(windows)]
+    {
+        normalize_windows_display_path(path).display().to_string()
+    }
+
+    #[cfg(not(windows))]
+    {
+        path.display().to_string()
+    }
+}
+
+#[cfg(windows)]
+fn normalize_windows_display_path(path: &Path) -> PathBuf {
+    expand_windows_long_path(&strip_windows_verbatim_prefix(path))
+        .unwrap_or_else(|| strip_windows_verbatim_prefix(path))
+}
+
+#[cfg(windows)]
+fn strip_windows_verbatim_prefix(path: &Path) -> PathBuf {
+    let raw = path.display().to_string();
+    if let Some(stripped) = raw.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{}", stripped))
+    } else if let Some(stripped) = raw.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(windows)]
+fn expand_windows_long_path(path: &Path) -> Option<PathBuf> {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use windows_sys::Win32::Storage::FileSystem::GetLongPathNameW;
+
+    let input: Vec<u16> = path.as_os_str().encode_wide().chain(Some(0)).collect();
+    // SAFETY: `input` is null-terminated and lives for the duration of the
+    // call. Passing a null output pointer with size 0 is the documented query
+    // form for retrieving the required buffer length.
+    let required = unsafe { GetLongPathNameW(input.as_ptr(), std::ptr::null_mut(), 0) };
+    if required == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u16; required as usize + 1];
+    // SAFETY: `buffer` is allocated with the size requested by Windows plus
+    // space for the trailing null. Both input and output buffers remain valid
+    // for the duration of the call.
+    let written =
+        unsafe { GetLongPathNameW(input.as_ptr(), buffer.as_mut_ptr(), buffer.len() as u32) };
+    if written == 0 {
+        return None;
+    }
+
+    buffer.truncate(written as usize);
+    Some(PathBuf::from(OsString::from_wide(&buffer)))
+}
+
 /// Check if a command exists in the system PATH.
 ///
 /// # Platform Behavior

@@ -12,7 +12,7 @@ and process management.
 | File | Description |
 |------|-------------|
 | `mod.rs` | Module root, `current_platform()`, `is_supported_platform()`, re-exports |
-| `paths.rs` | Platform-specific directories: config dir, registry DB path, venv Python path, desktop/apps dirs |
+| `paths.rs` | Platform-specific directories and display paths: config dir, registry DB path, venv Python path, desktop/apps dirs |
 | `permissions.rs` | `set_executable` - Sets executable bits on Unix, no-op on Windows |
 | `process.rs` | Process utilities: `configure_detached_command`, `find_processes_by_cmdline`, `is_process_alive`, `terminate_process_tree` |
 
@@ -23,9 +23,9 @@ and process management.
 - **Linux-first, Windows-ready**: Full Linux support is the primary target. Windows paths and
   process management are implemented but macOS remains architecture-ready with pending
   implementation.
-- **Unsafe boundary ownership**: OS FFI for process probes must stay inside this module and include
-  a `SAFETY:` note explaining descriptor, pointer, handle, or PID validity before crossing the
-  platform boundary.
+- **Unsafe boundary ownership**: OS FFI for process probes, process detachment, and Windows path
+  expansion must stay inside this module and include a `SAFETY:` note explaining descriptor,
+  pointer, handle, or PID validity before crossing the platform boundary.
 
 ## Dependencies
 

@@ -55,7 +55,11 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useLauncherUpdates.test.ts` | Hook coverage for update metadata storage, URL preference, stale-state clearing, and API-unavailable no-ops. |
 | `useSelectedAppVersions.ts` | Selected-app version hook routing for ComfyUI, Ollama, Torch, and unsupported app fallback state. |
 | `useSelectedAppVersions.test.ts` | Hook coverage for selected-app version tracking and unsupported version state. |
-| `usePhysicsDrag.ts` | Physics-based drag behavior for interactive UI elements. |
+| `usePhysicsDrag.ts` | Physics-based drag state, frame updates, delete/reorder commits, and public hook output. |
+| `usePhysicsDragDelete.ts` | Drag delete completion, fallback reset, and post-delete cleanup lifecycle. |
+| `usePhysicsDragPointerEvents.ts` | Pointer pending, drag, release, cancel, and blur lifecycle for physics drag. |
+| `usePhysicsDragSettle.ts` | Spring settle animation from current drag position to the resolved anchor. |
+| `usePhysicsDragUndo.ts` | Keyboard undo listener and selection restoration for the last drag reorder/delete snapshot. |
 | `physicsDragUtils.ts` | Shared constants, types, and pure drag math used by `usePhysicsDrag.ts`. |
 | `physicsDragUtils.test.ts` | Unit coverage for drag selection fallback, anchor hysteresis, reorder helpers, and delete-zone math. |
 | `useInstallationProgress.ts` | Installation-progress polling, cancellation notices, and failed-install tracking for the install dialog. |

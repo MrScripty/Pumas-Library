@@ -1,16 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
-import { animate, useMotionValue } from 'framer-motion';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useMotionValue } from 'framer-motion';
 import {
   calculateDragFrame,
-  clamp,
   computeAnchorIndex,
-  DRAG_START_DISTANCE,
   ICON_SIZE,
-  isEditableElement,
   LIST_TOP_PADDING,
   reorderAppsAtIndices,
-  resolveSelection,
-  TOTAL_HEIGHT,
   type FloatingState,
   type PendingDrag,
   type PhysicsDragState,
@@ -18,6 +13,10 @@ import {
   type UndoSnapshot,
   type UsePhysicsDragOptions,
 } from './physicsDragUtils';
+import { usePhysicsDragDelete } from './usePhysicsDragDelete';
+import { usePhysicsDragPointerEvents } from './usePhysicsDragPointerEvents';
+import { usePhysicsDragSettle } from './usePhysicsDragSettle';
+import { usePhysicsDragUndo } from './usePhysicsDragUndo';
 
 export {
   DELETE_DISTANCE,
@@ -210,66 +209,24 @@ export const usePhysicsDrag = ({
     pendingUndoRef.current = null;
   }, []);
 
-  useEffect(() => {
-    const handleUndo = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
-        const activeElement = document.activeElement as HTMLElement | null;
-        if (
-          draggedId
-          || floatingState
-          || isEditableElement(activeElement)
-          || !undoSnapshotRef.current
-          || !onReorderApps
-        ) {
-          return;
-        }
+  usePhysicsDragUndo({
+    draggedId,
+    floatingState,
+    undoSnapshotRef,
+    onReorderApps,
+    onSelectApp,
+  });
 
-        event.preventDefault();
-
-        const snapshot = undoSnapshotRef.current;
-        onReorderApps(snapshot.apps);
-        onSelectApp(resolveSelection(snapshot));
-        undoSnapshotRef.current = null;
-      }
-    };
-
-    window.addEventListener('keydown', handleUndo);
-    return () => window.removeEventListener('keydown', handleUndo);
-  }, [draggedId, floatingState, onReorderApps, onSelectApp]);
-
-  const settleToAnchor = useCallback(
-    (appId: string, anchorIndex: number) => {
-      const listElement = listRef.current;
-      const origin = dragOriginRef.current;
-      if (!listElement || !origin) return;
-
-      const listRect = listElement.getBoundingClientRect();
-      const anchorStart = LIST_TOP_PADDING + ICON_SIZE / 2;
-      const anchorX = listRect.left + (listRect.width / 2);
-      const anchorY = listRect.top + anchorStart + anchorIndex * TOTAL_HEIGHT;
-
-      const targetTopLeftX = anchorX - ICON_SIZE / 2;
-      const targetTopLeftY = anchorY - ICON_SIZE / 2;
-      const targetX = targetTopLeftX - origin.x;
-      const targetY = targetTopLeftY - origin.y;
-
-      const distance = Math.hypot(targetX - dragX.get(), targetY - dragY.get());
-      const stiffness = clamp(600 - distance * 1.5, 220, 700);
-      const damping = clamp(32 + distance * 0.08, 24, 50);
-
-      setFloatingId(appId);
-      setFloatingState('settling');
-      setPlaceholderIndex(anchorIndex);
-
-      const xAnim = animate(dragX, targetX, { type: 'spring', stiffness, damping });
-      const yAnim = animate(dragY, targetY, { type: 'spring', stiffness, damping });
-
-      void Promise.all([xAnim.finished, yAnim.finished]).then(() => {
-        resetFloating();
-      });
-    },
-    [dragX, dragY, listRef, resetFloating],
-  );
+  const settleToAnchor = usePhysicsDragSettle({
+    dragOriginRef,
+    dragX,
+    dragY,
+    listRef,
+    resetFloating,
+    setFloatingId,
+    setFloatingState,
+    setPlaceholderIndex,
+  });
 
   const endDrag = useCallback(
     (appId: string, clientX: number, clientY: number) => {
@@ -320,127 +277,32 @@ export const usePhysicsDrag = ({
     ],
   );
 
-  const completeDelete = useCallback(() => {
-    const deletingId = deletingIdRef.current;
-    if (!deletingId) return;
+  const completeDelete = usePhysicsDragDelete({
+    apps,
+    appsRef,
+    deleteFallbackRef,
+    deletingIdRef,
+    floatingId,
+    floatingState,
+    onDeleteApp,
+    onSelectApp,
+    resetFloating,
+  });
 
-    onDeleteApp?.(deletingId);
-    onSelectApp(null);
-
-    deletingIdRef.current = null;
-    if (deleteFallbackRef.current) {
-      window.clearTimeout(deleteFallbackRef.current);
-    }
-    deleteFallbackRef.current = window.setTimeout(() => {
-      if (floatingState !== 'deleting' || !floatingId) return;
-      const stillExists = appsRef.current.some(app => app.id === floatingId);
-      if (stillExists) {
-        resetFloating();
-      }
-    }, 350);
-  }, [floatingId, floatingState, onDeleteApp, onSelectApp, resetFloating]);
-
-  useEffect(() => {
-    if (floatingState !== 'deleting' || !floatingId) return;
-    const stillExists = apps.some(app => app.id === floatingId);
-    if (stillExists) return;
-
-    if (deleteFallbackRef.current) {
-      window.clearTimeout(deleteFallbackRef.current);
-      deleteFallbackRef.current = null;
-    }
-    resetFloating();
-  }, [apps, floatingId, floatingState, resetFloating]);
-
-  useEffect(() => {
-    if (pointerPhase === 'idle') return;
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (pointerIdRef.current !== null && event.pointerId !== pointerIdRef.current) return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
-
-      if (pointerPhase === 'pending' && pendingDragRef.current) {
-        const dx = event.clientX - pendingDragRef.current.startX;
-        const dy = event.clientY - pendingDragRef.current.startY;
-        if (Math.hypot(dx, dy) >= DRAG_START_DISTANCE) {
-          const pending = pendingDragRef.current;
-          pendingDragRef.current = null;
-          beginDrag(pending, event.clientX, event.clientY);
-          setPointerPhase('dragging');
-        }
-        return;
-      }
-
-      if (floatingState !== 'dragging') return;
-
-      event.preventDefault();
-      updateDragPhysics(event.clientX, event.clientY);
-
-      const now = performance.now();
-      if (lastPointerRef.current) {
-        const { x, y, time } = lastPointerRef.current;
-        const distance = Math.hypot(event.clientX - x, event.clientY - y);
-        const delta = Math.max(1, now - time);
-        setDragVelocity((distance / delta) * 1000);
-      }
-
-      lastPointerRef.current = { x: event.clientX, y: event.clientY, time: now };
-    };
-
-    const handlePointerEnd = (event: PointerEvent) => {
-      if (pointerIdRef.current !== null && event.pointerId !== pointerIdRef.current) return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
-
-      if (pointerPhase === 'pending') {
-        pendingDragRef.current = null;
-        pointerIdRef.current = null;
-        pointerTargetRef.current = null;
-        setPointerPhase('idle');
-        return;
-      }
-
-      event.preventDefault();
-      const activeId = draggedIdRef.current;
-      if (!activeId) return;
-
-      pointerIdRef.current = null;
-      pointerTargetRef.current?.releasePointerCapture?.(event.pointerId);
-      pointerTargetRef.current = null;
-
-      endDrag(activeId, event.clientX, event.clientY);
-      draggedIdRef.current = null;
-      setPointerPhase('idle');
-    };
-
-    const handleWindowBlur = () => {
-      if (pointerPhase === 'pending') {
-        pendingDragRef.current = null;
-        pointerIdRef.current = null;
-        pointerTargetRef.current = null;
-        setPointerPhase('idle');
-        return;
-      }
-      const activeId = draggedIdRef.current;
-      if (!activeId || !lastPointerRef.current) return;
-      endDrag(activeId, lastPointerRef.current.x, lastPointerRef.current.y);
-      draggedIdRef.current = null;
-      pointerIdRef.current = null;
-      pointerTargetRef.current = null;
-      setPointerPhase('idle');
-    };
-
-    window.addEventListener('pointermove', handlePointerMove, { passive: false });
-    window.addEventListener('pointerup', handlePointerEnd, { passive: false });
-    window.addEventListener('pointercancel', handlePointerEnd, { passive: false });
-    window.addEventListener('blur', handleWindowBlur);
-
-    return () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerEnd);
-      window.removeEventListener('pointercancel', handlePointerEnd);
-      window.removeEventListener('blur', handleWindowBlur);
-    };
-  }, [beginDrag, endDrag, floatingState, pointerPhase, updateDragPhysics]);
+  const onPointerDown = usePhysicsDragPointerEvents({
+    beginDrag,
+    draggedIdRef,
+    endDrag,
+    floatingState,
+    lastPointerRef,
+    pendingDragRef,
+    pointerIdRef,
+    pointerPhase,
+    pointerTargetRef,
+    setDragVelocity,
+    setPointerPhase,
+    updateDragPhysics,
+  });
 
   useEffect(() => {
     if (floatingState === 'dragging') {
@@ -464,28 +326,7 @@ export const usePhysicsDrag = ({
     dragX,
     dragY,
     dragOrigin,
-    onPointerDown: (appId: string, event: ReactPointerEvent<HTMLElement>) => {
-      if (floatingState !== null || draggedIdRef.current || pointerPhase !== 'idle') return;
-      if (event.pointerType && event.pointerType !== 'mouse') return;
-      if ('button' in event && event.button !== 0) return;
-
-      const element = event.currentTarget as HTMLElement | null;
-      const elementRect = element?.getBoundingClientRect();
-
-      if (!elementRect || !element) return;
-
-      pendingDragRef.current = {
-        appId,
-        pointerId: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        element,
-        elementRect,
-      };
-      pointerIdRef.current = event.pointerId;
-      pointerTargetRef.current = element;
-      setPointerPhase('pending');
-    },
+    onPointerDown,
     completeDelete,
   };
 };

@@ -252,8 +252,8 @@ impl ModelImporter {
         {
             Ok(_metadata) => {
                 // Atomic rename to final location
-                std::fs::create_dir_all(target_dir.parent().unwrap())?;
-                std::fs::rename(&temp_dir, &target_dir)?;
+                tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
+                tokio::fs::rename(&temp_dir, &target_dir).await?;
 
                 // Index the imported model
                 if let Err(e) = self.library.index_model_dir(&target_dir).await {
@@ -273,7 +273,7 @@ impl ModelImporter {
             }
             Err(e) => {
                 // Cleanup temp directory on failure
-                let _ = std::fs::remove_dir_all(&temp_dir);
+                let _ = tokio::fs::remove_dir_all(&temp_dir).await;
 
                 Ok(ModelImportResult {
                     path: spec.path.clone(),

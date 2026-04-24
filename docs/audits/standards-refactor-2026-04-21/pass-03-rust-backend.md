@@ -433,6 +433,9 @@ Implementation notes:
   collection through `tokio::task::spawn_blocking`, so that bundle import follow-up no longer
   performs a synchronous directory walk inline on async runtime threads when preparing the in-place
   import spec.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async cleanup, directory
+  creation, and rename for the plain import finalize path, so file-copy import failure cleanup and
+  temp-to-final placement no longer perform blocking std fs calls inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

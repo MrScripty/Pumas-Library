@@ -383,6 +383,18 @@ impl ModelImporter {
             });
         }
 
+        let target_dir_for_expected_files = target_dir.to_path_buf();
+        let expected_files = tokio::task::spawn_blocking(move || {
+            collect_relative_file_paths(&target_dir_for_expected_files)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join copied diffusers expected-files task: {}",
+                err
+            ))
+        })??;
+
         let in_place_spec = InPlaceImportSpec {
             model_dir: target_dir.to_path_buf(),
             official_name: spec.official_name.clone(),
@@ -391,7 +403,7 @@ impl ModelImporter {
             repo_id: spec.repo_id.clone(),
             known_sha256: None,
             compute_hashes: false,
-            expected_files: Some(collect_relative_file_paths(target_dir)?),
+            expected_files: Some(expected_files),
             pipeline_tag: Some("text-to-image".to_string()),
             huggingface_evidence: None,
             release_date: None,

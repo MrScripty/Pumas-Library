@@ -243,7 +243,7 @@ impl ModelImporter {
         }
 
         // Create temporary directory for atomic import
-        let temp_dir = self.create_temp_import_dir()?;
+        let temp_dir = self.create_temp_import_dir().await?;
 
         // Perform the import atomically
         match self
@@ -356,7 +356,7 @@ impl ModelImporter {
         model_type: &str,
         family: &str,
     ) -> Result<ModelImportResult> {
-        let temp_dir = self.create_temp_import_dir()?;
+        let temp_dir = self.create_temp_import_dir().await?;
         if let Err(err) = copy_directory_preserving_layout(source_path, &temp_dir) {
             let _ = std::fs::remove_dir_all(&temp_dir);
             return Err(err);
@@ -667,7 +667,7 @@ impl ModelImporter {
         }
 
         // Create temp dir
-        let temp_dir = self.create_temp_import_dir()?;
+        let temp_dir = self.create_temp_import_dir().await?;
 
         // Copy files
         let _ = progress_tx
@@ -863,11 +863,11 @@ impl ModelImporter {
     }
 
     /// Create a temporary directory for atomic import.
-    fn create_temp_import_dir(&self) -> Result<PathBuf> {
+    async fn create_temp_import_dir(&self) -> Result<PathBuf> {
         let uuid = uuid::Uuid::new_v4();
         let temp_name = format!("{}{}", TEMP_IMPORT_PREFIX, uuid);
         let temp_dir = self.library.library_root().join(temp_name);
-        std::fs::create_dir_all(&temp_dir)?;
+        tokio::fs::create_dir_all(&temp_dir).await?;
         Ok(temp_dir)
     }
 

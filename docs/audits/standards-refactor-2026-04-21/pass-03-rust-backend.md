@@ -418,6 +418,9 @@ Implementation notes:
   `import` through `tokio::task::spawn_blocking`, so those import entry points no longer perform
   synchronous existence checks or bundle validation inline on async runtime threads before routing
   into bundle or file-copy flows.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async temp-directory creation for
+  atomic imports, so import, progress-reporting import, and copied diffusers import flows no
+  longer perform blocking temp-root setup inline on async runtime threads before copying files.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

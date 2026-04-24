@@ -406,6 +406,10 @@ Implementation notes:
   import hashing through `tokio::task::spawn_blocking`, so file-copy import flows no longer
   perform synchronous dual-hash computation inline on async runtime threads while finalizing copied
   model directories.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes copy/import type detection
+  through `tokio::task::spawn_blocking`, so the primary import and progress-reporting import flows
+  no longer perform synchronous file or directory inspection inline on async runtime threads before
+  security checks and model-type routing.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

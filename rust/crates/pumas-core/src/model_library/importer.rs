@@ -138,7 +138,17 @@ impl ModelImporter {
         }
 
         // Detect file type and model info
-        let type_info = self.detect_type(&source_path)?;
+        let importer = self.clone();
+        let source_path_for_detection = source_path.clone();
+        let type_info =
+            tokio::task::spawn_blocking(move || importer.detect_type(&source_path_for_detection))
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join import type detection task: {}",
+                        err
+                    ))
+                })??;
 
         // Check security tier
         let security_tier = type_info.format.security_tier();
@@ -587,7 +597,17 @@ impl ModelImporter {
             })
             .await;
 
-        let type_info = self.detect_type(&source_path)?;
+        let importer = self.clone();
+        let source_path_for_detection = source_path.clone();
+        let type_info =
+            tokio::task::spawn_blocking(move || importer.detect_type(&source_path_for_detection))
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join progress import type detection task: {}",
+                        err
+                    ))
+                })??;
         let security_tier = type_info.format.security_tier();
 
         // Security check

@@ -1747,7 +1747,7 @@ impl ModelLibrary {
     pub async fn redetect_model_type(&self, model_id: &str) -> Result<Option<String>> {
         let model_dir = self.library_root.join(model_id);
 
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
@@ -1773,9 +1773,19 @@ impl ModelLibrary {
         let current_review_status = metadata.review_status.clone();
 
         // Keep file-signature detection independent from resolver rules and use it as fallback.
-        let type_info = find_primary_model_file(&model_dir)
-            .as_ref()
-            .and_then(|f| identify_model_type(f).ok());
+        let model_dir_for_type = model_dir.clone();
+        let type_info = tokio::task::spawn_blocking(move || {
+            find_primary_model_file(&model_dir_for_type)
+                .as_ref()
+                .and_then(|f| identify_model_type(f).ok())
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join redetect type inspection task: {}",
+                err
+            ))
+        })?;
         let resolved = resolve_local_model_type_with_persisted_hints(
             self.index(),
             &model_dir,
@@ -1788,12 +1798,26 @@ impl ModelLibrary {
             .as_ref()
             .and_then(|ti| ti.family.as_ref())
             .map(|f| f.as_str().to_string());
-        let new_subtype =
-            if resolved.model_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir) {
+        let new_subtype = if resolved.model_type == ModelType::Llm {
+            let model_dir_for_subtype = model_dir.clone();
+            let is_dllm = tokio::task::spawn_blocking(move || {
+                detect_dllm_from_config_json(&model_dir_for_subtype)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join redetect dLLM subtype task: {}",
+                    err
+                ))
+            })?;
+            if is_dllm {
                 Some("dllm".to_string())
             } else {
                 None
-            };
+            }
+        } else {
+            None
+        };
 
         // Update metadata
         metadata.model_type = Some(new_type.clone());
@@ -2006,7 +2030,7 @@ impl ModelLibrary {
     pub async fn reclassify_model(&self, model_id: &str) -> Result<Option<String>> {
         let model_dir = self.library_root.join(model_id);
 
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
@@ -2039,10 +2063,19 @@ impl ModelLibrary {
         let current_review_status = metadata.review_status.clone();
 
         // Keep family detection from file metadata (independent from model_type resolver).
-        let primary_file = find_primary_model_file(&model_dir);
-        let file_type_info = primary_file
-            .as_ref()
-            .and_then(|f| identify_model_type(f).ok());
+        let model_dir_for_type = model_dir.clone();
+        let file_type_info = tokio::task::spawn_blocking(move || {
+            find_primary_model_file(&model_dir_for_type)
+                .as_ref()
+                .and_then(|f| identify_model_type(f).ok())
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join reclassify type inspection task: {}",
+                err
+            ))
+        })?;
         let resolved = resolve_local_model_type_with_persisted_hints(
             self.index(),
             &model_dir,
@@ -2053,9 +2086,23 @@ impl ModelLibrary {
         let new_type_str = new_type.as_str().to_string();
 
         // Detect dLLM subtype
-        let new_subtype = if new_type == ModelType::Llm && detect_dllm_from_config_json(&model_dir)
-        {
-            Some("dllm".to_string())
+        let new_subtype = if new_type == ModelType::Llm {
+            let model_dir_for_subtype = model_dir.clone();
+            let is_dllm = tokio::task::spawn_blocking(move || {
+                detect_dllm_from_config_json(&model_dir_for_subtype)
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join reclassify dLLM subtype task: {}",
+                    err
+                ))
+            })?;
+            if is_dllm {
+                Some("dllm".to_string())
+            } else {
+                None
+            }
         } else {
             None
         };

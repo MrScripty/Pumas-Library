@@ -445,6 +445,11 @@ Implementation notes:
   async existence probe in `resolve_model_execution_descriptor`, so model execution resolution no
   longer performs synchronous bundle revalidation, directory walks, or path existence checks inline
   on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` now routes redetect/reclassify primary-file
+  inspection and dLLM subtype detection through `tokio::task::spawn_blocking`, and uses async
+  existence probes for those entry points, so model reclassification paths no longer perform
+  synchronous directory walks, file header inspection, `config.json` reads, or path existence
+  checks inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

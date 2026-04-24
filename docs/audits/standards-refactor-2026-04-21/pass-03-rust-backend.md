@@ -421,6 +421,10 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/importer.rs` now uses async temp-directory creation for
   atomic imports, so import, progress-reporting import, and copied diffusers import flows no
   longer perform blocking temp-root setup inline on async runtime threads before copying files.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async cleanup, directory
+  creation, and rename for copied diffusers finalize handoff, so copied bundle import flows no
+  longer perform blocking std fs cleanup or temp-to-final placement inline on async runtime
+  threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -358,13 +358,13 @@ impl ModelImporter {
     ) -> Result<ModelImportResult> {
         let temp_dir = self.create_temp_import_dir().await?;
         if let Err(err) = copy_directory_preserving_layout(source_path, &temp_dir) {
-            let _ = std::fs::remove_dir_all(&temp_dir);
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Err(err);
         }
 
-        std::fs::create_dir_all(target_dir.parent().unwrap())?;
-        if let Err(err) = std::fs::rename(&temp_dir, target_dir) {
-            let _ = std::fs::remove_dir_all(&temp_dir);
+        tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
+        if let Err(err) = tokio::fs::rename(&temp_dir, target_dir).await {
+            let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Err(PumasError::Io {
                 message: format!("failed to finalize diffusers bundle import: {}", err),
                 path: Some(target_dir.to_path_buf()),

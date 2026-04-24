@@ -425,6 +425,10 @@ Implementation notes:
   creation, and rename for copied diffusers finalize handoff, so copied bundle import flows no
   longer perform blocking std fs cleanup or temp-to-final placement inline on async runtime
   threads.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes file-copy traversal through
+  `tokio::task::spawn_blocking` in copied diffusers import, temp import, and progress-reporting
+  import flows, so those async importer paths no longer perform synchronous recursive copy work
+  inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

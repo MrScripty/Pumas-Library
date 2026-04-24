@@ -357,7 +357,18 @@ impl ModelImporter {
         family: &str,
     ) -> Result<ModelImportResult> {
         let temp_dir = self.create_temp_import_dir().await?;
-        if let Err(err) = copy_directory_preserving_layout(source_path, &temp_dir) {
+        let source_path_for_copy = source_path.to_path_buf();
+        let temp_dir_for_copy = temp_dir.clone();
+        if let Err(err) = tokio::task::spawn_blocking(move || {
+            copy_directory_preserving_layout(&source_path_for_copy, &temp_dir_for_copy)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join copied diffusers directory copy task: {}",
+                err
+            ))
+        })? {
             let _ = tokio::fs::remove_dir_all(&temp_dir).await;
             return Err(err);
         }
@@ -678,7 +689,19 @@ impl ModelImporter {
             })
             .await;
 
-        let files = self.copy_files(&source_path, &temp_dir)?;
+        let importer = self.clone();
+        let source_path_for_copy = source_path.clone();
+        let temp_dir_for_copy = temp_dir.clone();
+        let files = tokio::task::spawn_blocking(move || {
+            importer.copy_files(&source_path_for_copy, &temp_dir_for_copy)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join progress import file copy task: {}",
+                err
+            ))
+        })??;
 
         // Compute hashes
         let _ = progress_tx
@@ -880,7 +903,19 @@ impl ModelImporter {
         type_info: &ModelTypeInfo,
     ) -> Result<ModelMetadata> {
         // Copy files
-        let files = self.copy_files(source, temp_dir)?;
+        let importer = self.clone();
+        let source_for_copy = source.to_path_buf();
+        let temp_dir_for_copy = temp_dir.to_path_buf();
+        let files = tokio::task::spawn_blocking(move || {
+            importer.copy_files(&source_for_copy, &temp_dir_for_copy)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join temp import file copy task: {}",
+                err
+            ))
+        })??;
 
         // Compute hashes for primary file
         let primary_file = self.choose_primary_file(temp_dir)?;

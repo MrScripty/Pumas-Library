@@ -714,8 +714,8 @@ impl ModelImporter {
             })
             .await;
 
-        std::fs::create_dir_all(target_dir.parent().unwrap())?;
-        std::fs::rename(&temp_dir, &target_dir)?;
+        tokio::fs::create_dir_all(target_dir.parent().unwrap()).await?;
+        tokio::fs::rename(&temp_dir, &target_dir).await?;
 
         // Index
         let _ = progress_tx

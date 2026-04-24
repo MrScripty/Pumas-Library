@@ -410,6 +410,9 @@ Implementation notes:
   through `tokio::task::spawn_blocking`, so the primary import and progress-reporting import flows
   no longer perform synchronous file or directory inspection inline on async runtime threads before
   security checks and model-type routing.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async directory creation and
+  rename for the progress-reporting import finalize handoff, so that temp-to-final model placement
+  no longer performs blocking std fs calls inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

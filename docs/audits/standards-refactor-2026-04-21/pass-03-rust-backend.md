@@ -436,6 +436,10 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/importer.rs` now uses async cleanup, directory
   creation, and rename for the plain import finalize path, so file-copy import failure cleanup and
   temp-to-final placement no longer perform blocking std fs calls inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes progress-import and temp-import
+  primary model-file selection through `tokio::task::spawn_blocking`, so those async importer
+  paths no longer perform synchronous directory walks inline on async runtime threads before hash
+  computation.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

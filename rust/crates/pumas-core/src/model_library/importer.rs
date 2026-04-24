@@ -724,7 +724,18 @@ impl ModelImporter {
             })
             .await;
 
-        let primary_file = self.choose_primary_file(&temp_dir)?;
+        let importer = self.clone();
+        let temp_dir_for_primary = temp_dir.clone();
+        let primary_file = tokio::task::spawn_blocking(move || {
+            importer.choose_primary_file(&temp_dir_for_primary)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join progress import primary file selection task: {}",
+                err
+            ))
+        })??;
         let hashes = if let Some(ref primary) = primary_file {
             let primary_for_hash = primary.clone();
             Some(
@@ -930,7 +941,18 @@ impl ModelImporter {
         })??;
 
         // Compute hashes for primary file
-        let primary_file = self.choose_primary_file(temp_dir)?;
+        let importer = self.clone();
+        let temp_dir_for_primary = temp_dir.to_path_buf();
+        let primary_file = tokio::task::spawn_blocking(move || {
+            importer.choose_primary_file(&temp_dir_for_primary)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join temp import primary file selection task: {}",
+                err
+            ))
+        })??;
         let hashes = if let Some(ref primary) = primary_file {
             let primary_for_hash = primary.clone();
             Some(

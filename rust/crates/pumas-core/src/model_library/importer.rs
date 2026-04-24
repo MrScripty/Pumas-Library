@@ -133,9 +133,10 @@ impl ModelImporter {
         let source_path = PathBuf::from(&spec.path);
 
         // Validate source exists
-        if !source_path.exists() {
-            return Err(PumasError::FileNotFound(source_path));
+        if !tokio::fs::try_exists(&source_path).await? {
+            return Err(PumasError::FileNotFound(source_path.clone()));
         }
+        let source_metadata = tokio::fs::metadata(&source_path).await?;
 
         // Detect file type and model info
         let importer = self.clone();
@@ -163,8 +164,20 @@ impl ModelImporter {
             });
         }
 
-        let bundle_validation = if source_path.is_dir() {
-            Some(validate_diffusers_directory_for_import(&source_path))
+        let bundle_validation = if source_metadata.is_dir() {
+            let validation_source_path = source_path.clone();
+            Some(
+                tokio::task::spawn_blocking(move || {
+                    validate_diffusers_directory_for_import(&validation_source_path)
+                })
+                .await
+                .map_err(|err| {
+                    PumasError::Other(format!(
+                        "Failed to join import diffusers validation task: {}",
+                        err
+                    ))
+                })?,
+            )
         } else {
             None
         };
@@ -203,7 +216,7 @@ impl ModelImporter {
             .build_model_path(&model_type, &family, &cleaned_name);
 
         // Check if already exists
-        if target_dir.exists() {
+        if tokio::fs::try_exists(&target_dir).await? {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,
@@ -584,8 +597,8 @@ impl ModelImporter {
             .await;
 
         // Validate source
-        if !source_path.exists() {
-            return Err(PumasError::FileNotFound(source_path));
+        if !tokio::fs::try_exists(&source_path).await? {
+            return Err(PumasError::FileNotFound(source_path.clone()));
         }
 
         // Detect type
@@ -642,7 +655,7 @@ impl ModelImporter {
             .library
             .build_model_path(&model_type, &family, &cleaned_name);
 
-        if target_dir.exists() {
+        if tokio::fs::try_exists(&target_dir).await? {
             return Ok(ModelImportResult {
                 path: spec.path.clone(),
                 success: false,

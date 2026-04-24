@@ -413,6 +413,11 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/importer.rs` now uses async directory creation and
   rename for the progress-reporting import finalize handoff, so that temp-to-final model placement
   no longer performs blocking std fs calls inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async source/target path probes in
+  `import` and `import_with_progress`, and routes top-level diffusers bundle validation in
+  `import` through `tokio::task::spawn_blocking`, so those import entry points no longer perform
+  synchronous existence checks or bundle validation inline on async runtime threads before routing
+  into bundle or file-copy flows.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

@@ -440,6 +440,11 @@ Implementation notes:
   primary model-file selection through `tokio::task::spawn_blocking`, so those async importer
   paths no longer perform synchronous directory walks inline on async runtime threads before hash
   computation.
+- Completed: `pumas-core/src/model_library/library.rs` now routes external asset revalidation and
+  execution-descriptor primary-file discovery through `tokio::task::spawn_blocking`, and uses an
+  async existence probe in `resolve_model_execution_descriptor`, so model execution resolution no
+  longer performs synchronous bundle revalidation, directory walks, or path existence checks inline
+  on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

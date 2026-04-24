@@ -920,7 +920,20 @@ impl ModelLibrary {
             return Ok(());
         }
 
-        if refresh_external_metadata_validation(&mut metadata) {
+        let validation_changed = tokio::task::spawn_blocking(move || {
+            let changed = refresh_external_metadata_validation(&mut metadata);
+            (changed, metadata)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join external asset refresh task: {}",
+                err
+            ))
+        })?;
+        let (validation_changed, metadata) = validation_changed;
+
+        if validation_changed {
             self.save_metadata(&model_dir, &metadata).await?;
             self.upsert_index_from_metadata(&model_dir, &metadata)?;
         }
@@ -1886,7 +1899,7 @@ impl ModelLibrary {
         self.refresh_external_asset_state(model_id).await?;
 
         let model_dir = self.library_root.join(model_id);
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
@@ -1932,7 +1945,17 @@ impl ModelLibrary {
                         })?
                 }
             }
-        } else if let Some(primary_file) = self.get_primary_model_file(model_id) {
+        } else if let Some(primary_file) = tokio::task::spawn_blocking({
+            let model_dir = model_dir.clone();
+            move || find_primary_model_file(&model_dir)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join execution descriptor primary file task: {}",
+                err
+            ))
+        })? {
             primary_file.display().to_string()
         } else {
             model_dir.display().to_string()

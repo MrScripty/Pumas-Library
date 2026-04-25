@@ -1,11 +1,11 @@
 //! Link management handlers.
 
-use super::{get_str_param, path_exists, require_str_param};
+use super::{get_str_param, path_exists, require_str_param, validate_existing_local_path};
 use crate::server::AppState;
 use pumas_library::model_library::ConflictResolution;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 fn parse_conflict_resolutions(
     raw_resolutions: HashMap<String, String>,
@@ -219,14 +219,17 @@ pub async fn get_file_link_count(
     _state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let file_path = require_str_param(params, "file_path", "filePath")?;
+    let file_path: PathBuf = validate_existing_local_path(
+        require_str_param(params, "file_path", "filePath")?,
+        "file_path",
+    )
+    .await?;
     // Count hard links to a file
-    let path = Path::new(&file_path);
-    if path_exists(path).await? {
+    if path_exists(&file_path).await? {
         #[cfg(unix)]
         {
             use std::os::unix::fs::MetadataExt;
-            if let Ok(metadata) = tokio::fs::metadata(path).await {
+            if let Ok(metadata) = tokio::fs::metadata(&file_path).await {
                 return Ok(json!({
                     "success": true,
                     "count": metadata.nlink()

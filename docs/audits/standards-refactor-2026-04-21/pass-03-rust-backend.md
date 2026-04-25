@@ -696,10 +696,11 @@ Rectification:
 
 Implementation notes:
 - Completed: `pumas-rpc/src/handlers/shared.rs` now provides async validated local-path helpers,
-  and `pumas-rpc/src/handlers/models/imports.rs` uses them to canonicalize and type-check file,
-  directory, and import-path parameters at the RPC boundary before passing strings deeper into the
-  API, so model import and metadata-inspection entry points no longer forward raw renderer-supplied
-  filesystem paths unchecked.
+  and `pumas-rpc/src/handlers/models/imports.rs`, `handlers/process.rs`, and
+  `handlers/links.rs` now use them to canonicalize and type-check file, directory, import-path,
+  shell-open, and file-inspection parameters at the RPC boundary before passing strings deeper into
+  the API, so those entry points no longer forward raw renderer-supplied filesystem paths
+  unchecked.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

@@ -2,7 +2,7 @@
 
 use super::{
     get_str_param, get_version_manager, parse_params, path_exists,
-    sync_version_paths_to_process_manager, validate_external_url, validate_non_empty,
+    sync_version_paths_to_process_manager, validate_existing_local_path, validate_external_url,
 };
 use crate::server::AppState;
 use serde::Deserialize;
@@ -139,7 +139,8 @@ pub async fn is_torch_running(state: &AppState, _params: &Value) -> pumas_librar
 
 pub async fn open_path(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: OpenPathParams = parse_params("open_path", params)?;
-    let path = validate_non_empty(command.path, "path")?;
+    let path = validate_existing_local_path(command.path, "path").await?;
+    let path = path.to_string_lossy().to_string();
     match state.api.open_path(&path).await {
         Ok(()) => Ok(json!({"success": true})),
         Err(e) => Ok(json!({"success": false, "error": e.to_string()})),

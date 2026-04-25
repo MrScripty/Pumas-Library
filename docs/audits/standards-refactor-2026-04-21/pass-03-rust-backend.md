@@ -345,6 +345,9 @@ Implementation notes:
 - Completed: `pumas-core/src/launcher/updater.rs` now gathers update-check git metadata through a
   blocking task boundary, so launcher update polling no longer performs synchronous repository/path
   inspection inline on async runtime threads before the async GitHub/cache flow begins.
+- Completed: `pumas-core/src/launcher/updater.rs` now initializes `GitHubClient` through
+  `tokio::task::spawn_blocking` inside `check_for_updates`, so launcher update polling no longer
+  performs that synchronous cache-client construction inline on the async request path.
 - Completed: `pumas-core/src/launcher/updater.rs` now dispatches the launcher apply-update
   workflow through `tokio::task::spawn_blocking`, so git pull, pip install, pnpm build, and
   rollback subprocess orchestration no longer execute inline on async runtime threads.

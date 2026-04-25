@@ -319,19 +319,34 @@ impl LauncherUpdater {
             }
         }
 
-        let github_client = match GitHubClient::new(self.cache_dir()) {
-            Ok(client) => client,
-            Err(err) => {
-                return self
-                    .return_cached_or_error(
-                        current_commit,
-                        branch,
-                        current_version,
-                        format!("Failed to initialize GitHub client: {}", err),
-                    )
-                    .await;
-            }
-        };
+        let cache_dir = self.cache_dir();
+        let github_client =
+            match tokio::task::spawn_blocking(move || GitHubClient::new(cache_dir)).await {
+                Ok(Ok(client)) => client,
+                Ok(Err(err)) => {
+                    return self
+                        .return_cached_or_error(
+                            current_commit,
+                            branch,
+                            current_version,
+                            format!("Failed to initialize GitHub client: {}", err),
+                        )
+                        .await;
+                }
+                Err(error) => {
+                    return self
+                        .return_cached_or_error(
+                            current_commit,
+                            branch,
+                            current_version,
+                            format!(
+                                "Failed to join GitHub client initialization task: {}",
+                                error
+                            ),
+                        )
+                        .await;
+                }
+            };
 
         let repo = format!("{}/{}", self.repo_owner, self.repo_name);
         let release = match github_client.get_latest_release(&repo, force_refresh).await {

@@ -20,6 +20,7 @@
 use crate::{PumasError, Result};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs;
 use tracing::{debug, info, warn};
 
 use super::library::ModelLibrary;
@@ -42,6 +43,32 @@ pub struct LibraryMerger {
 }
 
 impl LibraryMerger {
+    async fn load_source_metadata(
+        source: Arc<ModelLibrary>,
+        source_dir: PathBuf,
+    ) -> Result<crate::models::ModelMetadata> {
+        tokio::task::spawn_blocking(move || {
+            let metadata = source.load_metadata(&source_dir)?;
+            metadata.ok_or_else(|| PumasError::ImportFailed {
+                message: format!("No metadata.json in {}", source_dir.display()),
+            })
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join merge metadata load task: {}", err))
+        })?
+    }
+
+    async fn move_directory_async(src: PathBuf, dest: PathBuf) -> Result<()> {
+        tokio::task::spawn_blocking(move || Self::move_directory(&src, &dest))
+            .await
+            .map_err(|err| PumasError::Other(format!("Failed to join merge move task: {}", err)))?
+    }
+
+    async fn cleanup_source_async(source_path: PathBuf) {
+        let _ = tokio::task::spawn_blocking(move || Self::cleanup_source(&source_path)).await;
+    }
+
     /// Create a new merger targeting the given destination library.
     pub fn new(destination: Arc<ModelLibrary>) -> Self {
         Self { destination }
@@ -77,7 +104,10 @@ impl LibraryMerger {
         }
 
         // Phase 2: VALIDATE
-        if !self.destination.library_root().exists() {
+        if !fs::try_exists(self.destination.library_root())
+            .await
+            .map_err(|e| PumasError::io_with_path(e, self.destination.library_root()))?
+        {
             return Err(PumasError::NotADirectory(
                 self.destination.library_root().to_path_buf(),
             ));
@@ -106,7 +136,7 @@ impl LibraryMerger {
 
         // Phase 5: CLEANUP - Remove empty source directory
         if errors.is_empty() {
-            Self::cleanup_source(source_path);
+            Self::cleanup_source_async(source_path.to_path_buf()).await;
         }
 
         info!(
@@ -129,10 +159,8 @@ impl LibraryMerger {
         source_dir: &Path,
     ) -> Result<MergeSingleResult> {
         // Load source metadata
-        let metadata = source.load_metadata(source_dir)?;
-        let metadata = metadata.ok_or_else(|| PumasError::ImportFailed {
-            message: format!("No metadata.json in {}", source_dir.display()),
-        })?;
+        let metadata =
+            Self::load_source_metadata(Arc::new(source.clone()), source_dir.to_path_buf()).await?;
 
         // Check for duplicate by hash
         if let Some(ref hashes) = metadata.hashes {
@@ -161,7 +189,10 @@ impl LibraryMerger {
             .build_model_path(model_type, family, &cleaned);
 
         // Move or copy the model directory
-        if dest_dir.exists() {
+        if fs::try_exists(&dest_dir)
+            .await
+            .map_err(|e| PumasError::io_with_path(e, &dest_dir))?
+        {
             debug!(
                 "Destination already exists, skipping: {}",
                 dest_dir.display()
@@ -169,7 +200,7 @@ impl LibraryMerger {
             return Ok(MergeSingleResult::Skipped);
         }
 
-        Self::move_directory(source_dir, &dest_dir)?;
+        Self::move_directory_async(source_dir.to_path_buf(), dest_dir.clone()).await?;
 
         // Index the moved model
         self.destination.index_model_dir(&dest_dir).await?;

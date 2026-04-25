@@ -217,6 +217,10 @@ Implementation notes:
   default-version metadata writes through blocking-task helpers, and version-manager default
   selection entry points await that async state path, so version selection flows no longer perform
   synchronous versions metadata JSON writes inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/merge.rs` now routes source metadata loads and
+  directory move or cleanup work through explicit async boundaries, and it uses async destination
+  existence checks, so library merge no longer performs synchronous metadata loads or recursive
+  filesystem mutations inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

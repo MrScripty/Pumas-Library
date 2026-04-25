@@ -5,6 +5,7 @@ use pumas_app_manager::VersionManager;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 /// Parse an RPC params object into a typed command at the handler boundary.
@@ -42,6 +43,82 @@ pub(crate) fn validate_external_url(value: String) -> pumas_library::Result<Stri
         scheme => Err(pumas_library::PumasError::InvalidParams {
             message: format!("Unsupported url scheme: {scheme}"),
         }),
+    }
+}
+
+async fn canonicalize_local_path(value: String, field: &str) -> pumas_library::Result<PathBuf> {
+    let raw = validate_non_empty(value, field)?;
+    let path = PathBuf::from(&raw);
+    tokio::fs::canonicalize(&path)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => pumas_library::PumasError::InvalidParams {
+                message: format!("Parameter '{field}' path not found: {}", path.display()),
+            },
+            _ => pumas_library::PumasError::Io {
+                message: format!("Failed to canonicalize path: {}", path.display()),
+                path: Some(path),
+                source: Some(source),
+            },
+        })
+}
+
+pub(crate) async fn validate_existing_local_path(
+    value: String,
+    field: &str,
+) -> pumas_library::Result<PathBuf> {
+    canonicalize_local_path(value, field).await
+}
+
+pub(crate) async fn validate_existing_local_file_path(
+    value: String,
+    field: &str,
+) -> pumas_library::Result<PathBuf> {
+    let path = canonicalize_local_path(value, field).await?;
+    let metadata =
+        tokio::fs::metadata(&path)
+            .await
+            .map_err(|source| pumas_library::PumasError::Io {
+                message: format!("Failed to inspect path: {}", path.display()),
+                path: Some(path.clone()),
+                source: Some(source),
+            })?;
+
+    if metadata.is_file() {
+        Ok(path)
+    } else {
+        Err(pumas_library::PumasError::InvalidParams {
+            message: format!(
+                "Parameter '{field}' must reference a file: {}",
+                path.display()
+            ),
+        })
+    }
+}
+
+pub(crate) async fn validate_existing_local_directory_path(
+    value: String,
+    field: &str,
+) -> pumas_library::Result<PathBuf> {
+    let path = canonicalize_local_path(value, field).await?;
+    let metadata =
+        tokio::fs::metadata(&path)
+            .await
+            .map_err(|source| pumas_library::PumasError::Io {
+                message: format!("Failed to inspect path: {}", path.display()),
+                path: Some(path.clone()),
+                source: Some(source),
+            })?;
+
+    if metadata.is_dir() {
+        Ok(path)
+    } else {
+        Err(pumas_library::PumasError::InvalidParams {
+            message: format!(
+                "Parameter '{field}' must reference a directory: {}",
+                path.display()
+            ),
+        })
     }
 }
 
@@ -262,6 +339,49 @@ mod tests {
         let error = validate_external_url("file:///tmp/example".to_string()).unwrap_err();
 
         assert!(error.to_string().contains("Unsupported url scheme"));
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_file_path_canonicalizes_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("model.gguf");
+        std::fs::write(&file_path, b"gguf").unwrap();
+
+        let validated =
+            validate_existing_local_file_path(file_path.to_string_lossy().to_string(), "file_path")
+                .await
+                .unwrap();
+
+        assert_eq!(validated, file_path.canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_file_path_rejects_missing_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let missing = temp_dir.path().join("missing.gguf");
+
+        let error =
+            validate_existing_local_file_path(missing.to_string_lossy().to_string(), "file_path")
+                .await
+                .unwrap_err();
+
+        assert!(error.to_string().contains("path not found"));
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_directory_path_rejects_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("bundle.json");
+        std::fs::write(&file_path, b"{}").unwrap();
+
+        let error = validate_existing_local_directory_path(
+            file_path.to_string_lossy().to_string(),
+            "directory_path",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("must reference a directory"));
     }
 
     #[tokio::test]

@@ -2,7 +2,8 @@
 
 use crate::handlers::{
     extract_safetensors_header, get_bool_param, get_str_param, parse_params, require_str_param,
-    validate_non_empty,
+    validate_existing_local_directory_path, validate_existing_local_file_path,
+    validate_existing_local_path, validate_non_empty,
 };
 use crate::server::AppState;
 use pumas_library::model_library::get_diffusers_component_manifest;
@@ -96,9 +97,11 @@ async fn extract_diffusers_component_manifest(
 
 pub async fn import_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let command: ImportModelParams = parse_params("import_model", params)?;
+    let local_path: PathBuf =
+        validate_existing_local_path(command.local_path, "local_path").await?;
 
     let spec = pumas_library::model_library::ModelImportSpec {
-        path: validate_non_empty(command.local_path, "local_path")?,
+        path: local_path.to_string_lossy().to_string(),
         family: validate_non_empty(command.family, "family")?,
         official_name: validate_non_empty(command.official_name, "official_name")?,
         repo_id: command.repo_id,
@@ -137,9 +140,11 @@ pub async fn import_external_diffusers_directory(
 ) -> pumas_library::Result<Value> {
     let command: ExternalDiffusersImportParams =
         parse_params("import_external_diffusers_directory", params)?;
+    let source_path: PathBuf =
+        validate_existing_local_directory_path(command.source_path, "source_path").await?;
 
     let spec = pumas_library::model_library::ExternalDiffusersImportSpec {
-        source_path: validate_non_empty(command.source_path, "source_path")?,
+        source_path: source_path.to_string_lossy().to_string(),
         family: validate_non_empty(command.family, "family")?,
         official_name: validate_non_empty(command.official_name, "official_name")?,
         repo_id: command.repo_id,
@@ -167,9 +172,17 @@ pub async fn lookup_hf_metadata_for_file(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let file_path = require_str_param(params, "file_path", "filePath")?;
+    let file_path: PathBuf = validate_existing_local_file_path(
+        require_str_param(params, "file_path", "filePath")?,
+        "file_path",
+    )
+    .await?;
 
-    match state.api.lookup_hf_metadata_for_file(&file_path).await {
+    match state
+        .api
+        .lookup_hf_metadata_for_file(&file_path.to_string_lossy())
+        .await
+    {
         Ok(Some(metadata)) => Ok(json!({
             "success": true,
             "found": true,
@@ -192,11 +205,15 @@ pub async fn lookup_hf_metadata_for_bundle_directory(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let directory_path = require_str_param(params, "directory_path", "directoryPath")?;
+    let directory_path: PathBuf = validate_existing_local_directory_path(
+        require_str_param(params, "directory_path", "directoryPath")?,
+        "directory_path",
+    )
+    .await?;
 
     match state
         .api
-        .lookup_hf_metadata_for_bundle_directory(&directory_path)
+        .lookup_hf_metadata_for_bundle_directory(&directory_path.to_string_lossy())
         .await
     {
         Ok(Some(metadata)) => Ok(json!({
@@ -227,8 +244,10 @@ pub async fn detect_sharded_sets(
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
 
-    // Convert to PathBuf
-    let paths: Vec<std::path::PathBuf> = files.iter().map(std::path::PathBuf::from).collect();
+    let mut paths = Vec::with_capacity(files.len());
+    for file in files {
+        paths.push(validate_existing_local_file_path(file, "files").await?);
+    }
 
     // Detect sharded sets
     let sets =
@@ -261,8 +280,15 @@ pub async fn detect_sharded_sets(
 }
 
 pub async fn validate_file_type(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
-    let file_path = require_str_param(params, "file_path", "filePath")?;
-    let response = state.api.validate_file_type(&file_path).await?;
+    let file_path: PathBuf = validate_existing_local_file_path(
+        require_str_param(params, "file_path", "filePath")?,
+        "file_path",
+    )
+    .await?;
+    let response = state
+        .api
+        .validate_file_type(&file_path.to_string_lossy())
+        .await?;
     Ok(serde_json::to_value(response)?)
 }
 
@@ -270,8 +296,12 @@ pub async fn get_embedded_metadata(
     _state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let file_path = require_str_param(params, "file_path", "filePath")?;
-    let path = std::path::PathBuf::from(&file_path);
+    let path: PathBuf = validate_existing_local_file_path(
+        require_str_param(params, "file_path", "filePath")?,
+        "file_path",
+    )
+    .await?;
+    let file_path = path.to_string_lossy().to_string();
 
     // Detect file type from extension
     let extension = path

@@ -1,6 +1,8 @@
 //! Model download handlers.
 
-use crate::handlers::{parse_params, require_str_param, validate_non_empty};
+use crate::handlers::{
+    parse_params, require_str_param, validate_existing_local_directory_path, validate_non_empty,
+};
 use crate::server::AppState;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -191,9 +193,17 @@ pub async fn list_interrupted_downloads(
 
 pub async fn recover_download(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let repo_id = require_str_param(params, "repo_id", "repoId")?;
-    let dest_dir = require_str_param(params, "dest_dir", "destDir")?;
+    let dest_dir = validate_existing_local_directory_path(
+        require_str_param(params, "dest_dir", "destDir")?,
+        "dest_dir",
+    )
+    .await?;
 
-    match state.api.recover_download(&repo_id, &dest_dir).await {
+    match state
+        .api
+        .recover_download(&repo_id, &dest_dir.to_string_lossy())
+        .await
+    {
         Ok(download_id) => Ok(json!({
             "success": true,
             "download_id": download_id
@@ -210,11 +220,15 @@ pub async fn resume_partial_download(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let repo_id = require_str_param(params, "repo_id", "repoId")?;
-    let dest_dir = require_str_param(params, "dest_dir", "destDir")?;
+    let dest_dir = validate_existing_local_directory_path(
+        require_str_param(params, "dest_dir", "destDir")?,
+        "dest_dir",
+    )
+    .await?;
 
     let action = state
         .api
-        .resume_partial_download(&repo_id, &dest_dir)
+        .resume_partial_download(&repo_id, &dest_dir.to_string_lossy())
         .await?;
     let success = action.action != "none";
     Ok(json!({
@@ -225,4 +239,45 @@ pub async fn resume_partial_download(
         "reason_code": action.reason_code,
         "error": if success { Value::Null } else { serde_json::to_value(action.message)? }
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_recover_download_validates_dest_dir() {
+        let temp = TempDir::new().unwrap();
+        let dest_dir = temp.path().join("downloads");
+        tokio::fs::create_dir_all(&dest_dir).await.unwrap();
+
+        let validated = validate_existing_local_directory_path(
+            dest_dir.to_string_lossy().to_string(),
+            "dest_dir",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(validated, tokio::fs::canonicalize(dest_dir).await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn test_resume_partial_download_rejects_file_dest_dir() {
+        let temp = TempDir::new().unwrap();
+        let file_path = temp.path().join("not-a-directory");
+        tokio::fs::write(&file_path, b"x").await.unwrap();
+
+        let error = validate_existing_local_directory_path(
+            file_path.to_string_lossy().to_string(),
+            "dest_dir",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            pumas_library::PumasError::InvalidParams { .. }
+        ));
+    }
 }

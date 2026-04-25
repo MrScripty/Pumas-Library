@@ -837,6 +837,10 @@ Implementation notes:
   `api/state.rs` now validate and canonicalize `model_dir` before in-place import begins, so RPC,
   direct API, and mirrored IPC in-place import entry points no longer accept unchecked raw
   directory strings.
+- Completed: `pumas-rpc/src/handlers/models/downloads.rs` now validates and canonicalizes
+  interrupted-download `dest_dir` values before calling recovery and resume APIs, so those RPC
+  recovery entry points no longer forward unchecked raw directory strings across the handler
+  boundary.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: remediated

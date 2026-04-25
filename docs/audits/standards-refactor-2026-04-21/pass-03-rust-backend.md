@@ -213,6 +213,10 @@ Implementation notes:
   blocking-task helper in async state initialization, refresh, and installation-validation paths,
   so version-state lifecycle methods no longer perform synchronous versions metadata JSON loads
   inline on async runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/state.rs` now routes last-selected and
+  default-version metadata writes through blocking-task helpers, and version-manager default
+  selection entry points await that async state path, so version selection flows no longer perform
+  synchronous versions metadata JSON writes inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

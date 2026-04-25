@@ -43,6 +43,36 @@ impl VersionState {
             })?
     }
 
+    async fn set_last_selected_version_metadata(&self, tag: Option<String>) -> Result<()> {
+        let metadata_manager = self.metadata_manager.clone();
+        let app_id = self.app_id;
+        tokio::task::spawn_blocking(move || {
+            metadata_manager.set_last_selected_version(tag.as_deref(), Some(app_id))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join version-state last-selected write task: {}",
+                err
+            ))
+        })?
+    }
+
+    async fn set_default_version_metadata(&self, tag: Option<String>) -> Result<()> {
+        let metadata_manager = self.metadata_manager.clone();
+        let app_id = self.app_id;
+        tokio::task::spawn_blocking(move || {
+            metadata_manager.set_default_version(tag.as_deref(), Some(app_id))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join version-state default-version write task: {}",
+                err
+            ))
+        })?
+    }
+
     /// Create a new version state tracker.
     pub async fn new(
         launcher_root: &Path,
@@ -227,15 +257,15 @@ impl VersionState {
             })?;
 
         // Update last_selected_version in metadata
-        self.metadata_manager
-            .set_last_selected_version(Some(tag), Some(self.app_id))?;
+        self.set_last_selected_version_metadata(Some(tag.to_string()))
+            .await?;
 
         info!("Set active version: {}", tag);
         Ok(true)
     }
 
     /// Set the default version.
-    pub fn set_default_version(&mut self, tag: Option<&str>) -> Result<bool> {
+    pub async fn set_default_version(&mut self, tag: Option<&str>) -> Result<bool> {
         if let Some(t) = tag {
             if !self.is_installed(t) {
                 return Err(PumasError::VersionNotFound { tag: t.to_string() });
@@ -246,8 +276,8 @@ impl VersionState {
         self.default_version = tag.map(String::from);
 
         // Update metadata
-        self.metadata_manager
-            .set_default_version(tag, Some(self.app_id))?;
+        self.set_default_version_metadata(tag.map(String::from))
+            .await?;
 
         info!("Set default version: {:?}", tag);
         Ok(true)
@@ -581,11 +611,11 @@ mod tests {
         state.add_installed_version("v1.0.0", metadata).unwrap();
 
         // Set default
-        state.set_default_version(Some("v1.0.0")).unwrap();
+        state.set_default_version(Some("v1.0.0")).await.unwrap();
         assert_eq!(state.get_default_version(), Some("v1.0.0".to_string()));
 
         // Clear default
-        state.set_default_version(None).unwrap();
+        state.set_default_version(None).await.unwrap();
         assert_eq!(state.get_default_version(), None);
     }
 
@@ -608,7 +638,7 @@ mod tests {
         };
         state.add_installed_version("v1.0.0", metadata).unwrap();
         state.set_active_version("v1.0.0").await.unwrap();
-        state.set_default_version(Some("v1.0.0")).unwrap();
+        state.set_default_version(Some("v1.0.0")).await.unwrap();
 
         // Remove
         state.remove_installed_version("v1.0.0").await.unwrap();

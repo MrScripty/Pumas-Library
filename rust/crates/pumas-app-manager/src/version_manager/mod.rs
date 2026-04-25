@@ -271,7 +271,7 @@ impl VersionManager {
     /// Set the default version.
     pub async fn set_default_version(&self, tag: Option<&str>) -> Result<bool> {
         let mut state = self.state.write().await;
-        state.set_default_version(tag)
+        state.set_default_version(tag).await
     }
 
     /// Get detailed version info for a specific tag.

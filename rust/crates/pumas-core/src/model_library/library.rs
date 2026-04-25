@@ -294,33 +294,16 @@ impl ModelLibrary {
     /// * `metadata` - Metadata to save
     pub async fn save_metadata(&self, model_dir: &Path, metadata: &ModelMetadata) -> Result<()> {
         let _lock = self.write_lock.lock().await;
-        if !model_dir.is_dir() {
-            return Err(PumasError::NotADirectory(model_dir.to_path_buf()));
-        }
-
-        let mut normalized = metadata.clone();
-        if let Some(model_id) = self.get_model_id(model_dir) {
-            normalized.model_id = Some(model_id);
-        }
-        let active_bindings = normalized
-            .model_id
-            .as_deref()
-            .map(|model_id| {
-                self.index
-                    .list_active_model_dependency_bindings(model_id, None)
-            })
-            .transpose()?
-            .unwrap_or_default();
-        apply_recommended_backend_hint(&mut normalized, &active_bindings);
-        let path = model_dir.join(METADATA_FILENAME);
-        if let Some(existing) = atomic_read_json::<ModelMetadata>(&path)? {
-            let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);
-            let next_json = serde_json::to_value(&normalized).unwrap_or(Value::Null);
-            if existing_json == next_json {
-                return Ok(());
+        match tokio::fs::metadata(model_dir).await {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_) => return Err(PumasError::NotADirectory(model_dir.to_path_buf())),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(PumasError::NotADirectory(model_dir.to_path_buf()));
             }
+            Err(err) => return Err(PumasError::io_with_path(err, model_dir)),
         }
-        self.write_metadata_projection(&path, &normalized)
+        save_metadata_projection_async(self.clone(), model_dir.to_path_buf(), metadata.clone())
+            .await
     }
 
     /// Load user overrides from a model directory.
@@ -332,8 +315,7 @@ impl ModelLibrary {
     /// Save user overrides to a model directory.
     pub async fn save_overrides(&self, model_dir: &Path, overrides: &ModelOverrides) -> Result<()> {
         let _lock = self.write_lock.lock().await;
-        let path = model_dir.join(OVERRIDES_FILENAME);
-        atomic_write_json(&path, overrides, false)
+        save_overrides_projection_async(model_dir.to_path_buf(), overrides.clone()).await
     }
 
     // ========================================
@@ -2521,6 +2503,63 @@ async fn load_baseline_metadata_value_async(
                 err
             ))
         })?
+}
+
+async fn save_metadata_projection_async(
+    library: ModelLibrary,
+    model_dir: PathBuf,
+    metadata: ModelMetadata,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let mut normalized = metadata;
+        if let Some(model_id) = library.get_model_id(&model_dir) {
+            normalized.model_id = Some(model_id);
+        }
+        let active_bindings = normalized
+            .model_id
+            .as_deref()
+            .map(|model_id| {
+                library
+                    .index
+                    .list_active_model_dependency_bindings(model_id, None)
+            })
+            .transpose()?
+            .unwrap_or_default();
+        apply_recommended_backend_hint(&mut normalized, &active_bindings);
+        let path = model_dir.join(METADATA_FILENAME);
+        if let Some(existing) = atomic_read_json::<ModelMetadata>(&path)? {
+            let existing_json = serde_json::to_value(existing).unwrap_or(Value::Null);
+            let next_json = serde_json::to_value(&normalized).unwrap_or(Value::Null);
+            if existing_json == next_json {
+                return Ok(());
+            }
+        }
+        library.write_metadata_projection(&path, &normalized)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join metadata projection save task: {}",
+            err
+        ))
+    })?
+}
+
+async fn save_overrides_projection_async(
+    model_dir: PathBuf,
+    overrides: ModelOverrides,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        let path = model_dir.join(OVERRIDES_FILENAME);
+        atomic_write_json(&path, &overrides, false)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join overrides projection save task: {}",
+            err
+        ))
+    })?
 }
 
 async fn resolve_local_model_type_with_persisted_hints_async(

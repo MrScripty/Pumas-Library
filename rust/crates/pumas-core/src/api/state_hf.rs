@@ -93,7 +93,7 @@ pub(super) async fn start_hf_download(
     request: &model_library::DownloadRequest,
 ) -> std::result::Result<String, PumasError> {
     use crate::api::hf::{
-        apply_remote_model_metadata, normalized_download_hint, resolve_model_type_from_hints,
+        apply_remote_model_metadata, normalized_download_hint,
     };
     use tracing::{info, warn};
 
@@ -151,14 +151,15 @@ pub(super) async fn start_hf_download(
                 normalized_download_hint(Some(model_info.kind.as_str())).map(ToOwned::to_owned);
         }
         if resolved_model_type.is_none() {
-            resolved_model_type = resolve_model_type_from_hints(
-                primary.model_library.index(),
-                [
-                    normalized_download_hint(request.model_type.as_deref()),
-                    resolved_pipeline_tag.as_deref(),
-                    normalized_download_hint(Some(model_info.kind.as_str())),
+            resolved_model_type = crate::api::hf::resolve_model_type_from_hints_async(
+                primary.model_library.index().clone(),
+                vec![
+                    normalized_download_hint(request.model_type.as_deref()).map(ToOwned::to_owned),
+                    resolved_pipeline_tag.clone(),
+                    normalized_download_hint(Some(model_info.kind.as_str())).map(ToOwned::to_owned),
                 ],
-            )?;
+            )
+            .await?;
         }
     }
     if let Some(model_info) = remote_model.as_ref() {
@@ -505,10 +506,11 @@ pub(super) async fn refetch_metadata_from_hf(
 
     if let Some(repo_id) = model_id.strip_prefix("download:") {
         let model = hf_client.get_model_info(repo_id).await?;
-        let model_type = crate::api::hf::resolve_model_type_from_hints(
-            library.index(),
-            [Some(model.kind.as_str()), None, None],
-        )?;
+        let model_type = crate::api::hf::resolve_model_type_from_hints_async(
+            library.index().clone(),
+            vec![Some(model.kind.clone()), None, None],
+        )
+        .await?;
         return Ok(models::ModelMetadata {
             repo_id: Some(model.repo_id),
             official_name: Some(model.name),
@@ -548,10 +550,11 @@ pub(super) async fn refetch_metadata_from_hf(
 
     let hf_result = if let Some(ref repo_id) = repo_id {
         let model = hf_client.get_model_info(repo_id).await?;
-        let translated_model_type = crate::api::hf::resolve_model_type_from_hints(
-            library.index(),
-            [Some(model.kind.as_str()), None, None],
-        )?;
+        let translated_model_type = crate::api::hf::resolve_model_type_from_hints_async(
+            library.index().clone(),
+            vec![Some(model.kind.clone()), None, None],
+        )
+        .await?;
         model_library::HfMetadataResult {
             repo_id: model.repo_id,
             official_name: Some(model.name),

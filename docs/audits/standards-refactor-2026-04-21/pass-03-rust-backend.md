@@ -382,6 +382,10 @@ Implementation notes:
   `tokio::fs::try_exists` when resolving HuggingFace auth status, so the request-facing
   auth-status endpoint no longer performs a synchronous token-path existence check inline on an
   async runtime thread.
+- Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now resolve HuggingFace
+  model-type hints through `tokio::task::spawn_blocking`, so download planning and HF metadata
+  refresh paths no longer perform synchronous model-type hint index reads inline on async runtime
+  threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

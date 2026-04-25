@@ -841,6 +841,9 @@ Implementation notes:
   interrupted-download `dest_dir` values before calling recovery and resume APIs, so those RPC
   recovery entry points no longer forward unchecked raw directory strings across the handler
   boundary.
+- Completed: `pumas-rpc/src/handlers/models/migration.rs` now validates and canonicalizes
+  migration `report_path` values before calling delete-report APIs, so that RPC delete-report
+  entry point no longer forwards an unchecked raw file path across the handler boundary.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: remediated

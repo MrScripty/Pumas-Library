@@ -5,25 +5,14 @@ import type { BaseResponse } from './api-common';
 // ============================================================================
 
 /**
- * Health status levels for link registry
+ * Health status levels returned by the backend link registry health check.
  */
-export type HealthStatus = 'healthy' | 'warnings' | 'errors';
+export type HealthStatus = 'healthy' | 'degraded';
 
 /**
  * Link types supported by the registry
  */
 export type LinkType = 'symlink' | 'hardlink' | 'copy';
-
-/**
- * Information about a broken link
- */
-export interface BrokenLinkInfo {
-  link_id: number;
-  target_path: string;
-  expected_source: string;
-  model_id: string;
-  reason: string;
-}
 
 /**
  * Information about a registered link
@@ -47,7 +36,7 @@ export interface LinkHealthResponse extends BaseResponse {
   status: HealthStatus;
   total_links: number;
   healthy_links: number;
-  broken_links: BrokenLinkInfo[];
+  broken_links: string[];
   orphaned_links: string[];
   warnings: string[];
   errors: string[];

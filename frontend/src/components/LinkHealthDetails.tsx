@@ -1,5 +1,5 @@
 import { CheckCircle, AlertCircle, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
-import type { BrokenLinkInfo, LinkHealthResponse } from '../types/api';
+import type { LinkHealthResponse } from '../types/api';
 
 interface LinkHealthDetailsProps {
   activeVersion?: string | null;
@@ -60,16 +60,13 @@ export function LinkHealthDetails({
             Broken Links
           </div>
           <div className="max-h-32 overflow-y-auto space-y-1">
-            {health.broken_links.map((link: BrokenLinkInfo) => (
+            {health.broken_links.map((path: string, index: number) => (
               <div
-                key={link.link_id}
+                key={`${path}-${index}`}
                 className="text-xs p-2 bg-[hsl(var(--accent-error)/0.1)] rounded border border-[hsl(var(--accent-error)/0.2)]"
               >
                 <div className="font-mono truncate text-[hsl(var(--launcher-text-primary))]">
-                  {link.target_path}
-                </div>
-                <div className="text-[hsl(var(--launcher-text-tertiary))]">
-                  {link.reason}
+                  {path}
                 </div>
               </div>
             ))}

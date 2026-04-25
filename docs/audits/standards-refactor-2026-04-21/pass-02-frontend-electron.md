@@ -258,6 +258,25 @@ Rectification:
 - Completed: reduce `frontend/src/components/MappingPreviewDetails.tsx` render complexity by extracting cross-filesystem, summary, warning, action-list, apply-result, and control sections into focused mapping preview detail modules with interaction coverage.
 - Completed: reduce `frontend/src/components/MappingPreview.tsx` render complexity by moving header rendering, unavailable-state rendering, and derived preview count/status calculation into focused modules with workflow coverage.
 - Completed: reduce `frontend/src/components/RemoteModelListItem.tsx` render complexity by extracting remote download flags/options and row action controls into focused modules with action coverage.
+
+## Additional Remediation Notes
+
+### 2026-04-25 - Link Health Renderer Contract Drift
+Status: remediated
+
+The frontend link-health panel had drifted from the backend response contract:
+
+- `frontend/src/types/api-links.ts` still declared `status` as `'healthy' | 'warnings' | 'errors'`
+- `frontend/src/components/LinkHealthStatus.tsx` indexed a status config table directly and assumed every backend status had a matching entry
+- `frontend/src/components/LinkHealthDetails.tsx` still treated `broken_links` as structured objects even though the backend returns path strings
+
+The Rust backend currently returns `"healthy"` or `"degraded"` for link health. When `"degraded"` reached the renderer, `statusConfig[status]` was `undefined`, which caused a production renderer crash on `config.icon`.
+
+Rectification:
+- Completed: align `HealthStatus` with the backend contract in `frontend/src/types/api-links.ts`
+- Completed: align `broken_links` typing with the backend payload shape
+- Completed: add a defensive status fallback in `LinkHealthStatus.tsx` so an unexpected backend status renders an error presentation instead of crashing
+- Completed: add `frontend/src/components/LinkHealthStatus.test.tsx` coverage for degraded and unknown backend status values
 - Completed: reduce `frontend/src/components/Header.tsx` render/status complexity by extracting status projection, update/window controls, status badge, and resource strip rendering into focused header modules.
 - Completed: reduce `frontend/src/components/VersionListItem.tsx` render complexity by extracting install-version display-state projection, info rendering, and action-button state rendering into focused modules while preserving install-dialog row coverage.
 - Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.

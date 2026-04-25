@@ -42,17 +42,24 @@ const statusConfig: Record<
     color: 'text-[hsl(var(--accent-success))]',
     label: 'All links healthy',
   },
-  warnings: {
+  degraded: {
     icon: AlertTriangle,
     color: 'text-[hsl(var(--accent-warning))]',
-    label: 'Warnings detected',
-  },
-  errors: {
-    icon: XCircle,
-    color: 'text-[hsl(var(--accent-error))]',
-    label: 'Errors detected',
+    label: 'Issues detected',
   },
 };
+
+function getStatusConfig(status: string | null | undefined) {
+  if (status === 'healthy' || status === 'degraded') {
+    return statusConfig[status];
+  }
+
+  return {
+    icon: XCircle,
+    color: 'text-[hsl(var(--accent-error))]',
+    label: 'Unknown status',
+  };
+}
 
 export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
   activeVersion,
@@ -140,8 +147,8 @@ export const LinkHealthStatus: React.FC<LinkHealthStatusProps> = ({
     return null;
   }
 
-  const status = health?.status || 'healthy';
-  const config = statusConfig[status];
+  const status = health?.status ?? 'healthy';
+  const config = getStatusConfig(status);
   const StatusIcon = config.icon;
   const hasBrokenLinks = (health?.broken_links.length || 0) > 0;
   const hasOrphanedLinks = (health?.orphaned_links.length || 0) > 0;

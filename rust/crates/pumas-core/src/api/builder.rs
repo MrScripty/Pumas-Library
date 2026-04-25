@@ -68,6 +68,24 @@ impl Drop for InstanceClaimGuard {
     }
 }
 
+async fn load_known_download_dirs(
+    persistence: Option<Arc<model_library::DownloadPersistence>>,
+) -> HashSet<PathBuf> {
+    tokio::task::spawn_blocking(move || {
+        persistence
+            .map(|persistence| {
+                persistence
+                    .load_all()
+                    .into_iter()
+                    .map(|entry| entry.dest_dir)
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 fn start_primary_background_work(
     primary_state: Arc<PrimaryState>,
     known_download_dirs: HashSet<PathBuf>,
@@ -533,20 +551,12 @@ impl PumasApiBuilder {
 
         // Collect known dest_dirs for interrupted download detection
         // (must happen before hf_client is moved into PrimaryState)
-        let known_download_dirs: std::collections::HashSet<std::path::PathBuf> =
-            if let Some(ref client) = hf_client {
-                if let Some(persistence) = client.persistence() {
-                    persistence
-                        .load_all()
-                        .into_iter()
-                        .map(|e| e.dest_dir)
-                        .collect()
-                } else {
-                    std::collections::HashSet::new()
-                }
-            } else {
-                std::collections::HashSet::new()
-            };
+        let known_download_dirs = load_known_download_dirs(
+            hf_client
+                .as_ref()
+                .and_then(|client| client.persistence().cloned()),
+        )
+        .await;
 
         let primary_state = Arc::new(PrimaryState {
             _state: state,

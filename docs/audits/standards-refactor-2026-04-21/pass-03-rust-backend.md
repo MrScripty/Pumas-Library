@@ -363,6 +363,10 @@ Implementation notes:
   async `ModelImporter` wrapper backed by `spawn_blocking`, so background startup recovery no
   longer performs its recursive library scan and shard-set classification inline on an async task
   before scheduling HuggingFace resume work.
+- Completed: `pumas-core/src/api/builder.rs` now loads known interrupted-download destination
+  directories through a `spawn_blocking` helper before startup background work begins, so API
+  construction no longer performs synchronous download-persistence reads inline on the async
+  builder path before wiring interrupted-download recovery state.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

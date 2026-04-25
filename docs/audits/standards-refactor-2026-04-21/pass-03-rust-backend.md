@@ -370,6 +370,10 @@ Implementation notes:
   audits through `tokio::task::spawn_blocking` after the async model listing step, so those
   request-facing review and governance endpoints no longer perform per-model effective-metadata
   loads and dependency-binding index scans inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` now routes `list_models`, `get_model`,
+  `search_models`, and `search_models_filtered` through `tokio::task::spawn_blocking`, so
+  request-facing catalog queries no longer perform synchronous SQLite reads, dependency-binding
+  projection, and display-field shaping inline on async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

@@ -1058,11 +1058,10 @@ impl ModelLibrary {
 
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<ModelRecord>> {
-        let mut result = self.index.search("", None, None, 10000, 0)?;
-        self.project_dependency_bindings_for_records(&mut result.models)?;
-        self.project_display_fields_for_records(&mut result.models);
-        annotate_and_dedupe_records_by_repo_id(&mut result.models);
-        Ok(result.models)
+        let library = self.clone();
+        tokio::task::spawn_blocking(move || library.list_models_sync())
+            .await
+            .map_err(|err| PumasError::Other(format!("Failed to join list_models task: {}", err)))?
     }
 
     /// Get a single model by ID.
@@ -1072,13 +1071,11 @@ impl ModelLibrary {
     /// * `model_id` - Relative path from library root (e.g., "llm/llama/llama-2-7b")
     pub async fn get_model(&self, model_id: &str) -> Result<Option<ModelRecord>> {
         self.refresh_external_asset_state(model_id).await?;
-        let mut record = match self.index.get(model_id)? {
-            Some(record) => record,
-            None => return Ok(None),
-        };
-        self.project_active_dependency_refs_value(model_id, &mut record.metadata)?;
-        project_display_fields_for_record(&mut record);
-        Ok(Some(record))
+        let library = self.clone();
+        let model_id = model_id.to_string();
+        tokio::task::spawn_blocking(move || library.get_model_sync(&model_id))
+            .await
+            .map_err(|err| PumasError::Other(format!("Failed to join get_model task: {}", err)))?
     }
 
     /// Search models using FTS5 full-text search.
@@ -1094,12 +1091,13 @@ impl ModelLibrary {
         limit: usize,
         offset: usize,
     ) -> Result<SearchResult> {
-        let mut result = self.index.search(query, None, None, limit, offset)?;
-        self.project_dependency_bindings_for_records(&mut result.models)?;
-        self.project_display_fields_for_records(&mut result.models);
-        annotate_and_dedupe_records_by_repo_id(&mut result.models);
-        result.total_count = result.models.len();
-        Ok(result)
+        let library = self.clone();
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || library.search_models_sync(&query, limit, offset))
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!("Failed to join search_models task: {}", err))
+            })?
     }
 
     /// Search with additional filters.
@@ -1121,19 +1119,24 @@ impl ModelLibrary {
     ) -> Result<SearchResult> {
         let model_types = model_type.map(|t| vec![t.to_string()]);
         let tags_owned = tags.map(|t| t.to_vec());
-
-        let mut result = self.index.search(
-            query,
-            model_types.as_deref(),
-            tags_owned.as_deref(),
-            limit,
-            offset,
-        )?;
-        self.project_dependency_bindings_for_records(&mut result.models)?;
-        self.project_display_fields_for_records(&mut result.models);
-        annotate_and_dedupe_records_by_repo_id(&mut result.models);
-        result.total_count = result.models.len();
-        Ok(result)
+        let library = self.clone();
+        let query = query.to_string();
+        tokio::task::spawn_blocking(move || {
+            library.search_models_filtered_sync(
+                &query,
+                limit,
+                offset,
+                model_types.as_deref(),
+                tags_owned.as_deref(),
+            )
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join search_models_filtered task: {}",
+                err
+            ))
+        })?
     }
 
     /// List models currently requiring metadata review.
@@ -1433,6 +1436,41 @@ impl ModelLibrary {
 
         review_items.sort_by(|a, b| a.model_id.cmp(&b.model_id));
         Ok(review_items)
+    }
+
+    fn list_models_sync(&self) -> Result<Vec<ModelRecord>> {
+        self.search_models_filtered_sync("", 10000, 0, None, None)
+            .map(|result| result.models)
+    }
+
+    fn get_model_sync(&self, model_id: &str) -> Result<Option<ModelRecord>> {
+        let mut record = match self.index.get(model_id)? {
+            Some(record) => record,
+            None => return Ok(None),
+        };
+        self.project_active_dependency_refs_value(model_id, &mut record.metadata)?;
+        project_display_fields_for_record(&mut record);
+        Ok(Some(record))
+    }
+
+    fn search_models_sync(&self, query: &str, limit: usize, offset: usize) -> Result<SearchResult> {
+        self.search_models_filtered_sync(query, limit, offset, None, None)
+    }
+
+    fn search_models_filtered_sync(
+        &self,
+        query: &str,
+        limit: usize,
+        offset: usize,
+        model_types: Option<&[String]>,
+        tags: Option<&[String]>,
+    ) -> Result<SearchResult> {
+        let mut result = self.index.search(query, model_types, tags, limit, offset)?;
+        self.project_dependency_bindings_for_records(&mut result.models)?;
+        self.project_display_fields_for_records(&mut result.models);
+        annotate_and_dedupe_records_by_repo_id(&mut result.models);
+        result.total_count = result.models.len();
+        Ok(result)
     }
 
     fn project_active_dependency_refs(

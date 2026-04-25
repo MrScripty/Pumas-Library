@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::task::JoinHandle;
@@ -654,7 +655,10 @@ async fn run_conversion(
     _importer: &ModelImporter,
 ) -> Result<()> {
     let python_path = scripts::venv_python(launcher_root);
-    if !python_path.exists() {
+    if !fs::try_exists(&python_path)
+        .await
+        .map_err(|e| PumasError::io("checking conversion python", &python_path, e))?
+    {
         return Err(PumasError::ConversionFailed {
             message: "Conversion environment not set up. Call setup_conversion_environment first."
                 .to_string(),
@@ -702,7 +706,10 @@ async fn run_conversion(
             ];
 
             let config_path = model_path.join("config.json");
-            if config_path.exists() {
+            if fs::try_exists(&config_path)
+                .await
+                .map_err(|e| PumasError::io("checking conversion config", &config_path, e))?
+            {
                 args.push("--config".to_string());
                 args.push(config_path.to_string_lossy().to_string());
             }

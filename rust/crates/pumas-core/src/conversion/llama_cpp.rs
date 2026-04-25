@@ -7,6 +7,7 @@
 use std::path::{Path, PathBuf};
 
 use regex::Regex;
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tracing::{debug, info, warn};
@@ -474,7 +475,11 @@ impl QuantizationBackend for LlamaCppBackend {
             .map_err(|_| PumasError::ConversionCancelled)?;
 
         let mut cmd = Command::new(self.quantize_binary());
-        if needs_imatrix && imatrix_file.exists() {
+        if needs_imatrix
+            && fs::try_exists(&imatrix_file)
+                .await
+                .map_err(|e| PumasError::io("checking imatrix output", &imatrix_file, e))?
+        {
             cmd.arg("--imatrix").arg(&imatrix_file);
         }
         cmd.arg(&source_gguf)
@@ -495,11 +500,18 @@ impl QuantizationBackend for LlamaCppBackend {
 
         // -- PHASE 4: CLEANUP --
         // Remove intermediate files (keep only the quantized output).
-        if needs_f16_conversion && f16_gguf.exists() {
-            std::fs::remove_file(&f16_gguf).ok();
+        if needs_f16_conversion
+            && fs::try_exists(&f16_gguf)
+                .await
+                .map_err(|e| PumasError::io("checking f16 gguf output", &f16_gguf, e))?
+        {
+            let _ = fs::remove_file(&f16_gguf).await;
         }
-        if imatrix_file.exists() {
-            std::fs::remove_file(&imatrix_file).ok();
+        if fs::try_exists(&imatrix_file)
+            .await
+            .map_err(|e| PumasError::io("checking imatrix output", &imatrix_file, e))?
+        {
+            let _ = fs::remove_file(&imatrix_file).await;
         }
 
         // Atomic rename temp dir → final output dir.

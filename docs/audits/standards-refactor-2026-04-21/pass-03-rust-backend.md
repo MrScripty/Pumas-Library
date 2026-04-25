@@ -460,6 +460,10 @@ Implementation notes:
   `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and `conversion/sherry.rs` now use them, so
   stale-temp cleanup and temp-dir creation no longer perform synchronous remove/create operations
   inline on async runtime threads.
+- Completed: `pumas-core/src/conversion/manager.rs` and `conversion/llama_cpp.rs` now use
+  `tokio::fs` for conversion-environment/config probes plus intermediate-output cleanup, so those
+  async conversion and llama.cpp quantization flows no longer perform synchronous existence checks
+  or file removals inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

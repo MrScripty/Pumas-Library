@@ -447,6 +447,10 @@ Implementation notes:
   `finalize_downloaded_directory`, so those download-finalization and orphan-adoption paths no
   longer perform synchronous `metadata.json` existence checks or directory validation inline on
   async runtime threads.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes partial-download metadata stub
+  loads through `tokio::task::spawn_blocking`, so `upsert_download_metadata_stub` no longer
+  performs a synchronous metadata projection read inline on an async runtime thread before
+  persisting and indexing partial download state.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

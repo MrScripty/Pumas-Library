@@ -136,6 +136,20 @@ async fn resolve_model_type_with_rules_async(
     })?
 }
 
+async fn load_model_metadata_or_default(
+    library: Arc<ModelLibrary>,
+    model_dir: PathBuf,
+) -> Result<ModelMetadata> {
+    tokio::task::spawn_blocking(move || Ok(library.load_metadata(&model_dir)?.unwrap_or_default()))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join importer metadata load task: {}",
+                err
+            ))
+        })?
+}
+
 /// Model importer for bringing local files into the library.
 ///
 /// Features:
@@ -574,7 +588,8 @@ impl ModelImporter {
             )
         });
 
-        let mut metadata = self.library.load_metadata(model_dir)?.unwrap_or_default();
+        let mut metadata =
+            load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf()).await?;
         let now = chrono::Utc::now().to_rfc3339();
         metadata.schema_version = Some(2);
         metadata.model_id = Some(model_id);

@@ -44,6 +44,19 @@ impl PluginLoader {
         Ok(loader)
     }
 
+    /// Create a new plugin loader without blocking the async runtime.
+    pub async fn new_async(plugins_dir: impl Into<PathBuf>) -> Result<Self> {
+        let plugins_dir = plugins_dir.into();
+        tokio::task::spawn_blocking(move || Self::new(plugins_dir))
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join plugin loader initialization task: {}",
+                    err
+                ))
+            })?
+    }
+
     /// Reload all plugins from disk.
     ///
     /// This will clear the cache and reload all plugin configurations.

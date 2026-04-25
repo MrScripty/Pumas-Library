@@ -680,6 +680,10 @@ Implementation notes:
   `MetadataManager` directory setup and `GitHubClient` startup through
   `tokio::task::spawn_blocking`, so `VersionManager::new` no longer performs that synchronous
   constructor and filesystem setup work directly on async startup paths.
+- Completed: `pumas-core/src/plugins/loader.rs` now exposes `PluginLoader::new_async`, and
+  `pumas-rpc/src/main.rs` plus the RPC server startup test bootstrap now use it, so RPC startup
+  no longer performs synchronous plugin-directory creation and plugin-config reload work inline on
+  async startup paths.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

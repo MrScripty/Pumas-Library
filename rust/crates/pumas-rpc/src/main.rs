@@ -147,7 +147,7 @@ async fn main() -> Result<()> {
 
     // Initialize plugin loader
     let plugins_dir = launcher_root.join("launcher-data").join("plugins");
-    let plugin_loader = match PluginLoader::new(&plugins_dir) {
+    let plugin_loader = match PluginLoader::new_async(plugins_dir.clone()).await {
         Ok(loader) => {
             info!("Plugin loader initialized ({} plugins)", loader.count());
             loader
@@ -157,7 +157,9 @@ async fn main() -> Result<()> {
                 "Failed to initialize plugin loader: {}, using empty loader",
                 e
             );
-            PluginLoader::new(std::env::temp_dir().join("pumas-plugins-fallback")).unwrap()
+            PluginLoader::new_async(std::env::temp_dir().join("pumas-plugins-fallback"))
+                .await
+                .unwrap()
         }
     };
 

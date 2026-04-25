@@ -206,7 +206,7 @@ mod tests {
 
         // Initialize plugin loader
         let plugins_dir = launcher_root.join("launcher-data").join("plugins");
-        let plugin_loader = PluginLoader::new(&plugins_dir).unwrap();
+        let plugin_loader = PluginLoader::new_async(plugins_dir).await.unwrap();
 
         let result = start_server(
             api,

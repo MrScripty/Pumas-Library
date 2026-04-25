@@ -358,6 +358,10 @@ Implementation notes:
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime
   threads before deciding whether to recover or resume a partial download.
+- Completed: `pumas-core/src/api/migration.rs` and `api/state.rs` now route migration report
+  generation, rewrite, listing, deletion, and pruning through `tokio::task::spawn_blocking`, so
+  direct API calls and mirrored IPC migration-report requests no longer perform synchronous report
+  artifact I/O or index maintenance inline on async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

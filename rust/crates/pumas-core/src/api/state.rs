@@ -625,9 +625,10 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(response)?)
             }
             "generate_model_migration_dry_run_report" => {
-                let report = self
-                    .model_library
-                    .generate_migration_dry_run_report_with_artifacts()?;
+                let report = super::migration::generate_migration_dry_run_report_with_artifacts(
+                    self.model_library.clone(),
+                )
+                .await?;
                 Ok(serde_json::to_value(report)?)
             }
             "execute_model_migration" => {
@@ -639,13 +640,17 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     super::migration::relocate_skipped_partial_downloads(self, &mut report).await?;
                 if mutated {
                     super::migration::recompute_execution_report_counts(&mut report);
-                    self.model_library
-                        .rewrite_migration_execution_report(&report)?;
+                    super::migration::rewrite_migration_execution_report(
+                        self.model_library.clone(),
+                        report.clone(),
+                    )
+                    .await?;
                 }
                 Ok(serde_json::to_value(report)?)
             }
             "list_model_migration_reports" => {
-                let reports = self.model_library.list_migration_reports()?;
+                let reports =
+                    super::migration::list_migration_reports(self.model_library.clone()).await?;
                 Ok(serde_json::to_value(reports)?)
             }
             "delete_model_migration_report" => {
@@ -655,7 +660,11 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "report_path is required".to_string(),
                         })?;
-                let deleted = self.model_library.delete_migration_report(report_path)?;
+                let deleted = super::migration::delete_migration_report(
+                    self.model_library.clone(),
+                    report_path.to_string(),
+                )
+                .await?;
                 Ok(serde_json::to_value(deleted)?)
             }
             "prune_model_migration_reports" => {
@@ -665,7 +674,11 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "keep_latest is required".to_string(),
                         })? as usize;
-                let pruned = self.model_library.prune_migration_reports(keep_latest)?;
+                let pruned = super::migration::prune_migration_reports(
+                    self.model_library.clone(),
+                    keep_latest,
+                )
+                .await?;
                 Ok(serde_json::to_value(pruned)?)
             }
             "search_hf_models" => {

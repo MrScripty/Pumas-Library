@@ -7,6 +7,7 @@ use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::{
     fs,
     time::{sleep, Duration},
@@ -33,9 +34,7 @@ impl PumasApi {
         )
         .await?;
 
-        primary
-            .model_library
-            .generate_migration_dry_run_report_with_artifacts()
+        generate_migration_dry_run_report_with_artifacts(primary.model_library.clone()).await
     }
 
     /// Execute checkpointed metadata v2 migration moves.
@@ -57,9 +56,8 @@ impl PumasApi {
         if mutated {
             recompute_execution_report_counts(&mut report);
             // Rewrite artifacts so UI/opened report JSON reflects post-move outcomes.
-            primary
-                .model_library
-                .rewrite_migration_execution_report(&report)?;
+            rewrite_migration_execution_report(primary.model_library.clone(), report.clone())
+                .await?;
         }
         Ok(report)
     }
@@ -74,7 +72,7 @@ impl PumasApi {
                 .await;
         }
 
-        self.primary().model_library.list_migration_reports()
+        list_migration_reports(self.primary().model_library.clone()).await
     }
 
     /// Delete a migration report artifact pair (JSON + Markdown) and index entry.
@@ -88,9 +86,11 @@ impl PumasApi {
                 .await;
         }
 
-        self.primary()
-            .model_library
-            .delete_migration_report(report_path)
+        delete_migration_report(
+            self.primary().model_library.clone(),
+            report_path.to_string(),
+        )
+        .await
     }
 
     /// Prune migration report history to `keep_latest` entries.
@@ -104,10 +104,76 @@ impl PumasApi {
                 .await;
         }
 
-        self.primary()
-            .model_library
-            .prune_migration_reports(keep_latest)
+        prune_migration_reports(self.primary().model_library.clone(), keep_latest).await
     }
+}
+
+pub(crate) async fn generate_migration_dry_run_report_with_artifacts(
+    library: Arc<model_library::ModelLibrary>,
+) -> Result<model_library::MigrationDryRunReport> {
+    tokio::task::spawn_blocking(move || library.generate_migration_dry_run_report_with_artifacts())
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration dry-run report task: {}",
+                err
+            ))
+        })?
+}
+
+pub(crate) async fn rewrite_migration_execution_report(
+    library: Arc<model_library::ModelLibrary>,
+    report: model_library::MigrationExecutionReport,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || library.rewrite_migration_execution_report(&report))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration execution report rewrite task: {}",
+                err
+            ))
+        })?
+}
+
+pub(crate) async fn list_migration_reports(
+    library: Arc<model_library::ModelLibrary>,
+) -> Result<Vec<model_library::MigrationReportArtifact>> {
+    tokio::task::spawn_blocking(move || library.list_migration_reports())
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration report listing task: {}",
+                err
+            ))
+        })?
+}
+
+pub(crate) async fn delete_migration_report(
+    library: Arc<model_library::ModelLibrary>,
+    report_path: String,
+) -> Result<bool> {
+    tokio::task::spawn_blocking(move || library.delete_migration_report(&report_path))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration report delete task: {}",
+                err
+            ))
+        })?
+}
+
+pub(crate) async fn prune_migration_reports(
+    library: Arc<model_library::ModelLibrary>,
+    keep_latest: usize,
+) -> Result<usize> {
+    tokio::task::spawn_blocking(move || library.prune_migration_reports(keep_latest))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration report prune task: {}",
+                err
+            ))
+        })?
 }
 
 async fn reconcile_all_models_for_migration(

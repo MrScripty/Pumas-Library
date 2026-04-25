@@ -381,6 +381,11 @@ Implementation notes:
   and diffusers component-manifest extraction through `tokio::task::spawn_blocking`, so the RPC
   model-details request path no longer performs synchronous metadata reads, primary-file discovery,
   or bundle manifest scans inline on async runtime threads.
+- Completed: `pumas-core/src/api/models.rs` and `api/state.rs` now route inference-settings,
+  model-notes, and effective-metadata loads through `tokio::task::spawn_blocking`, so direct API
+  calls and mirrored IPC metadata request paths no longer perform synchronous `metadata.json`
+  reads or primary-file discovery inline on async runtime threads before resolving or persisting
+  model metadata updates.
 - Completed: `pumas-rpc/src/handlers/ollama.rs` now routes primary model-file discovery through
   `tokio::task::spawn_blocking`, so the Ollama create-model request path no longer performs
   synchronous library file discovery inline on async runtime threads before validating GGUF input.

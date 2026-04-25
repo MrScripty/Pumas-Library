@@ -9,12 +9,64 @@ use crate::PumasApi;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 use tokio::fs;
 
 async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
         .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
+
+async fn load_model_metadata_or_default(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+) -> Result<models::ModelMetadata> {
+    tokio::task::spawn_blocking(move || Ok(library.load_metadata(&model_dir)?.unwrap_or_default()))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join model metadata load task: {}", err))
+        })?
+}
+
+async fn load_inference_snapshot(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+    model_id: String,
+) -> Result<(models::ModelMetadata, String)> {
+    tokio::task::spawn_blocking(move || {
+        let metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let file_format = library
+            .get_primary_model_file(&model_id)
+            .and_then(|path| {
+                path.extension()
+                    .and_then(|ext| ext.to_str())
+                    .map(|ext| ext.to_lowercase())
+            })
+            .unwrap_or_default();
+        Ok((metadata, file_format))
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join inference metadata snapshot task: {}",
+            err
+        ))
+    })?
+}
+
+async fn load_effective_model_metadata(
+    library: Arc<model_library::ModelLibrary>,
+    model_id: String,
+) -> Result<Option<models::ModelMetadata>> {
+    tokio::task::spawn_blocking(move || library.get_effective_metadata(&model_id))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join effective model metadata task: {}",
+                err
+            ))
+        })?
 }
 
 impl PumasApi {
@@ -232,7 +284,7 @@ impl PumasApi {
                 .await;
         }
 
-        let library = &self.primary().model_library;
+        let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
         if !path_exists(&model_dir).await? {
@@ -242,21 +294,12 @@ impl PumasApi {
             )));
         }
 
-        let metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let (metadata, file_format) =
+            load_inference_snapshot(library, model_dir, model_id.to_string()).await?;
 
         if let Some(settings) = metadata.inference_settings {
             return Ok(settings);
         }
-
-        // Lazy defaults: compute from model type + file format without persisting
-        let file_format = library
-            .get_primary_model_file(model_id)
-            .and_then(|p| {
-                p.extension()
-                    .and_then(|e| e.to_str())
-                    .map(|s| s.to_lowercase())
-            })
-            .unwrap_or_default();
 
         Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
     }
@@ -282,7 +325,7 @@ impl PumasApi {
             return Ok(());
         }
 
-        let library = &self.primary().model_library;
+        let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
         if !path_exists(&model_dir).await? {
@@ -292,7 +335,8 @@ impl PumasApi {
             )));
         }
 
-        let mut metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let mut metadata =
+            load_model_metadata_or_default(library.clone(), model_dir.clone()).await?;
 
         metadata.inference_settings = if settings.is_empty() {
             None
@@ -325,7 +369,7 @@ impl PumasApi {
                 .await;
         }
 
-        let library = &self.primary().model_library;
+        let library = self.primary().model_library.clone();
         let model_dir = library.library_root().join(model_id);
 
         if !path_exists(&model_dir).await? {
@@ -337,7 +381,8 @@ impl PumasApi {
             });
         }
 
-        let mut metadata = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let mut metadata =
+            load_model_metadata_or_default(library.clone(), model_dir.clone()).await?;
         let normalized_notes = notes.and_then(|value| {
             if value.trim().is_empty() {
                 None
@@ -516,7 +561,7 @@ impl PumasApi {
             "api-get-effective-metadata",
         )
         .await?;
-        primary.model_library.get_effective_metadata(model_id)
+        load_effective_model_metadata(primary.model_library.clone(), model_id.to_string()).await
     }
 
     /// Import a model from a local path.

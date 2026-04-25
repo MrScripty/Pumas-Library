@@ -892,6 +892,11 @@ Rectification:
 - Split `pumas-uniffi/src/bindings.rs` by domain.
 - Keep generated C# artifacts out of hand-edited paths and verify package/native compatibility in CI.
 
+Implementation notes:
+- Completed: `pumas-uniffi/src/bindings.rs` now delegates its FFI record and enum surface to
+  `src/bindings/ffi_types.rs`, keeping the API object and call orchestration in the root module
+  while moving wrapper data types into a dedicated domain module as the first bindings split.
+
 ### R10 - Rust Tooling Baseline Is Missing
 Status: partially remediated
 

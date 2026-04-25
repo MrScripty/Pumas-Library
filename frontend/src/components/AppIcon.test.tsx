@@ -177,27 +177,32 @@ describe('AppIcon', () => {
   describe('Icon Paths', () => {
     it('uses correct icon path for openwebui', () => {
       const { container } = render(<AppIcon {...defaultProps} appId="openwebui" />);
-      expect(container.querySelector('button')).toBeInTheDocument();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./openwebui-icon.png');
     });
 
     it('uses correct icon path for ollama', () => {
       const { container } = render(<AppIcon {...defaultProps} appId="ollama" />);
-      expect(container.querySelector('button')).toBeInTheDocument();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./ollama-icon.png');
     });
 
-    it('uses correct icon path for invoke', () => {
+    it('uses the shipped svg path for torch', () => {
+      const { container } = render(<AppIcon {...defaultProps} appId="torch" />);
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./torch-icon.svg');
+    });
+
+    it('uses the built-in fallback asset for invoke', () => {
       const { container } = render(<AppIcon {...defaultProps} appId="invoke" />);
-      expect(container.querySelector('button')).toBeInTheDocument();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./comfyui-icon.png');
     });
 
-    it('uses correct icon path for krita-diffusion', () => {
+    it('uses the built-in fallback asset for krita-diffusion', () => {
       const { container } = render(<AppIcon {...defaultProps} appId="krita-diffusion" />);
-      expect(container.querySelector('button')).toBeInTheDocument();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./comfyui-icon.png');
     });
 
     it('falls back to comfyui icon for unknown appId', () => {
       const { container } = render(<AppIcon {...defaultProps} appId="unknown-app" />);
-      expect(container.querySelector('button')).toBeInTheDocument();
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('./unknown-app-icon.png');
     });
   });
 });

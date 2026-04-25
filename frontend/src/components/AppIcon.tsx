@@ -48,11 +48,22 @@ const IconWrapper: React.FC<IconWrapperProps> = ({ isSelected, children }) => {
   );
 };
 
+const BUILTIN_APP_ICON_PATHS: Record<string, string> = {
+  comfyui: './comfyui-icon.png',
+  openwebui: './openwebui-icon.png',
+  ollama: './ollama-icon.png',
+  torch: './torch-icon.svg',
+  invoke: './comfyui-icon.png',
+  'krita-diffusion': './comfyui-icon.png',
+};
+
 /**
- * Get the icon path for an app using convention: ./{appId}-icon.png
- * Falls back to SVG if PNG is not found (handled via onError on <img>).
+ * Get the shipped icon path for built-in apps.
+ *
+ * Unknown app ids still use the conventional `./{appId}-icon.png` path so
+ * custom assets can be added without code changes.
  */
-const getIconPath = (appId: string): string => `./${appId}-icon.png`;
+const getIconPath = (appId: string): string => BUILTIN_APP_ICON_PATHS[appId] ?? `./${appId}-icon.png`;
 
 /**
  * Handle icon load error by trying alternative extensions.

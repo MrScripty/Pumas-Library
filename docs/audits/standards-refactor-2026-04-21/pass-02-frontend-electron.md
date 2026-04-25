@@ -277,6 +277,7 @@ Rectification:
 - Completed: align `broken_links` typing with the backend payload shape
 - Completed: add a defensive status fallback in `LinkHealthStatus.tsx` so an unexpected backend status renders an error presentation instead of crashing
 - Completed: add `frontend/src/components/LinkHealthStatus.test.tsx` coverage for degraded and unknown backend status values
+- Completed: align `AppIcon.tsx` built-in icon path resolution with the shipped frontend assets so Torch uses its existing SVG icon directly and built-in apps without dedicated art fall back to a shipped asset instead of probing missing files in production
 - Completed: reduce `frontend/src/components/Header.tsx` render/status complexity by extracting status projection, update/window controls, status badge, and resource strip rendering into focused header modules.
 - Completed: reduce `frontend/src/components/VersionListItem.tsx` render complexity by extracting install-version display-state projection, info rendering, and action-button state rendering into focused modules while preserving install-dialog row coverage.
 - Completed: reduce `frontend/src/components/LocalModelsList.tsx` render complexity by moving local model row state, metadata, download actions, installed actions, and related-model disclosure into focused row modules while preserving local-model list coverage.

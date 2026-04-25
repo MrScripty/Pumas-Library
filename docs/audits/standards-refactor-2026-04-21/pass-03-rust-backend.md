@@ -721,6 +721,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/state.rs` now validates `set_process_version_paths` directory
   entries before deserializing them into process-manager paths, so mirrored IPC process-version
   synchronization no longer forwards unchecked raw directory strings into process detection state.
+- Completed: `pumas-core/src/api/mapping.rs` and `api/state.rs` now validate conflict-resolution
+  target paths before converting them into mapping-operation `PathBuf`s, so direct API and mirrored
+  IPC sync-with-resolutions flows no longer accept unchecked raw target strings outside the active
+  `models_path`.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

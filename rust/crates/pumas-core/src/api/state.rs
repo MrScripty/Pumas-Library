@@ -1447,11 +1447,9 @@ async fn sync_with_resolutions_response(
     let overwrite_count = resolution_count(model_library::ConflictResolution::Overwrite);
     let rename_count = resolution_count(model_library::ConflictResolution::Rename);
 
-    let typed_resolutions: std::collections::HashMap<PathBuf, model_library::ConflictResolution> =
-        resolutions
-            .into_iter()
-            .map(|(target, resolution)| (PathBuf::from(target), resolution))
-            .collect();
+    let typed_resolutions =
+        crate::api::mapping::validate_mapping_conflict_resolution_targets(models_path, resolutions)
+            .await?;
 
     let result = primary
         .model_mapper

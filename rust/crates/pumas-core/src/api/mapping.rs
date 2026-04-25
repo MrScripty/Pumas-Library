@@ -1,17 +1,87 @@
 //! App-facing model-mapping methods on `PumasApi`.
 
-use crate::error::Result;
+use crate::error::{PumasError, Result};
 use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tokio::fs;
 
 async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
         .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
+
+fn normalize_absolute_local_path(value: &str, field: &str) -> Result<PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: format!("{field} is required"),
+        });
+    }
+
+    let raw = PathBuf::from(trimmed);
+    let mut normalized = if raw.is_absolute() {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to resolve current directory for {field}: {}",
+                err
+            ))
+        })?
+    };
+
+    for component in raw.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    Ok(normalized)
+}
+
+pub(crate) async fn validate_mapping_conflict_resolution_targets(
+    models_path: &Path,
+    resolutions: HashMap<String, model_library::ConflictResolution>,
+) -> Result<HashMap<PathBuf, model_library::ConflictResolution>> {
+    let models_root =
+        normalize_absolute_local_path(models_path.to_string_lossy().as_ref(), "models_path")?;
+    let mut validated = HashMap::with_capacity(resolutions.len());
+
+    for (target, resolution) in resolutions {
+        let target_path = normalize_absolute_local_path(&target, "resolutions")?;
+        if !target_path.starts_with(&models_root) {
+            return Err(PumasError::InvalidParams {
+                message: format!(
+                    "resolution target must be within models_path: {}",
+                    target_path.display()
+                ),
+            });
+        }
+
+        match fs::symlink_metadata(&target_path).await {
+            Ok(_) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                return Err(PumasError::InvalidParams {
+                    message: format!("resolution target not found: {}", target_path.display()),
+                });
+            }
+            Err(err) => return Err(PumasError::io_with_path(err, &target_path)),
+        }
+
+        validated.insert(target_path, resolution);
+    }
+
+    Ok(validated)
 }
 
 impl PumasApi {
@@ -212,10 +282,8 @@ impl PumasApi {
         let overwrite_count = resolution_count(model_library::ConflictResolution::Overwrite);
         let rename_count = resolution_count(model_library::ConflictResolution::Rename);
 
-        let typed_resolutions: HashMap<PathBuf, model_library::ConflictResolution> = resolutions
-            .into_iter()
-            .map(|(target, resolution)| (PathBuf::from(target), resolution))
-            .collect();
+        let typed_resolutions =
+            validate_mapping_conflict_resolution_targets(models_path, resolutions).await?;
 
         let result = primary
             .model_mapper
@@ -314,5 +382,69 @@ impl PumasApi {
                 recommendation: None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_mapping_conflict_resolution_targets;
+    use crate::model_library::ConflictResolution;
+    use std::collections::HashMap;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn validate_mapping_conflict_resolution_targets_rejects_path_outside_models_root() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let models_path = temp_dir.path().join("models");
+        tokio::fs::create_dir_all(&models_path)
+            .await
+            .expect("create models dir");
+        let outside = temp_dir.path().join("outside.ckpt");
+        tokio::fs::write(&outside, "data")
+            .await
+            .expect("write outside file");
+
+        let mut resolutions = HashMap::new();
+        resolutions.insert(
+            outside.to_string_lossy().to_string(),
+            ConflictResolution::Overwrite,
+        );
+
+        let error = validate_mapping_conflict_resolution_targets(&models_path, resolutions)
+            .await
+            .expect_err("outside path should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::error::PumasError::InvalidParams { message }
+                if message.contains("within models_path")
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_mapping_conflict_resolution_targets_accepts_existing_target_under_models_root(
+    ) {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let models_path = temp_dir.path().join("models");
+        let checkpoints = models_path.join("checkpoints");
+        tokio::fs::create_dir_all(&checkpoints)
+            .await
+            .expect("create target dir");
+        let target = checkpoints.join("conflict.safetensors");
+        tokio::fs::write(&target, "data")
+            .await
+            .expect("write conflict file");
+
+        let mut resolutions = HashMap::new();
+        resolutions.insert(
+            target.to_string_lossy().to_string(),
+            ConflictResolution::Overwrite,
+        );
+
+        let validated = validate_mapping_conflict_resolution_targets(&models_path, resolutions)
+            .await
+            .expect("target should validate");
+
+        assert_eq!(validated.get(&target), Some(&ConflictResolution::Overwrite));
     }
 }

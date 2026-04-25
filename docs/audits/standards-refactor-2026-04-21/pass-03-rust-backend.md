@@ -455,6 +455,10 @@ Implementation notes:
   and post-save metadata reloads through the shared async metadata helper, so full index rebuilds
   no longer perform synchronous projection reads inline on an async lifecycle path while repairing
   metadata projections.
+- Completed: `pumas-core/src/model_library/library.rs` now routes `refresh_external_asset_state`
+  and `deep_scan_rebuild` metadata loads through the shared async metadata helper, so those async
+  maintenance paths no longer perform synchronous projection reads inline on runtime threads
+  before validation refresh or hash verification.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

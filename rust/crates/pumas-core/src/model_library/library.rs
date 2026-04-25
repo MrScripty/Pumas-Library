@@ -927,7 +927,8 @@ impl ModelLibrary {
 
     async fn refresh_external_asset_state(&self, model_id: &str) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
-        let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+        let Some(mut metadata) = load_model_metadata_async(self.clone(), model_dir.clone()).await?
+        else {
             return Ok(());
         };
 
@@ -1006,7 +1007,7 @@ impl ModelLibrary {
             }
 
             // Load metadata
-            let metadata = match self.load_metadata(model_dir) {
+            let metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await {
                 Ok(Some(m)) => m,
                 Ok(None) => {
                     result

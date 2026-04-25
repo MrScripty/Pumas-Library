@@ -450,6 +450,11 @@ Implementation notes:
   existence probes for those entry points, so model reclassification paths no longer perform
   synchronous directory walks, file header inspection, `config.json` reads, or path existence
   checks inline on async runtime threads.
+- Completed: `pumas-core/src/conversion/pipeline.rs` now uses `tokio::fs` for async output-dir
+  collision probes and temp-to-final rename handoff, and the async conversion flows in
+  `conversion/manager.rs`, `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and
+  `conversion/sherry.rs` now await that helper, so conversion finalize paths no longer perform
+  synchronous existence checks or rename operations inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

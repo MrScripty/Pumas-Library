@@ -508,7 +508,7 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // Atomic rename temp dir → final output dir.
-        pipeline::finalize_output_dir(&temp_dir, &output_dir)?;
+        pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
 
         Ok(output_dir)
     }

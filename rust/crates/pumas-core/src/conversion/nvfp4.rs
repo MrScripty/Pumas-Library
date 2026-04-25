@@ -273,7 +273,7 @@ impl QuantizationBackend for Nvfp4Backend {
 
         // -- PHASE 4: CLEANUP --
         progress.update_pipeline(conversion_id, 2, 2, "Finalizing output");
-        pipeline::finalize_output_dir(&temp_dir, &output_dir)?;
+        pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
 
         Ok(output_dir)
     }

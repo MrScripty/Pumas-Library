@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tracing::{debug, warn};
 
@@ -88,12 +89,18 @@ pub async fn wait_and_check_exit(
 /// Atomically rename `temp_dir` to `output_dir`.
 ///
 /// If `output_dir` already exists, appends a `-v{N}` suffix to avoid collision.
-pub fn finalize_output_dir(temp_dir: &Path, output_dir: &Path) -> Result<()> {
-    if output_dir.exists() {
+pub async fn finalize_output_dir(temp_dir: &Path, output_dir: &Path) -> Result<()> {
+    if fs::try_exists(output_dir)
+        .await
+        .map_err(|e| PumasError::io("checking quantization output dir", output_dir, e))?
+    {
         let mut suffix = 2u32;
         let base = output_dir.to_path_buf();
         let mut final_dir = base.clone();
-        while final_dir.exists() {
+        while fs::try_exists(&final_dir)
+            .await
+            .map_err(|e| PumasError::io("checking quantization output dir", &final_dir, e))?
+        {
             final_dir = base.with_file_name(format!(
                 "{}-v{}",
                 base.file_name().unwrap_or_default().to_string_lossy(),
@@ -101,10 +108,12 @@ pub fn finalize_output_dir(temp_dir: &Path, output_dir: &Path) -> Result<()> {
             ));
             suffix += 1;
         }
-        std::fs::rename(temp_dir, &final_dir)
+        fs::rename(temp_dir, &final_dir)
+            .await
             .map_err(|e| PumasError::io("renaming quantization output", temp_dir, e))?;
     } else {
-        std::fs::rename(temp_dir, output_dir)
+        fs::rename(temp_dir, output_dir)
+            .await
             .map_err(|e| PumasError::io("renaming quantization output", temp_dir, e))?;
     }
     Ok(())

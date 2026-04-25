@@ -796,7 +796,7 @@ async fn run_conversion(
     }
 
     // Rename temp dir to final
-    pipeline::finalize_output_dir(&temp_dir, &output_dir)?;
+    pipeline::finalize_output_dir(&temp_dir, &output_dir).await?;
 
     // Build conversion source metadata
     let is_dequantized = direction == ConversionDirection::GgufToSafetensors

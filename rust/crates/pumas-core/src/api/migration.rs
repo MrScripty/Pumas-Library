@@ -360,6 +360,19 @@ pub(crate) async fn wait_for_download_pause(
     )))
 }
 
+async fn load_persisted_downloads_for_move(
+    client: &model_library::HuggingFaceClient,
+) -> Vec<model_library::download_store::PersistedDownload> {
+    let persistence = client.persistence().cloned();
+    tokio::task::spawn_blocking(move || {
+        persistence
+            .map(|persistence| persistence.load_all())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
 pub(crate) async fn relocate_skipped_partial_downloads(
     primary: &super::state::PrimaryState,
     report: &mut model_library::MigrationExecutionReport,
@@ -408,10 +421,7 @@ pub(crate) async fn relocate_skipped_partial_downloads(
 
         let move_result: Result<()> = async {
             let (download_id, was_active) = if let Some(ref client) = primary.hf_client {
-                let persisted = client
-                    .persistence()
-                    .map(|p| p.load_all())
-                    .unwrap_or_default();
+                let persisted = load_persisted_downloads_for_move(client).await;
                 if let Some(entry) = persisted.iter().find(|entry| entry.dest_dir == source_dir) {
                     let download_id = entry.download_id.clone();
                     let status = client.get_download_status(&download_id).await;

@@ -375,6 +375,10 @@ Implementation notes:
   blocking helper and uses the async interrupted-download scan wrapper when staging partial
   download rows, so reconcile-time partial metadata repair no longer performs synchronous download
   store reads or recursive partial-download discovery inline on async runtime threads.
+- Completed: `pumas-core/src/api/migration.rs` now loads download persistence through a blocking
+  helper before partial-download move handling inspects active entries, so migration execute paths
+  no longer perform synchronous persistence reads inline on async runtime threads while preparing
+  pause, relocate, and resume decisions.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

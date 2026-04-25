@@ -30,7 +30,7 @@ use crate::process;
 use crate::registry;
 use crate::system;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tokio::fs;
 
 async fn path_exists(path: &Path) -> std::result::Result<bool, PumasError> {
@@ -44,6 +44,114 @@ async fn path_is_symlink(path: &Path) -> std::result::Result<bool, PumasError> {
         Ok(metadata) => Ok(metadata.file_type().is_symlink()),
         Err(err) if err.kind() == ErrorKind::NotFound => Ok(false),
         Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
+}
+
+fn normalize_absolute_local_path(
+    value: &str,
+    field: &str,
+) -> std::result::Result<PathBuf, PumasError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: format!("{field} is required"),
+        });
+    }
+
+    let raw = PathBuf::from(trimmed);
+    let mut normalized = if raw.is_absolute() {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to resolve current directory for {field}: {}",
+                err
+            ))
+        })?
+    };
+
+    for component in raw.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    Ok(normalized)
+}
+
+async fn validate_local_directory_target_path(
+    value: &str,
+    field: &str,
+) -> std::result::Result<PathBuf, PumasError> {
+    let candidate = normalize_absolute_local_path(value, field)?;
+
+    match fs::metadata(&candidate).await {
+        Ok(metadata) => {
+            if !metadata.is_dir() {
+                return Err(PumasError::InvalidParams {
+                    message: format!(
+                        "{field} must reference a directory: {}",
+                        candidate.display()
+                    ),
+                });
+            }
+
+            return fs::canonicalize(&candidate)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, &candidate));
+        }
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => return Err(PumasError::io_with_path(err, &candidate)),
+    }
+
+    let mut existing_ancestor = candidate.as_path();
+    loop {
+        match fs::metadata(existing_ancestor).await {
+            Ok(metadata) => {
+                if !metadata.is_dir() {
+                    return Err(PumasError::InvalidParams {
+                        message: format!(
+                            "{field} must resolve under a directory: {}",
+                            existing_ancestor.display()
+                        ),
+                    });
+                }
+
+                let canonical_ancestor = fs::canonicalize(existing_ancestor)
+                    .await
+                    .map_err(|err| PumasError::io_with_path(err, existing_ancestor))?;
+                let suffix = candidate.strip_prefix(existing_ancestor).map_err(|_| {
+                    PumasError::Other(format!(
+                        "Failed to resolve normalized directory target for {}",
+                        candidate.display()
+                    ))
+                })?;
+
+                return Ok(if suffix.as_os_str().is_empty() {
+                    canonical_ancestor
+                } else {
+                    canonical_ancestor.join(suffix)
+                });
+            }
+            Err(err) if err.kind() == ErrorKind::NotFound => {
+                existing_ancestor =
+                    existing_ancestor
+                        .parent()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: format!(
+                                "{field} path is not rooted under an accessible directory: {}",
+                                candidate.display()
+                            ),
+                        })?;
+            }
+            Err(err) => return Err(PumasError::io_with_path(err, existing_ancestor)),
+        }
     }
 }
 
@@ -554,7 +662,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "models_path is required".to_string(),
                         })?;
-                let models_path = PathBuf::from(models_path);
+                let models_path =
+                    validate_local_directory_target_path(models_path, "models_path").await?;
                 let response =
                     preview_model_mapping_response(self, version_tag, models_path.as_path())
                         .await?;
@@ -573,7 +682,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "models_path is required".to_string(),
                         })?;
-                let models_path = PathBuf::from(models_path);
+                let models_path =
+                    validate_local_directory_target_path(models_path, "models_path").await?;
                 let response =
                     apply_model_mapping_response(self, version_tag, models_path.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
@@ -591,7 +701,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "models_path is required".to_string(),
                         })?;
-                let models_path = PathBuf::from(models_path);
+                let models_path =
+                    validate_local_directory_target_path(models_path, "models_path").await?;
                 let apply =
                     apply_model_mapping_response(self, version_tag, models_path.as_path()).await?;
                 let response = models::SyncModelsResponse {
@@ -615,6 +726,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "models_path is required".to_string(),
                         })?;
+                let models_path =
+                    validate_local_directory_target_path(models_path, "models_path").await?;
                 let resolutions: std::collections::HashMap<
                     String,
                     model_library::ConflictResolution,
@@ -626,7 +739,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let response = sync_with_resolutions_response(
                     self,
                     version_tag,
-                    Path::new(models_path),
+                    models_path.as_path(),
                     resolutions,
                 )
                 .await?;
@@ -930,7 +1043,9 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "version_dir is required".to_string(),
                         })?;
-                let response = launch_ollama(self, tag, Path::new(version_dir)).await?;
+                let version_dir =
+                    validate_local_directory_target_path(version_dir, "version_dir").await?;
+                let response = launch_ollama(self, tag, version_dir.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
             }
             "is_torch_running" => Ok(serde_json::to_value(is_torch_running(self).await)?),
@@ -950,7 +1065,9 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "version_dir is required".to_string(),
                         })?;
-                let response = launch_torch(self, tag, Path::new(version_dir)).await?;
+                let version_dir =
+                    validate_local_directory_target_path(version_dir, "version_dir").await?;
+                let response = launch_torch(self, tag, version_dir.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
             }
             "launch_version" => {
@@ -965,7 +1082,9 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "version_dir is required".to_string(),
                         })?;
-                let response = launch_version(self, tag, Path::new(version_dir)).await?;
+                let version_dir =
+                    validate_local_directory_target_path(version_dir, "version_dir").await?;
+                let response = launch_version(self, tag, version_dir.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
             }
             "get_last_launch_log" => {
@@ -1353,4 +1472,60 @@ async fn sync_with_resolutions_response(
         overwrites: overwrite_count,
         errors,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_local_directory_target_path;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn validate_local_directory_target_path_canonicalizes_existing_directory() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let validated = validate_local_directory_target_path(
+            temp_dir.path().to_string_lossy().as_ref(),
+            "models_path",
+        )
+        .await
+        .expect("existing directory should validate");
+
+        assert_eq!(
+            validated,
+            temp_dir.path().canonicalize().expect("canonical path")
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_local_directory_target_path_preserves_missing_child_under_existing_parent() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let nested = temp_dir.path().join("models").join("incoming");
+        let validated =
+            validate_local_directory_target_path(nested.to_string_lossy().as_ref(), "models_path")
+                .await
+                .expect("missing child path should validate against existing parent");
+
+        assert_eq!(validated, temp_dir.path().join("models").join("incoming"));
+    }
+
+    #[tokio::test]
+    async fn validate_local_directory_target_path_rejects_existing_file() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let file_path = temp_dir.path().join("metadata.json");
+        tokio::fs::write(&file_path, "{}")
+            .await
+            .expect("write test file");
+
+        let error = validate_local_directory_target_path(
+            file_path.to_string_lossy().as_ref(),
+            "models_path",
+        )
+        .await
+        .expect_err("file path should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::error::PumasError::InvalidParams { message }
+                if message.contains("models_path must reference a directory")
+        ));
+    }
 }

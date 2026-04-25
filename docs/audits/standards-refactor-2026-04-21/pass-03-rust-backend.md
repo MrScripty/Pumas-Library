@@ -707,6 +707,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/models.rs` and `api/system.rs` now validate and canonicalize
   direct file-validation and shell-open paths before blocking inspection or OS open calls begin, so
   those API ingress points no longer accept unchecked raw local path strings.
+- Completed: `pumas-core/src/api/state.rs` now validates and normalizes IPC `models_path` and
+  `version_dir` directory targets before mapping preview/apply/sync and launch dispatch, preserving
+  create-if-missing mapping semantics while preventing file-path injection and raw unchecked
+  directory strings from crossing the mirrored IPC boundary.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

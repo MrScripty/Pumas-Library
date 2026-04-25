@@ -89,6 +89,20 @@ impl ModelMapper {
         Ok(Some(merged))
     }
 
+    /// Load mapping configuration without blocking the async runtime.
+    pub async fn load_config_async(
+        &self,
+        app_id: &str,
+        version: Option<&str>,
+    ) -> Result<Option<MappingConfig>> {
+        let mapper = self.clone();
+        let app_id = app_id.to_string();
+        let version = version.map(str::to_string);
+        tokio::task::spawn_blocking(move || mapper.load_config(&app_id, version.as_deref()))
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join load_config task: {}", e)))?
+    }
+
     /// Find all matching config files sorted by specificity.
     fn find_matching_configs(
         &self,
@@ -255,123 +269,22 @@ impl ModelMapper {
         app_models_root: &Path,
     ) -> Result<MappingPreview> {
         let config = self
-            .load_config(app_id, version)?
+            .load_config_async(app_id, version)
+            .await?
             .ok_or_else(|| PumasError::Config {
                 message: format!("No mapping config found for {} {:?}", app_id, version),
             })?;
 
-        let mut preview = MappingPreview::new();
-
-        // Get excluded model IDs for this app
-        let excluded_ids: std::collections::HashSet<String> = self
-            .library
-            .index()
-            .get_excluded_model_ids(app_id)?
-            .into_iter()
-            .collect();
-
-        // Get all models from library
+        let excluded_ids = self.load_excluded_model_ids_async(app_id).await?;
         let models = self.library.list_models().await?;
+        let mapper = self.clone();
+        let app_models_root = app_models_root.to_path_buf();
 
-        for model in models {
-            // Skip models excluded from linking for this app
-            if excluded_ids.contains(&model.id) {
-                continue;
-            }
-            if model
-                .metadata
-                .get("storage_kind")
-                .and_then(|value| value.as_str())
-                == Some("external_reference")
-            {
-                continue;
-            }
-            let model_name = if model.official_name.is_empty() {
-                model.cleaned_name.clone()
-            } else {
-                model.official_name.clone()
-            };
-
-            // Find matching rules for this model
-            for rule in &config.mappings {
-                if !self.matches_rule(&model, rule) {
-                    continue;
-                }
-
-                // Get model files
-                let model_dir = self.library.library_root().join(&model.path);
-                let files = self.get_model_files(&model_dir)?;
-
-                for file_path in files {
-                    let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-
-                    let target_path = app_models_root.join(&rule.target_dir).join(filename);
-
-                    let action = if target_path.exists() {
-                        if target_path.is_symlink() {
-                            // Check if it points to our file
-                            if let Ok(link_target) = std::fs::read_link(&target_path) {
-                                if link_target == file_path {
-                                    MappingAction {
-                                        action: MappingActionType::SkipExists,
-                                        model_id: model.id.clone(),
-                                        model_name: model_name.clone(),
-                                        source: file_path.clone(),
-                                        target: target_path,
-                                        reason: Some("Link already exists".to_string()),
-                                    }
-                                } else {
-                                    MappingAction {
-                                        action: MappingActionType::SkipConflict,
-                                        model_id: model.id.clone(),
-                                        model_name: model_name.clone(),
-                                        source: file_path.clone(),
-                                        target: target_path,
-                                        reason: Some("Different file exists".to_string()),
-                                    }
-                                }
-                            } else {
-                                MappingAction {
-                                    action: MappingActionType::RemoveBroken,
-                                    model_id: model.id.clone(),
-                                    model_name: model_name.clone(),
-                                    source: file_path.clone(),
-                                    target: target_path,
-                                    reason: Some("Broken symlink".to_string()),
-                                }
-                            }
-                        } else {
-                            MappingAction {
-                                action: MappingActionType::SkipConflict,
-                                model_id: model.id.clone(),
-                                model_name: model_name.clone(),
-                                source: file_path.clone(),
-                                target: target_path,
-                                reason: Some("Regular file exists".to_string()),
-                            }
-                        }
-                    } else {
-                        MappingAction {
-                            action: MappingActionType::Create,
-                            model_id: model.id.clone(),
-                            model_name: model_name.clone(),
-                            source: file_path.clone(),
-                            target: target_path,
-                            reason: None,
-                        }
-                    };
-
-                    match action.action {
-                        MappingActionType::Create => preview.creates.push(action),
-                        MappingActionType::SkipExists => preview.skips.push(action),
-                        MappingActionType::SkipConflict => preview.conflicts.push(action),
-                        MappingActionType::RemoveBroken => preview.broken.push(action),
-                    }
-                }
-            }
-        }
-
-        Ok(preview)
+        tokio::task::spawn_blocking(move || {
+            mapper.build_preview(config, excluded_ids, models, &app_models_root)
+        })
+        .await
+        .map_err(|e| PumasError::Other(format!("Failed to join preview_mapping task: {}", e)))?
     }
 
     /// Apply mapping for an application.
@@ -698,6 +611,137 @@ impl ModelMapper {
         }
 
         Ok(files)
+    }
+
+    fn load_excluded_model_ids(&self, app_id: &str) -> Result<std::collections::HashSet<String>> {
+        Ok(self
+            .library
+            .index()
+            .get_excluded_model_ids(app_id)?
+            .into_iter()
+            .collect())
+    }
+
+    async fn load_excluded_model_ids_async(
+        &self,
+        app_id: &str,
+    ) -> Result<std::collections::HashSet<String>> {
+        let mapper = self.clone();
+        let app_id = app_id.to_string();
+        tokio::task::spawn_blocking(move || mapper.load_excluded_model_ids(&app_id))
+            .await
+            .map_err(|e| {
+                PumasError::Other(format!(
+                    "Failed to join load_excluded_model_ids task: {}",
+                    e
+                ))
+            })?
+    }
+
+    fn build_preview(
+        &self,
+        config: MappingConfig,
+        excluded_ids: std::collections::HashSet<String>,
+        models: Vec<crate::index::ModelRecord>,
+        app_models_root: &Path,
+    ) -> Result<MappingPreview> {
+        let mut preview = MappingPreview::new();
+
+        for model in models {
+            if excluded_ids.contains(&model.id) {
+                continue;
+            }
+            if model
+                .metadata
+                .get("storage_kind")
+                .and_then(|value| value.as_str())
+                == Some("external_reference")
+            {
+                continue;
+            }
+
+            let model_name = if model.official_name.is_empty() {
+                model.cleaned_name.clone()
+            } else {
+                model.official_name.clone()
+            };
+
+            for rule in &config.mappings {
+                if !self.matches_rule(&model, rule) {
+                    continue;
+                }
+
+                let model_dir = self.library.library_root().join(&model.path);
+                let files = self.get_model_files(&model_dir)?;
+
+                for file_path in files {
+                    let filename = file_path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                    let target_path = app_models_root.join(&rule.target_dir).join(filename);
+
+                    let action = if target_path.exists() {
+                        if target_path.is_symlink() {
+                            if let Ok(link_target) = std::fs::read_link(&target_path) {
+                                if link_target == file_path {
+                                    MappingAction {
+                                        action: MappingActionType::SkipExists,
+                                        model_id: model.id.clone(),
+                                        model_name: model_name.clone(),
+                                        source: file_path.clone(),
+                                        target: target_path,
+                                        reason: Some("Link already exists".to_string()),
+                                    }
+                                } else {
+                                    MappingAction {
+                                        action: MappingActionType::SkipConflict,
+                                        model_id: model.id.clone(),
+                                        model_name: model_name.clone(),
+                                        source: file_path.clone(),
+                                        target: target_path,
+                                        reason: Some("Different file exists".to_string()),
+                                    }
+                                }
+                            } else {
+                                MappingAction {
+                                    action: MappingActionType::RemoveBroken,
+                                    model_id: model.id.clone(),
+                                    model_name: model_name.clone(),
+                                    source: file_path.clone(),
+                                    target: target_path,
+                                    reason: Some("Broken symlink".to_string()),
+                                }
+                            }
+                        } else {
+                            MappingAction {
+                                action: MappingActionType::SkipConflict,
+                                model_id: model.id.clone(),
+                                model_name: model_name.clone(),
+                                source: file_path.clone(),
+                                target: target_path,
+                                reason: Some("Regular file exists".to_string()),
+                            }
+                        }
+                    } else {
+                        MappingAction {
+                            action: MappingActionType::Create,
+                            model_id: model.id.clone(),
+                            model_name: model_name.clone(),
+                            source: file_path.clone(),
+                            target: target_path,
+                            reason: None,
+                        }
+                    };
+
+                    match action.action {
+                        MappingActionType::Create => preview.creates.push(action),
+                        MappingActionType::SkipExists => preview.skips.push(action),
+                        MappingActionType::SkipConflict => preview.conflicts.push(action),
+                        MappingActionType::RemoveBroken => preview.broken.push(action),
+                    }
+                }
+            }
+        }
+
+        Ok(preview)
     }
 
     // ========================================

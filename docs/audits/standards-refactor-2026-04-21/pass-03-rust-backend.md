@@ -190,6 +190,10 @@ Implementation notes:
   default-config creation helpers, and `api/mapping.rs` plus the mirrored IPC handlers in
   `api/state.rs` use them, so mapping preview/apply/sync request paths no longer perform config
   directory creation or config JSON writes inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/mapper.rs` now loads mapping configs and excluded model
+  ids through async helpers and builds mapping previews on a blocking task, so mapping preview and
+  mapping-apply preparation no longer perform config scans, exclusion lookups, model-file
+  enumeration, or target-path inspection inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

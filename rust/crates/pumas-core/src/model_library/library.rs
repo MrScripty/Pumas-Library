@@ -2094,7 +2094,7 @@ impl ModelLibrary {
         }
 
         // Load current metadata
-        let mut metadata = match self.load_metadata(&model_dir)? {
+        let mut metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await? {
             Some(m) => m,
             None => return Ok(None),
         };
@@ -2226,15 +2226,18 @@ impl ModelLibrary {
         }
 
         // Check for collision at new path
-        if new_dir.exists() {
-            if directories_have_identical_contents(&model_dir, &new_dir)? {
+        if tokio::fs::try_exists(&new_dir).await? {
+            if directories_have_identical_contents_async(model_dir.clone(), new_dir.clone()).await?
+            {
                 tracing::info!(
                     "Reclassify dedupe: removing duplicate source {} in favor of existing destination {}",
                     model_dir.display(),
                     new_dir.display()
                 );
 
-                if let Some(mut existing_metadata) = self.load_metadata(&new_dir)? {
+                if let Some(mut existing_metadata) =
+                    load_model_metadata_async(self.clone(), new_dir.clone()).await?
+                {
                     existing_metadata.model_id = Some(new_model_id.clone());
                     apply_target_identity_to_metadata(&mut existing_metadata, &new_model_id);
                     existing_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
@@ -2242,8 +2245,8 @@ impl ModelLibrary {
                 }
 
                 let _ = self.index.delete(model_id);
-                std::fs::remove_dir_all(&model_dir)?;
-                cleanup_empty_parent_dirs_after_move(&model_dir, &self.library_root);
+                tokio::fs::remove_dir_all(&model_dir).await?;
+                cleanup_empty_parent_dirs_after_move_async(&model_dir, &self.library_root).await;
                 self.index_model_dir(&new_dir).await?;
                 return Ok(Some(new_model_id));
             }
@@ -2256,22 +2259,15 @@ impl ModelLibrary {
         }
 
         // Move the directory
-        std::fs::create_dir_all(new_dir.parent().unwrap())?;
-        std::fs::rename(&model_dir, &new_dir)?;
+        tokio::fs::create_dir_all(new_dir.parent().unwrap()).await?;
+        tokio::fs::rename(&model_dir, &new_dir).await?;
 
         metadata.model_id = Some(new_model_id.clone());
         apply_target_identity_to_metadata(&mut metadata, &new_model_id);
         self.save_metadata(&new_dir, &metadata).await?;
 
         // Clean up empty parent directories left behind
-        if let Some(parent) = model_dir.parent() {
-            let _ = std::fs::remove_dir(parent); // Only removes if empty
-            if let Some(grandparent) = parent.parent() {
-                if grandparent != self.library_root {
-                    let _ = std::fs::remove_dir(grandparent);
-                }
-            }
-        }
+        cleanup_empty_parent_dirs_after_move_async(&model_dir, &self.library_root).await;
 
         // Remove from index at old ID after the destination metadata is durable.
         let _ = self.index.delete(model_id);
@@ -2475,6 +2471,34 @@ async fn translate_model_type_hint(
                 err
             ))
         })?
+}
+
+async fn load_model_metadata_async(
+    library: ModelLibrary,
+    model_dir: PathBuf,
+) -> Result<Option<ModelMetadata>> {
+    tokio::task::spawn_blocking(move || library.load_metadata(&model_dir))
+        .await
+        .map_err(|err| PumasError::Other(format!("Failed to join metadata load task: {}", err)))?
+}
+
+async fn directories_have_identical_contents_async(left: PathBuf, right: PathBuf) -> Result<bool> {
+    tokio::task::spawn_blocking(move || directories_have_identical_contents(&left, &right))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join directory comparison task: {}", err))
+        })?
+}
+
+async fn cleanup_empty_parent_dirs_after_move_async(model_dir: &Path, library_root: &Path) {
+    if let Some(parent) = model_dir.parent() {
+        let _ = tokio::fs::remove_dir(parent).await;
+        if let Some(grandparent) = parent.parent() {
+            if grandparent != library_root {
+                let _ = tokio::fs::remove_dir(grandparent).await;
+            }
+        }
+    }
 }
 
 impl ModelLibrary {

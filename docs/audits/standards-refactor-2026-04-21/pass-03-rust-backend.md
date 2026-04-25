@@ -455,6 +455,11 @@ Implementation notes:
   `conversion/manager.rs`, `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and
   `conversion/sherry.rs` now await that helper, so conversion finalize paths no longer perform
   synchronous existence checks or rename operations inline on async runtime threads.
+- Completed: `pumas-core/src/conversion/pipeline.rs` now provides async temp-dir prepare and
+  cleanup helpers, and the async conversion flows in `conversion/manager.rs`,
+  `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and `conversion/sherry.rs` now use them, so
+  stale-temp cleanup and temp-dir creation no longer perform synchronous remove/create operations
+  inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

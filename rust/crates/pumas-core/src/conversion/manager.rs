@@ -679,11 +679,7 @@ async fn run_conversion(
     let output_dir = determine_output_dir(model_path, direction)?;
     let temp_dir = output_dir.with_extension("converting");
 
-    if temp_dir.exists() {
-        std::fs::remove_dir_all(&temp_dir).ok();
-    }
-    std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| PumasError::io("creating temp conversion dir", &temp_dir, e))?;
+    pipeline::prepare_temp_output_dir(&temp_dir, "creating temp conversion dir").await?;
 
     let scripts_dir = scripts::scripts_dir(launcher_root);
     let (script_name, args) = match direction {
@@ -752,7 +748,7 @@ async fn run_conversion(
     loop {
         if cancel_token.is_cancelled() {
             child.kill().await.ok();
-            std::fs::remove_dir_all(&temp_dir).ok();
+            pipeline::cleanup_temp_output_dir(&temp_dir).await;
             return Err(PumasError::ConversionCancelled);
         }
 
@@ -780,7 +776,7 @@ async fn run_conversion(
         })?;
 
     if !status.success() {
-        std::fs::remove_dir_all(&temp_dir).ok();
+        pipeline::cleanup_temp_output_dir(&temp_dir).await;
         if let Some(p) = progress.get(conversion_id) {
             if p.status == ConversionStatus::Error {
                 return Err(PumasError::ConversionFailed {

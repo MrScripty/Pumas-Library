@@ -86,6 +86,26 @@ pub async fn wait_and_check_exit(
 // Output directory management
 // ---------------------------------------------------------------------------
 
+/// Remove any stale temp directory and recreate it for a fresh conversion run.
+pub async fn prepare_temp_output_dir(temp_dir: &Path, context: &str) -> Result<()> {
+    if fs::try_exists(temp_dir)
+        .await
+        .map_err(|e| PumasError::io("checking conversion temp dir", temp_dir, e))?
+    {
+        let _ = fs::remove_dir_all(temp_dir).await;
+    }
+
+    fs::create_dir_all(temp_dir)
+        .await
+        .map_err(|e| PumasError::io(context, temp_dir, e))?;
+    Ok(())
+}
+
+/// Best-effort removal for temp output directories after cancellation or failure.
+pub async fn cleanup_temp_output_dir(temp_dir: &Path) {
+    let _ = fs::remove_dir_all(temp_dir).await;
+}
+
 /// Atomically rename `temp_dir` to `output_dir`.
 ///
 /// If `output_dir` already exists, appends a `-v{N}` suffix to avoid collision.

@@ -241,11 +241,7 @@ impl QuantizationBackend for SherryBackend {
             .join(&output_dir_name);
         let temp_dir = output_dir.with_extension("converting");
 
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).ok();
-        }
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| PumasError::io("creating sherry temp dir", &temp_dir, e))?;
+        pipeline::prepare_temp_output_dir(&temp_dir, "creating sherry temp dir").await?;
 
         let mut args = vec![
             self.train_script().to_string_lossy().to_string(),

@@ -235,11 +235,7 @@ impl QuantizationBackend for Nvfp4Backend {
             .join(&output_dir_name);
         let temp_dir = output_dir.with_extension("converting");
 
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).ok();
-        }
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| PumasError::io("creating nvfp4 temp dir", &temp_dir, e))?;
+        pipeline::prepare_temp_output_dir(&temp_dir, "creating nvfp4 temp dir").await?;
 
         // Build calibration dataset arg if provided
         let mut args = vec![

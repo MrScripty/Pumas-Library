@@ -363,12 +363,7 @@ impl QuantizationBackend for LlamaCppBackend {
         let output_dir = determine_quantized_output_dir(&params.model_path, &params.target_quant)?;
         let temp_dir = output_dir.with_extension("quantizing");
 
-        // Clean up any leftover temp dir from a previous failed run.
-        if temp_dir.exists() {
-            std::fs::remove_dir_all(&temp_dir).ok();
-        }
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| PumasError::io("creating quantization temp dir", &temp_dir, e))?;
+        pipeline::prepare_temp_output_dir(&temp_dir, "creating quantization temp dir").await?;
 
         let f16_gguf = temp_dir.join("intermediate-f16.gguf");
         let imatrix_file = temp_dir.join("imatrix.dat");

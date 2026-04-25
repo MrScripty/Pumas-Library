@@ -379,6 +379,10 @@ Implementation notes:
   helper before partial-download move handling inspects active entries, so migration execute paths
   no longer perform synchronous persistence reads inline on async runtime threads while preparing
   pause, relocate, and resume decisions.
+- Completed: `pumas-core/src/model_library/hf/download.rs` now routes queued, paused, errored,
+  cancelled, completed, and relocated persistence updates through blocking helpers, so the active
+  HuggingFace download lifecycle no longer performs direct download-store reads or writes inline on
+  async runtime threads while mutating persisted resume state.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

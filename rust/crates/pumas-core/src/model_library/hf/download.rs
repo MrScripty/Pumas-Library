@@ -538,19 +538,23 @@ impl HuggingFaceClient {
 
         // Persist download metadata for crash recovery
         if let Some(ref persistence) = self.persistence {
-            let _ = persistence.save(&PersistedDownload {
-                download_id: download_id.clone(),
-                repo_id: request.repo_id.clone(),
-                filename: first_filename.clone(),
-                filenames: files.iter().map(|f| f.filename.clone()).collect(),
-                dest_dir: dest_dir.to_path_buf(),
-                total_bytes,
-                status: DownloadStatus::Queued,
-                download_request: request.clone(),
-                created_at: chrono::Utc::now().to_rfc3339(),
-                known_sha256: known_sha256.clone(),
-                huggingface_evidence: huggingface_evidence.clone(),
-            });
+            Self::save_persisted_download(
+                persistence.clone(),
+                PersistedDownload {
+                    download_id: download_id.clone(),
+                    repo_id: request.repo_id.clone(),
+                    filename: first_filename.clone(),
+                    filenames: files.iter().map(|f| f.filename.clone()).collect(),
+                    dest_dir: dest_dir.to_path_buf(),
+                    total_bytes,
+                    status: DownloadStatus::Queued,
+                    download_request: request.clone(),
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    known_sha256: known_sha256.clone(),
+                    huggingface_evidence: huggingface_evidence.clone(),
+                },
+            )
+            .await;
         }
 
         // Fire early callback immediately so metadata is available in SQLite
@@ -643,15 +647,12 @@ impl HuggingFaceClient {
                 }
                 // Update persistence with error status (preserve for resume)
                 if let Some(ref persistence) = persistence {
-                    if let Ok(mut entries) = Ok::<Vec<_>, ()>(persistence.load_all()) {
-                        if let Some(entry) = entries
-                            .iter_mut()
-                            .find(|d| d.download_id == download_id_clone)
-                        {
-                            entry.status = DownloadStatus::Error;
-                            let _ = persistence.save(entry);
-                        }
-                    }
+                    Self::persist_status_update(
+                        persistence.clone(),
+                        download_id_clone.clone(),
+                        DownloadStatus::Error,
+                    )
+                    .await;
                 }
             }
         });
@@ -818,7 +819,11 @@ impl HuggingFaceClient {
                         state.status = DownloadStatus::Cancelled;
                     }
                     if let Some(ref persistence) = persistence {
-                        let _ = persistence.remove(download_id);
+                        Self::remove_persisted_download(
+                            persistence.clone(),
+                            download_id.to_string(),
+                        )
+                        .await;
                     }
                     return Err(PumasError::DownloadCancelled);
                 }
@@ -831,10 +836,11 @@ impl HuggingFaceClient {
                     }
                     if let Some(ref persistence) = persistence {
                         Self::persist_status_update(
-                            persistence,
-                            download_id,
+                            persistence.clone(),
+                            download_id.to_string(),
                             DownloadStatus::Paused,
-                        );
+                        )
+                        .await;
                     }
                     return Err(PumasError::DownloadPaused);
                 }
@@ -899,10 +905,11 @@ impl HuggingFaceClient {
                         if matches!(e, PumasError::DownloadPaused) {
                             if let Some(ref persistence) = persistence {
                                 Self::persist_status_update(
-                                    persistence,
-                                    download_id,
+                                    persistence.clone(),
+                                    download_id.to_string(),
                                     DownloadStatus::Paused,
-                                );
+                                )
+                                .await;
                             }
                             return Err(e);
                         }
@@ -911,7 +918,11 @@ impl HuggingFaceClient {
                             if cancel_flag.load(Ordering::Relaxed) {
                                 let _ = tokio::fs::remove_file(&part_path).await;
                                 if let Some(ref persistence) = persistence {
-                                    let _ = persistence.remove(download_id);
+                                    Self::remove_persisted_download(
+                                        persistence.clone(),
+                                        download_id.to_string(),
+                                    )
+                                    .await;
                                 }
                             }
                             return Err(e);
@@ -1043,7 +1054,7 @@ impl HuggingFaceClient {
 
         // Remove from persistence -- download is done
         if let Some(ref persistence) = persistence {
-            let _ = persistence.remove(download_id);
+            Self::remove_persisted_download(persistence.clone(), download_id.to_string()).await;
         }
 
         Ok(())
@@ -1194,16 +1205,66 @@ impl HuggingFaceClient {
     }
 
     /// Helper: update status in persistence store (best-effort).
-    fn persist_status_update(
-        persistence: &DownloadPersistence,
-        download_id: &str,
+    async fn persist_status_update(
+        persistence: Arc<DownloadPersistence>,
+        download_id: String,
         status: DownloadStatus,
     ) {
-        let entries = persistence.load_all();
-        if let Some(mut entry) = entries.into_iter().find(|d| d.download_id == download_id) {
-            entry.status = status;
+        let _ = tokio::task::spawn_blocking(move || {
+            let entries = persistence.load_all();
+            if let Some(mut entry) = entries.into_iter().find(|d| d.download_id == download_id) {
+                entry.status = status;
+                let _ = persistence.save(&entry);
+            }
+        })
+        .await;
+    }
+
+    async fn save_persisted_download(
+        persistence: Arc<DownloadPersistence>,
+        entry: PersistedDownload,
+    ) {
+        let _ = tokio::task::spawn_blocking(move || {
             let _ = persistence.save(&entry);
-        }
+        })
+        .await;
+    }
+
+    async fn remove_persisted_download(persistence: Arc<DownloadPersistence>, download_id: String) {
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = persistence.remove(&download_id);
+        })
+        .await;
+    }
+
+    async fn relocate_persisted_download(
+        persistence: Arc<DownloadPersistence>,
+        download_id: String,
+        new_dest_dir: std::path::PathBuf,
+        new_model_type: Option<String>,
+        new_family: Option<String>,
+    ) -> Result<()> {
+        tokio::task::spawn_blocking(move || {
+            let mut persisted = persistence.load_all();
+            if let Some(entry) = persisted
+                .iter_mut()
+                .find(|entry| entry.download_id == download_id)
+            {
+                entry.dest_dir = new_dest_dir;
+                if let Some(model_type) = new_model_type {
+                    entry.download_request.model_type = Some(model_type);
+                }
+                if let Some(family) = new_family {
+                    entry.download_request.family = family;
+                }
+                persistence.save(entry)?;
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join persisted relocation task: {err}"))
+        })?
     }
 
     /// Get download progress.
@@ -1250,7 +1311,7 @@ impl HuggingFaceClient {
             self.abort_download_task(download_id);
             // Remove from persistence -- cancelled downloads don't survive restart
             if let Some(ref persistence) = self.persistence {
-                let _ = persistence.remove(download_id);
+                Self::remove_persisted_download(persistence.clone(), download_id.to_string()).await;
             }
             Ok(true)
         } else {
@@ -1341,20 +1402,14 @@ impl HuggingFaceClient {
         }
 
         if let Some(ref persistence) = self.persistence {
-            let mut persisted = persistence.load_all();
-            if let Some(entry) = persisted
-                .iter_mut()
-                .find(|entry| entry.download_id == download_id)
-            {
-                entry.dest_dir = new_dest_dir.to_path_buf();
-                if let Some(model_type) = new_model_type {
-                    entry.download_request.model_type = Some(model_type.to_string());
-                }
-                if let Some(family) = new_family {
-                    entry.download_request.family = family.to_string();
-                }
-                persistence.save(entry)?;
-            }
+            Self::relocate_persisted_download(
+                persistence.clone(),
+                download_id.to_string(),
+                new_dest_dir.to_path_buf(),
+                new_model_type.map(|value| value.to_string()),
+                new_family.map(|value| value.to_string()),
+            )
+            .await?;
         }
 
         Ok(true)
@@ -1415,7 +1470,12 @@ impl HuggingFaceClient {
 
         // Update persistence to Queued status
         if let Some(ref persistence) = self.persistence {
-            Self::persist_status_update(persistence, download_id, DownloadStatus::Queued);
+            Self::persist_status_update(
+                persistence.clone(),
+                download_id.to_string(),
+                DownloadStatus::Queued,
+            )
+            .await;
         }
 
         // Re-spawn the download task
@@ -1461,10 +1521,11 @@ impl HuggingFaceClient {
                 // Update persistence with error status
                 if let Some(ref persistence) = persistence {
                     Self::persist_status_update(
-                        persistence,
-                        &download_id_clone,
+                        persistence.clone(),
+                        download_id_clone.clone(),
                         DownloadStatus::Error,
-                    );
+                    )
+                    .await;
                 }
             }
         });

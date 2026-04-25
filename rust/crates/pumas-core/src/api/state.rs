@@ -570,12 +570,16 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(result)?)
             }
             "import_model_in_place" => {
-                let spec: model_library::InPlaceImportSpec =
+                let mut spec: model_library::InPlaceImportSpec =
                     serde_json::from_value(params["spec"].clone()).map_err(|e| {
                         PumasError::InvalidParams {
                             message: format!("Invalid in-place import spec: {e}"),
                         }
                     })?;
+                spec.model_dir = crate::api::models::validate_existing_local_directory_path(
+                    spec.model_dir.to_string_lossy().as_ref(),
+                )
+                .await?;
                 let result = self.model_importer.import_in_place(&spec).await?;
                 Ok(serde_json::to_value(result)?)
             }

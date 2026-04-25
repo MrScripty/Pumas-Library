@@ -49,6 +49,41 @@ async fn validate_existing_local_file_path(file_path: &str) -> Result<std::path:
     }
 }
 
+pub(crate) async fn validate_existing_local_directory_path(
+    dir_path: &str,
+) -> Result<std::path::PathBuf> {
+    let trimmed = dir_path.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: "model_dir is required".to_string(),
+        });
+    }
+
+    let path = std::path::PathBuf::from(trimmed);
+    let canonical = fs::canonicalize(&path)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => PumasError::InvalidParams {
+                message: format!("model_dir not found: {}", path.display()),
+            },
+            _ => PumasError::io_with_path(source, &path),
+        })?;
+
+    let metadata = fs::metadata(&canonical)
+        .await
+        .map_err(|source| PumasError::io_with_path(source, &canonical))?;
+    if metadata.is_dir() {
+        Ok(canonical)
+    } else {
+        Err(PumasError::InvalidParams {
+            message: format!(
+                "model_dir must reference a directory: {}",
+                canonical.display()
+            ),
+        })
+    }
+}
+
 async fn load_model_metadata_or_default(
     library: Arc<model_library::ModelLibrary>,
     model_dir: std::path::PathBuf,
@@ -689,7 +724,15 @@ impl PumasApi {
                 .await;
         }
 
-        self.primary().model_importer.import_in_place(spec).await
+        let mut validated_spec = spec.clone();
+        validated_spec.model_dir =
+            validate_existing_local_directory_path(spec.model_dir.to_string_lossy().as_ref())
+                .await?;
+
+        self.primary()
+            .model_importer
+            .import_in_place(&validated_spec)
+            .await
     }
 
     /// Scan for and adopt orphan model directories.
@@ -738,7 +781,7 @@ impl PumasApi {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_existing_local_file_path;
+    use super::{validate_existing_local_directory_path, validate_existing_local_file_path};
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -752,5 +795,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(validated, file_path.canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_directory_path_canonicalizes_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let validated =
+            validate_existing_local_directory_path(temp_dir.path().to_string_lossy().as_ref())
+                .await
+                .unwrap();
+
+        assert_eq!(validated, temp_dir.path().canonicalize().unwrap());
     }
 }

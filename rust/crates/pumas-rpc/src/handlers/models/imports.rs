@@ -449,7 +449,11 @@ pub async fn import_model_in_place(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let model_dir = require_str_param(params, "model_dir", "modelDir")?;
+    let model_dir = validate_existing_local_directory_path(
+        require_str_param(params, "model_dir", "modelDir")?,
+        "model_dir",
+    )
+    .await?;
     let official_name = require_str_param(params, "official_name", "officialName")?;
     let family = require_str_param(params, "family", "family")?;
     let model_type = get_str_param(params, "model_type", "modelType").map(String::from);
@@ -483,7 +487,7 @@ pub async fn import_model_in_place(
         .and_then(|value| serde_json::from_value(value.clone()).ok());
 
     let spec = pumas_library::model_library::InPlaceImportSpec {
-        model_dir: std::path::PathBuf::from(model_dir),
+        model_dir,
         official_name,
         family,
         model_type,

@@ -733,6 +733,10 @@ Implementation notes:
   and `handlers/links.rs` now uses it for `check_files_writable`, so that RPC path-probe flow no
   longer inspects raw unchecked file strings when evaluating existing files or missing children
   under writable parents.
+- Completed: `pumas-rpc/src/handlers/models/imports.rs`, `pumas-core/src/api/models.rs`, and
+  `api/state.rs` now validate and canonicalize `model_dir` before in-place import begins, so RPC,
+  direct API, and mirrored IPC in-place import entry points no longer accept unchecked raw
+  directory strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

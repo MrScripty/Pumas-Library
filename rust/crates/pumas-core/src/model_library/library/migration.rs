@@ -1,4 +1,73 @@
 use super::*;
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+async fn load_migration_checkpoint_async(
+    path: PathBuf,
+) -> Result<Option<MigrationCheckpointState>> {
+    tokio::task::spawn_blocking(move || load_migration_checkpoint(&path))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration checkpoint load task: {}",
+                err
+            ))
+        })?
+}
+
+async fn save_migration_checkpoint_async(
+    path: PathBuf,
+    state: MigrationCheckpointState,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || save_migration_checkpoint(&path, &state))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration checkpoint save task: {}",
+                err
+            ))
+        })?
+}
+
+async fn write_migration_execution_reports_async(
+    library_root: PathBuf,
+    report: MigrationExecutionReport,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || write_migration_execution_reports(&library_root, &report))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration execution report write task: {}",
+                err
+            ))
+        })?
+}
+
+async fn append_migration_report_index_entry_async(
+    library_root: PathBuf,
+    entry: MigrationReportIndexEntry,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || append_migration_report_index_entry(&library_root, entry))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join migration report index append task: {}",
+                err
+            ))
+        })?
+}
+
+async fn cleanup_empty_parent_dirs_after_move_async(source_dir: PathBuf, library_root: PathBuf) {
+    let _ = tokio::task::spawn_blocking(move || {
+        cleanup_empty_parent_dirs_after_move(&source_dir, &library_root);
+    })
+    .await;
+}
 
 impl ModelLibrary {
     /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
@@ -379,14 +448,16 @@ impl ModelLibrary {
     pub async fn execute_migration_with_checkpoint(&self) -> Result<MigrationExecutionReport> {
         let checkpoint_path = self.library_root.join(MIGRATION_CHECKPOINT_FILENAME);
         let mut resumed_from_checkpoint = false;
-        let mut checkpoint_state = if checkpoint_path.exists() {
+        let mut checkpoint_state = if path_exists(&checkpoint_path).await? {
             resumed_from_checkpoint = true;
-            load_migration_checkpoint(&checkpoint_path)?.ok_or_else(|| {
-                PumasError::Other(format!(
-                    "Migration checkpoint file exists but could not be loaded: {}",
-                    checkpoint_path.display()
-                ))
-            })?
+            load_migration_checkpoint_async(checkpoint_path.clone())
+                .await?
+                .ok_or_else(|| {
+                    PumasError::Other(format!(
+                        "Migration checkpoint file exists but could not be loaded: {}",
+                        checkpoint_path.display()
+                    ))
+                })?
         } else {
             let dry_run = self.generate_migration_dry_run_report()?;
             let pending_moves = dry_run
@@ -422,7 +493,7 @@ impl ModelLibrary {
                 pending_moves,
                 completed_results,
             };
-            save_migration_checkpoint(&checkpoint_path, &initialized)?;
+            save_migration_checkpoint_async(checkpoint_path.clone(), initialized.clone()).await?;
             initialized
         };
 
@@ -433,7 +504,8 @@ impl ModelLibrary {
             let result = self.execute_planned_migration_move(&planned).await;
             checkpoint_state.completed_results.push(result);
             checkpoint_state.updated_at = chrono::Utc::now().to_rfc3339();
-            save_migration_checkpoint(&checkpoint_path, &checkpoint_state)?;
+            save_migration_checkpoint_async(checkpoint_path.clone(), checkpoint_state.clone())
+                .await?;
         }
 
         let mut report = MigrationExecutionReport {
@@ -469,25 +541,27 @@ impl ModelLibrary {
         }
 
         if checkpoint_state.pending_moves.is_empty() {
-            let _ = std::fs::remove_file(&checkpoint_path);
+            let _ = fs::remove_file(&checkpoint_path).await;
         } else {
-            save_migration_checkpoint(&checkpoint_path, &checkpoint_state)?;
+            save_migration_checkpoint_async(checkpoint_path.clone(), checkpoint_state.clone())
+                .await?;
         }
 
         let (json_report_path, markdown_report_path) =
             migration_report_paths(&self.library_root, "execution");
         report.machine_readable_report_path = Some(json_report_path.display().to_string());
         report.human_readable_report_path = Some(markdown_report_path.display().to_string());
-        write_migration_execution_reports(&self.library_root, &report)?;
-        append_migration_report_index_entry(
-            &self.library_root,
+        write_migration_execution_reports_async(self.library_root.clone(), report.clone()).await?;
+        append_migration_report_index_entry_async(
+            self.library_root.clone(),
             MigrationReportIndexEntry {
                 generated_at: report.generated_at.clone(),
                 report_kind: "execution".to_string(),
                 json_report_path: json_report_path.display().to_string(),
                 markdown_report_path: markdown_report_path.display().to_string(),
             },
-        )?;
+        )
+        .await?;
 
         Ok(report)
     }
@@ -499,8 +573,8 @@ impl ModelLibrary {
         let source_dir = self.library_root.join(&planned.model_id);
         let target_dir = self.library_root.join(&planned.target_model_id);
 
-        if !source_dir.exists() {
-            if target_dir.exists() {
+        if !path_exists(&source_dir).await.unwrap_or(false) {
+            if path_exists(&target_dir).await.unwrap_or(false) {
                 return MigrationExecutionItem {
                     model_id: planned.model_id.clone(),
                     target_model_id: planned.target_model_id.clone(),
@@ -519,7 +593,7 @@ impl ModelLibrary {
             };
         }
 
-        if target_dir.exists() {
+        if path_exists(&target_dir).await.unwrap_or(false) {
             return MigrationExecutionItem {
                 model_id: planned.model_id.clone(),
                 target_model_id: planned.target_model_id.clone(),
@@ -562,7 +636,7 @@ impl ModelLibrary {
         }
 
         if let Some(parent) = target_dir.parent() {
-            if let Err(err) = std::fs::create_dir_all(parent) {
+            if let Err(err) = fs::create_dir_all(parent).await {
                 return MigrationExecutionItem {
                     model_id: planned.model_id.clone(),
                     target_model_id: planned.target_model_id.clone(),
@@ -576,7 +650,7 @@ impl ModelLibrary {
             }
         }
 
-        if let Err(err) = std::fs::rename(&source_dir, &target_dir) {
+        if let Err(err) = fs::rename(&source_dir, &target_dir).await {
             return MigrationExecutionItem {
                 model_id: planned.model_id.clone(),
                 target_model_id: planned.target_model_id.clone(),
@@ -615,7 +689,7 @@ impl ModelLibrary {
             };
         }
 
-        cleanup_empty_parent_dirs_after_move(&source_dir, &self.library_root);
+        cleanup_empty_parent_dirs_after_move_async(source_dir, self.library_root.clone()).await;
 
         MigrationExecutionItem {
             model_id: planned.model_id.clone(),

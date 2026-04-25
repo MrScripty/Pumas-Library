@@ -398,6 +398,11 @@ Implementation notes:
   generation, rewrite, listing, deletion, and pruning through `tokio::task::spawn_blocking`, so
   direct API calls and mirrored IPC migration-report requests no longer perform synchronous report
   artifact I/O or index maintenance inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library/migration.rs` now routes checkpoint load/save,
+  execution-report persistence, and report-index appends through blocking-task boundaries, and
+  uses async path probes, parent-directory creation, rename, and checkpoint cleanup in the async
+  migration executor, so `execute_migration_with_checkpoint` no longer performs those synchronous
+  filesystem/report operations inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and `api/state.rs` now route library model-count reads
   through `tokio::task::spawn_blocking`, so rebuild-index and library-status request paths no
   longer perform synchronous SQLite count queries inline on async runtime threads.

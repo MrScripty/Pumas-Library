@@ -362,6 +362,9 @@ Implementation notes:
   generation, rewrite, listing, deletion, and pruning through `tokio::task::spawn_blocking`, so
   direct API calls and mirrored IPC migration-report requests no longer perform synchronous report
   artifact I/O or index maintenance inline on async runtime threads.
+- Completed: `pumas-core/src/api/models.rs` and `api/state.rs` now route library model-count reads
+  through `tokio::task::spawn_blocking`, so rebuild-index and library-status request paths no
+  longer perform synchronous SQLite count queries inline on async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

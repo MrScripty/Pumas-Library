@@ -98,6 +98,14 @@ async fn load_effective_model_metadata(
         })?
 }
 
+async fn load_model_count(
+    library: Arc<model_library::ModelLibrary>,
+) -> std::result::Result<usize, PumasError> {
+    tokio::task::spawn_blocking(move || library.model_count())
+        .await
+        .map_err(|err| PumasError::Other(format!("Failed to join model count task: {}", err)))?
+}
+
 /// All state owned by a primary instance.
 ///
 /// This is the full set of subsystems that were previously fields on `PumasApi`.
@@ -246,7 +254,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 self.reconciliation.mark_dirty_all().await;
                 let _ = reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-rebuild-index")
                     .await?;
-                let model_count = self.model_library.model_count()?;
+                let model_count = load_model_count(self.model_library.clone()).await?;
                 Ok(serde_json::to_value(model_count)?)
             }
             "reclassify_model" => {
@@ -309,7 +317,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let _ =
                     reconcile_on_demand(self, ReconcileScope::AllModels, "ipc-get-library-status")
                         .await?;
-                let model_count = self.model_library.model_count()? as u32;
+                let model_count = load_model_count(self.model_library.clone()).await? as u32;
                 let pending_lookups = self.model_library.get_pending_lookups().await?.len() as u32;
                 Ok(serde_json::to_value(models::LibraryStatusResponse {
                     success: true,

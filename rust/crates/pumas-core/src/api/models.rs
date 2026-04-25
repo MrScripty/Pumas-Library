@@ -69,6 +69,12 @@ async fn load_effective_model_metadata(
         })?
 }
 
+async fn load_model_count(library: Arc<model_library::ModelLibrary>) -> Result<usize> {
+    tokio::task::spawn_blocking(move || library.model_count())
+        .await
+        .map_err(|err| PumasError::Other(format!("Failed to join model count task: {}", err)))?
+}
+
 impl PumasApi {
     // ========================================
     // Model Library Methods
@@ -173,7 +179,7 @@ impl PumasApi {
             "api-rebuild-model-index",
         )
         .await?;
-        primary.model_library.model_count()
+        load_model_count(primary.model_library.clone()).await
     }
 
     /// Get model-library status information for GUI polling.
@@ -192,7 +198,7 @@ impl PumasApi {
         )
         .await?;
 
-        let model_count = primary.model_library.model_count()? as u32;
+        let model_count = load_model_count(primary.model_library.clone()).await? as u32;
         let pending_lookups = primary.model_library.get_pending_lookups().await?.len() as u32;
 
         Ok(models::LibraryStatusResponse {

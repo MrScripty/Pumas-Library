@@ -2497,6 +2497,10 @@ async fn calculate_total_size_async(model_dirs: Vec<PathBuf>) -> Result<u64> {
         for model_dir in model_dirs {
             for entry in WalkDir::new(&model_dir).into_iter().filter_map(|e| e.ok()) {
                 if entry.file_type().is_file() {
+                    let filename = entry.file_name().to_string_lossy();
+                    if filename == METADATA_FILENAME || filename == OVERRIDES_FILENAME {
+                        continue;
+                    }
                     if let Ok(meta) = entry.metadata() {
                         total += meta.len();
                     }
@@ -8698,6 +8702,19 @@ mod tests {
         std::fs::write(first_dir.join("weights.gguf"), vec![0_u8; 11]).unwrap();
         std::fs::write(second_dir.join("nested").join("voice.onnx"), vec![0_u8; 7]).unwrap();
         library
+            .save_overrides(
+                &first_dir,
+                &ModelOverrides {
+                    version_ranges: Some(HashMap::from([(
+                        "comfyui".to_string(),
+                        ">=0.0.1".to_string(),
+                    )])),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        library
             .save_metadata(
                 &first_dir,
                 &ModelMetadata {
@@ -8724,16 +8741,7 @@ mod tests {
             .await
             .unwrap();
 
-        let expected = std::fs::metadata(first_dir.join("weights.gguf"))
-            .unwrap()
-            .len()
-            + std::fs::metadata(second_dir.join("nested").join("voice.onnx"))
-                .unwrap()
-                .len()
-            + std::fs::metadata(first_dir.join("metadata.json")).unwrap().len()
-            + std::fs::metadata(second_dir.join("metadata.json")).unwrap().len();
-
-        assert_eq!(library.total_size().await.unwrap(), expected);
+        assert_eq!(library.total_size().await.unwrap(), 18);
     }
 
     #[tokio::test]

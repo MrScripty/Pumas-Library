@@ -412,8 +412,9 @@ Implementation notes:
   longer performs synchronous metadata reads or persisted-marker/model-type resolution inline on
   async runtime threads.
 - Completed: `pumas-core/src/model_library/library.rs` now routes `total_size` through a blocking
-  directory-walk helper, so library statistics no longer perform recursive filesystem traversal
-  inline on async runtime threads when computing aggregate size.
+  directory-walk helper and excludes projection artifacts such as `metadata.json` and
+  `overrides.json`, so library statistics no longer perform recursive filesystem traversal inline
+  on async runtime threads or count SQLite-backed projection files as model payload.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

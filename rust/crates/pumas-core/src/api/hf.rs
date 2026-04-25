@@ -5,6 +5,7 @@ use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use std::collections::HashSet;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
@@ -43,6 +44,61 @@ async fn is_directory(path: &Path) -> Result<bool> {
         Ok(metadata) => Ok(metadata.is_dir()),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
+}
+
+async fn canonicalize_local_lookup_path(value: &str, field: &str) -> Result<std::path::PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: format!("{field} is required"),
+        });
+    }
+
+    let path = std::path::PathBuf::from(trimmed);
+    fs::canonicalize(&path)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => PumasError::InvalidParams {
+                message: format!("{field} path not found: {}", path.display()),
+            },
+            _ => PumasError::io_with_path(source, &path),
+        })
+}
+
+pub(crate) async fn validate_existing_local_file_lookup_path(
+    value: &str,
+    field: &str,
+) -> Result<std::path::PathBuf> {
+    let path = canonicalize_local_lookup_path(value, field).await?;
+    let metadata = fs::metadata(&path)
+        .await
+        .map_err(|source| PumasError::io_with_path(source, &path))?;
+
+    if metadata.is_file() {
+        Ok(path)
+    } else {
+        Err(PumasError::InvalidParams {
+            message: format!("{field} must reference a file: {}", path.display()),
+        })
+    }
+}
+
+pub(crate) async fn validate_existing_local_directory_lookup_path(
+    value: &str,
+    field: &str,
+) -> Result<std::path::PathBuf> {
+    let path = canonicalize_local_lookup_path(value, field).await?;
+    let metadata = fs::metadata(&path)
+        .await
+        .map_err(|source| PumasError::io_with_path(source, &path))?;
+
+    if metadata.is_dir() {
+        Ok(path)
+    } else {
+        Err(PumasError::InvalidParams {
+            message: format!("{field} must reference a directory: {}", path.display()),
+        })
     }
 }
 
@@ -775,12 +831,12 @@ impl PumasApi {
         }
 
         if let Some(ref client) = self.primary().hf_client {
-            let path = std::path::Path::new(file_path);
+            let path = validate_existing_local_file_lookup_path(file_path, "file_path").await?;
             let filename = path
                 .file_name()
                 .and_then(|n| n.to_str())
                 .unwrap_or(file_path);
-            client.lookup_metadata(filename, Some(path), None).await
+            client.lookup_metadata(filename, Some(&path), None).await
         } else {
             Ok(None)
         }
@@ -805,10 +861,10 @@ impl PumasApi {
             return Ok(None);
         };
 
-        let dir_path = dir_path.to_string();
+        let dir_path = validate_existing_local_directory_lookup_path(dir_path, "dir_path").await?;
         let dir_path_for_lookup = dir_path.clone();
         let hints = tokio::task::spawn_blocking(move || {
-            model_library::get_diffusers_bundle_lookup_hints(Path::new(&dir_path_for_lookup))
+            model_library::get_diffusers_bundle_lookup_hints(&dir_path_for_lookup)
         })
         .await
         .map_err(|err| {
@@ -901,7 +957,9 @@ impl PumasApi {
             Err(err) => {
                 warn!(
                     "Failed to resolve diffusers bundle base model {} for {}: {}",
-                    base_repo_id, dir_path, err
+                    base_repo_id,
+                    dir_path.display(),
+                    err
                 );
                 Ok(None)
             }
@@ -1310,6 +1368,7 @@ pub(crate) fn partial_download_reason_code(err: &PumasError) -> &'static str {
 mod tests {
     use super::*;
     use crate::models::HuggingFaceModel;
+    use tempfile::TempDir;
 
     #[test]
     fn test_partial_download_reason_code_maps_invalid_repo_id() {
@@ -1405,6 +1464,38 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_file_lookup_path_canonicalizes_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("weights.gguf");
+        std::fs::write(&file_path, b"gguf").unwrap();
+
+        let validated = validate_existing_local_file_lookup_path(
+            file_path.to_string_lossy().as_ref(),
+            "file_path",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(validated, file_path.canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_directory_lookup_path_rejects_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("model_index.json");
+        std::fs::write(&file_path, b"{}").unwrap();
+
+        let error = validate_existing_local_directory_lookup_path(
+            file_path.to_string_lossy().as_ref(),
+            "dir_path",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(error.to_string().contains("must reference a directory"));
     }
 
     fn hf_model(repo_id: &str, name: &str, downloads: u64) -> HuggingFaceModel {

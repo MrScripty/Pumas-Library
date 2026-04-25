@@ -605,12 +605,13 @@ pub(super) async fn lookup_hf_metadata_for_file(
     file_path: &str,
 ) -> std::result::Result<Option<model_library::HfMetadataResult>, PumasError> {
     if let Some(ref client) = primary.hf_client {
-        let path = Path::new(file_path);
+        let path = crate::api::hf::validate_existing_local_file_lookup_path(file_path, "file_path")
+            .await?;
         let filename = path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or(file_path);
-        client.lookup_metadata(filename, Some(path), None).await
+        client.lookup_metadata(filename, Some(&path), None).await
     } else {
         Ok(None)
     }
@@ -624,10 +625,11 @@ pub(super) async fn lookup_hf_metadata_for_bundle_directory(
         return Ok(None);
     };
 
-    let dir_path = dir_path.to_string();
+    let dir_path =
+        crate::api::hf::validate_existing_local_directory_lookup_path(dir_path, "dir_path").await?;
     let dir_path_for_lookup = dir_path.clone();
     let hints = tokio::task::spawn_blocking(move || {
-        model_library::get_diffusers_bundle_lookup_hints(Path::new(&dir_path_for_lookup))
+        model_library::get_diffusers_bundle_lookup_hints(&dir_path_for_lookup)
     })
     .await
     .map_err(|err| {
@@ -724,7 +726,7 @@ pub(super) async fn lookup_hf_metadata_for_bundle_directory(
             tracing::warn!(
                 "Failed to resolve diffusers bundle base model {} for {}: {}",
                 base_repo_id,
-                dir_path,
+                dir_path.display(),
                 err
             );
             Ok(None)

@@ -701,6 +701,9 @@ Implementation notes:
   shell-open, and file-inspection parameters at the RPC boundary before passing strings deeper into
   the API, so those entry points no longer forward raw renderer-supplied filesystem paths
   unchecked.
+- Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate and canonicalize local
+  file and diffusers bundle paths before HuggingFace lookup work starts, so direct API and mirrored
+  IPC metadata-lookup entry points no longer accept unchecked raw path strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

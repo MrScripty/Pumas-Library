@@ -434,6 +434,10 @@ Implementation notes:
   through `tokio::task::spawn_blocking`, so KittenTTS and SD Turbo candidate inspection no longer
   performs synchronous `config.json`, `model_index.json`, or directory-entry reads inline on async
   runtime threads while deciding runtime bindings and projected metadata.
+- Completed: `pumas-core/src/model_library/library.rs` now routes `reclassify_model` type
+  resolution through the existing async persisted-hint resolution helper, so reclassification no
+  longer performs synchronous directory-layout and name-token inspection inline on an async runtime
+  thread while deciding model relocation.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

@@ -2126,12 +2126,13 @@ impl ModelLibrary {
                 err
             ))
         })?;
-        let resolved = resolve_local_model_type_with_persisted_hints(
-            self.index(),
-            &model_dir,
-            &metadata,
-            file_type_info.as_ref(),
-        )?;
+        let resolved = resolve_local_model_type_with_persisted_hints_async(
+            self.index().clone(),
+            model_dir.clone(),
+            metadata.clone(),
+            file_type_info.clone(),
+        )
+        .await?;
         let new_type = resolved.model_type;
         let new_type_str = new_type.as_str().to_string();
 

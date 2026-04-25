@@ -1979,11 +1979,11 @@ impl ModelLibrary {
             });
         }
 
-        let metadata =
-            self.get_effective_metadata(model_id)?
-                .ok_or_else(|| PumasError::ModelNotFound {
-                    model_id: model_id.to_string(),
-                })?;
+        let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
+            .await?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
 
         let storage_kind = metadata.storage_kind.unwrap_or(StorageKind::LibraryOwned);
         let validation_state = metadata.validation_state.unwrap_or(

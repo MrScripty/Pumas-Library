@@ -4,9 +4,7 @@ use super::state::PrimaryState;
 use crate::error::PumasError;
 use crate::{model_library, models};
 use std::collections::HashSet;
-use std::path::Path;
 use std::sync::Arc;
-use tokio::fs;
 
 async fn load_hf_model_snapshot(
     library: Arc<model_library::ModelLibrary>,
@@ -34,14 +32,6 @@ async fn load_model_metadata_or_default(
                 err
             ))
         })?
-}
-
-async fn is_directory(path: &Path) -> std::result::Result<bool, PumasError> {
-    match fs::metadata(path).await {
-        Ok(metadata) => Ok(metadata.is_dir()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(PumasError::io_with_path(err, path)),
-    }
 }
 
 pub(super) async fn search_hf_models(
@@ -314,12 +304,8 @@ pub(super) async fn recover_download(
     repo_id: &str,
     dest_dir: &str,
 ) -> std::result::Result<String, PumasError> {
-    let dest = Path::new(dest_dir);
-    if !is_directory(dest).await? {
-        return Err(PumasError::NotFound {
-            resource: format!("directory: {}", dest_dir),
-        });
-    }
+    let dest =
+        crate::api::hf::validate_existing_local_directory_lookup_path(dest_dir, "dest_dir").await?;
 
     let client = primary
         .hf_client
@@ -362,7 +348,7 @@ pub(super) async fn recover_download(
         license_status: None,
     };
 
-    client.start_download(&request, dest, None).await
+    client.start_download(&request, &dest, None).await
 }
 
 pub(super) async fn resume_partial_download(
@@ -370,16 +356,22 @@ pub(super) async fn resume_partial_download(
     repo_id: &str,
     dest_dir: &str,
 ) -> std::result::Result<models::PartialDownloadAction, PumasError> {
-    let dest = Path::new(dest_dir);
-    if !is_directory(dest).await? {
-        return Ok(models::PartialDownloadAction {
-            action: "none".to_string(),
-            download_id: None,
-            status: None,
-            reason_code: Some("dest_dir_missing".to_string()),
-            message: Some(format!("directory not found: {}", dest_dir)),
-        });
-    }
+    let dest =
+        match crate::api::hf::validate_existing_local_directory_lookup_path(dest_dir, "dest_dir")
+            .await
+        {
+            Ok(dest) => dest,
+            Err(PumasError::InvalidParams { .. } | PumasError::NotFound { .. }) => {
+                return Ok(models::PartialDownloadAction {
+                    action: "none".to_string(),
+                    download_id: None,
+                    status: None,
+                    reason_code: Some("dest_dir_missing".to_string()),
+                    message: Some(format!("directory not found: {}", dest_dir)),
+                });
+            }
+            Err(err) => return Err(err),
+        };
 
     let client = match primary.hf_client.as_ref() {
         Some(client) => client,
@@ -394,7 +386,7 @@ pub(super) async fn resume_partial_download(
         }
     };
 
-    if let Some(download_id) = client.find_download_id_by_dest_dir(dest).await {
+    if let Some(download_id) = client.find_download_id_by_dest_dir(&dest).await {
         let status = client.get_download_status(&download_id).await;
         if let Some(status) = status {
             match status {

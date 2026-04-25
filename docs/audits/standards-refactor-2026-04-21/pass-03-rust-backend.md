@@ -711,6 +711,9 @@ Implementation notes:
   `version_dir` directory targets before mapping preview/apply/sync and launch dispatch, preserving
   create-if-missing mapping semantics while preventing file-path injection and raw unchecked
   directory strings from crossing the mirrored IPC boundary.
+- Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now canonicalize and type-check
+  `dest_dir` before interrupted-download recovery and partial-download resume flows, so those direct
+  API and mirrored IPC recovery entry points no longer accept unchecked raw directory strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

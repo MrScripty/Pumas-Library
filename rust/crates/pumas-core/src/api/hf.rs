@@ -6,7 +6,6 @@ use crate::models;
 use crate::PumasApi;
 use std::collections::HashSet;
 use std::io::ErrorKind;
-use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
 use tracing::{info, warn};
@@ -37,14 +36,6 @@ async fn load_model_metadata_or_default(
                 err
             ))
         })?
-}
-
-async fn is_directory(path: &Path) -> Result<bool> {
-    match fs::metadata(path).await {
-        Ok(metadata) => Ok(metadata.is_dir()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(PumasError::io_with_path(err, path)),
-    }
 }
 
 async fn canonicalize_local_lookup_path(value: &str, field: &str) -> Result<std::path::PathBuf> {
@@ -488,12 +479,7 @@ impl PumasApi {
                 .await;
         }
 
-        let dest = std::path::Path::new(dest_dir);
-        if !is_directory(dest).await? {
-            return Err(PumasError::NotFound {
-                resource: format!("directory: {}", dest_dir),
-            });
-        }
+        let dest = validate_existing_local_directory_lookup_path(dest_dir, "dest_dir").await?;
 
         let primary = self.primary();
         let client = primary
@@ -542,7 +528,7 @@ impl PumasApi {
             license_status: None,
         };
 
-        client.start_download(&request, dest, None).await
+        client.start_download(&request, &dest, None).await
     }
 
     /// Resume a partial download by choosing the correct action:
@@ -569,16 +555,19 @@ impl PumasApi {
                 .await;
         }
 
-        let dest = Path::new(dest_dir);
-        if !is_directory(dest).await? {
-            return Ok(models::PartialDownloadAction {
-                action: "none".to_string(),
-                download_id: None,
-                status: None,
-                reason_code: Some("dest_dir_missing".to_string()),
-                message: Some(format!("directory not found: {}", dest_dir)),
-            });
-        }
+        let dest = match validate_existing_local_directory_lookup_path(dest_dir, "dest_dir").await {
+            Ok(dest) => dest,
+            Err(PumasError::InvalidParams { .. } | PumasError::NotFound { .. }) => {
+                return Ok(models::PartialDownloadAction {
+                    action: "none".to_string(),
+                    download_id: None,
+                    status: None,
+                    reason_code: Some("dest_dir_missing".to_string()),
+                    message: Some(format!("directory not found: {}", dest_dir)),
+                });
+            }
+            Err(err) => return Err(err),
+        };
 
         let primary = self.primary();
         let client = match primary.hf_client.as_ref() {
@@ -594,7 +583,7 @@ impl PumasApi {
             }
         };
 
-        if let Some(download_id) = client.find_download_id_by_dest_dir(dest).await {
+        if let Some(download_id) = client.find_download_id_by_dest_dir(&dest).await {
             let status = client.get_download_status(&download_id).await;
             if let Some(status) = status {
                 match status {
@@ -1480,6 +1469,20 @@ mod tests {
         .unwrap();
 
         assert_eq!(validated, file_path.canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn validate_existing_local_directory_lookup_path_canonicalizes_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let validated = validate_existing_local_directory_lookup_path(
+            temp_dir.path().to_string_lossy().as_ref(),
+            "dest_dir",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(validated, temp_dir.path().canonicalize().unwrap());
     }
 
     #[tokio::test]

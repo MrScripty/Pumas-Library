@@ -519,7 +519,7 @@ impl HuggingFaceClient {
 
         // Ensure destination exists so early metadata projection can be written
         // immediately at download start.
-        std::fs::create_dir_all(dest_dir)?;
+        tokio::fs::create_dir_all(dest_dir).await?;
 
         // Persist download metadata for crash recovery
         if let Some(ref persistence) = self.persistence {
@@ -554,7 +554,7 @@ impl HuggingFaceClient {
         // Write marker file with repo_id so interrupted downloads can be recovered
         // even if downloads.json is lost (e.g. crash before persistence flush).
         let marker_path = dest_dir.join(".pumas_download");
-        if let Err(e) = std::fs::write(
+        if let Err(e) = tokio::fs::write(
             &marker_path,
             serde_json::to_string_pretty(&serde_json::json!({
                 "repo_id": request.repo_id,
@@ -567,7 +567,9 @@ impl HuggingFaceClient {
                 "huggingface_evidence": huggingface_evidence,
             }))
             .unwrap_or_default(),
-        ) {
+        )
+        .await
+        {
             info!("Failed to write download marker (non-fatal): {}", e);
         }
 
@@ -681,7 +683,7 @@ impl HuggingFaceClient {
             }
         }
 
-        std::fs::create_dir_all(dest_dir)?;
+        tokio::fs::create_dir_all(dest_dir).await?;
 
         let max_attempts = NetworkConfig::hf_download_max_retries();
         let retry_limit = retry_limit(max_attempts);
@@ -710,7 +712,7 @@ impl HuggingFaceClient {
             }
 
             // Skip files that already exist (completed from previous run)
-            if dest_path.exists() {
+            if tokio::fs::try_exists(&dest_path).await.unwrap_or(false) {
                 let existing_size = tokio::fs::metadata(&dest_path)
                     .await
                     .map(|m| m.len())

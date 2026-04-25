@@ -122,6 +122,7 @@ struct CustomRuntimeProjection {
 /// - JSON metadata files per model
 /// - SQLite FTS5 index for fast search
 /// - Thread-safe operations
+#[derive(Clone)]
 pub struct ModelLibrary {
     /// Root directory of the library
     library_root: PathBuf,
@@ -1144,50 +1145,15 @@ impl ModelLibrary {
         let reason_filter = filter.reason.map(|r| r.trim().to_lowercase());
         let status_filter = filter.review_status.map(|s| s.trim().to_lowercase());
         let all_models = self.list_models().await?;
+        let library = self.clone();
 
-        let mut review_items = Vec::new();
-        for model in all_models {
-            let Some(metadata) = self.load_effective_metadata_by_id(&model.id)? else {
-                continue;
-            };
-            if metadata.metadata_needs_review != Some(true) {
-                continue;
-            }
-
-            let mut reasons = metadata.review_reasons.clone().unwrap_or_default();
-            normalize_review_reasons(&mut reasons);
-
-            if let Some(ref reason) = reason_filter {
-                if !reasons.iter().any(|value| value == reason) {
-                    continue;
-                }
-            }
-
-            if let Some(ref status) = status_filter {
-                let current_status = metadata
-                    .review_status
-                    .as_deref()
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
-                if current_status != *status {
-                    continue;
-                }
-            }
-
-            review_items.push(ModelReviewItem {
-                model_id: model.id,
-                model_type: metadata.model_type,
-                family: metadata.family,
-                official_name: metadata.official_name,
-                metadata_needs_review: true,
-                review_status: metadata.review_status,
-                review_reasons: reasons,
-            });
-        }
-
-        review_items.sort_by(|a, b| a.model_id.cmp(&b.model_id));
-        Ok(review_items)
+        tokio::task::spawn_blocking(move || {
+            library.collect_models_needing_review(all_models, reason_filter, status_filter)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join model review listing task: {}", err))
+        })?
     }
 
     /// Load effective model metadata (`baseline + active overlay`) for a model ID.
@@ -1416,6 +1382,57 @@ impl ModelLibrary {
             self.project_active_dependency_refs(model_id, &mut metadata)?;
             Ok(Some(metadata))
         }
+    }
+
+    fn collect_models_needing_review(
+        &self,
+        all_models: Vec<ModelRecord>,
+        reason_filter: Option<String>,
+        status_filter: Option<String>,
+    ) -> Result<Vec<ModelReviewItem>> {
+        let mut review_items = Vec::new();
+        for model in all_models {
+            let Some(metadata) = self.load_effective_metadata_by_id(&model.id)? else {
+                continue;
+            };
+            if metadata.metadata_needs_review != Some(true) {
+                continue;
+            }
+
+            let mut reasons = metadata.review_reasons.clone().unwrap_or_default();
+            normalize_review_reasons(&mut reasons);
+
+            if let Some(ref reason) = reason_filter {
+                if !reasons.iter().any(|value| value == reason) {
+                    continue;
+                }
+            }
+
+            if let Some(ref status) = status_filter {
+                let current_status = metadata
+                    .review_status
+                    .as_deref()
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase();
+                if current_status != *status {
+                    continue;
+                }
+            }
+
+            review_items.push(ModelReviewItem {
+                model_id: model.id,
+                model_type: metadata.model_type,
+                family: metadata.family,
+                official_name: metadata.official_name,
+                metadata_needs_review: true,
+                review_status: metadata.review_status,
+                review_reasons: reasons,
+            });
+        }
+
+        review_items.sort_by(|a, b| a.model_id.cmp(&b.model_id));
+        Ok(review_items)
     }
 
     fn project_active_dependency_refs(

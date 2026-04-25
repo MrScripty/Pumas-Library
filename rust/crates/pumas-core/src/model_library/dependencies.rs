@@ -359,6 +359,23 @@ impl ModelLibrary {
     /// modality-resolution ambiguity before/after enforcement rollout.
     pub async fn audit_dependency_pin_compliance(&self) -> Result<DependencyPinAuditReport> {
         let models = self.list_models().await?;
+        let library = self.clone();
+        tokio::task::spawn_blocking(move || {
+            library.audit_dependency_pin_compliance_for_models(models)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join dependency pin compliance audit task: {}",
+                err
+            ))
+        })?
+    }
+
+    fn audit_dependency_pin_compliance_for_models(
+        &self,
+        models: Vec<crate::index::ModelRecord>,
+    ) -> Result<DependencyPinAuditReport> {
         let mut binding_issues = Vec::new();
         let mut profile_issues: BTreeMap<(String, i64), DependencyPinAuditProfileIssue> =
             BTreeMap::new();

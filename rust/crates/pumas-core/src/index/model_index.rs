@@ -164,6 +164,7 @@ pub struct ForeignKeyViolation {
 }
 
 /// SQLite model index with FTS5 support.
+#[derive(Clone)]
 pub struct ModelIndex {
     db_path: PathBuf,
     conn: Arc<Mutex<Connection>>,

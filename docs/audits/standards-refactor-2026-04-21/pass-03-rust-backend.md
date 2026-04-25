@@ -365,6 +365,11 @@ Implementation notes:
 - Completed: `pumas-core/src/api/models.rs` and `api/state.rs` now route library model-count reads
   through `tokio::task::spawn_blocking`, so rebuild-index and library-status request paths no
   longer perform synchronous SQLite count queries inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` and
+  `model_library/dependencies.rs` now route review-queue scans and dependency pin-compliance
+  audits through `tokio::task::spawn_blocking` after the async model listing step, so those
+  request-facing review and governance endpoints no longer perform per-model effective-metadata
+  loads and dependency-binding index scans inline on async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

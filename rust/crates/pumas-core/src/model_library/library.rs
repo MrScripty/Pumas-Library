@@ -1205,13 +1205,18 @@ impl ModelLibrary {
         }
 
         let model_dir = self.library_root.join(model_id);
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
         }
 
-        let baseline_value = self.load_baseline_metadata_value(model_id, &model_dir)?;
+        let baseline_value = load_baseline_metadata_value_async(
+            self.clone(),
+            model_id.to_string(),
+            model_dir.clone(),
+        )
+        .await?;
         let mut target_value = self
             .index
             .get_effective_metadata_json(model_id)?
@@ -1325,7 +1330,7 @@ impl ModelLibrary {
         }
 
         let model_dir = self.library_root.join(model_id);
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
@@ -1335,7 +1340,9 @@ impl ModelLibrary {
             .index
             .reset_metadata_overlay(model_id, reviewer, reason)?;
         if reset {
-            if let Some(metadata) = self.load_effective_metadata_by_id(model_id)? {
+            if let Some(metadata) =
+                load_effective_metadata_by_id_async(self.clone(), model_id.to_string()).await?
+            {
                 self.save_metadata(&model_dir, &metadata).await?;
                 self.index_model_dir(&model_dir).await?;
             }
@@ -2485,6 +2492,35 @@ async fn load_model_metadata_async(
     tokio::task::spawn_blocking(move || library.load_metadata(&model_dir))
         .await
         .map_err(|err| PumasError::Other(format!("Failed to join metadata load task: {}", err)))?
+}
+
+async fn load_effective_metadata_by_id_async(
+    library: ModelLibrary,
+    model_id: String,
+) -> Result<Option<ModelMetadata>> {
+    tokio::task::spawn_blocking(move || library.load_effective_metadata_by_id(&model_id))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join effective metadata load task: {}",
+                err
+            ))
+        })?
+}
+
+async fn load_baseline_metadata_value_async(
+    library: ModelLibrary,
+    model_id: String,
+    model_dir: PathBuf,
+) -> Result<Value> {
+    tokio::task::spawn_blocking(move || library.load_baseline_metadata_value(&model_id, &model_dir))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join baseline metadata load task: {}",
+                err
+            ))
+        })?
 }
 
 async fn resolve_local_model_type_with_persisted_hints_async(

@@ -468,6 +468,10 @@ Implementation notes:
   `sync_active_dependency_projection` metadata loads through the shared async metadata helper, so
   index/model-scope maintenance no longer performs synchronous projection reads inline on async
   indexing paths.
+- Completed: `pumas-core/src/model_library/library.rs` now uses async model-directory existence
+  checks plus async baseline/effective metadata helpers in `submit_model_review` and
+  `reset_model_review`, so those review request paths no longer perform synchronous path probes or
+  projection reads inline on async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

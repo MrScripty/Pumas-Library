@@ -665,6 +665,10 @@ Implementation notes:
   backend-status requests through `tokio::task::spawn_blocking`, so RPC and IPC conversion status
   request paths no longer perform backend filesystem readiness probes inline on async runtime
   threads.
+- Completed: `pumas-app-manager/src/version_manager/mod.rs` now initializes
+  `MetadataManager` directory setup and `GitHubClient` startup through
+  `tokio::task::spawn_blocking`, so `VersionManager::new` no longer performs that synchronous
+  constructor and filesystem setup work directly on async startup paths.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

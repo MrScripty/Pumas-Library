@@ -118,14 +118,24 @@ impl VersionManager {
             });
         }
 
-        // Initialize components
-        let metadata_manager = Arc::new(MetadataManager::new(&launcher_root));
-        metadata_manager.ensure_directories()?;
-
         let cache_dir = launcher_root
             .join("launcher-data")
             .join(PathsConfig::CACHE_DIR_NAME);
-        let github_client = Arc::new(GitHubClient::new(cache_dir.clone())?);
+        let launcher_root_for_setup = launcher_root.clone();
+        let cache_dir_for_setup = cache_dir.clone();
+        let (metadata_manager, github_client) = tokio::task::spawn_blocking(move || {
+            let metadata_manager = Arc::new(MetadataManager::new(&launcher_root_for_setup));
+            metadata_manager.ensure_directories()?;
+            let github_client = Arc::new(GitHubClient::new(cache_dir_for_setup)?);
+            Ok::<_, PumasError>((metadata_manager, github_client))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join version manager startup initialization task: {}",
+                err
+            ))
+        })??;
 
         let progress_tracker = Arc::new(RwLock::new(
             InstallationProgressTracker::new_with_stale_cleanup(cache_dir.clone()).await,

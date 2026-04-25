@@ -1833,6 +1833,21 @@ mod tests {
         assert!(importer.has_orphan_candidates());
     }
 
+    #[tokio::test]
+    async fn test_has_orphan_candidates_async_detects_missing_metadata_model_dir() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let orphan_dir = library
+            .library_root()
+            .join("llm")
+            .join("llama")
+            .join("candidate");
+        std::fs::create_dir_all(&orphan_dir).unwrap();
+        create_test_file(&orphan_dir, "weights.gguf", b"ok");
+
+        assert!(importer.has_orphan_candidates_async().await);
+    }
+
     fn write_min_safetensors(path: &Path) {
         let header = b"{}";
         let header_size: u64 = header.len() as u64;

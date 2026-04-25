@@ -355,6 +355,10 @@ Implementation notes:
   scanning through `tokio::task::spawn_blocking`, so startup recovery no longer performs
   persistence loads, stale-entry cleanup, or on-disk byte counting inline on async runtime
   threads before restoring in-memory download state.
+- Completed: `pumas-core/src/api/builder.rs` now probes orphan-candidate startup state through an
+  async `ModelImporter` wrapper backed by `spawn_blocking`, so API initialization no longer
+  performs a synchronous library tree orphan scan inline on the async builder path before deciding
+  whether to spawn orphan adoption work.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

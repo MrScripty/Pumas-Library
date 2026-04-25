@@ -101,6 +101,14 @@ impl ModelImporter {
             .is_empty()
     }
 
+    /// Async wrapper for orphan candidate probing used on startup paths.
+    pub async fn has_orphan_candidates_async(&self) -> bool {
+        let importer = self.clone();
+        tokio::task::spawn_blocking(move || importer.has_orphan_candidates())
+            .await
+            .unwrap_or(false)
+    }
+
     /// Scan for incomplete sharded models that need recovery downloads.
     ///
     /// Finds directories where:

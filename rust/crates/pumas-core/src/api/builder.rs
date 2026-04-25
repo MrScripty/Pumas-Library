@@ -516,7 +516,7 @@ impl PumasApiBuilder {
         {
             let lib_clone = model_library.clone();
             let importer = model_library::ModelImporter::new(lib_clone);
-            if importer.has_orphan_candidates() {
+            if importer.has_orphan_candidates_async().await {
                 runtime_tasks.spawn(async move {
                     let result = importer.adopt_orphans(false).await;
                     if result.orphans_found > 0 {

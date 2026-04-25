@@ -420,6 +420,10 @@ Implementation notes:
   async metadata-loading helper in `mark_lookup_failed`, so lookup-failure bookkeeping no longer
   performs synchronous existence checks or projection reads inline on async runtime threads before
   persisting attempt counters and timestamps.
+- Completed: `pumas-core/src/model_library/library.rs` now routes external reference validation in
+  `rebuild_index` through `tokio::task::spawn_blocking`, so rebuild-time external asset refresh no
+  longer performs synchronous bundle revalidation and `model_index.json` reads inline on async
+  runtime threads while repairing metadata projections.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

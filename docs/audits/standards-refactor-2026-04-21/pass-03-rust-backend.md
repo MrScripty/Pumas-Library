@@ -704,6 +704,9 @@ Implementation notes:
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate and canonicalize local
   file and diffusers bundle paths before HuggingFace lookup work starts, so direct API and mirrored
   IPC metadata-lookup entry points no longer accept unchecked raw path strings.
+- Completed: `pumas-core/src/api/models.rs` and `api/system.rs` now validate and canonicalize
+  direct file-validation and shell-open paths before blocking inspection or OS open calls begin, so
+  those API ingress points no longer accept unchecked raw local path strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

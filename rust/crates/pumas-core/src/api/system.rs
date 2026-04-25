@@ -6,6 +6,7 @@ use crate::launcher;
 use crate::models;
 use crate::system;
 use crate::PumasApi;
+use std::io::ErrorKind;
 use std::path::Path;
 use tokio::fs;
 
@@ -13,6 +14,25 @@ async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
         .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
+
+async fn validate_existing_local_open_path(path: &str) -> Result<std::path::PathBuf> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: "path is required".to_string(),
+        });
+    }
+
+    let candidate = std::path::PathBuf::from(trimmed);
+    fs::canonicalize(&candidate)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => PumasError::NotFound {
+                resource: format!("Path: {}", candidate.display()),
+            },
+            _ => PumasError::io_with_path(source, &candidate),
+        })
 }
 
 impl PumasApi {
@@ -300,7 +320,8 @@ impl PumasApi {
     /// Open a path in the file manager.
     pub async fn open_path(&self, path: &str) -> Result<()> {
         let system_utils = self.primary().system_utils.clone();
-        let path = path.to_string();
+        let path = validate_existing_local_open_path(path).await?;
+        let path = path.to_string_lossy().to_string();
         tokio::task::spawn_blocking(move || system_utils.open_path(&path))
             .await
             .map_err(|e| PumasError::Other(format!("Failed to join open_path task: {}", e)))?
@@ -536,5 +557,23 @@ impl PumasApi {
                 path: None,
                 info: Some("Failed to join check_setproctitle task".to_string()),
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_existing_local_open_path;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn validate_existing_local_open_path_canonicalizes_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        let validated =
+            validate_existing_local_open_path(temp_dir.path().to_string_lossy().as_ref())
+                .await
+                .unwrap();
+
+        assert_eq!(validated, temp_dir.path().canonicalize().unwrap());
     }
 }

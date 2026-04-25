@@ -8,6 +8,7 @@ use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
 use std::collections::HashSet;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 use tokio::fs;
@@ -16,6 +17,36 @@ async fn path_exists(path: &Path) -> Result<bool> {
     fs::try_exists(path)
         .await
         .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
+
+async fn validate_existing_local_file_path(file_path: &str) -> Result<std::path::PathBuf> {
+    let trimmed = file_path.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: "file_path is required".to_string(),
+        });
+    }
+
+    let path = std::path::PathBuf::from(trimmed);
+    let canonical = fs::canonicalize(&path)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => PumasError::InvalidParams {
+                message: format!("file_path not found: {}", path.display()),
+            },
+            _ => PumasError::io_with_path(source, &path),
+        })?;
+
+    let metadata = fs::metadata(&canonical)
+        .await
+        .map_err(|source| PumasError::io_with_path(source, &canonical))?;
+    if metadata.is_file() {
+        Ok(canonical)
+    } else {
+        Err(PumasError::InvalidParams {
+            message: format!("file_path must reference a file: {}", canonical.display()),
+        })
+    }
 }
 
 async fn load_model_metadata_or_default(
@@ -217,19 +248,19 @@ impl PumasApi {
         &self,
         file_path: &str,
     ) -> Result<models::FileTypeValidationResponse> {
-        let file_path = file_path.to_string();
-        tokio::task::spawn_blocking(move || {
-            let path = Path::new(&file_path);
-            if !path.exists() || !path.is_file() {
+        let path = match validate_existing_local_file_path(file_path).await {
+            Ok(path) => path,
+            Err(err) => {
                 return Ok(models::FileTypeValidationResponse {
                     success: false,
-                    error: Some(format!("File not found: {}", file_path)),
+                    error: Some(err.to_string()),
                     valid: false,
                     detected_type: "error".to_string(),
                 });
             }
-
-            let response = match model_library::identify_model_type(path) {
+        };
+        tokio::task::spawn_blocking(move || {
+            let response = match model_library::identify_model_type(&path) {
                 Ok(info) => {
                     let detected_type = info.format.as_str().to_string();
                     let valid = info.format != model_library::FileFormat::Unknown;
@@ -702,5 +733,24 @@ impl PumasApi {
         }
 
         self.primary().model_library.reclassify_all_models().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_existing_local_file_path;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn validate_existing_local_file_path_canonicalizes_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("model.gguf");
+        std::fs::write(&file_path, b"gguf").unwrap();
+
+        let validated = validate_existing_local_file_path(file_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+
+        assert_eq!(validated, file_path.canonicalize().unwrap());
     }
 }

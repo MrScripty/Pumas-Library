@@ -136,11 +136,11 @@ impl AppProcessManager for BinaryProcessManager {
         let logs_dir = self.launcher_root.join("launcher-data").join("logs");
         let _ = fs::create_dir_all(&logs_dir).await;
         let log_file = logs_dir.join(format!("{}.log", self.plugin.id));
+        let log_output = create_log_output(&log_file).await?;
 
         // Launch the binary
-        let log_file_clone = log_file.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let log = std::fs::File::create(&log_file_clone)?;
+            let log = log_output;
             Command::new(&binary_path)
                 .arg("serve")
                 .stdout(log.try_clone()?)
@@ -323,10 +323,10 @@ impl AppProcessManager for PythonProcessManager {
         let logs_dir = self.launcher_root.join("launcher-data").join("logs");
         let _ = fs::create_dir_all(&logs_dir).await;
         let log_file = logs_dir.join(format!("{}.log", self.plugin.id));
+        let log_output = create_log_output(&log_file).await?;
 
-        let log_file_clone = log_file.clone();
         let result = tokio::task::spawn_blocking(move || {
-            let log = std::fs::File::create(&log_file_clone)?;
+            let log = log_output;
             std::process::Command::new(venv_python)
                 .arg(entry_script)
                 .current_dir(version_path)
@@ -444,6 +444,19 @@ async fn path_exists(path: &Path) -> Result<bool> {
         path: Some(path.to_path_buf()),
         source: Some(e),
     })
+}
+
+async fn create_log_output(log_file: &Path) -> Result<std::fs::File> {
+    let file = fs::File::create(log_file)
+        .await
+        .map_err(|e| PumasError::Io {
+            message: format!("Failed to create log file: {}", e),
+            path: Some(log_file.to_path_buf()),
+            source: Some(e),
+        })?
+        .into_std()
+        .await;
+    Ok(file)
 }
 
 #[cfg(test)]

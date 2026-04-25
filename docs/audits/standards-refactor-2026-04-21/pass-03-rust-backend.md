@@ -242,9 +242,10 @@ Implementation notes:
   directory creation so those async lifecycle entry points no longer perform synchronous metadata
   probes or directory setup on runtime threads before invoking git operations.
 - Completed: `pumas-app-manager/src/process/factory.rs` now uses `tokio::fs` for async
-  version/log/pid path checks, async log reads, async pid-file removal, and async log-directory
-  creation so binary and Python process manager lifecycle methods no longer perform synchronous
-  filesystem probes or file reads on runtime threads.
+  version/log/pid path checks, async log reads, async pid-file removal, async log-directory
+  creation, and async launch-log file creation so binary and Python process manager lifecycle
+  methods no longer perform synchronous filesystem probes, file reads, or launch-log setup on
+  runtime threads.
 - Completed: `pumas-app-manager/src/version_manager/ollama.rs` now uses async file creation and
   writes for streamed downloads plus async archive cleanup and direct-binary rename, so those
   async install steps no longer perform synchronous file output or archive relocation on runtime

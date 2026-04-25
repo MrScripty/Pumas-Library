@@ -348,6 +348,17 @@ impl ModelImporter {
         results
     }
 
+    /// Async wrapper for interrupted-download discovery used on startup paths.
+    pub async fn find_interrupted_downloads_async(
+        &self,
+        known_dest_dirs: HashSet<PathBuf>,
+    ) -> Vec<InterruptedDownload> {
+        let importer = self.clone();
+        tokio::task::spawn_blocking(move || importer.find_interrupted_downloads(&known_dest_dirs))
+            .await
+            .unwrap_or_default()
+    }
+
     /// Find directories with model files but no metadata.json.
     fn find_orphan_dirs(&self, library_root: &Path, stop_after_first: bool) -> Vec<PathBuf> {
         let mut orphans = Vec::new();

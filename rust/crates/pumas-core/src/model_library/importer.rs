@@ -1869,6 +1869,27 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn test_find_interrupted_downloads_async_detects_partial_download_dir() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let model_dir = library
+            .library_root()
+            .join("llm")
+            .join("llama")
+            .join("partial-model");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        create_test_file(&model_dir, "weights.gguf.part", b"partial");
+
+        let interrupted = importer
+            .find_interrupted_downloads_async(std::collections::HashSet::new())
+            .await;
+        assert_eq!(interrupted.len(), 1);
+        assert_eq!(interrupted[0].family, "llama");
+        assert_eq!(interrupted[0].inferred_name, "partial-model");
+        assert_eq!(interrupted[0].part_files, vec!["weights.gguf.part"]);
+    }
+
     fn write_min_safetensors(path: &Path) {
         let header = b"{}";
         let header_size: u64 = header.len() as u64;

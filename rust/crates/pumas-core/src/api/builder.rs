@@ -159,7 +159,8 @@ fn start_primary_background_work(
         runtime_tasks.spawn(async move {
             let interrupted = ps
                 .model_importer
-                .find_interrupted_downloads(&known_download_dirs);
+                .find_interrupted_downloads_async(known_download_dirs)
+                .await;
             if interrupted.is_empty() {
                 return;
             }

@@ -520,6 +520,10 @@ Implementation notes:
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline
   on async runtime threads before attaching persistence and restoring downloads.
+- Completed: `pumas-core/src/model_library/library.rs` now initializes library-root creation,
+  canonicalization, SQLite index construction, and link-registry construction through
+  `tokio::task::spawn_blocking`, so `ModelLibrary::new` no longer performs that synchronous
+  startup filesystem and index setup work directly on an async constructor path.
 - Completed: `pumas-core/src/api/mapping.rs` and `pumas-rpc/src/handlers/links.rs` now route the
   cross-filesystem warning request through `tokio::task::spawn_blocking`, so RPC link-warning
   checks no longer perform synchronous filesystem metadata inspection inline on async runtime

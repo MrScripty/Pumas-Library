@@ -148,17 +148,23 @@ impl ModelLibrary {
     pub async fn new(library_root: impl Into<PathBuf>) -> Result<Self> {
         let library_root = library_root.into();
 
-        // Ensure the library directory exists
-        std::fs::create_dir_all(&library_root)?;
-        let library_root = library_root.canonicalize()?;
-        let db_path = library_root.join(DB_FILENAME);
-        let registry_path = library_root.join("link_registry.json");
+        let (library_root, index, link_registry) = tokio::task::spawn_blocking(move || {
+            std::fs::create_dir_all(&library_root)?;
+            let library_root = library_root.canonicalize()?;
+            let db_path = library_root.join(DB_FILENAME);
+            let registry_path = library_root.join("link_registry.json");
+            let index = ModelIndex::new(&db_path)?;
+            let link_registry = LinkRegistry::new(registry_path);
+            Ok::<_, PumasError>((library_root, index, link_registry))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join model library startup initialization task: {}",
+                err
+            ))
+        })??;
 
-        // Initialize the model index
-        let index = ModelIndex::new(&db_path)?;
-
-        // Initialize link registry
-        let link_registry = LinkRegistry::new(registry_path);
         link_registry.load().await?;
 
         let library = Self {

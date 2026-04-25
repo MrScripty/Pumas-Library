@@ -70,6 +70,83 @@ pub(crate) async fn validate_existing_local_path(
     canonicalize_local_path(value, field).await
 }
 
+pub(crate) async fn validate_local_write_target_path(
+    value: String,
+    field: &str,
+) -> pumas_library::Result<PathBuf> {
+    let raw = validate_non_empty(value, field)?;
+    let candidate = PathBuf::from(&raw);
+
+    match tokio::fs::symlink_metadata(&candidate).await {
+        Ok(_) => return canonicalize_local_path(raw, field).await,
+        Err(source) if source.kind() == ErrorKind::NotFound => {}
+        Err(source) => {
+            return Err(pumas_library::PumasError::Io {
+                message: format!("Failed to inspect path: {}", candidate.display()),
+                path: Some(candidate),
+                source: Some(source),
+            });
+        }
+    }
+
+    let mut existing_ancestor = candidate.as_path();
+    loop {
+        match tokio::fs::metadata(existing_ancestor).await {
+            Ok(metadata) => {
+                if !metadata.is_dir() {
+                    return Err(pumas_library::PumasError::InvalidParams {
+                        message: format!(
+                            "Parameter '{field}' must resolve under a directory: {}",
+                            existing_ancestor.display()
+                        ),
+                    });
+                }
+
+                let canonical_ancestor =
+                    tokio::fs::canonicalize(existing_ancestor)
+                        .await
+                        .map_err(|source| pumas_library::PumasError::Io {
+                            message: format!(
+                                "Failed to canonicalize path: {}",
+                                existing_ancestor.display()
+                            ),
+                            path: Some(existing_ancestor.to_path_buf()),
+                            source: Some(source),
+                        })?;
+                let suffix = candidate.strip_prefix(existing_ancestor).map_err(|_| {
+                    pumas_library::PumasError::Other(format!(
+                        "Failed to normalize write target path: {}",
+                        candidate.display()
+                    ))
+                })?;
+
+                return Ok(if suffix.as_os_str().is_empty() {
+                    canonical_ancestor
+                } else {
+                    canonical_ancestor.join(suffix)
+                });
+            }
+            Err(source) if source.kind() == ErrorKind::NotFound => {
+                existing_ancestor = existing_ancestor.parent().ok_or_else(|| {
+                    pumas_library::PumasError::InvalidParams {
+                        message: format!(
+                            "Parameter '{field}' path is not rooted under an accessible directory: {}",
+                            candidate.display()
+                        ),
+                    }
+                })?;
+            }
+            Err(source) => {
+                return Err(pumas_library::PumasError::Io {
+                    message: format!("Failed to inspect path: {}", existing_ancestor.display()),
+                    path: Some(existing_ancestor.to_path_buf()),
+                    source: Some(source),
+                });
+            }
+        }
+    }
+}
+
 pub(crate) async fn validate_existing_local_file_path(
     value: String,
     field: &str,
@@ -382,6 +459,33 @@ mod tests {
         .unwrap_err();
 
         assert!(error.to_string().contains("must reference a directory"));
+    }
+
+    #[tokio::test]
+    async fn validate_local_write_target_path_preserves_missing_child_under_existing_parent() {
+        let temp_dir = TempDir::new().unwrap();
+        let target = temp_dir.path().join("outputs").join("result.txt");
+
+        let validated =
+            validate_local_write_target_path(target.to_string_lossy().to_string(), "file_path")
+                .await
+                .unwrap();
+
+        assert_eq!(validated, target);
+    }
+
+    #[tokio::test]
+    async fn validate_local_write_target_path_canonicalizes_existing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("existing.txt");
+        std::fs::write(&file_path, b"ok").unwrap();
+
+        let validated =
+            validate_local_write_target_path(file_path.to_string_lossy().to_string(), "file_path")
+                .await
+                .unwrap();
+
+        assert_eq!(validated, file_path.canonicalize().unwrap());
     }
 
     #[tokio::test]

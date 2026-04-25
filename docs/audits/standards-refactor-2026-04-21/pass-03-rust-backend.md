@@ -729,6 +729,10 @@ Implementation notes:
   incoming migration `report_path` values against the library `migration-reports` root before
   delete-report calls reach the blocking library helper, so direct API and mirrored IPC deletion
   entry points no longer forward unchecked raw report path strings.
+- Completed: `pumas-rpc/src/handlers/shared.rs` now provides a normalized local write-target helper,
+  and `handlers/links.rs` now uses it for `check_files_writable`, so that RPC path-probe flow no
+  longer inspects raw unchecked file strings when evaluating existing files or missing children
+  under writable parents.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

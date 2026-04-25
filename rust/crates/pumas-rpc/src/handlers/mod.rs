@@ -26,7 +26,8 @@ pub(crate) use shared::{
     get_str_param, get_version_manager, parse_params, path_exists, read_utf8_file,
     require_str_param, require_version_manager, sync_version_paths_to_process_manager,
     validate_existing_local_directory_path, validate_existing_local_file_path,
-    validate_existing_local_path, validate_external_url, validate_non_empty,
+    validate_existing_local_path, validate_external_url, validate_local_write_target_path,
+    validate_non_empty,
 };
 
 // ============================================================================

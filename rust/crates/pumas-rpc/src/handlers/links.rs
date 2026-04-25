@@ -1,11 +1,14 @@
 //! Link management handlers.
 
-use super::{get_str_param, path_exists, require_str_param, validate_existing_local_path};
+use super::{
+    get_str_param, path_exists, require_str_param, validate_existing_local_path,
+    validate_local_write_target_path,
+};
 use crate::server::AppState;
 use pumas_library::model_library::ConflictResolution;
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn parse_conflict_resolutions(
     raw_resolutions: HashMap<String, String>,
@@ -256,17 +259,22 @@ pub async fn check_files_writable(
 
     let mut results = Vec::with_capacity(file_paths.len());
     for file_path in &file_paths {
-        let path = Path::new(file_path);
-        let writable = if path_exists(path).await? {
-            tokio::fs::metadata(path)
-                .await
-                .map(|metadata| !metadata.permissions().readonly())
-                .unwrap_or(false)
-        } else if let Some(parent) = path.parent() {
-            tokio::fs::metadata(parent)
-                .await
-                .map(|metadata| !metadata.permissions().readonly())
-                .unwrap_or(false)
+        let writable = if let Ok(path) =
+            validate_local_write_target_path(file_path.to_string(), "file_paths").await
+        {
+            if path_exists(&path).await? {
+                tokio::fs::metadata(&path)
+                    .await
+                    .map(|metadata| !metadata.permissions().readonly())
+                    .unwrap_or(false)
+            } else if let Some(parent) = path.parent() {
+                tokio::fs::metadata(parent)
+                    .await
+                    .map(|metadata| !metadata.permissions().readonly())
+                    .unwrap_or(false)
+            } else {
+                false
+            }
         } else {
             false
         };

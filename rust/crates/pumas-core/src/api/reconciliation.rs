@@ -668,6 +668,31 @@ fn select_partial_model_type(
     Ok(PartialModelTypeSelection::default())
 }
 
+async fn select_partial_model_type_async(
+    index: ModelIndex,
+    model_dir: PathBuf,
+    path_model_type: Option<String>,
+    pipeline_tag_hint: Option<String>,
+    model_type_hint: Option<String>,
+) -> Result<PartialModelTypeSelection> {
+    tokio::task::spawn_blocking(move || {
+        select_partial_model_type(
+            &index,
+            &model_dir,
+            path_model_type.as_deref(),
+            pipeline_tag_hint.as_deref(),
+            model_type_hint.as_deref(),
+        )
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join partial model-type selection task: {}",
+            err
+        ))
+    })?
+}
+
 fn load_persisted_downloads(primary: &PrimaryState) -> Vec<PersistedDownload> {
     let Some(ref client) = primary.hf_client else {
         return Vec::new();
@@ -842,13 +867,14 @@ async fn stage_partial_candidate(
 
     let now = chrono::Utc::now().to_rfc3339();
     let (path_model_type, path_family, path_cleaned_name) = split_model_id(&candidate.model_id);
-    let selected_type = select_partial_model_type(
-        primary.model_library.index(),
-        &candidate.model_dir,
-        path_model_type.as_deref(),
-        candidate.pipeline_tag_hint.as_deref(),
-        candidate.model_type_hint.as_deref(),
-    )?;
+    let selected_type = select_partial_model_type_async(
+        primary.model_library.index().clone(),
+        candidate.model_dir.clone(),
+        path_model_type,
+        candidate.pipeline_tag_hint.clone(),
+        candidate.model_type_hint.clone(),
+    )
+    .await?;
     let selected_type = apply_partial_reranker_name_override(selected_type, &candidate);
     let family = candidate
         .family

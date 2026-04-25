@@ -394,6 +394,10 @@ Implementation notes:
   model-type hints through `tokio::task::spawn_blocking`, so metadata refresh and download
   completion flows no longer perform synchronous model-type hint index reads inline on async
   runtime threads while applying remote metadata.
+- Completed: `pumas-core/src/api/reconciliation.rs` now routes partial-download model-type
+  selection through `tokio::task::spawn_blocking`, so reconciliation no longer performs
+  synchronous SQLite hint translation and model-directory inspection inline on async runtime
+  threads while staging partial download records.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

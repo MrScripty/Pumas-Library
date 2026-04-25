@@ -103,6 +103,25 @@ pub struct VersionManager {
 }
 
 impl VersionManager {
+    async fn get_installed_version_metadata(
+        &self,
+        tag: &str,
+    ) -> Result<Option<pumas_library::metadata::InstalledVersionMetadata>> {
+        let metadata_manager = self.metadata_manager.clone();
+        let tag = tag.to_string();
+        let app_id = self.app_id;
+        tokio::task::spawn_blocking(move || {
+            metadata_manager.get_installed_version(&tag, Some(app_id))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join installed version metadata task: {}",
+                err
+            ))
+        })?
+    }
+
     /// Create a new version manager.
     ///
     /// # Arguments
@@ -260,24 +279,25 @@ impl VersionManager {
         &self,
         tag: &str,
     ) -> Result<Option<pumas_library::metadata::InstalledVersionMetadata>> {
-        self.metadata_manager
-            .get_installed_version(tag, Some(self.app_id))
+        self.get_installed_version_metadata(tag).await
     }
 
     /// Get combined version status (all versions with their states).
     pub async fn get_version_status(&self) -> Result<VersionStatusReport> {
-        let state = self.state.read().await;
-        let installed = state.get_installed_tags();
-        let active = state.get_active_version();
-        let default = state.get_default_version();
+        let (installed, active, default) = {
+            let state = self.state.read().await;
+            (
+                state.get_installed_tags(),
+                state.get_active_version(),
+                state.get_default_version(),
+            )
+        };
 
         let mut versions = Vec::new();
         for tag in &installed {
             let is_active = active.as_deref() == Some(tag);
             let is_default = default.as_deref() == Some(tag);
-            let info = self
-                .metadata_manager
-                .get_installed_version(tag, Some(self.app_id))?;
+            let info = self.get_installed_version_metadata(tag).await?;
 
             versions.push(VersionStatusEntry {
                 tag: tag.clone(),
@@ -648,6 +668,40 @@ mod tests {
         let (manager, _temp) = create_test_manager().await;
         let active = manager.get_active_version().await.unwrap();
         assert!(active.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_version_status_reads_installed_metadata() {
+        let (manager, _temp) = create_test_manager().await;
+
+        let metadata = pumas_library::metadata::InstalledVersionMetadata {
+            path: "v1.0.0".to_string(),
+            installed_date: "2024-01-01T00:00:00Z".to_string(),
+            python_version: Some("3.11.0".to_string()),
+            release_tag: "v1.0.0".to_string(),
+            dependencies_installed: Some(true),
+            release_date: None,
+            release_notes: None,
+            download_url: None,
+            size: None,
+            git_commit: None,
+            requirements_hash: None,
+        };
+
+        {
+            let mut state = manager.state.write().await;
+            state.add_installed_version("v1.0.0", metadata).unwrap();
+        }
+
+        let status = manager.get_version_status().await.unwrap();
+        assert_eq!(status.versions.len(), 1);
+        assert_eq!(status.versions[0].tag, "v1.0.0");
+        assert_eq!(
+            status.versions[0].installed_date.as_deref(),
+            Some("2024-01-01T00:00:00Z")
+        );
+        assert_eq!(status.versions[0].python_version.as_deref(), Some("3.11.0"));
+        assert_eq!(status.versions[0].dependencies_installed, Some(true));
     }
 
     #[tokio::test]

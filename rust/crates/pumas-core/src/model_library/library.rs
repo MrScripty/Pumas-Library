@@ -772,7 +772,9 @@ impl ModelLibrary {
         }
 
         for model_dir in self.model_dirs() {
-            if let Ok(Some(mut metadata)) = self.load_metadata(&model_dir) {
+            if let Ok(Some(mut metadata)) =
+                load_model_metadata_async(self.clone(), model_dir.clone()).await
+            {
                 if let Some(model_id) = self.get_model_id(&model_dir) {
                     discovered_model_ids.insert(model_id.clone());
 
@@ -795,7 +797,9 @@ impl ModelLibrary {
                                 err
                             );
                         }
-                        if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                        if let Ok(Some(updated)) =
+                            load_model_metadata_async(self.clone(), model_dir.clone()).await
+                        {
                             metadata = updated;
                         }
                     }
@@ -808,7 +812,9 @@ impl ModelLibrary {
                                 err
                             );
                         }
-                        if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                        if let Ok(Some(updated)) =
+                            load_model_metadata_async(self.clone(), model_dir.clone()).await
+                        {
                             metadata = updated;
                         }
                     }
@@ -836,7 +842,9 @@ impl ModelLibrary {
                                     err
                                 );
                             }
-                            if let Ok(Some(updated)) = self.load_metadata(&model_dir) {
+                            if let Ok(Some(updated)) =
+                                load_model_metadata_async(self.clone(), model_dir.clone()).await
+                            {
                                 metadata = updated;
                             }
                         }

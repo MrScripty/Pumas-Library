@@ -9,6 +9,11 @@ This crate owns version installation workflows, external API client adapters, an
 ## Producer Contract
 Operations that touch files, archives, or external service APIs must accept typed configuration from callers and report structured errors suitable for RPC projection.
 
+Torch listener configuration is local-only by default. Non-loopback Torch binds require explicit
+`lan_access` opt-in at the Rust config boundary, and supported LAN mode depends on the sidecar's
+additional Python enforcement (`PUMAS_TORCH_ALLOW_LAN=1` plus `PUMAS_TORCH_API_TOKEN`) before the
+listener will accept non-loopback traffic.
+
 ## Consumer Contract
 `pumas-rpc` may expose these operations over JSON-RPC after validating request payloads. Domain crates should not depend on this crate for model metadata or catalog behavior.
 

@@ -16,6 +16,9 @@ Application-manager layer for installed app versions, dependency checks, process
 ## Design Decisions
 - App/version-specific orchestration is separated from core model-library logic.
 - Reusable clients and managers are composed by higher transport layers.
+- Torch LAN exposure is treated as an explicit opt-in surface: Rust validates loopback-default
+  configuration before requests leave this crate, while the Python sidecar owns token-gated LAN
+  listener enforcement.
 
 ## Dependencies
 **Internal:** `pumas-library` (`pumas-core`) types/services.

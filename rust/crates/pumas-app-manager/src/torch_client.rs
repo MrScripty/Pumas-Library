@@ -140,6 +140,10 @@ pub struct DeviceInfo {
 }
 
 /// Server configuration for the Torch inference process.
+///
+/// Local-only loopback binding is the default. Non-loopback binding is supported only when
+/// `lan_access` is explicitly enabled here, and the Python sidecar separately requires both
+/// `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN` before accepting LAN traffic.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TorchServerConfig {
     /// Port for the OpenAI-compatible API.
@@ -466,7 +470,11 @@ impl TorchClient {
 
     /// Update server configuration.
     ///
-    /// Note: Changes to `host` or `api_port` require a server restart to take effect.
+    /// Note: changes to `host` or `api_port` require a server restart to take effect.
+    ///
+    /// Non-loopback binding is intentionally gated twice: this client rejects it unless
+    /// `lan_access` is enabled, and the Python sidecar still requires explicit LAN env opt-in
+    /// plus an API token before serving non-loopback traffic.
     pub async fn configure(&self, config: &TorchServerConfig) -> Result<()> {
         config.validate()?;
 

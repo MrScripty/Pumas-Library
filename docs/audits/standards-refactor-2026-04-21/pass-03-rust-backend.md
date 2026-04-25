@@ -739,7 +739,7 @@ Implementation notes:
   directory strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
-Status: partially compliant
+Status: remediated
 
 Positive:
 
@@ -748,19 +748,21 @@ Positive:
 - RPC server CORS is restricted to loopback browser origins and `GET`/`POST` with
   `Content-Type`.
 
-Risks:
+Resolved listener policy:
 
-- `pumas-rpc` now requires explicit `--allow-lan` opt-in for non-loopback `--host`, but the LAN
-  mode threat model still needs explicit product documentation and review.
-- Torch LAN access can set host to `0.0.0.0`; this may be product-intended but needs documented security policy and authentication/authorization review.
-- RPC request concurrency is now capped in transport, but broader listener/backpressure policy for
-  Torch LAN mode still needs explicit product documentation and review.
+- `pumas-rpc` non-loopback binding now requires explicit `--allow-lan` opt-in and is documented in
+  the crate contract.
+- Torch LAN mode now has an explicit two-layer policy: Rust requires `lan_access=true` for
+  non-loopback hosts, and the Python sidecar separately requires both `PUMAS_TORCH_ALLOW_LAN=1`
+  and `PUMAS_TORCH_API_TOKEN`, with token enforcement on sidecar API routes.
+- RPC transport request concurrency is capped, and the RPC crate README now records that limit as
+  part of the supported listener policy.
 
 Rectification:
 - Validate host binding policy at CLI/config boundary.
 - Restrict CORS to renderer/dev origins where possible.
 - Add max connection limits or request concurrency limits.
-- Document LAN mode threat model for Torch server.
+- Document LAN mode threat model for Torch server and crate boundaries.
 
 Implementation notes:
 - Completed: `pumas-rpc/src/main.rs` now validates `--host` as an IP address and rejects
@@ -774,6 +776,10 @@ Implementation notes:
 - Completed: `pumas-app-manager/src/torch_client.rs` now validates `TorchServerConfig` so
   non-loopback bind hosts require explicit `lan_access`, enforcing the local-only default at the
   Torch configuration boundary before LAN-exposed settings are sent to the inference server.
+- Completed: `pumas-app-manager/README.md`, `pumas-app-manager/src/README.md`, and
+  `torch_client.rs` now document the Torch LAN boundary explicitly, including the sidecar's
+  required `PUMAS_TORCH_ALLOW_LAN=1` and `PUMAS_TORCH_API_TOKEN` gates, so the Rust-side crate
+  contract no longer leaves the supported LAN threat model implicit.
 
 ### R09 - Language Binding Boundary Is Too Entangled With Core Types
 Status: partially compliant

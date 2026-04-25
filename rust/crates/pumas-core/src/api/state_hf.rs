@@ -6,6 +6,7 @@ use crate::{model_library, models};
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use tokio::fs;
 
 async fn load_hf_model_snapshot(
     library: Arc<model_library::ModelLibrary>,
@@ -33,6 +34,14 @@ async fn load_model_metadata_or_default(
                 err
             ))
         })?
+}
+
+async fn is_directory(path: &Path) -> std::result::Result<bool, PumasError> {
+    match fs::metadata(path).await {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
 }
 
 pub(super) async fn search_hf_models(
@@ -307,7 +316,7 @@ pub(super) async fn recover_download(
     dest_dir: &str,
 ) -> std::result::Result<String, PumasError> {
     let dest = Path::new(dest_dir);
-    if !dest.is_dir() {
+    if !is_directory(dest).await? {
         return Err(PumasError::NotFound {
             resource: format!("directory: {}", dest_dir),
         });
@@ -363,7 +372,7 @@ pub(super) async fn resume_partial_download(
     dest_dir: &str,
 ) -> std::result::Result<models::PartialDownloadAction, PumasError> {
     let dest = Path::new(dest_dir);
-    if !dest.is_dir() {
+    if !is_directory(dest).await? {
         return Ok(models::PartialDownloadAction {
             action: "none".to_string(),
             download_id: None,

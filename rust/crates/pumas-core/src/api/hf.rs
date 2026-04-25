@@ -7,6 +7,7 @@ use crate::PumasApi;
 use std::collections::HashSet;
 use std::path::Path;
 use std::sync::Arc;
+use tokio::fs;
 use tracing::{info, warn};
 
 async fn load_hf_model_snapshot(
@@ -35,6 +36,14 @@ async fn load_model_metadata_or_default(
                 err
             ))
         })?
+}
+
+async fn is_directory(path: &Path) -> Result<bool> {
+    match fs::metadata(path).await {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
 }
 
 impl PumasApi {
@@ -421,7 +430,7 @@ impl PumasApi {
         }
 
         let dest = std::path::Path::new(dest_dir);
-        if !dest.is_dir() {
+        if !is_directory(dest).await? {
             return Err(PumasError::NotFound {
                 resource: format!("directory: {}", dest_dir),
             });
@@ -502,7 +511,7 @@ impl PumasApi {
         }
 
         let dest = Path::new(dest_dir);
-        if !dest.is_dir() {
+        if !is_directory(dest).await? {
             return Ok(models::PartialDownloadAction {
                 action: "none".to_string(),
                 download_id: None,

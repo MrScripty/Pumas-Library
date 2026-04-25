@@ -354,6 +354,10 @@ Implementation notes:
   scanning through `tokio::task::spawn_blocking`, so startup recovery no longer performs
   persistence loads, stale-entry cleanup, or on-disk byte counting inline on async runtime
   threads before restoring in-memory download state.
+- Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
+  destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
+  requests no longer perform synchronous destination `is_dir` probes inline on async runtime
+  threads before deciding whether to recover or resume a partial download.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

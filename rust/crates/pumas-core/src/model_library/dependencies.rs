@@ -156,6 +156,32 @@ impl ModelLibrary {
         platform_context: &str,
         backend_key: Option<&str>,
     ) -> Result<ModelDependencyRequirementsResolution> {
+        let library = self.clone();
+        let model_id = model_id.to_string();
+        let platform_context = platform_context.to_string();
+        let backend_key = backend_key.map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            library.resolve_model_dependency_requirements_sync(
+                &model_id,
+                &platform_context,
+                backend_key.as_deref(),
+            )
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join dependency requirements resolution task: {}",
+                err
+            ))
+        })?
+    }
+
+    fn resolve_model_dependency_requirements_sync(
+        &self,
+        model_id: &str,
+        platform_context: &str,
+        backend_key: Option<&str>,
+    ) -> Result<ModelDependencyRequirementsResolution> {
         ensure_model_exists(self, model_id)?;
 
         let platform_key = normalize_platform_key(platform_context);

@@ -378,6 +378,10 @@ Implementation notes:
   `resolve_model_dependency_requirements` through `tokio::task::spawn_blocking`, so the
   request-facing dependency-resolution endpoint no longer performs synchronous model-existence,
   effective-metadata, and active-binding index reads inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/hf/mod.rs` now probes the Pumas token file with
+  `tokio::fs::try_exists` when resolving HuggingFace auth status, so the request-facing
+  auth-status endpoint no longer performs a synchronous token-path existence check inline on an
+  async runtime thread.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

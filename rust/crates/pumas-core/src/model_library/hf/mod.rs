@@ -273,7 +273,7 @@ impl HuggingFaceClient {
     /// Determine where the current token was resolved from.
     async fn resolve_token_source(&self) -> String {
         if let Ok(path) = auth::hf_token_path() {
-            if path.exists() {
+            if tokio::fs::try_exists(&path).await.unwrap_or(false) {
                 return "pumas_config".to_string();
             }
         }

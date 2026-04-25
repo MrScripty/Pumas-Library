@@ -411,6 +411,9 @@ Implementation notes:
   classification hints for `redetect_model_type` through blocking helpers, so redetection no
   longer performs synchronous metadata reads or persisted-marker/model-type resolution inline on
   async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` now routes `total_size` through a blocking
+  directory-walk helper, so library statistics no longer perform recursive filesystem traversal
+  inline on async runtime threads when computing aggregate size.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

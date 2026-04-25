@@ -1738,19 +1738,8 @@ impl ModelLibrary {
 
     /// Get the total size of all models in the library.
     pub async fn total_size(&self) -> Result<u64> {
-        let mut total = 0u64;
-
-        for model_dir in self.model_dirs() {
-            for entry in WalkDir::new(&model_dir).into_iter().filter_map(|e| e.ok()) {
-                if entry.file_type().is_file() {
-                    if let Ok(meta) = entry.metadata() {
-                        total += meta.len();
-                    }
-                }
-            }
-        }
-
-        Ok(total)
+        let model_dirs: Vec<_> = self.model_dirs().collect();
+        calculate_total_size_async(model_dirs).await
     }
 
     /// Get statistics about the library.
@@ -2496,6 +2485,31 @@ async fn resolve_local_model_type_with_persisted_hints_async(
     .map_err(|err| {
         PumasError::Other(format!(
             "Failed to join redetect model-type resolution task: {}",
+            err
+        ))
+    })?
+}
+
+async fn calculate_total_size_async(model_dirs: Vec<PathBuf>) -> Result<u64> {
+    tokio::task::spawn_blocking(move || {
+        let mut total = 0_u64;
+
+        for model_dir in model_dirs {
+            for entry in WalkDir::new(&model_dir).into_iter().filter_map(|e| e.ok()) {
+                if entry.file_type().is_file() {
+                    if let Ok(meta) = entry.metadata() {
+                        total += meta.len();
+                    }
+                }
+            }
+        }
+
+        Ok(total)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join total size calculation task: {}",
             err
         ))
     })?
@@ -8671,6 +8685,55 @@ mod tests {
         assert!(!model_dir.exists());
         assert!(bundle_root.exists());
         assert!(bundle_root.join("model_index.json").exists());
+    }
+
+    #[tokio::test]
+    async fn test_total_size_sums_model_files() {
+        let (_tmp, library) = setup_library().await;
+        let first_dir = library.build_model_path("llm", "llama", "size-one");
+        let second_dir = library.build_model_path("audio", "kitten", "size-two");
+
+        std::fs::create_dir_all(&first_dir).unwrap();
+        std::fs::create_dir_all(second_dir.join("nested")).unwrap();
+        std::fs::write(first_dir.join("weights.gguf"), vec![0_u8; 11]).unwrap();
+        std::fs::write(second_dir.join("nested").join("voice.onnx"), vec![0_u8; 7]).unwrap();
+        library
+            .save_metadata(
+                &first_dir,
+                &ModelMetadata {
+                    model_id: Some("llm/llama/size-one".to_string()),
+                    model_type: Some("llm".to_string()),
+                    family: Some("llama".to_string()),
+                    official_name: Some("size-one".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        library
+            .save_metadata(
+                &second_dir,
+                &ModelMetadata {
+                    model_id: Some("audio/kitten/size-two".to_string()),
+                    model_type: Some("audio".to_string()),
+                    family: Some("kitten".to_string()),
+                    official_name: Some("size-two".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        let expected = std::fs::metadata(first_dir.join("weights.gguf"))
+            .unwrap()
+            .len()
+            + std::fs::metadata(second_dir.join("nested").join("voice.onnx"))
+                .unwrap()
+                .len()
+            + std::fs::metadata(first_dir.join("metadata.json")).unwrap().len()
+            + std::fs::metadata(second_dir.join("metadata.json")).unwrap().len();
+
+        assert_eq!(library.total_size().await.unwrap(), expected);
     }
 
     #[tokio::test]

@@ -690,4 +690,22 @@ mod tests {
         assert!(matches!(error, FfiError::Validation { .. }));
         let _ = std::fs::remove_dir_all(temp_dir);
     }
+
+    #[tokio::test]
+    async fn test_canonicalize_existing_local_path_string_rejects_missing_path() {
+        let missing = std::env::temp_dir().join(format!(
+            "pumas-uniffi-missing-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+
+        let error =
+            canonicalize_existing_local_path_string(missing.to_string_lossy().to_string(), "path")
+                .await
+                .unwrap_err();
+
+        assert!(matches!(error, FfiError::Validation { .. }));
+    }
 }

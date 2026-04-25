@@ -848,6 +848,9 @@ Implementation notes:
   canonicalize existing local `file_path` and `dest_dir` values before HF file-lookup and
   interrupted-download recovery calls cross the UniFFI boundary, so those FFI entry points no
   longer forward unchecked raw local path strings into the API surface.
+- Completed: `pumas-uniffi/src/bindings/api_models.rs` now canonicalizes existing local import
+  source paths before single and batch model-import requests cross the UniFFI boundary, so those
+  FFI import entry points no longer forward unchecked raw local path strings into the API surface.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: remediated

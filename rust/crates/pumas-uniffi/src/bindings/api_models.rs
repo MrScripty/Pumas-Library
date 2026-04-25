@@ -1,6 +1,7 @@
 use super::{
-    FfiApiInner, FfiDeleteModelResponse, FfiError, FfiInferenceParamSchema, FfiModelImportResult,
-    FfiModelImportSpec, FfiModelRecord, FfiPumasApi, FfiReclassifyResult, FfiSearchResult,
+    canonicalize_existing_local_path_string, FfiApiInner, FfiDeleteModelResponse, FfiError,
+    FfiInferenceParamSchema, FfiModelImportResult, FfiModelImportSpec, FfiModelRecord, FfiPumasApi,
+    FfiReclassifyResult, FfiSearchResult,
 };
 
 #[uniffi::export(async_runtime = "tokio")]
@@ -79,7 +80,8 @@ impl FfiPumasApi {
         &self,
         spec: FfiModelImportSpec,
     ) -> Result<FfiModelImportResult, FfiError> {
-        let core_spec = spec.into_core()?;
+        let mut core_spec = spec.into_core()?;
+        core_spec.path = canonicalize_existing_local_path_string(core_spec.path, "path").await?;
         let result = match &self.inner {
             FfiApiInner::Primary(api) => {
                 api.import_model(&core_spec).await.map_err(FfiError::from)?
@@ -100,7 +102,23 @@ impl FfiPumasApi {
         let mut core_specs = Vec::with_capacity(specs.len());
         for spec in specs {
             match spec.into_core() {
-                Ok(core_spec) => core_specs.push(core_spec),
+                Ok(mut core_spec) => {
+                    match canonicalize_existing_local_path_string(core_spec.path, "path").await {
+                        Ok(path) => {
+                            core_spec.path = path;
+                            core_specs.push(core_spec);
+                        }
+                        Err(err) => {
+                            return vec![FfiModelImportResult {
+                                path: String::new(),
+                                success: false,
+                                model_path: None,
+                                error: Some(err.to_string()),
+                                security_tier: None,
+                            }];
+                        }
+                    }
+                }
                 Err(err) => {
                     return vec![FfiModelImportResult {
                         path: String::new(),

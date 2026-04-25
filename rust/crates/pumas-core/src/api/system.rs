@@ -6,6 +6,14 @@ use crate::launcher;
 use crate::models;
 use crate::system;
 use crate::PumasApi;
+use std::path::Path;
+use tokio::fs;
+
+async fn path_exists(path: &Path) -> Result<bool> {
+    fs::try_exists(path)
+        .await
+        .map_err(|err| crate::error::PumasError::io_with_path(err, path))
+}
 
 impl PumasApi {
     // ========================================
@@ -312,18 +320,17 @@ impl PumasApi {
     /// The caller (RPC layer) can use this with a version directory path
     /// obtained from pumas-app-manager's VersionManager.
     pub async fn open_directory(&self, dir: &std::path::Path) -> Result<()> {
+        if !path_exists(dir).await? {
+            return Err(PumasError::NotFound {
+                resource: format!("Directory: {}", dir.display()),
+            });
+        }
+
         let system_utils = self.primary().system_utils.clone();
         let dir = dir.to_path_buf();
-        tokio::task::spawn_blocking(move || {
-            if !dir.exists() {
-                return Err(PumasError::NotFound {
-                    resource: format!("Directory: {}", dir.display()),
-                });
-            }
-            system_utils.open_path(&dir.to_string_lossy())
-        })
-        .await
-        .map_err(|e| PumasError::Other(format!("Failed to join open_directory task: {}", e)))?
+        tokio::task::spawn_blocking(move || system_utils.open_path(&dir.to_string_lossy()))
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join open_directory task: {}", e)))?
     }
 
     // ========================================

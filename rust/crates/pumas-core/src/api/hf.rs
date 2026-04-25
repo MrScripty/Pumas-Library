@@ -6,7 +6,36 @@ use crate::models;
 use crate::PumasApi;
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{info, warn};
+
+async fn load_hf_model_snapshot(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+    model_id: String,
+) -> Result<(Option<models::ModelMetadata>, Option<std::path::PathBuf>)> {
+    tokio::task::spawn_blocking(move || {
+        let metadata = library.load_metadata(&model_dir)?;
+        let primary_file = library.get_primary_model_file(&model_id);
+        Ok((metadata, primary_file))
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join HF model snapshot task: {}", err)))?
+}
+
+async fn load_model_metadata_or_default(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+) -> Result<models::ModelMetadata> {
+    tokio::task::spawn_blocking(move || Ok(library.load_metadata(&model_dir)?.unwrap_or_default()))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join HF metadata refresh load task: {}",
+                err
+            ))
+        })?
+}
 
 impl PumasApi {
     // ========================================
@@ -643,7 +672,9 @@ impl PumasApi {
 
         // Load current metadata
         let model_dir = library.library_root().join(model_id);
-        let current = library.load_metadata(&model_dir)?;
+        let (current, primary_file) =
+            load_hf_model_snapshot(library.clone(), model_dir.clone(), model_id.to_string())
+                .await?;
 
         let repo_id = current
             .as_ref()
@@ -693,7 +724,6 @@ impl PumasApi {
             }
         } else {
             // Fallback: use filename-based lookup
-            let primary_file = library.get_primary_model_file(model_id);
             let file_path = primary_file.ok_or_else(|| PumasError::NotFound {
                 resource: format!("primary model file for: {}", model_id),
             })?;
@@ -712,7 +742,7 @@ impl PumasApi {
             .await?;
 
         // Return the freshly-updated metadata
-        let updated = library.load_metadata(&model_dir)?.unwrap_or_default();
+        let updated = load_model_metadata_or_default(library.clone(), model_dir).await?;
         Ok(updated)
     }
 

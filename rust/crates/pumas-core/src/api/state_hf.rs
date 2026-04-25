@@ -5,6 +5,35 @@ use crate::error::PumasError;
 use crate::{model_library, models};
 use std::collections::HashSet;
 use std::path::Path;
+use std::sync::Arc;
+
+async fn load_hf_model_snapshot(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+    model_id: String,
+) -> std::result::Result<(Option<models::ModelMetadata>, Option<std::path::PathBuf>), PumasError> {
+    tokio::task::spawn_blocking(move || {
+        let metadata = library.load_metadata(&model_dir)?;
+        let primary_file = library.get_primary_model_file(&model_id);
+        Ok((metadata, primary_file))
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join HF model snapshot task: {}", err)))?
+}
+
+async fn load_model_metadata_or_default(
+    library: Arc<model_library::ModelLibrary>,
+    model_dir: std::path::PathBuf,
+) -> std::result::Result<models::ModelMetadata, PumasError> {
+    tokio::task::spawn_blocking(move || Ok(library.load_metadata(&model_dir)?.unwrap_or_default()))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join HF metadata refresh load task: {}",
+                err
+            ))
+        })?
+}
 
 pub(super) async fn search_hf_models(
     primary: &PrimaryState,
@@ -489,7 +518,12 @@ pub(super) async fn refetch_metadata_from_hf(
     }
 
     let model_dir = library.library_root().join(model_id);
-    let current = library.load_metadata(&model_dir)?;
+    let (current, primary_file) = load_hf_model_snapshot(
+        primary.model_library.clone(),
+        model_dir.clone(),
+        model_id.to_string(),
+    )
+    .await?;
 
     let repo_id = current
         .as_ref()
@@ -536,7 +570,6 @@ pub(super) async fn refetch_metadata_from_hf(
             expected_sha256: None,
         }
     } else {
-        let primary_file = library.get_primary_model_file(model_id);
         let file_path = primary_file.ok_or_else(|| PumasError::NotFound {
             resource: format!("primary model file for: {}", model_id),
         })?;
@@ -553,7 +586,7 @@ pub(super) async fn refetch_metadata_from_hf(
         .update_metadata_from_hf(model_id, &hf_result, true)
         .await?;
 
-    let updated = library.load_metadata(&model_dir)?.unwrap_or_default();
+    let updated = load_model_metadata_or_default(primary.model_library.clone(), model_dir).await?;
     Ok(updated)
 }
 

@@ -377,6 +377,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now route diffusers bundle lookup
   hint extraction through `tokio::task::spawn_blocking`, so direct API and mirrored IPC metadata
   lookup no longer perform synchronous `model_index.json` reads inline on async runtime threads.
+- Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now route HuggingFace metadata
+  refresh snapshot loads through `tokio::task::spawn_blocking`, so direct API and mirrored IPC
+  metadata refresh requests no longer perform synchronous `metadata.json` reads or primary-file
+  discovery inline on async runtime threads before or after the network lookup.
 - Completed: `pumas-rpc/src/handlers/models/imports.rs` now routes library metadata snapshot reads
   and diffusers component-manifest extraction through `tokio::task::spawn_blocking`, so the RPC
   model-details request path no longer performs synchronous metadata reads, primary-file discovery,

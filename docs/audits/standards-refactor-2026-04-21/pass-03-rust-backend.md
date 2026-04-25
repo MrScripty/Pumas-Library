@@ -343,6 +343,10 @@ Implementation notes:
   directory creation, download marker writes, and completed-file existence probes in the async
   download start and run paths, so HuggingFace download lifecycle requests no longer perform those
   filesystem operations inline on runtime threads.
+- Completed: `pumas-core/src/model_library/hf/download.rs` now routes persisted-download restore
+  scanning through `tokio::task::spawn_blocking`, so startup recovery no longer performs
+  persistence loads, stale-entry cleanup, or on-disk byte counting inline on async runtime
+  threads before restoring in-memory download state.
 - Completed: `pumas-core/src/api/mapping.rs` and `pumas-rpc/src/handlers/links.rs` now route the
   cross-filesystem warning request through `tokio::task::spawn_blocking`, so RPC link-warning
   checks no longer perform synchronous filesystem metadata inspection inline on async runtime

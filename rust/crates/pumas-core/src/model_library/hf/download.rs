@@ -200,66 +200,81 @@ impl HuggingFaceClient {
     /// Only restores entries whose `.part` file still exists on disk.
     pub async fn restore_persisted_downloads(&self) {
         let persistence = match &self.persistence {
-            Some(p) => p,
+            Some(p) => p.clone(),
             None => return,
         };
 
-        let entries = persistence.load_all();
-        if entries.is_empty() {
-            return;
-        }
+        let restored_entries = match tokio::task::spawn_blocking(move || {
+            let entries = persistence.load_all();
+            let mut restored = Vec::new();
 
-        info!("Restoring {} persisted downloads", entries.len());
-        let mut downloads = self.downloads.write().await;
+            for entry in entries {
+                let all_filenames = if entry.filenames.is_empty() {
+                    vec![entry.filename.clone()]
+                } else {
+                    entry.filenames.clone()
+                };
 
-        for entry in entries {
-            // For multi-file downloads, check if any file or .part exists.
-            // For single-file downloads (legacy), check the primary .part file.
-            let all_filenames = if entry.filenames.is_empty() {
-                vec![entry.filename.clone()]
-            } else {
-                entry.filenames.clone()
-            };
-
-            let has_any_file = all_filenames.iter().any(|f| {
-                let part = entry.dest_dir.join(format!(
-                    "{}{}",
-                    f,
-                    crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
-                ));
-                let completed = entry.dest_dir.join(f);
-                part.exists() || completed.exists()
-            });
-
-            if !has_any_file {
-                info!(
-                    "Removing stale persisted download {} (no files on disk)",
-                    entry.download_id
-                );
-                let _ = persistence.remove(&entry.download_id);
-                continue;
-            }
-
-            // Sum bytes from completed files + current .part file for progress
-            let downloaded_bytes: u64 = all_filenames
-                .iter()
-                .map(|f| {
-                    let completed = entry.dest_dir.join(f);
+                let has_any_file = all_filenames.iter().any(|f| {
                     let part = entry.dest_dir.join(format!(
                         "{}{}",
                         f,
                         crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
                     ));
-                    if completed.exists() {
-                        std::fs::metadata(&completed).map(|m| m.len()).unwrap_or(0)
-                    } else if part.exists() {
-                        std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
-                    } else {
-                        0
-                    }
-                })
-                .sum();
+                    let completed = entry.dest_dir.join(f);
+                    part.exists() || completed.exists()
+                });
 
+                if !has_any_file {
+                    info!(
+                        "Removing stale persisted download {} (no files on disk)",
+                        entry.download_id
+                    );
+                    let _ = persistence.remove(&entry.download_id);
+                    continue;
+                }
+
+                let downloaded_bytes: u64 = all_filenames
+                    .iter()
+                    .map(|f| {
+                        let completed = entry.dest_dir.join(f);
+                        let part = entry.dest_dir.join(format!(
+                            "{}{}",
+                            f,
+                            crate::config::NetworkConfig::DOWNLOAD_TEMP_SUFFIX
+                        ));
+                        if completed.exists() {
+                            std::fs::metadata(&completed).map(|m| m.len()).unwrap_or(0)
+                        } else if part.exists() {
+                            std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0)
+                        } else {
+                            0
+                        }
+                    })
+                    .sum();
+
+                restored.push((entry, downloaded_bytes));
+            }
+
+            restored
+        })
+        .await
+        {
+            Ok(entries) => entries,
+            Err(err) => {
+                error!("Failed to join persisted download restore task: {}", err);
+                return;
+            }
+        };
+
+        if restored_entries.is_empty() {
+            return;
+        }
+
+        info!("Restoring {} persisted downloads", restored_entries.len());
+        let mut downloads = self.downloads.write().await;
+
+        for (entry, downloaded_bytes) in restored_entries {
             // Log status transitions for visibility
             match entry.status {
                 DownloadStatus::Queued | DownloadStatus::Downloading => {

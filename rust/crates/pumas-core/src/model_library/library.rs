@@ -2609,11 +2609,11 @@ impl ModelLibrary {
         &self,
         model_dir: &Path,
     ) -> Result<PreparedIndexProjection> {
-        let mut metadata =
-            self.load_metadata(model_dir)?
-                .ok_or_else(|| PumasError::ModelNotFound {
-                    model_id: model_dir.display().to_string(),
-                })?;
+        let mut metadata = load_model_metadata_async(self.clone(), model_dir.to_path_buf())
+            .await?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_dir.display().to_string(),
+            })?;
 
         let model_id = self.get_model_id(model_dir).ok_or_else(|| {
             PumasError::Other(format!("Could not determine model ID for {:?}", model_dir))
@@ -2669,7 +2669,9 @@ impl ModelLibrary {
     ) -> Result<bool> {
         if prepared.metadata_changed {
             self.save_metadata(model_dir, &prepared.metadata).await?;
-            if let Some(updated) = self.load_metadata(model_dir)? {
+            if let Some(updated) =
+                load_model_metadata_async(self.clone(), model_dir.to_path_buf()).await?
+            {
                 prepared.metadata = updated;
             }
             prepared.record = metadata_to_record(&prepared.model_id, model_dir, &prepared.metadata);
@@ -2702,7 +2704,9 @@ impl ModelLibrary {
         model_dir: &Path,
         model_id: &str,
     ) -> Result<bool> {
-        let Some(mut metadata) = self.load_metadata(model_dir)? else {
+        let Some(mut metadata) =
+            load_model_metadata_async(self.clone(), model_dir.to_path_buf()).await?
+        else {
             return Ok(false);
         };
         let before = serde_json::to_value(&metadata).unwrap_or(Value::Null);

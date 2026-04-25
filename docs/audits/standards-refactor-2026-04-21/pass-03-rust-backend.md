@@ -463,6 +463,11 @@ Implementation notes:
   checks and the shared async metadata helper in `update_metadata_from_hf`, so HF metadata refresh
   no longer performs synchronous path probes or metadata projection reads inline on an async
   request path before applying refreshed fields.
+- Completed: `pumas-core/src/model_library/library.rs` now routes
+  `prepare_index_projection_async`, `persist_index_projection`, and
+  `sync_active_dependency_projection` metadata loads through the shared async metadata helper, so
+  index/model-scope maintenance no longer performs synchronous projection reads inline on async
+  indexing paths.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

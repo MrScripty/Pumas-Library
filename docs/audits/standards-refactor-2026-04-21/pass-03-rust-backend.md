@@ -896,6 +896,9 @@ Implementation notes:
 - Completed: `pumas-uniffi/src/bindings.rs` now delegates its FFI record and enum surface to
   `src/bindings/ffi_types.rs`, keeping the API object and call orchestration in the root module
   while moving wrapper data types into a dedicated domain module as the first bindings split.
+- Completed: `pumas-uniffi/src/bindings.rs` now delegates its HuggingFace UniFFI method block to
+  `src/bindings/api_hf.rs`, keeping the exported surface unchanged while moving download, lookup,
+  and repo-file RPC orchestration into a dedicated domain module.
 
 ### R10 - Rust Tooling Baseline Is Missing
 Status: partially remediated

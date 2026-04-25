@@ -903,6 +903,9 @@ Implementation notes:
   `src/bindings/api_models.rs`, keeping the exported surface unchanged while moving search,
   import, reclassification, and inference-settings RPC orchestration into a dedicated domain
   module.
+- Completed: `pumas-uniffi/src/bindings.rs` now delegates its constructor, system-status, and
+  Torch UniFFI methods to `src/bindings/api_runtime.rs`, leaving the root bindings module focused
+  on shared helper plumbing, error translation, and tests.
 
 ### R10 - Rust Tooling Baseline Is Missing
 Status: partially remediated

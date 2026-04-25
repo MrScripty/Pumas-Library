@@ -201,6 +201,10 @@ Implementation notes:
 - Completed: `pumas-core/src/model_library/mapper.rs` now also removes broken links with
   `tokio::fs` in the conflict-resolution mapping path, closing the remaining direct unlink call on
   that async request flow.
+- Completed: `pumas-core/src/model_library/hf/search.rs` now routes SQLite search-cache reads,
+  repo-detail refresh checks, and cache writes through blocking-task helpers, so HuggingFace
+  search and enrichment request paths no longer perform cache database operations inline on async
+  runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

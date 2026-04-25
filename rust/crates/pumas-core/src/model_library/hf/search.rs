@@ -9,9 +9,10 @@ use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
 use crate::model_library::sharding::group_weight_files;
 use crate::model_library::types::{HfSearchParams, HuggingFaceModel, RepoFileTree};
+use crate::model_library::HfSearchCache;
 use crate::models::{DownloadOption, FileGroup};
 use std::collections::{BTreeMap, HashMap};
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use tracing::{debug, info, warn};
 
 const MIN_QUANT_COVERAGE_GAP_BYTES: u64 = 5 * 1024 * 1024 * 1024;
@@ -101,6 +102,84 @@ fn likely_missing_quant_variants(
     gap > MIN_QUANT_COVERAGE_GAP_BYTES && coverage_percent < MIN_EXPECTED_QUANT_COVERAGE_PERCENT
 }
 
+async fn get_cached_search_results_async(
+    cache: Arc<HfSearchCache>,
+    query: String,
+    kind: Option<String>,
+    limit: usize,
+    offset: usize,
+) -> Result<Option<Vec<HuggingFaceModel>>> {
+    tokio::task::spawn_blocking(move || {
+        cache.get_search_results(&query, kind.as_deref(), limit, offset)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join HF search cache lookup task: {}",
+            err
+        ))
+    })?
+}
+
+async fn cache_search_results_async(
+    cache: Arc<HfSearchCache>,
+    query: String,
+    kind: Option<String>,
+    limit: usize,
+    offset: usize,
+    repo_ids: Vec<String>,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || {
+        cache.cache_search_results(&query, kind.as_deref(), limit, offset, &repo_ids)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join HF search cache write task: {}",
+            err
+        ))
+    })?
+}
+
+async fn cache_repo_details_async(
+    cache: Arc<HfSearchCache>,
+    model: HuggingFaceModel,
+) -> Result<()> {
+    tokio::task::spawn_blocking(move || cache.cache_repo_details(&model))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join HF repo cache write task: {}", err))
+        })?
+}
+
+async fn needs_repo_refresh_async(
+    cache: Arc<HfSearchCache>,
+    repo_id: String,
+    search_last_modified: Option<String>,
+) -> Result<bool> {
+    tokio::task::spawn_blocking(move || {
+        cache.needs_refresh(&repo_id, search_last_modified.as_deref())
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join HF repo refresh check task: {}",
+            err
+        ))
+    })?
+}
+
+async fn get_cached_repo_details_async(
+    cache: Arc<HfSearchCache>,
+    repo_id: String,
+) -> Result<Option<crate::model_library::hf_cache::CachedRepoDetails>> {
+    tokio::task::spawn_blocking(move || cache.get_repo_details(&repo_id))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join HF repo cache lookup task: {}", err))
+        })?
+}
+
 impl HuggingFaceClient {
     /// Search for models on HuggingFace with automatic caching.
     ///
@@ -116,7 +195,7 @@ impl HuggingFaceClient {
     pub async fn search(&self, params: &HfSearchParams) -> Result<Vec<HuggingFaceModel>> {
         // If we have a cache, use it transparently
         let cache = match &self.search_cache {
-            Some(c) => c,
+            Some(c) => c.clone(),
             None => {
                 // No cache configured, use direct API
                 return self.search_api(params).await;
@@ -128,7 +207,15 @@ impl HuggingFaceClient {
         let kind = params.kind.as_deref();
 
         // Check cache for existing search results
-        match cache.get_search_results(&params.query, kind, limit, offset) {
+        match get_cached_search_results_async(
+            cache.clone(),
+            params.query.clone(),
+            kind.map(str::to_string),
+            limit,
+            offset,
+        )
+        .await
+        {
             Ok(Some(models)) => {
                 info!(
                     "Cache hit for search '{}': {} models",
@@ -145,7 +232,7 @@ impl HuggingFaceClient {
                     .await;
 
                 for model in &enriched {
-                    if let Err(e) = cache.cache_repo_details(model) {
+                    if let Err(e) = cache_repo_details_async(cache.clone(), model.clone()).await {
                         warn!(
                             "Failed to refresh cached repo details for {}: {}",
                             model.repo_id, e
@@ -173,13 +260,22 @@ impl HuggingFaceClient {
 
         // Cache the search results
         let repo_ids: Vec<String> = enriched.iter().map(|m| m.repo_id.clone()).collect();
-        if let Err(e) = cache.cache_search_results(&params.query, kind, limit, offset, &repo_ids) {
+        if let Err(e) = cache_search_results_async(
+            cache.clone(),
+            params.query.clone(),
+            kind.map(str::to_string),
+            limit,
+            offset,
+            repo_ids,
+        )
+        .await
+        {
             warn!("Failed to cache search results: {}", e);
         }
 
         // Cache individual model details
         for model in &enriched {
-            if let Err(e) = cache.cache_repo_details(model) {
+            if let Err(e) = cache_repo_details_async(cache.clone(), model.clone()).await {
                 warn!("Failed to cache repo details for {}: {}", model.repo_id, e);
             }
         }
@@ -268,13 +364,19 @@ impl HuggingFaceClient {
             // Try to get download options from cache first
             if let Some(cache) = &self.search_cache {
                 // Check if we need to refresh based on lastModified
-                let needs_refresh = cache
-                    .needs_refresh(&model.repo_id, model.release_date.as_deref())
-                    .unwrap_or(true);
+                let needs_refresh = needs_repo_refresh_async(
+                    cache.clone(),
+                    model.repo_id.clone(),
+                    model.release_date.clone(),
+                )
+                .await
+                .unwrap_or(true);
 
                 if !needs_refresh {
                     // Use cached details
-                    if let Ok(Some(cached)) = cache.get_repo_details(&model.repo_id) {
+                    if let Ok(Some(cached)) =
+                        get_cached_repo_details_async(cache.clone(), model.repo_id.clone()).await
+                    {
                         if !cached.download_options.is_empty() {
                             // For non-quant repos, re-enrich if cached options
                             // lack file_group data (pre-grouping cache entries).

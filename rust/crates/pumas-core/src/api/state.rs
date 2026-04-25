@@ -155,6 +155,17 @@ async fn validate_local_directory_target_path(
     }
 }
 
+async fn validate_process_version_paths(
+    version_paths: std::collections::HashMap<String, String>,
+) -> std::result::Result<std::collections::HashMap<String, PathBuf>, PumasError> {
+    let mut validated = std::collections::HashMap::with_capacity(version_paths.len());
+    for (tag, path) in version_paths {
+        let validated_path = validate_local_directory_target_path(&path, "version_paths").await?;
+        validated.insert(tag, validated_path);
+    }
+    Ok(validated)
+}
+
 async fn load_model_metadata_or_default(
     library: Arc<model_library::ModelLibrary>,
     model_dir: PathBuf,
@@ -1013,12 +1024,13 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(processes)?)
             }
             "set_process_version_paths" => {
-                let version_paths: std::collections::HashMap<String, PathBuf> =
+                let version_paths: std::collections::HashMap<String, String> =
                     serde_json::from_value(params["version_paths"].clone()).map_err(|e| {
                         PumasError::InvalidParams {
                             message: format!("Invalid version_paths: {e}"),
                         }
                     })?;
+                let version_paths = validate_process_version_paths(version_paths).await?;
                 set_process_version_paths(self, version_paths).await;
                 Ok(serde_json::json!({ "success": true }))
             }
@@ -1526,6 +1538,31 @@ mod tests {
             error,
             crate::error::PumasError::InvalidParams { message }
                 if message.contains("models_path must reference a directory")
+        ));
+    }
+
+    #[tokio::test]
+    async fn validate_process_version_paths_rejects_file_entries() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let file_path = temp_dir.path().join("version.txt");
+        tokio::fs::write(&file_path, "not a directory")
+            .await
+            .expect("write test file");
+
+        let mut version_paths = std::collections::HashMap::new();
+        version_paths.insert(
+            "comfyui".to_string(),
+            file_path.to_string_lossy().to_string(),
+        );
+
+        let error = super::validate_process_version_paths(version_paths)
+            .await
+            .expect_err("file path should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::error::PumasError::InvalidParams { message }
+                if message.contains("version_paths must reference a directory")
         ));
     }
 }

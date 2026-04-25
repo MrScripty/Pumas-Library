@@ -718,6 +718,9 @@ Implementation notes:
   incoming migration `report_path` values before indexed report deletion, so direct API and
   mirrored IPC delete-report flows no longer compare unchecked raw path strings against artifact
   index entries.
+- Completed: `pumas-core/src/api/state.rs` now validates `set_process_version_paths` directory
+  entries before deserializing them into process-manager paths, so mirrored IPC process-version
+  synchronization no longer forwards unchecked raw directory strings into process detection state.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

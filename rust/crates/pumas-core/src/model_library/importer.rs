@@ -97,6 +97,20 @@ fn parse_model_card_json(
     }
 }
 
+async fn path_exists(path: &Path) -> Result<bool> {
+    tokio::fs::try_exists(path)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, path))
+}
+
+async fn path_is_dir(path: &Path) -> Result<bool> {
+    match tokio::fs::metadata(path).await {
+        Ok(metadata) => Ok(metadata.is_dir()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
+}
+
 async fn resolve_model_type_with_rules_async(
     index: crate::index::ModelIndex,
     model_dir: PathBuf,
@@ -480,7 +494,8 @@ impl ModelImporter {
         let metadata = build_diffusers_bundle_metadata(&metadata_spec, validation, &model_id);
         validate_metadata_v2_with_index(&metadata, self.library.index())?;
 
-        if model_dir.join("metadata.json").exists() {
+        let metadata_path = model_dir.join("metadata.json");
+        if path_exists(&metadata_path).await? {
             let model_id = self.library.get_model_id(model_dir);
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
@@ -516,7 +531,7 @@ impl ModelImporter {
         info: &DownloadCompletionInfo,
     ) -> Result<ModelImportResult> {
         let metadata_path = info.dest_dir.join("metadata.json");
-        if metadata_path.exists() {
+        if path_exists(&metadata_path).await? {
             tracing::info!(
                 "Removing stale metadata before re-import: {}",
                 metadata_path.display()
@@ -1224,9 +1239,10 @@ impl ModelImporter {
     /// - Orphan recovery (directories with model files but no metadata.json)
     pub async fn import_in_place(&self, spec: &InPlaceImportSpec) -> Result<ModelImportResult> {
         let model_dir = &spec.model_dir;
+        let metadata_path = model_dir.join("metadata.json");
 
         // Guard: skip if metadata already exists (idempotent)
-        if model_dir.join("metadata.json").exists() {
+        if path_exists(&metadata_path).await? {
             let model_id = self.library.get_model_id(model_dir);
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
@@ -1238,7 +1254,7 @@ impl ModelImporter {
             });
         }
 
-        if !model_dir.is_dir() {
+        if !path_is_dir(model_dir).await? {
             return Err(PumasError::FileNotFound(model_dir.clone()));
         }
 
@@ -1530,7 +1546,7 @@ impl ModelImporter {
 
         // Concurrent import paths (download completion callback + reconciliation)
         // can race after the initial idempotency guard. Skip redundant rewrites.
-        if model_dir.join("metadata.json").exists() {
+        if path_exists(&metadata_path).await? {
             let model_id = self.library.get_model_id(model_dir);
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
@@ -2280,6 +2296,120 @@ mod tests {
         assert_eq!(
             metadata.output_modalities.as_deref(),
             Some(&["bbox".to_string()][..])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_import_in_place_is_idempotent_when_metadata_exists() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("vision", "idea-research", "grounding-dino-base");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"not-a-real-model").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: library.get_model_id(&model_dir),
+            model_type: Some("vision".to_string()),
+            official_name: Some("existing-metadata".to_string()),
+            match_source: Some("existing".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "grounding-dino-base".to_string(),
+            family: "idea-research".to_string(),
+            model_type: Some("vision".to_string()),
+            repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec!["detector.onnx".to_string()]),
+            pipeline_tag: Some("zero-shot-object-detection".to_string()),
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(result.success);
+
+        let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            persisted.official_name.as_deref(),
+            Some("existing-metadata")
+        );
+        assert_eq!(persisted.match_source.as_deref(), Some("existing"));
+        assert_eq!(persisted.pipeline_tag, None);
+    }
+
+    #[tokio::test]
+    async fn test_finalize_downloaded_directory_replaces_stale_metadata() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("vision", "idea-research", "grounding-dino-base");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"not-a-real-model").unwrap();
+
+        let stale_metadata = ModelMetadata {
+            model_id: library.get_model_id(&model_dir),
+            official_name: Some("stale-metadata".to_string()),
+            match_source: Some("stale".to_string()),
+            repo_id: Some("stale/repo".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&model_dir, &stale_metadata)
+            .await
+            .unwrap();
+
+        let info = DownloadCompletionInfo {
+            download_id: "dl-grounding-dino".to_string(),
+            dest_dir: model_dir.clone(),
+            filename: "detector.onnx".to_string(),
+            filenames: vec!["detector.onnx".to_string()],
+            download_request: crate::model_library::DownloadRequest {
+                repo_id: "IDEA-Research/grounding-dino-base".to_string(),
+                family: "idea-research".to_string(),
+                official_name: "grounding-dino-base".to_string(),
+                model_type: Some("vision".to_string()),
+                quant: None,
+                filename: None,
+                filenames: None,
+                pipeline_tag: Some("zero-shot-object-detection".to_string()),
+                bundle_format: None,
+                pipeline_class: None,
+                release_date: None,
+                download_url: Some(
+                    "https://huggingface.co/IDEA-Research/grounding-dino-base".to_string(),
+                ),
+                model_card_json: None,
+                license_status: Some("apache-2.0".to_string()),
+            },
+            known_sha256: None,
+            huggingface_evidence: None,
+        };
+
+        let result = importer.finalize_downloaded_directory(&info).await.unwrap();
+        assert!(result.success);
+
+        let persisted = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            persisted.official_name.as_deref(),
+            Some("grounding-dino-base")
+        );
+        assert_eq!(persisted.match_source.as_deref(), Some("download"));
+        assert_eq!(
+            persisted.repo_id.as_deref(),
+            Some("IDEA-Research/grounding-dino-base")
+        );
+        assert_eq!(
+            persisted.pipeline_tag.as_deref(),
+            Some("zero-shot-object-detection")
         );
     }
 

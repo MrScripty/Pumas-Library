@@ -442,6 +442,11 @@ Implementation notes:
   resolution through `tokio::task::spawn_blocking`, so `import_in_place` no longer performs
   synchronous rule-based type resolution and its directory-layout/name-token inspection inline on
   an async runtime thread before building metadata.
+- Completed: `pumas-core/src/model_library/importer.rs` now uses async metadata existence and
+  directory probes in `import_in_place`, `import_library_owned_diffusers_directory`, and
+  `finalize_downloaded_directory`, so those download-finalization and orphan-adoption paths no
+  longer perform synchronous `metadata.json` existence checks or directory validation inline on
+  async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

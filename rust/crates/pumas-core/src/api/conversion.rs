@@ -79,16 +79,19 @@ impl PumasApi {
     }
 
     /// Check if the Python conversion environment is ready.
-    pub fn is_conversion_environment_ready(&self) -> bool {
+    pub async fn is_conversion_environment_ready(&self) -> Result<bool> {
         if self.try_client().is_some() {
             let response: serde_json::Value = self.call_client_method_blocking_or_default(
                 "is_conversion_environment_ready",
                 serde_json::json!({}),
             );
-            return response["ready"].as_bool().unwrap_or(false);
+            return Ok(response["ready"].as_bool().unwrap_or(false));
         }
 
-        self.primary().conversion_manager.is_environment_ready()
+        self.primary()
+            .conversion_manager
+            .is_environment_ready_async()
+            .await
     }
 
     /// Ensure the Python conversion environment is set up.
@@ -104,25 +107,31 @@ impl PumasApi {
     }
 
     /// Get the list of supported quantization types for conversion.
-    pub fn supported_quant_types(&self) -> Vec<conversion::QuantOption> {
+    pub async fn supported_quant_types(&self) -> Result<Vec<conversion::QuantOption>> {
         if self.try_client().is_some() {
-            return self.call_client_method_blocking_or_default(
+            return Ok(self.call_client_method_blocking_or_default(
                 "supported_quant_types",
                 serde_json::json!({}),
-            );
+            ));
         }
 
-        self.primary().conversion_manager.supported_quant_types()
+        self.primary()
+            .conversion_manager
+            .supported_quant_types_async()
+            .await
     }
 
     /// Get the readiness status of all quantization backends.
-    pub fn backend_status(&self) -> Vec<conversion::BackendStatus> {
+    pub async fn backend_status(&self) -> Result<Vec<conversion::BackendStatus>> {
         if self.try_client().is_some() {
-            return self
-                .call_client_method_blocking_or_default("backend_status", serde_json::json!({}));
+            return Ok(self
+                .call_client_method_blocking_or_default("backend_status", serde_json::json!({})));
         }
 
-        self.primary().conversion_manager.backend_status()
+        self.primary()
+            .conversion_manager
+            .backend_status_async()
+            .await
     }
 
     /// Ensure a specific quantization backend's environment is set up.

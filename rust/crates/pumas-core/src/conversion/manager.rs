@@ -81,6 +81,19 @@ impl ConversionManager {
         scripts::venv_python(&self.launcher_root).exists()
     }
 
+    /// Check if the Python conversion environment is ready on a blocking task.
+    pub async fn is_environment_ready_async(&self) -> Result<bool> {
+        let launcher_root = self.launcher_root.clone();
+        tokio::task::spawn_blocking(move || Ok(scripts::venv_python(&launcher_root).exists()))
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join conversion environment readiness task: {}",
+                    err
+                ))
+            })?
+    }
+
     /// Ensure the Python conversion environment is set up.
     ///
     /// Creates the virtual environment and installs required packages if needed.
@@ -174,6 +187,23 @@ impl ConversionManager {
             .collect()
     }
 
+    /// Get backend readiness status on a blocking task.
+    pub async fn backend_status_async(&self) -> Result<Vec<BackendStatus>> {
+        let backends = self.backends.clone();
+        tokio::task::spawn_blocking(move || {
+            Ok(backends
+                .iter()
+                .map(|b| BackendStatus {
+                    backend: b.backend_id(),
+                    name: b.name().to_string(),
+                    ready: b.is_ready(),
+                })
+                .collect())
+        })
+        .await
+        .map_err(|err| PumasError::Other(format!("Failed to join backend status task: {}", err)))?
+    }
+
     /// Set up the environment for a specific quantization backend.
     ///
     /// # Preconditions
@@ -213,6 +243,36 @@ impl ConversionManager {
         }
 
         types
+    }
+
+    /// Get supported quantization types on a blocking task.
+    pub async fn supported_quant_types_async(&self) -> Result<Vec<QuantOption>> {
+        let backends = self.backends.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut types = vec![QuantOption {
+                name: "F16".to_string(),
+                description: "Half-precision float, no quality loss".to_string(),
+                bits_per_weight: 16.0,
+                recommended: true,
+                backend: Some(QuantBackend::PythonConversion),
+                imatrix_recommended: false,
+            }];
+
+            for backend in &backends {
+                if backend.is_ready() {
+                    types.extend(backend.supported_quant_types());
+                }
+            }
+
+            Ok(types)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join supported quantization types task: {}",
+                err
+            ))
+        })?
     }
 
     // -----------------------------------------------------------------------

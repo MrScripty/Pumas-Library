@@ -659,6 +659,12 @@ Implementation notes:
   `tokio::fs` for script deployment plus backend environment path probes and setup directory/file
   creation, so async conversion-environment setup no longer performs those filesystem operations
   inline on runtime threads.
+- Completed: `pumas-core/src/conversion/manager.rs`, `pumas-core/src/api/conversion.rs`,
+  mirrored IPC conversion dispatch in `api/state.rs`, and `pumas-rpc/src/handlers/conversion.rs`
+  now route conversion-environment readiness checks, supported-quant-type enumeration, and
+  backend-status requests through `tokio::task::spawn_blocking`, so RPC and IPC conversion status
+  request paths no longer perform backend filesystem readiness probes inline on async runtime
+  threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

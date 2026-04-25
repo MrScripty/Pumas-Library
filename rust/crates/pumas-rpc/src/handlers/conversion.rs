@@ -100,7 +100,7 @@ pub async fn check_conversion_environment(
     state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    let ready = state.api.is_conversion_environment_ready();
+    let ready = state.api.is_conversion_environment_ready().await?;
     Ok(json!({
         "success": true,
         "ready": ready
@@ -121,7 +121,7 @@ pub async fn get_supported_quant_types(
     state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
-    let types = state.api.supported_quant_types();
+    let types = state.api.supported_quant_types().await?;
     Ok(json!({
         "success": true,
         "quant_types": types
@@ -129,7 +129,7 @@ pub async fn get_supported_quant_types(
 }
 
 pub async fn get_backend_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
-    let status = state.api.backend_status();
+    let status = state.api.backend_status().await?;
     Ok(json!({
         "success": true,
         "backends": status

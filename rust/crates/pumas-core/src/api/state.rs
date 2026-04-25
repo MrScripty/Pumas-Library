@@ -1191,7 +1191,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(conversions)?)
             }
             "is_conversion_environment_ready" => {
-                let ready = self.conversion_manager.is_environment_ready();
+                let ready = self.conversion_manager.is_environment_ready_async().await?;
                 Ok(serde_json::json!({ "ready": ready }))
             }
             "ensure_conversion_environment" => {
@@ -1199,12 +1199,15 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::json!({ "success": true }))
             }
             "supported_quant_types" => {
-                let types = self.conversion_manager.supported_quant_types();
+                let types = self
+                    .conversion_manager
+                    .supported_quant_types_async()
+                    .await?;
                 Ok(serde_json::to_value(types)?)
             }
             // Quantization backend methods
             "backend_status" => {
-                let status = self.conversion_manager.backend_status();
+                let status = self.conversion_manager.backend_status_async().await?;
                 Ok(serde_json::to_value(status)?)
             }
             "ensure_backend_environment" => {

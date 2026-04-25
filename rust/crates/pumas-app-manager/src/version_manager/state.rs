@@ -30,6 +30,19 @@ pub struct VersionState {
 }
 
 impl VersionState {
+    async fn load_versions_metadata(&self) -> Result<pumas_library::metadata::VersionsMetadata> {
+        let metadata_manager = self.metadata_manager.clone();
+        let app_id = self.app_id;
+        tokio::task::spawn_blocking(move || metadata_manager.load_versions(Some(app_id)))
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join version-state metadata load task: {}",
+                    err
+                ))
+            })?
+    }
+
     /// Create a new version state tracker.
     pub async fn new(
         launcher_root: &Path,
@@ -52,7 +65,7 @@ impl VersionState {
     /// Initialize state from metadata and filesystem.
     async fn initialize(&mut self) -> Result<()> {
         // Load metadata
-        let versions = self.metadata_manager.load_versions(Some(self.app_id))?;
+        let versions = self.load_versions_metadata().await?;
 
         // Cache installed tags
         self.installed_tags = versions.installed.keys().cloned().collect();
@@ -132,7 +145,7 @@ impl VersionState {
 
     /// Refresh state from disk.
     pub async fn refresh(&mut self) -> Result<()> {
-        let versions = self.metadata_manager.load_versions(Some(self.app_id))?;
+        let versions = self.load_versions_metadata().await?;
         self.installed_tags = versions.installed.keys().cloned().collect();
         self.default_version = versions.default_version.clone();
 
@@ -296,7 +309,7 @@ impl VersionState {
         let mut orphaned_dirs = Vec::new();
 
         // Check metadata entries against filesystem
-        let metadata = self.metadata_manager.load_versions(Some(self.app_id))?;
+        let metadata = self.load_versions_metadata().await?;
         for (tag, info) in &metadata.installed {
             // Handle both old format (full path like "comfyui-versions/v0.4.0")
             // and new format (just tag like "v0.4.0")

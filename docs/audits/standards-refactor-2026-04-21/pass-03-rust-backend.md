@@ -209,6 +209,10 @@ Implementation notes:
   through a blocking-task helper in `get_version_info` and `get_version_status`, and it no longer
   holds the version-state read lock across those metadata reads, so version status/info request
   paths do not perform synchronous metadata JSON loads inline on async runtime threads.
+- Completed: `pumas-app-manager/src/version_manager/state.rs` now loads version metadata through a
+  blocking-task helper in async state initialization, refresh, and installation-validation paths,
+  so version-state lifecycle methods no longer perform synchronous versions metadata JSON loads
+  inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

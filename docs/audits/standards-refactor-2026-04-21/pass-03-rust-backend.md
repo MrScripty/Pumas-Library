@@ -415,6 +415,10 @@ Implementation notes:
   directory-walk helper and excludes projection artifacts such as `metadata.json` and
   `overrides.json`, so library statistics no longer perform recursive filesystem traversal inline
   on async runtime threads or count SQLite-backed projection files as model payload.
+- Completed: `pumas-core/src/model_library/library.rs` now uses async path probes and the shared
+  async metadata-loading helper in `mark_lookup_failed`, so lookup-failure bookkeeping no longer
+  performs synchronous existence checks or projection reads inline on async runtime threads before
+  persisting attempt counters and timestamps.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

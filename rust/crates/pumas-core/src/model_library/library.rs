@@ -1354,12 +1354,14 @@ impl ModelLibrary {
     /// Mark a model's metadata lookup as failed.
     pub async fn mark_lookup_failed(&self, model_id: &str) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
         }
-        let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
+        let mut metadata = load_model_metadata_async(self.clone(), model_dir.clone())
+            .await?
+            .unwrap_or_default();
 
         let attempts = metadata.lookup_attempts.unwrap_or(0) + 1;
         metadata.lookup_attempts = Some(attempts);
@@ -8742,6 +8744,35 @@ mod tests {
             .unwrap();
 
         assert_eq!(library.total_size().await.unwrap(), 18);
+    }
+
+    #[tokio::test]
+    async fn test_mark_lookup_failed_updates_lookup_bookkeeping() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/lookup-bookkeeping";
+        let model_dir = library.build_model_path("llm", "llama", "lookup-bookkeeping");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        library
+            .save_metadata(
+                &model_dir,
+                &ModelMetadata {
+                    model_id: Some(model_id.to_string()),
+                    model_type: Some("llm".to_string()),
+                    family: Some("llama".to_string()),
+                    official_name: Some("lookup-bookkeeping".to_string()),
+                    lookup_attempts: Some(2),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        library.mark_lookup_failed(model_id).await.unwrap();
+
+        let updated = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(updated.lookup_attempts, Some(3));
+        assert!(updated.last_lookup_attempt.is_some());
     }
 
     #[tokio::test]

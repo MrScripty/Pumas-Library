@@ -813,11 +813,16 @@ impl ModelLibrary {
                         }
                     }
 
-                    if let Some(projection) = self.apply_custom_runtime_metadata_projection(
-                        &model_id,
-                        &model_dir,
-                        &mut metadata,
-                    ) {
+                    let (projection, projected_metadata) =
+                        apply_custom_runtime_metadata_projection_async(
+                            self.clone(),
+                            model_id.clone(),
+                            model_dir.clone(),
+                            metadata,
+                        )
+                        .await?;
+                    metadata = projected_metadata;
+                    if let Some(projection) = projection {
                         custom_runtime_bindings.push((
                             model_id.clone(),
                             model_dir.clone(),
@@ -2510,6 +2515,27 @@ async fn refresh_external_metadata_validation_async(
     })
 }
 
+async fn apply_custom_runtime_metadata_projection_async(
+    library: ModelLibrary,
+    model_id: String,
+    model_dir: PathBuf,
+    metadata: ModelMetadata,
+) -> Result<(Option<CustomRuntimeProjection>, ModelMetadata)> {
+    tokio::task::spawn_blocking(move || {
+        let mut metadata = metadata;
+        let projection =
+            library.apply_custom_runtime_metadata_projection(&model_id, &model_dir, &mut metadata);
+        (projection, metadata)
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join custom runtime projection task: {}",
+            err
+        ))
+    })
+}
+
 async fn calculate_total_size_async(model_dirs: Vec<PathBuf>) -> Result<u64> {
     tokio::task::spawn_blocking(move || {
         let mut total = 0_u64;
@@ -2590,8 +2616,14 @@ impl ModelLibrary {
         }
         metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
 
-        let projection =
-            self.apply_custom_runtime_metadata_projection(&model_id, model_dir, &mut metadata);
+        let (projection, projected_metadata) = apply_custom_runtime_metadata_projection_async(
+            self.clone(),
+            model_id.clone(),
+            model_dir.to_path_buf(),
+            metadata,
+        )
+        .await?;
+        metadata = projected_metadata;
         metadata_changed |= projection
             .as_ref()
             .is_some_and(|projection| projection.metadata_changed);

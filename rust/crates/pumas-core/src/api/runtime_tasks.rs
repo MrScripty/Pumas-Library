@@ -2,14 +2,23 @@
 
 use std::future::Future;
 use std::sync::{Arc, Mutex};
+use tokio::runtime::Handle;
 use tokio::task::JoinHandle;
 
-#[derive(Clone, Default)]
+#[derive(Clone)]
 pub(crate) struct RuntimeTasks {
+    handle: Handle,
     inner: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl RuntimeTasks {
+    pub(crate) fn new() -> Self {
+        Self {
+            handle: Handle::current(),
+            inner: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
     fn prune_finished(handles: &mut Vec<JoinHandle<()>>) {
         handles.retain(|handle| !handle.is_finished());
     }
@@ -18,7 +27,7 @@ impl RuntimeTasks {
     where
         F: Future<Output = ()> + Send + 'static,
     {
-        let handle = tokio::spawn(task);
+        let handle = self.handle.spawn(task);
         let mut handles = self.inner.lock().expect("runtime task owner poisoned");
         Self::prune_finished(&mut handles);
         handles.push(handle);
@@ -41,6 +50,12 @@ impl RuntimeTasks {
     }
 }
 
+impl Default for RuntimeTasks {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for RuntimeTasks {
     fn drop(&mut self) {
         if Arc::strong_count(&self.inner) == 1 {
@@ -53,6 +68,7 @@ impl Drop for RuntimeTasks {
 mod tests {
     use super::RuntimeTasks;
     use tokio::sync::oneshot;
+    use tokio::time::{timeout, Duration};
 
     #[tokio::test]
     async fn shutdown_aborts_tracked_tasks() {
@@ -98,6 +114,25 @@ mod tests {
         tasks.shutdown();
         aborted_rx.await.expect("tracked task should be aborted");
         assert_eq!(tasks.tracked_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn spawn_uses_captured_runtime_handle_from_non_runtime_thread() {
+        let tasks = RuntimeTasks::default();
+        let tasks_for_thread = tasks.clone();
+        let (tx, rx) = oneshot::channel();
+        let join = std::thread::spawn(move || {
+            tasks_for_thread.spawn(async move {
+                let _ = tx.send(());
+            });
+        });
+
+        join.join()
+            .expect("non-runtime thread should enqueue task successfully");
+        timeout(Duration::from_secs(1), rx)
+            .await
+            .expect("spawned task should run on captured runtime")
+            .expect("spawned task should signal completion");
     }
 
     struct AbortGuard(Option<oneshot::Sender<()>>);

@@ -132,6 +132,10 @@ Implementation notes:
   reconciliation tasks through `PrimaryState`-owned `RuntimeTasks`, and `RuntimeTasks` now prunes
   finished handles before tracking new work so repeated reconcile bursts do not accumulate stale
   join handles.
+- Completed: `pumas-core/src/api/runtime_tasks.rs` now captures a Tokio runtime handle at
+  construction and uses that handle for later spawns, so download callbacks and other non-runtime
+  threads can enqueue owned background tasks without panicking during API startup and runtime task
+  supervision.
 
 ### R05 - Blocking Work in Async Paths Needs Audit
 Status: partially compliant

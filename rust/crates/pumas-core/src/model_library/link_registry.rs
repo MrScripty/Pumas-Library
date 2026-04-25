@@ -9,6 +9,7 @@ use crate::model_library::types::{LinkEntry, LinkType};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs;
 use tokio::sync::RwLock;
 
 /// Tracks all symlinks/hardlinks created for model mapping.
@@ -51,11 +52,20 @@ impl LinkRegistry {
 
     /// Load the registry from disk.
     pub async fn load(&self) -> Result<()> {
-        if !self.registry_path.exists() {
+        if !fs::try_exists(&self.registry_path).await? {
             return Ok(());
         }
 
-        let data: Option<LinkData> = atomic_read_json(&self.registry_path)?;
+        let registry_path = self.registry_path.clone();
+        let data: Option<LinkData> =
+            tokio::task::spawn_blocking(move || atomic_read_json(&registry_path))
+                .await
+                .map_err(|err| {
+                    crate::PumasError::Other(format!(
+                        "Failed to join link registry load task: {}",
+                        err
+                    ))
+                })??;
         if let Some(data) = data {
             *self.links.write().await = data;
         }
@@ -66,7 +76,12 @@ impl LinkRegistry {
     /// Save the registry to disk.
     pub async fn save(&self) -> Result<()> {
         let data = self.links.read().await.clone();
-        atomic_write_json(&self.registry_path, &data, false)?;
+        let registry_path = self.registry_path.clone();
+        tokio::task::spawn_blocking(move || atomic_write_json(&registry_path, &data, false))
+            .await
+            .map_err(|err| {
+                crate::PumasError::Other(format!("Failed to join link registry save task: {}", err))
+            })??;
         Ok(())
     }
 
@@ -182,22 +197,30 @@ impl LinkRegistry {
     ///
     /// Returns the list of broken links that were removed.
     pub async fn cleanup_broken(&self) -> Result<Vec<LinkEntry>> {
-        let mut broken = Vec::new();
-
-        {
+        let entries = {
             let data = self.links.read().await;
-            for (target, entry) in &data.by_target {
-                // Check if the link target still exists
-                if !target.exists() {
-                    broken.push(entry.clone());
-                } else if target.symlink_metadata().is_ok() {
-                    // For symlinks, check if the source still exists
-                    if target.is_symlink() && !entry.source.exists() {
-                        broken.push(entry.clone());
-                    }
-                }
-            }
-        }
+            data.by_target.values().cloned().collect::<Vec<_>>()
+        };
+        let broken = tokio::task::spawn_blocking(move || {
+            Ok::<_, crate::PumasError>(
+                entries
+                    .into_iter()
+                    .filter(|entry| {
+                        if !entry.target.exists() {
+                            return true;
+                        }
+                        entry.target.is_symlink() && !entry.source.exists()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .await
+        .map_err(|err| {
+            crate::PumasError::Other(format!(
+                "Failed to join link registry broken-link scan task: {}",
+                err
+            ))
+        })??;
 
         // Remove broken links
         for entry in &broken {

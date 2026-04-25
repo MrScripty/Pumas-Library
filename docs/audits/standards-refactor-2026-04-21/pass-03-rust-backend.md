@@ -179,6 +179,10 @@ Implementation notes:
   `api/state.rs` now use async existence/symlink checks and async file removal so those link
   registry health/cleanup paths no longer perform synchronous metadata probes or unlinks on async
   runtime threads.
+- Completed: `pumas-core/src/model_library/link_registry.rs` now loads and saves its JSON registry
+  through `tokio::task::spawn_blocking` and scans for broken links on a blocking task, so
+  registry persistence and cleanup no longer perform synchronous JSON/file metadata work inline on
+  async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

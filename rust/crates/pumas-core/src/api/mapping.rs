@@ -126,7 +126,8 @@ impl PumasApi {
         let primary = self.primary();
         primary
             .model_mapper
-            .create_default_comfyui_config("*", models_path)?;
+            .create_default_comfyui_config_async("*", models_path)
+            .await?;
 
         let preview = primary
             .model_mapper
@@ -199,7 +200,8 @@ impl PumasApi {
         let primary = self.primary();
         primary
             .model_mapper
-            .create_default_comfyui_config("*", models_path)?;
+            .create_default_comfyui_config_async("*", models_path)
+            .await?;
 
         let result = primary
             .model_mapper
@@ -274,7 +276,8 @@ impl PumasApi {
         let primary = self.primary();
         primary
             .model_mapper
-            .create_default_comfyui_config("*", models_path)?;
+            .create_default_comfyui_config_async("*", models_path)
+            .await?;
 
         let resolution_count = |kind: model_library::ConflictResolution| {
             resolutions.values().filter(|value| **value == kind).count()

@@ -1365,7 +1365,8 @@ async fn preview_model_mapping_response(
 
     primary
         .model_mapper
-        .create_default_comfyui_config("*", models_path)?;
+        .create_default_comfyui_config_async("*", models_path)
+        .await?;
 
     let preview = primary
         .model_mapper
@@ -1420,7 +1421,8 @@ async fn apply_model_mapping_response(
 
     primary
         .model_mapper
-        .create_default_comfyui_config("*", models_path)?;
+        .create_default_comfyui_config_async("*", models_path)
+        .await?;
 
     let result = primary
         .model_mapper
@@ -1450,7 +1452,8 @@ async fn sync_with_resolutions_response(
 
     primary
         .model_mapper
-        .create_default_comfyui_config("*", models_path)?;
+        .create_default_comfyui_config_async("*", models_path)
+        .await?;
 
     let resolution_count = |kind: model_library::ConflictResolution| {
         resolutions.values().filter(|value| **value == kind).count()

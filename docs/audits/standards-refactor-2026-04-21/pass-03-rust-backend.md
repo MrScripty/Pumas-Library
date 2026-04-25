@@ -186,6 +186,10 @@ Implementation notes:
 - Completed: `pumas-rpc/src/shortcut/manager.rs` now provides `ShortcutManager::new_async`, and
   `pumas-rpc/src/server.rs` uses it during bootstrap, so shortcut-manager startup no longer
   performs synchronous shortcut-script directory probes inline on the async server startup path.
+- Completed: `pumas-core/src/model_library/mapper.rs` now provides async mapping-config save and
+  default-config creation helpers, and `api/mapping.rs` plus the mirrored IPC handlers in
+  `api/state.rs` use them, so mapping preview/apply/sync request paths no longer perform config
+  directory creation or config JSON writes inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

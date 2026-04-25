@@ -180,6 +180,14 @@ impl ModelMapper {
         atomic_write_json(&path, config, false)
     }
 
+    /// Save a mapping configuration without blocking the async runtime.
+    pub async fn save_config_async(&self, config: MappingConfig) -> Result<()> {
+        let mapper = self.clone();
+        tokio::task::spawn_blocking(move || mapper.save_config(&config))
+            .await
+            .map_err(|e| PumasError::Other(format!("Failed to join save_config task: {}", e)))?
+    }
+
     /// Create and persist a default ComfyUI mapping configuration.
     ///
     /// Generates rules for standard ComfyUI model directories (checkpoints, loras,
@@ -205,6 +213,28 @@ impl ModelMapper {
 
         self.save_config(&config)?;
         Ok(config)
+    }
+
+    /// Create and persist a default ComfyUI mapping configuration without
+    /// blocking the async runtime.
+    pub async fn create_default_comfyui_config_async(
+        &self,
+        version: &str,
+        comfyui_models_path: &Path,
+    ) -> Result<MappingConfig> {
+        let mapper = self.clone();
+        let version = version.to_string();
+        let comfyui_models_path = comfyui_models_path.to_path_buf();
+        tokio::task::spawn_blocking(move || {
+            mapper.create_default_comfyui_config(&version, &comfyui_models_path)
+        })
+        .await
+        .map_err(|e| {
+            PumasError::Other(format!(
+                "Failed to join create_default_comfyui_config task: {}",
+                e
+            ))
+        })?
     }
 
     // ========================================
@@ -872,7 +902,7 @@ mod tests {
             }],
         };
 
-        mapper.save_config(&config).unwrap();
+        mapper.save_config_async(config).await.unwrap();
 
         let loaded = mapper
             .load_config("comfyui", Some("0.6.0"))

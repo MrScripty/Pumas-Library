@@ -1623,12 +1623,14 @@ impl ModelLibrary {
         force: bool,
     ) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
         }
-        let mut metadata = self.load_metadata(&model_dir)?.unwrap_or_default();
+        let mut metadata = load_model_metadata_async(self.clone(), model_dir.clone())
+            .await?
+            .unwrap_or_default();
 
         // Don't overwrite manual metadata unless forced
         if !force && metadata.match_source.as_deref() == Some("manual") {

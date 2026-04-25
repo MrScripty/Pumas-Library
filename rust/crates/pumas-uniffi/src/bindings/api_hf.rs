@@ -1,4 +1,5 @@
 use super::{
+    validate_existing_local_directory_path_string, validate_existing_local_file_path_string,
     FfiApiInner, FfiDownloadRequest, FfiError, FfiHfMetadataResult, FfiHuggingFaceModel,
     FfiInterruptedDownload, FfiModelDownloadProgress, FfiPumasApi, FfiRepoFileTree,
 };
@@ -106,6 +107,7 @@ impl FfiPumasApi {
         repo_id: String,
         dest_dir: String,
     ) -> Result<String, FfiError> {
+        let dest_dir = validate_existing_local_directory_path_string(dest_dir, "dest_dir").await?;
         match &self.inner {
             FfiApiInner::Primary(api) => api
                 .recover_download(&repo_id, &dest_dir)
@@ -129,6 +131,7 @@ impl FfiPumasApi {
         &self,
         file_path: String,
     ) -> Result<Option<FfiHfMetadataResult>, FfiError> {
+        let file_path = validate_existing_local_file_path_string(file_path, "file_path").await?;
         let result = match &self.inner {
             FfiApiInner::Primary(api) => api
                 .lookup_hf_metadata_for_file(&file_path)

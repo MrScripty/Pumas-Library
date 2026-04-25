@@ -844,6 +844,10 @@ Implementation notes:
 - Completed: `pumas-rpc/src/handlers/models/migration.rs` now validates and canonicalizes
   migration `report_path` values before calling delete-report APIs, so that RPC delete-report
   entry point no longer forwards an unchecked raw file path across the handler boundary.
+- Completed: `pumas-uniffi/src/bindings.rs` and `src/bindings/api_hf.rs` now validate and
+  canonicalize existing local `file_path` and `dest_dir` values before HF file-lookup and
+  interrupted-download recovery calls cross the UniFFI boundary, so those FFI entry points no
+  longer forward unchecked raw local path strings into the API surface.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: remediated

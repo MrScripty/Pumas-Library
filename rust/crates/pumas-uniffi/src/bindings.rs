@@ -2,6 +2,7 @@
 use pumas_library::ipc::IpcClient;
 use pumas_library::PumasApi;
 use serde::de::DeserializeOwned;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -243,6 +244,55 @@ fn validate_path_string(value: String, field: &str) -> FfiResult<String> {
     Ok(path)
 }
 
+async fn canonicalize_existing_local_path_string(value: String, field: &str) -> FfiResult<String> {
+    let raw = validate_path_string(value, field)?;
+    let path = std::path::PathBuf::from(&raw);
+    let canonical = tokio::fs::canonicalize(&path)
+        .await
+        .map_err(|source| match source.kind() {
+            ErrorKind::NotFound => FfiError::Validation {
+                message: format!("{field} path not found: {}", path.display()),
+            },
+            _ => FfiError::Io {
+                message: format!("Failed to canonicalize path: {}", path.display()),
+            },
+        })?;
+    Ok(canonical.to_string_lossy().to_string())
+}
+
+async fn validate_existing_local_file_path_string(value: String, field: &str) -> FfiResult<String> {
+    let canonical = canonicalize_existing_local_path_string(value, field).await?;
+    let path = std::path::PathBuf::from(&canonical);
+    let metadata = tokio::fs::metadata(&path).await.map_err(|_| FfiError::Io {
+        message: format!("Failed to inspect path: {}", path.display()),
+    })?;
+    if metadata.is_file() {
+        Ok(canonical)
+    } else {
+        Err(FfiError::Validation {
+            message: format!("{field} must reference a file: {}", path.display()),
+        })
+    }
+}
+
+async fn validate_existing_local_directory_path_string(
+    value: String,
+    field: &str,
+) -> FfiResult<String> {
+    let canonical = canonicalize_existing_local_path_string(value, field).await?;
+    let path = std::path::PathBuf::from(&canonical);
+    let metadata = tokio::fs::metadata(&path).await.map_err(|_| FfiError::Io {
+        message: format!("Failed to inspect path: {}", path.display()),
+    })?;
+    if metadata.is_dir() {
+        Ok(canonical)
+    } else {
+        Err(FfiError::Validation {
+            message: format!("{field} must reference a directory: {}", path.display()),
+        })
+    }
+}
+
 /// Get the version of the pumas-uniffi bindings.
 #[uniffi::export]
 pub fn version() -> String {
@@ -395,6 +445,18 @@ mod tests {
     use super::*;
     use pumas_library::models::HuggingFaceModel;
     use pumas_library::{ModelRecord, SearchResult};
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn create_temp_test_dir(name: &str) -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("pumas-uniffi-{name}-{unique}"));
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
 
     #[test]
     fn test_ffi_error_conversion() {
@@ -590,5 +652,42 @@ mod tests {
     fn test_validate_path_string_rejects_nul_bytes() {
         let error = validate_path_string("abc\0def".to_string(), "launcher_root").unwrap_err();
         assert!(matches!(error, FfiError::Validation { .. }));
+    }
+
+    #[tokio::test]
+    async fn test_validate_existing_local_file_path_string_canonicalizes_existing_file() {
+        let temp_dir = create_temp_test_dir("file-path");
+        let file_path = temp_dir.join("model.gguf");
+        std::fs::write(&file_path, b"gguf").unwrap();
+
+        let validated = validate_existing_local_file_path_string(
+            file_path.to_string_lossy().to_string(),
+            "file_path",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            validated,
+            file_path.canonicalize().unwrap().to_string_lossy()
+        );
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_validate_existing_local_directory_path_string_rejects_file() {
+        let temp_dir = create_temp_test_dir("dir-path");
+        let file_path = temp_dir.join("bundle.json");
+        std::fs::write(&file_path, b"{}").unwrap();
+
+        let error = validate_existing_local_directory_path_string(
+            file_path.to_string_lossy().to_string(),
+            "dest_dir",
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(error, FfiError::Validation { .. }));
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

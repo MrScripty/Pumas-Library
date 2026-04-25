@@ -390,6 +390,10 @@ Implementation notes:
   repo-file-tree cache through async metadata probes plus blocking cache JSON helpers, so
   request-facing repository file-tree lookups no longer perform synchronous cache freshness checks
   or cache file I/O inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` now resolves HuggingFace-applied
+  model-type hints through `tokio::task::spawn_blocking`, so metadata refresh and download
+  completion flows no longer perform synchronous model-type hint index reads inline on async
+  runtime threads while applying remote metadata.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

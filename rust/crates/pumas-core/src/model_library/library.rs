@@ -1626,7 +1626,9 @@ impl ModelLibrary {
             metadata.family = Some(family.clone());
         }
         if let Some(ref model_type) = hf_metadata.model_type {
-            if let Some(translated) = self.index.resolve_model_type_hint(model_type)? {
+            if let Some(translated) =
+                translate_model_type_hint(self.index.clone(), model_type.clone()).await?
+            {
                 metadata.model_type = Some(translated);
             } else {
                 tracing::warn!(
@@ -2459,6 +2461,20 @@ impl ModelLibrary {
         }
         Ok(report)
     }
+}
+
+async fn translate_model_type_hint(
+    index: ModelIndex,
+    model_type_hint: String,
+) -> Result<Option<String>> {
+    tokio::task::spawn_blocking(move || index.resolve_model_type_hint(&model_type_hint))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join HF model-type translation task: {}",
+                err
+            ))
+        })?
 }
 
 impl ModelLibrary {

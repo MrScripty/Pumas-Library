@@ -1806,7 +1806,7 @@ impl ModelLibrary {
         }
 
         // Load current metadata
-        let mut metadata = match self.load_metadata(&model_dir)? {
+        let mut metadata = match load_model_metadata_async(self.clone(), model_dir.clone()).await? {
             Some(m) => m,
             None => return Ok(None),
         };
@@ -1838,12 +1838,13 @@ impl ModelLibrary {
                 err
             ))
         })?;
-        let resolved = resolve_local_model_type_with_persisted_hints(
-            self.index(),
-            &model_dir,
-            &metadata,
-            type_info.as_ref(),
-        )?;
+        let resolved = resolve_local_model_type_with_persisted_hints_async(
+            self.index().clone(),
+            model_dir.clone(),
+            metadata.clone(),
+            type_info.clone(),
+        )
+        .await?;
         let new_type = resolved.model_type.as_str().to_string();
 
         let detected_family = type_info
@@ -2475,6 +2476,29 @@ async fn load_model_metadata_async(
     tokio::task::spawn_blocking(move || library.load_metadata(&model_dir))
         .await
         .map_err(|err| PumasError::Other(format!("Failed to join metadata load task: {}", err)))?
+}
+
+async fn resolve_local_model_type_with_persisted_hints_async(
+    index: ModelIndex,
+    model_dir: PathBuf,
+    metadata: ModelMetadata,
+    file_type_info: Option<ModelTypeInfo>,
+) -> Result<ModelTypeResolution> {
+    tokio::task::spawn_blocking(move || {
+        resolve_local_model_type_with_persisted_hints(
+            &index,
+            &model_dir,
+            &metadata,
+            file_type_info.as_ref(),
+        )
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join redetect model-type resolution task: {}",
+            err
+        ))
+    })?
 }
 
 async fn directories_have_identical_contents_async(left: PathBuf, right: PathBuf) -> Result<bool> {

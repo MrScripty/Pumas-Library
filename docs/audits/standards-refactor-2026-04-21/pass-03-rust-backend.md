@@ -407,6 +407,10 @@ Implementation notes:
   `delete_model`, so model deletion no longer performs synchronous existence checks, metadata
   loads, symlink deletion, or directory cleanup inline on async runtime threads or hold the outer
   registry lock across an await.
+- Completed: `pumas-core/src/model_library/library.rs` now loads metadata and resolves persisted
+  classification hints for `redetect_model_type` through blocking helpers, so redetection no
+  longer performs synchronous metadata reads or persisted-marker/model-type resolution inline on
+  async runtime threads.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

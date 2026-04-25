@@ -7,6 +7,7 @@ use crate::error::IoResultExt;
 use crate::Result;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
+use tokio::fs;
 use tracing::info;
 
 /// Python requirements for the conversion virtual environment.
@@ -304,41 +305,47 @@ pub fn venv_python(launcher_root: &Path) -> PathBuf {
 ///
 /// Uses a `.hash` sidecar file to detect when the embedded script has changed
 /// and needs to be rewritten.
-pub fn ensure_scripts_deployed(launcher_root: &Path) -> Result<()> {
+pub async fn ensure_scripts_deployed(launcher_root: &Path) -> Result<()> {
     let dir = scripts_dir(launcher_root);
-    std::fs::create_dir_all(&dir).with_path(&dir)?;
+    fs::create_dir_all(&dir).await.with_path(&dir)?;
 
     deploy_script(
         &dir,
         "convert_gguf_to_safetensors.py",
         GGUF_TO_SAFETENSORS_SCRIPT,
-    )?;
+    )
+    .await?;
     deploy_script(
         &dir,
         "convert_safetensors_to_gguf.py",
         SAFETENSORS_TO_GGUF_SCRIPT,
-    )?;
-    deploy_script(&dir, "requirements.txt", REQUIREMENTS)?;
+    )
+    .await?;
+    deploy_script(&dir, "requirements.txt", REQUIREMENTS).await?;
 
     info!("Conversion scripts deployed to {}", dir.display());
     Ok(())
 }
 
-fn deploy_script(dir: &Path, filename: &str, content: &str) -> Result<()> {
+async fn deploy_script(dir: &Path, filename: &str, content: &str) -> Result<()> {
     let script_path = dir.join(filename);
     let hash_path = dir.join(format!("{}.hash", filename));
     let current_hash = content_hash(content);
 
     // Check if script is already up to date
-    if script_path.exists() {
-        if let Ok(stored_hash) = std::fs::read_to_string(&hash_path) {
+    if fs::try_exists(&script_path).await.with_path(&script_path)? {
+        if let Ok(stored_hash) = fs::read_to_string(&hash_path).await {
             if stored_hash.trim() == current_hash {
                 return Ok(());
             }
         }
     }
 
-    std::fs::write(&script_path, content).with_path(&script_path)?;
-    std::fs::write(&hash_path, &current_hash).with_path(&hash_path)?;
+    fs::write(&script_path, content)
+        .await
+        .with_path(&script_path)?;
+    fs::write(&hash_path, &current_hash)
+        .await
+        .with_path(&hash_path)?;
     Ok(())
 }

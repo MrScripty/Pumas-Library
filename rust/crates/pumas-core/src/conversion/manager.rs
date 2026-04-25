@@ -85,12 +85,15 @@ impl ConversionManager {
     ///
     /// Creates the virtual environment and installs required packages if needed.
     pub async fn ensure_environment(&self) -> Result<()> {
-        scripts::ensure_scripts_deployed(&self.launcher_root)?;
+        scripts::ensure_scripts_deployed(&self.launcher_root).await?;
 
         let venv_path = scripts::venv_dir(&self.launcher_root);
         let python_path = scripts::venv_python(&self.launcher_root);
 
-        if python_path.exists() {
+        if fs::try_exists(&python_path)
+            .await
+            .map_err(|e| PumasError::io("checking conversion python", &python_path, e))?
+        {
             debug!("Conversion venv already exists at {}", venv_path.display());
             return Ok(());
         }
@@ -665,7 +668,7 @@ async fn run_conversion(
         });
     }
 
-    scripts::ensure_scripts_deployed(launcher_root)?;
+    scripts::ensure_scripts_deployed(launcher_root).await?;
 
     progress.set_status(conversion_id, ConversionStatus::Validating);
 

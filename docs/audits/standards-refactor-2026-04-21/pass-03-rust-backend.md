@@ -468,6 +468,11 @@ Implementation notes:
   discovery, and `conversion/manager.rs`, `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and
   `conversion/sherry.rs` now use that helper, so conversion source enumeration and quantization
   input validation no longer perform synchronous directory walks inline on async runtime threads.
+- Completed: `pumas-core/src/conversion/scripts.rs`, `conversion/manager.rs`,
+  `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and `conversion/sherry.rs` now use
+  `tokio::fs` for script deployment plus backend environment path probes and setup directory/file
+  creation, so async conversion-environment setup no longer performs those filesystem operations
+  inline on runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

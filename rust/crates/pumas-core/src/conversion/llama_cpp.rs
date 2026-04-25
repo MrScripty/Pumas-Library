@@ -279,11 +279,15 @@ impl QuantizationBackend for LlamaCppBackend {
     }
 
     async fn ensure_environment(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.base_dir)
+        fs::create_dir_all(&self.base_dir)
+            .await
             .map_err(|e| PumasError::io("creating llama-cpp dir", &self.base_dir, e))?;
 
         // Step 1: Clone or update source
-        if self.source_dir().join(".git").exists() {
+        if fs::try_exists(&self.source_dir().join(".git"))
+            .await
+            .map_err(|e| PumasError::io("checking llama.cpp checkout", self.source_dir(), e))?
+        {
             info!("Updating llama.cpp source...");
             self.git_pull().await?;
         } else {
@@ -292,7 +296,13 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // Step 2-3: cmake build (only if binaries missing)
-        if !self.quantize_binary().exists() {
+        if !fs::try_exists(&self.quantize_binary()).await.map_err(|e| {
+            PumasError::io(
+                "checking llama.cpp quantize binary",
+                self.quantize_binary(),
+                e,
+            )
+        })? {
             info!("Building llama.cpp (cmake configure)...");
             self.cmake_configure().await?;
             info!("Building llama.cpp (compiling)...");
@@ -300,7 +310,10 @@ impl QuantizationBackend for LlamaCppBackend {
         }
 
         // Step 4: Python venv (only if missing)
-        if !self.venv_python().exists() {
+        if !fs::try_exists(&self.venv_python())
+            .await
+            .map_err(|e| PumasError::io("checking llama.cpp python", self.venv_python(), e))?
+        {
             info!("Setting up Python environment for HF conversion...");
             self.setup_python_venv().await?;
         }

@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
+use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -47,12 +48,14 @@ impl Nvfp4Backend {
     }
 
     /// Deploy the NVFP4 quantization script to the backend directory.
-    fn deploy_script(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.base_dir)
+    async fn deploy_script(&self) -> Result<()> {
+        fs::create_dir_all(&self.base_dir)
+            .await
             .map_err(|e| PumasError::io("creating nvfp4 dir", &self.base_dir, e))?;
 
         let script = include_str!("nvfp4_script.py");
-        std::fs::write(self.quantize_script(), script)
+        fs::write(self.quantize_script(), script)
+            .await
             .map_err(|e| PumasError::io("writing nvfp4 script", self.quantize_script(), e))?;
         Ok(())
     }
@@ -62,7 +65,10 @@ impl Nvfp4Backend {
         let venv_dir = self.venv_dir();
         let python = self.venv_python();
 
-        if python.exists() {
+        if fs::try_exists(&python)
+            .await
+            .map_err(|e| PumasError::io("checking nvfp4 python", &python, e))?
+        {
             debug!("NVFP4 venv already exists at {}", venv_dir.display());
             return Ok(());
         }
@@ -155,7 +161,7 @@ impl QuantizationBackend for Nvfp4Backend {
     }
 
     async fn ensure_environment(&self) -> Result<()> {
-        self.deploy_script()?;
+        self.deploy_script().await?;
         self.setup_venv().await
     }
 

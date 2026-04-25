@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use tokio::fs;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
 
@@ -49,12 +50,14 @@ impl SherryBackend {
     }
 
     /// Deploy the Sherry QAT script to the backend directory.
-    fn deploy_script(&self) -> Result<()> {
-        std::fs::create_dir_all(&self.base_dir)
+    async fn deploy_script(&self) -> Result<()> {
+        fs::create_dir_all(&self.base_dir)
+            .await
             .map_err(|e| PumasError::io("creating sherry dir", &self.base_dir, e))?;
 
         let script = include_str!("sherry_script.py");
-        std::fs::write(self.train_script(), script)
+        fs::write(self.train_script(), script)
+            .await
             .map_err(|e| PumasError::io("writing sherry script", self.train_script(), e))?;
         Ok(())
     }
@@ -64,7 +67,10 @@ impl SherryBackend {
         let venv_dir = self.venv_dir();
         let python = self.venv_python();
 
-        if python.exists() {
+        if fs::try_exists(&python)
+            .await
+            .map_err(|e| PumasError::io("checking sherry python", &python, e))?
+        {
             debug!("Sherry venv already exists at {}", venv_dir.display());
             return Ok(());
         }
@@ -158,7 +164,7 @@ impl QuantizationBackend for SherryBackend {
     }
 
     async fn ensure_environment(&self) -> Result<()> {
-        self.deploy_script()?;
+        self.deploy_script().await?;
         self.setup_venv().await
     }
 

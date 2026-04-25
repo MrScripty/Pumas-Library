@@ -7205,6 +7205,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delete_migration_report_normalizes_report_lookup_path() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "report-delete-normalized");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/report-delete-normalized".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("report-delete-normalized".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library
+            .generate_migration_dry_run_report_with_artifacts()
+            .unwrap();
+        let markdown_path = PathBuf::from(report.human_readable_report_path.unwrap());
+        let normalized_lookup_path = markdown_path
+            .parent()
+            .unwrap()
+            .join(".")
+            .join(markdown_path.file_name().unwrap());
+
+        let removed = library
+            .delete_migration_report(normalized_lookup_path.to_string_lossy().as_ref())
+            .unwrap();
+
+        assert!(removed);
+        assert!(library.list_migration_reports().unwrap().is_empty());
+    }
+
+    #[tokio::test]
     async fn test_prune_migration_reports_keeps_newest_entries() {
         let (_, library) = setup_library().await;
         let model_dir = library.build_model_path("llm", "llama", "report-prune");

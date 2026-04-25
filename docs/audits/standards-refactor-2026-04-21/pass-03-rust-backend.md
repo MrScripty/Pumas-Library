@@ -714,6 +714,10 @@ Implementation notes:
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now canonicalize and type-check
   `dest_dir` before interrupted-download recovery and partial-download resume flows, so those direct
   API and mirrored IPC recovery entry points no longer accept unchecked raw directory strings.
+- Completed: `pumas-core/src/model_library/library/migration.rs` now normalizes and constrains
+  incoming migration `report_path` values before indexed report deletion, so direct API and
+  mirrored IPC delete-report flows no longer compare unchecked raw path strings against artifact
+  index entries.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

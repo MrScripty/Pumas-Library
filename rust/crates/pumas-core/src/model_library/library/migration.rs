@@ -107,10 +107,25 @@ impl ModelLibrary {
     ///
     /// `report_path` may match either the JSON path or Markdown path from the index entry.
     pub fn delete_migration_report(&self, report_path: &str) -> Result<bool> {
+        let report_path = resolve_migration_report_artifact_path(&self.library_root, report_path)?;
         let mut index = load_migration_report_index(&self.library_root)?;
-        let Some(position) = index.entries.iter().position(|entry| {
-            entry.json_report_path == report_path || entry.markdown_report_path == report_path
-        }) else {
+        let mut position = None;
+        for (idx, entry) in index.entries.iter().enumerate() {
+            let json_path = resolve_migration_report_artifact_path(
+                &self.library_root,
+                &entry.json_report_path,
+            )?;
+            let markdown_path = resolve_migration_report_artifact_path(
+                &self.library_root,
+                &entry.markdown_report_path,
+            )?;
+            if json_path == report_path || markdown_path == report_path {
+                position = Some(idx);
+                break;
+            }
+        }
+
+        let Some(position) = position else {
             return Ok(false);
         };
 

@@ -386,10 +386,23 @@ impl PumasApiBuilder {
             // Initialize SQLite search cache at shared-resources/cache/search.sqlite
             let search_cache_dir = self.launcher_root.join("shared-resources").join("cache");
             let search_cache_db = search_cache_dir.join("search.sqlite");
-            let search_cache = match model_library::HfSearchCache::new(&search_cache_db) {
-                Ok(cache) => Some(std::sync::Arc::new(cache)),
-                Err(e) => {
+            let search_cache_db_for_task = search_cache_db.clone();
+            let search_cache = match tokio::task::spawn_blocking(move || {
+                model_library::HfSearchCache::new(&search_cache_db_for_task)
+                    .map(std::sync::Arc::new)
+            })
+            .await
+            {
+                Ok(Ok(cache)) => Some(cache),
+                Ok(Err(e)) => {
                     tracing::warn!("Failed to initialize HuggingFace search cache: {}", e);
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to join HuggingFace search cache initialization task: {}",
+                        e
+                    );
                     None
                 }
             };
@@ -399,8 +412,13 @@ impl PumasApiBuilder {
             let download_persistence =
                 std::sync::Arc::new(model_library::DownloadPersistence::new(&data_dir));
 
-            match model_library::HuggingFaceClient::new(&hf_cache_dir) {
-                Ok(mut client) => {
+            let hf_cache_dir_for_task = hf_cache_dir.clone();
+            match tokio::task::spawn_blocking(move || {
+                model_library::HuggingFaceClient::new(&hf_cache_dir_for_task)
+            })
+            .await
+            {
+                Ok(Ok(mut client)) => {
                     // Attach search cache if available
                     if let Some(cache) = search_cache {
                         client.set_search_cache(cache);
@@ -411,8 +429,15 @@ impl PumasApiBuilder {
                     client.restore_persisted_downloads().await;
                     Some(client)
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     tracing::warn!("Failed to initialize HuggingFace client: {}", e);
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to join HuggingFace client initialization task: {}",
+                        e
+                    );
                     None
                 }
             }

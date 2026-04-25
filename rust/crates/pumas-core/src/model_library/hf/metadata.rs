@@ -9,6 +9,7 @@ use super::types::{
 };
 use super::HuggingFaceClient;
 use crate::error::{PumasError, Result};
+use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::hashing::compute_fast_hash;
 use crate::model_library::naming::extract_base_name;
 use crate::model_library::types::{
@@ -146,17 +147,11 @@ impl HuggingFaceClient {
     pub async fn get_repo_files(&self, repo_id: &str) -> Result<RepoFileTree> {
         // Check cache first
         let cache_file = self.get_cache_path(repo_id, "files");
-        if let Some(cached) = self.read_cache::<RepoFileTree>(&cache_file)? {
+        if let Some(cached) = read_repo_file_tree_cache(cache_file.clone()).await? {
             // Reject entries from an older cache format (e.g. pre-recursive)
             if cached.cache_version >= REPO_FILE_TREE_VERSION {
-                if let Ok(meta) = std::fs::metadata(&cache_file) {
-                    if let Ok(modified) = meta.modified() {
-                        if let Ok(elapsed) = modified.elapsed() {
-                            if elapsed.as_secs() < REPO_CACHE_TTL_SECS {
-                                return Ok(cached);
-                            }
-                        }
-                    }
+                if repo_file_tree_cache_is_fresh(&cache_file).await? {
+                    return Ok(cached);
                 }
             }
         }
@@ -219,7 +214,7 @@ impl HuggingFaceClient {
         };
 
         // Cache the result
-        self.write_cache(&cache_file, &tree)?;
+        write_repo_file_tree_cache(cache_file, &tree).await?;
 
         Ok(tree)
     }
@@ -401,4 +396,42 @@ impl HuggingFaceClient {
             0.0
         }
     }
+}
+
+async fn read_repo_file_tree_cache(path: PathBuf) -> Result<Option<RepoFileTree>> {
+    tokio::task::spawn_blocking(move || atomic_read_json(&path))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join HuggingFace repo tree cache read task: {}",
+                err
+            ))
+        })?
+}
+
+async fn write_repo_file_tree_cache(path: PathBuf, tree: &RepoFileTree) -> Result<()> {
+    let tree = tree.clone();
+    tokio::task::spawn_blocking(move || atomic_write_json(&path, &tree, false))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join HuggingFace repo tree cache write task: {}",
+                err
+            ))
+        })?
+}
+
+async fn repo_file_tree_cache_is_fresh(path: &Path) -> Result<bool> {
+    let metadata = match tokio::fs::metadata(path).await {
+        Ok(metadata) => metadata,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(err) => return Err(PumasError::io_with_path(err, path)),
+    };
+
+    Ok(metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .map(|elapsed| elapsed.as_secs() < REPO_CACHE_TTL_SECS)
+        .unwrap_or(false))
 }

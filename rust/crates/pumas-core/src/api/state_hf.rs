@@ -92,9 +92,7 @@ pub(super) async fn start_hf_download(
     primary: &PrimaryState,
     request: &model_library::DownloadRequest,
 ) -> std::result::Result<String, PumasError> {
-    use crate::api::hf::{
-        apply_remote_model_metadata, normalized_download_hint,
-    };
+    use crate::api::hf::{apply_remote_model_metadata, normalized_download_hint};
     use tracing::{info, warn};
 
     let client = primary

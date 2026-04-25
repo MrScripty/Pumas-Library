@@ -29,15 +29,13 @@ pub use types::{
 use types::{DownloadState, REPO_CACHE_TTL_SECS};
 
 use crate::error::{PumasError, Result};
-use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::download_store::DownloadPersistence;
 use crate::model_library::hf_cache::HfSearchCache;
 use crate::network::{CacheStrategy, WebSource, WebSourceId};
 use async_trait::async_trait;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock};
@@ -291,17 +289,6 @@ impl HuggingFaceClient {
         let safe_name = repo_id.replace('/', "_");
         self.cache_dir
             .join(format!("hf_{}_{}.json", safe_name, suffix))
-    }
-
-    pub(super) fn read_cache<T: for<'de> Deserialize<'de>>(
-        &self,
-        path: &Path,
-    ) -> Result<Option<T>> {
-        atomic_read_json(path)
-    }
-
-    pub(super) fn write_cache<T: Serialize>(&self, path: &Path, data: &T) -> Result<()> {
-        atomic_write_json(path, data, false)
     }
 }
 

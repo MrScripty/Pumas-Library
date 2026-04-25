@@ -899,6 +899,10 @@ Implementation notes:
 - Completed: `pumas-uniffi/src/bindings.rs` now delegates its HuggingFace UniFFI method block to
   `src/bindings/api_hf.rs`, keeping the exported surface unchanged while moving download, lookup,
   and repo-file RPC orchestration into a dedicated domain module.
+- Completed: `pumas-uniffi/src/bindings.rs` now delegates its model-library UniFFI method block to
+  `src/bindings/api_models.rs`, keeping the exported surface unchanged while moving search,
+  import, reclassification, and inference-settings RPC orchestration into a dedicated domain
+  module.
 
 ### R10 - Rust Tooling Baseline Is Missing
 Status: partially remediated

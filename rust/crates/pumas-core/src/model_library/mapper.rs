@@ -362,7 +362,7 @@ impl ModelMapper {
 
         // Handle broken links
         for action in &preview.broken {
-            if let Err(e) = std::fs::remove_file(&action.target) {
+            if let Err(e) = fs::remove_file(&action.target).await {
                 result.errors.push((action.target.clone(), e.to_string()));
             } else {
                 result.broken_removed += 1;

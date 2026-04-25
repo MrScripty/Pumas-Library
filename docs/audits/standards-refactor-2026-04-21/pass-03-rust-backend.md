@@ -198,6 +198,9 @@ Implementation notes:
   directory creation, blocking-task link creation, and async rename-target probing in
   mapping-apply flows, so mapping apply/sync request paths no longer perform those filesystem
   mutations inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/mapper.rs` now also removes broken links with
+  `tokio::fs` in the conflict-resolution mapping path, closing the remaining direct unlink call on
+  that async request flow.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

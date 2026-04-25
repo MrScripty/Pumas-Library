@@ -348,14 +348,14 @@ impl ModelLibrary {
     ///
     /// * `model_dir` - Path to the model directory
     pub async fn index_model_dir(&self, model_dir: &Path) -> Result<()> {
-        let prepared = self.prepare_index_projection(model_dir)?;
+        let prepared = self.prepare_index_projection_async(model_dir).await?;
         self.persist_index_projection(model_dir, prepared).await?;
 
         Ok(())
     }
 
     pub async fn model_scope_is_current(&self, model_dir: &Path) -> Result<bool> {
-        let prepared = self.prepare_index_projection(model_dir)?;
+        let prepared = self.prepare_index_projection_async(model_dir).await?;
         let existing = self.index.get(&prepared.model_id)?;
         let Some(existing) = existing else {
             return Ok(false);
@@ -2567,7 +2567,10 @@ async fn cleanup_empty_parent_dirs_after_move_async(model_dir: &Path, library_ro
 }
 
 impl ModelLibrary {
-    fn prepare_index_projection(&self, model_dir: &Path) -> Result<PreparedIndexProjection> {
+    async fn prepare_index_projection_async(
+        &self,
+        model_dir: &Path,
+    ) -> Result<PreparedIndexProjection> {
         let mut metadata =
             self.load_metadata(model_dir)?
                 .ok_or_else(|| PumasError::ModelNotFound {
@@ -2579,8 +2582,12 @@ impl ModelLibrary {
         })?;
 
         let mut metadata_changed = normalize_library_owned_bundle_paths(model_dir, &mut metadata);
-        metadata_changed |=
-            is_external_reference(&metadata) && refresh_external_metadata_validation(&mut metadata);
+        if is_external_reference(&metadata) {
+            let (validation_changed, refreshed_metadata) =
+                refresh_external_metadata_validation_async(metadata).await?;
+            metadata = refreshed_metadata;
+            metadata_changed |= validation_changed;
+        }
         metadata_changed |= apply_task_projection_from_persisted_evidence(&mut metadata);
 
         let projection =
@@ -8885,6 +8892,54 @@ mod tests {
 
         let rebuilt = library.rebuild_index().await.unwrap();
         assert_eq!(rebuilt, 1);
+
+        let refreshed = library.load_metadata(&model_dir).unwrap().unwrap();
+        assert_eq!(
+            refreshed.validation_state,
+            Some(AssetValidationState::Degraded)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_index_model_dir_refreshes_external_validation_to_degraded() {
+        let (temp_dir, library) = setup_library().await;
+        let external_root = temp_dir.path().join("external");
+        std::fs::create_dir_all(&external_root).unwrap();
+        let bundle_root = create_external_diffusers_bundle(&external_root);
+        let model_id = "diffusion/stable-diffusion/tiny-sd-turbo";
+        let model_dir = library.build_model_path("diffusion", "stable-diffusion", "tiny-sd-turbo");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("stable-diffusion".to_string()),
+            model_type: Some("diffusion".to_string()),
+            official_name: Some("tiny-sd-turbo".to_string()),
+            cleaned_name: Some("tiny-sd-turbo".to_string()),
+            source_path: Some(bundle_root.display().to_string()),
+            entry_path: Some(bundle_root.display().to_string()),
+            storage_kind: Some(StorageKind::ExternalReference),
+            bundle_format: Some(crate::models::BundleFormat::DiffusersDirectory),
+            pipeline_class: Some("StableDiffusionPipeline".to_string()),
+            import_state: Some(crate::models::ImportState::Ready),
+            validation_state: Some(AssetValidationState::Valid),
+            task_type_primary: Some("text-to-image".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test".to_string()),
+            model_type_resolution_confidence: Some(1.0),
+            recommended_backend: Some("diffusers".to_string()),
+            runtime_engine_hints: Some(vec!["diffusers".to_string(), "pytorch".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        std::fs::remove_dir_all(&bundle_root).unwrap();
+
+        library.index_model_dir(&model_dir).await.unwrap();
 
         let refreshed = library.load_metadata(&model_dir).unwrap().unwrap();
         assert_eq!(

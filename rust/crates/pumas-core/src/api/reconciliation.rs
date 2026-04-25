@@ -693,14 +693,18 @@ async fn select_partial_model_type_async(
     })?
 }
 
-fn load_persisted_downloads(primary: &PrimaryState) -> Vec<PersistedDownload> {
-    let Some(ref client) = primary.hf_client else {
-        return Vec::new();
-    };
-    let Some(persistence) = client.persistence() else {
-        return Vec::new();
-    };
-    persistence.load_all()
+async fn load_persisted_downloads(primary: &PrimaryState) -> Vec<PersistedDownload> {
+    let persistence = primary
+        .hf_client
+        .as_ref()
+        .and_then(|client| client.persistence().cloned());
+    tokio::task::spawn_blocking(move || {
+        persistence
+            .map(|persistence| persistence.load_all())
+            .unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn candidate_from_persisted(
@@ -940,14 +944,15 @@ async fn stage_partial_candidate(
 
 async fn stage_partial_download_rows(primary: &PrimaryState) -> Result<()> {
     let library_root = primary.model_library.library_root().to_path_buf();
-    let persisted = load_persisted_downloads(primary);
+    let persisted = load_persisted_downloads(primary).await;
     let known_dirs: HashSet<PathBuf> = persisted
         .iter()
         .map(|entry| entry.dest_dir.clone())
         .collect();
     let interrupted = primary
         .model_importer
-        .find_interrupted_downloads(&known_dirs);
+        .find_interrupted_downloads_async(known_dirs)
+        .await;
 
     let mut candidates: HashMap<String, PartialDownloadCandidate> = HashMap::new();
 
@@ -1046,7 +1051,7 @@ async fn stage_partial_download_row_for_model(
     model_id: &str,
     model_dir: &Path,
 ) -> Result<()> {
-    let persisted = load_persisted_downloads(primary);
+    let persisted = load_persisted_downloads(primary).await;
     let mut candidate = persisted
         .iter()
         .find(|entry| entry.dest_dir == model_dir)

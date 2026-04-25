@@ -371,6 +371,10 @@ Implementation notes:
   `ModelImporter` wrapper backed by `spawn_blocking`, so background startup recovery no longer
   performs its recursive partial-download scan and marker-file reads inline on an async task
   before scheduling interrupted-download resume work.
+- Completed: `pumas-core/src/api/reconciliation.rs` now loads persisted downloads through a
+  blocking helper and uses the async interrupted-download scan wrapper when staging partial
+  download rows, so reconcile-time partial metadata repair no longer performs synchronous download
+  store reads or recursive partial-download discovery inline on async runtime threads.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

@@ -438,6 +438,10 @@ Implementation notes:
   resolution through the existing async persisted-hint resolution helper, so reclassification no
   longer performs synchronous directory-layout and name-token inspection inline on an async runtime
   thread while deciding model relocation.
+- Completed: `pumas-core/src/model_library/importer.rs` now routes in-place import model-type
+  resolution through `tokio::task::spawn_blocking`, so `import_in_place` no longer performs
+  synchronous rule-based type resolution and its directory-layout/name-token inspection inline on
+  an async runtime thread before building metadata.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

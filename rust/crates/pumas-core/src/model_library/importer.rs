@@ -97,6 +97,31 @@ fn parse_model_card_json(
     }
 }
 
+async fn resolve_model_type_with_rules_async(
+    index: crate::index::ModelIndex,
+    model_dir: PathBuf,
+    pipeline_tag: Option<String>,
+    model_type_hint: Option<String>,
+    huggingface_evidence: Option<HuggingFaceEvidence>,
+) -> Result<crate::model_library::ModelTypeResolution> {
+    tokio::task::spawn_blocking(move || {
+        resolve_model_type_with_rules(
+            &index,
+            &model_dir,
+            pipeline_tag.as_deref(),
+            model_type_hint.as_deref(),
+            huggingface_evidence.as_ref(),
+        )
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join in-place model-type resolution task: {}",
+            err
+        ))
+    })?
+}
+
 /// Model importer for bringing local files into the library.
 ///
 /// Features:
@@ -1273,13 +1298,14 @@ impl ModelImporter {
 
         // Resolve model type from hard source signals via SQLite rule tables.
         // Medium hints (pipeline_tag/spec.model_type) only adjust confidence.
-        let resolved_model_type = resolve_model_type_with_rules(
-            self.library.index(),
-            model_dir,
-            spec.pipeline_tag.as_deref(),
-            spec.model_type.as_deref(),
-            spec.huggingface_evidence.as_ref(),
-        )?;
+        let resolved_model_type = resolve_model_type_with_rules_async(
+            self.library.index().clone(),
+            model_dir.to_path_buf(),
+            spec.pipeline_tag.clone(),
+            spec.model_type.clone(),
+            spec.huggingface_evidence.clone(),
+        )
+        .await?;
 
         // Detect dLLM subtype from config.json
         let resolved_subtype = if resolved_model_type.model_type == ModelType::Llm {

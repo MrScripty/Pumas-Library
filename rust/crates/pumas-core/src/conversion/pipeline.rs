@@ -6,6 +6,7 @@
 //! the llama.cpp quantization backend.
 
 use std::path::Path;
+use std::path::PathBuf;
 
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -85,6 +86,28 @@ pub async fn wait_and_check_exit(
 // ---------------------------------------------------------------------------
 // Output directory management
 // ---------------------------------------------------------------------------
+
+/// List files with a matching extension from a model directory.
+pub async fn list_files_with_extension(model_path: &Path, ext: &str) -> Result<Vec<PathBuf>> {
+    let mut entries = fs::read_dir(model_path)
+        .await
+        .map_err(|e| PumasError::io("reading model directory", model_path, e))?;
+    let mut files = Vec::new();
+
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .map_err(|e| PumasError::io("reading directory entry", model_path, e))?
+    {
+        let path = entry.path();
+        if path.extension().and_then(|entry_ext| entry_ext.to_str()) == Some(ext) {
+            files.push(path);
+        }
+    }
+
+    files.sort();
+    Ok(files)
+}
 
 /// Remove any stale temp directory and recreate it for a fresh conversion run.
 pub async fn prepare_temp_output_dir(temp_dir: &Path, context: &str) -> Result<()> {

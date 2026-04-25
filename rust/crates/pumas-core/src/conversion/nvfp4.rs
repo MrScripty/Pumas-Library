@@ -189,19 +189,10 @@ impl QuantizationBackend for Nvfp4Backend {
         }
 
         // Verify safetensors files exist
-        let has_safetensors = std::fs::read_dir(&params.model_path)
-            .map(|entries| {
-                entries.filter_map(|e| e.ok()).any(|e| {
-                    e.path()
-                        .extension()
-                        .and_then(|ext| ext.to_str())
-                        .map(|ext| ext == "safetensors")
-                        .unwrap_or(false)
-                })
-            })
-            .unwrap_or(false);
-
-        if !has_safetensors {
+        if pipeline::list_files_with_extension(&params.model_path, "safetensors")
+            .await?
+            .is_empty()
+        {
             return Err(PumasError::ConversionFailed {
                 message: "No safetensors files found in source model directory".to_string(),
             });

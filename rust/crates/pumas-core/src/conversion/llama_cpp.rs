@@ -417,7 +417,7 @@ impl QuantizationBackend for LlamaCppBackend {
         let source_gguf = if needs_f16_conversion {
             f16_gguf.clone()
         } else {
-            find_gguf_file(&params.model_path)?
+            find_gguf_file(&params.model_path).await?
         };
 
         // Step: importance matrix generation
@@ -826,16 +826,9 @@ fn has_gguf_files(path: &Path) -> bool {
 }
 
 /// Find the first `.gguf` file in a model directory.
-fn find_gguf_file(model_path: &Path) -> Result<PathBuf> {
-    let mut files: Vec<PathBuf> = std::fs::read_dir(model_path)
-        .map_err(|e| PumasError::io("reading model directory", model_path, e))?
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().and_then(|ext| ext.to_str()) == Some("gguf"))
-        .collect();
-
-    files.sort();
-    files
+async fn find_gguf_file(model_path: &Path) -> Result<PathBuf> {
+    pipeline::list_files_with_extension(model_path, "gguf")
+        .await?
         .into_iter()
         .next()
         .ok_or_else(|| PumasError::ConversionFailed {

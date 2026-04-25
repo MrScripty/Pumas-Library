@@ -464,6 +464,10 @@ Implementation notes:
   `tokio::fs` for conversion-environment/config probes plus intermediate-output cleanup, so those
   async conversion and llama.cpp quantization flows no longer perform synchronous existence checks
   or file removals inline on async runtime threads.
+- Completed: `pumas-core/src/conversion/pipeline.rs` now provides async extension-based file
+  discovery, and `conversion/manager.rs`, `conversion/llama_cpp.rs`, `conversion/nvfp4.rs`, and
+  `conversion/sherry.rs` now use that helper, so conversion source enumeration and quantization
+  input validation no longer perform synchronous directory walks inline on async runtime threads.
 - Remaining: classify the current audit output and replace blocking work in confirmed async
   request/lifecycle paths with async equivalents or `spawn_blocking`.
 

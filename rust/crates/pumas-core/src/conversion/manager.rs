@@ -669,7 +669,8 @@ async fn run_conversion(
 
     progress.set_status(conversion_id, ConversionStatus::Validating);
 
-    let model_files = find_model_files(model_path, direction)?;
+    let model_files =
+        pipeline::list_files_with_extension(model_path, source_extension(direction)).await?;
     if model_files.is_empty() {
         return Err(PumasError::ConversionFailed {
             message: format!(
@@ -852,32 +853,6 @@ async fn run_conversion(
 
     info!("Conversion {} completed successfully", conversion_id);
     Ok(())
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (existing, for Python format conversions)
-// ---------------------------------------------------------------------------
-
-/// Find model files of the appropriate format in the model directory.
-fn find_model_files(model_path: &Path, direction: ConversionDirection) -> Result<Vec<PathBuf>> {
-    let ext = source_extension(direction);
-    let mut files = Vec::new();
-
-    if model_path.is_dir() {
-        for entry in std::fs::read_dir(model_path)
-            .map_err(|e| PumasError::io("reading model directory", model_path, e))?
-        {
-            let entry =
-                entry.map_err(|e| PumasError::io("reading directory entry", model_path, e))?;
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) == Some(ext) {
-                files.push(path);
-            }
-        }
-        files.sort();
-    }
-
-    Ok(files)
 }
 
 /// Get the source file extension for a conversion direction.

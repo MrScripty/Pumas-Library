@@ -6,12 +6,89 @@ use crate::model_library;
 use crate::models;
 use crate::PumasApi;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::{
     fs,
     time::{sleep, Duration},
 };
+
+const MIGRATION_REPORTS_DIR: &str = "migration-reports";
+
+fn normalize_absolute_local_path(value: &str, field: &str) -> Result<PathBuf> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: format!("{field} is required"),
+        });
+    }
+
+    let raw = PathBuf::from(trimmed);
+    let mut normalized = if raw.is_absolute() {
+        PathBuf::new()
+    } else {
+        std::env::current_dir().map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to resolve current directory for {field}: {}",
+                err
+            ))
+        })?
+    };
+
+    for component in raw.components() {
+        match component {
+            Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
+            Component::RootDir => normalized.push(component.as_os_str()),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            Component::Normal(part) => normalized.push(part),
+        }
+    }
+
+    Ok(normalized)
+}
+
+pub(crate) fn normalize_migration_report_path(
+    library_root: &Path,
+    report_path: &str,
+) -> Result<PathBuf> {
+    let raw = report_path.trim();
+    if raw.is_empty() {
+        return Err(PumasError::InvalidParams {
+            message: "report_path is required".to_string(),
+        });
+    }
+
+    let normalized = if Path::new(raw).is_absolute() {
+        normalize_absolute_local_path(raw, "report_path")?
+    } else {
+        let reports_root = library_root.join(MIGRATION_REPORTS_DIR);
+        normalize_absolute_local_path(
+            reports_root.join(raw).to_string_lossy().as_ref(),
+            "report_path",
+        )?
+    };
+
+    let reports_root = normalize_absolute_local_path(
+        library_root
+            .join(MIGRATION_REPORTS_DIR)
+            .to_string_lossy()
+            .as_ref(),
+        "report_path",
+    )?;
+    if !normalized.starts_with(&reports_root) {
+        return Err(PumasError::InvalidParams {
+            message: format!(
+                "report_path must be within migration reports directory: {}",
+                normalized.display()
+            ),
+        });
+    }
+
+    Ok(normalized)
+}
 
 impl PumasApi {
     /// Generate a non-mutating migration dry-run report for metadata v2 cutover.
@@ -85,10 +162,14 @@ impl PumasApi {
                 )
                 .await;
         }
+        let normalized = normalize_migration_report_path(
+            self.primary().model_library.library_root(),
+            report_path,
+        )?;
 
         delete_migration_report(
             self.primary().model_library.clone(),
-            report_path.to_string(),
+            normalized.to_string_lossy().to_string(),
         )
         .await
     }
@@ -464,5 +545,44 @@ pub(crate) fn recompute_execution_report_counts(
     }
     if !report.referential_integrity_ok {
         report.error_count += report.referential_integrity_errors.len();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalize_migration_report_path;
+    use tempfile::TempDir;
+
+    #[test]
+    fn normalize_migration_report_path_accepts_relative_report_path() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let normalized =
+            normalize_migration_report_path(temp_dir.path(), "dry-run/report-20260425.md")
+                .expect("relative report path should normalize");
+
+        assert_eq!(
+            normalized,
+            temp_dir
+                .path()
+                .join("migration-reports")
+                .join("dry-run")
+                .join("report-20260425.md")
+        );
+    }
+
+    #[test]
+    fn normalize_migration_report_path_rejects_path_outside_reports_root() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let outside = temp_dir.path().join("outside.md");
+
+        let error =
+            normalize_migration_report_path(temp_dir.path(), outside.to_string_lossy().as_ref())
+                .expect_err("path outside migration reports root should be rejected");
+
+        assert!(matches!(
+            error,
+            crate::error::PumasError::InvalidParams { message }
+                if message.contains("within migration reports directory")
+        ));
     }
 }

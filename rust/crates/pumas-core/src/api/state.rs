@@ -792,9 +792,13 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         .ok_or_else(|| PumasError::InvalidParams {
                             message: "report_path is required".to_string(),
                         })?;
+                let report_path = crate::api::migration::normalize_migration_report_path(
+                    self.model_library.library_root(),
+                    report_path,
+                )?;
                 let deleted = super::migration::delete_migration_report(
                     self.model_library.clone(),
-                    report_path.to_string(),
+                    report_path.to_string_lossy().to_string(),
                 )
                 .await?;
                 Ok(serde_json::to_value(deleted)?)

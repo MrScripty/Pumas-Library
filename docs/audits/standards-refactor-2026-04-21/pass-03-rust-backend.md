@@ -725,6 +725,10 @@ Implementation notes:
   target paths before converting them into mapping-operation `PathBuf`s, so direct API and mirrored
   IPC sync-with-resolutions flows no longer accept unchecked raw target strings outside the active
   `models_path`.
+- Completed: `pumas-core/src/api/migration.rs` and `api/state.rs` now normalize and constrain
+  incoming migration `report_path` values against the library `migration-reports` root before
+  delete-report calls reach the blocking library helper, so direct API and mirrored IPC deletion
+  entry points no longer forward unchecked raw report path strings.
 
 ### R08 - Network Listener Policy Needs Explicit Enforcement
 Status: partially compliant

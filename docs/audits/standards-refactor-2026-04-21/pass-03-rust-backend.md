@@ -183,6 +183,9 @@ Implementation notes:
   through `tokio::task::spawn_blocking` and scans for broken links on a blocking task, so
   registry persistence and cleanup no longer perform synchronous JSON/file metadata work inline on
   async runtime threads.
+- Completed: `pumas-rpc/src/shortcut/manager.rs` now provides `ShortcutManager::new_async`, and
+  `pumas-rpc/src/server.rs` uses it during bootstrap, so shortcut-manager startup no longer
+  performs synchronous shortcut-script directory probes inline on the async server startup path.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

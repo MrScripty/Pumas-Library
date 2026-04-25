@@ -87,7 +87,7 @@ pub async fn start_server(
     port: u16,
 ) -> anyhow::Result<ServerHandle> {
     // Initialize shortcut manager
-    let shortcut_manager = match ShortcutManager::new(&launcher_root) {
+    let shortcut_manager = match ShortcutManager::new_async(&launcher_root).await {
         Ok(mgr) => {
             info!("Shortcut manager initialized");
             Some(mgr)

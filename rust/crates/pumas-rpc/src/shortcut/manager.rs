@@ -48,18 +48,18 @@ pub struct ShortcutManager {
 }
 
 impl ShortcutManager {
-    fn resolve_scripts_dir(launcher_data: &Path) -> PathBuf {
+    async fn resolve_scripts_dir_async(launcher_data: &Path) -> Result<PathBuf> {
         let current_dir = launcher_data.join("shortcut-scripts");
-        if current_dir.exists() {
-            return current_dir;
+        if async_path_exists(&current_dir).await? {
+            return Ok(current_dir);
         }
 
         let legacy_dir = launcher_data.join("shortcuts");
-        if legacy_dir.exists() {
-            return legacy_dir;
+        if async_path_exists(&legacy_dir).await? {
+            return Ok(legacy_dir);
         }
 
-        current_dir
+        Ok(current_dir)
     }
 
     /// Quote a single argument for .desktop Exec syntax.
@@ -71,24 +71,16 @@ impl ShortcutManager {
         format!("\"{}\"", escaped)
     }
 
-    /// Create a new shortcut manager.
-    ///
-    /// # Arguments
-    ///
-    /// * `script_dir` - Launcher root directory
-    pub fn new(script_dir: impl AsRef<Path>) -> Result<Self> {
+    /// Create a new shortcut manager with async filesystem probes.
+    pub async fn new_async(script_dir: impl AsRef<Path>) -> Result<Self> {
         let script_dir = script_dir.as_ref().to_path_buf();
         let launcher_data = script_dir.join("launcher-data");
 
-        // Icon paths
         let base_icon = script_dir.join("resources").join("icon.webp");
         let generated_icons_dir = launcher_data.join("generated-icons");
-
-        // Script and profile paths
-        let scripts_dir = Self::resolve_scripts_dir(&launcher_data);
+        let scripts_dir = Self::resolve_scripts_dir_async(&launcher_data).await?;
         let profiles_dir = launcher_data.join("profiles");
 
-        // Platform-specific directories (uses centralized platform module)
         let apps_dir = platform::apps_dir()?;
         let desktop_dir = platform::desktop_dir()?;
 
@@ -458,8 +450,8 @@ mod tests {
         assert_eq!(quoted, r#""/tmp/some \"quoted\" path\\with\\slashes""#);
     }
 
-    #[test]
-    fn test_resolve_scripts_dir_prefers_current_directory() {
+    #[tokio::test]
+    async fn test_resolve_scripts_dir_async_prefers_current_directory() {
         let temp_dir = TempDir::new().unwrap();
         let launcher_data = temp_dir.path().join("launcher-data");
         let current_dir = launcher_data.join("shortcut-scripts");
@@ -469,13 +461,15 @@ mod tests {
         fs::create_dir_all(&legacy_dir).unwrap();
 
         assert_eq!(
-            ShortcutManager::resolve_scripts_dir(&launcher_data),
+            ShortcutManager::resolve_scripts_dir_async(&launcher_data)
+                .await
+                .unwrap(),
             current_dir
         );
     }
 
-    #[test]
-    fn test_resolve_scripts_dir_falls_back_to_legacy_directory() {
+    #[tokio::test]
+    async fn test_resolve_scripts_dir_async_falls_back_to_legacy_directory() {
         let temp_dir = TempDir::new().unwrap();
         let launcher_data = temp_dir.path().join("launcher-data");
         let legacy_dir = launcher_data.join("shortcuts");
@@ -483,7 +477,9 @@ mod tests {
         fs::create_dir_all(&legacy_dir).unwrap();
 
         assert_eq!(
-            ShortcutManager::resolve_scripts_dir(&launcher_data),
+            ShortcutManager::resolve_scripts_dir_async(&launcher_data)
+                .await
+                .unwrap(),
             legacy_dir
         );
     }

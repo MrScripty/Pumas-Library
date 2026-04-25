@@ -17,8 +17,9 @@
 //! use crate::shortcut::ShortcutManager;
 //! use std::path::Path;
 //!
-//! fn main() -> anyhow::Result<()> {
-//!     let manager = ShortcutManager::new("/path/to/launcher")?;
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let manager = ShortcutManager::new_async("/path/to/launcher").await?;
 //!
 //!     // Create shortcuts for a version
 //!     let version_dir = Path::new("/path/to/version");

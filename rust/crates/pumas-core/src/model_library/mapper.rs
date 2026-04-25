@@ -14,6 +14,7 @@ use crate::model_library::types::{
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use tokio::fs;
 use tokio::sync::RwLock;
 use walkdir::WalkDir;
 
@@ -314,7 +315,7 @@ impl ModelMapper {
 
         // Remove broken links
         for action in &preview.broken {
-            if let Err(e) = std::fs::remove_file(&action.target) {
+            if let Err(e) = fs::remove_file(&action.target).await {
                 result.errors.push((action.target.clone(), e.to_string()));
             } else {
                 result.broken_removed += 1;
@@ -393,7 +394,7 @@ impl ModelMapper {
                 }
                 ConflictResolution::Overwrite => {
                     // Remove existing and create link
-                    if let Err(e) = std::fs::remove_file(&action.target) {
+                    if let Err(e) = fs::remove_file(&action.target).await {
                         result.errors.push((action.target.clone(), e.to_string()));
                         continue;
                     }
@@ -408,7 +409,7 @@ impl ModelMapper {
                 }
                 ConflictResolution::Rename => {
                     // Create with modified name
-                    let new_target = self.get_renamed_path(&action.target);
+                    let new_target = self.get_renamed_path_async(&action.target).await?;
                     let renamed_action = MappingAction {
                         target: new_target,
                         ..action
@@ -437,11 +438,20 @@ impl ModelMapper {
     ) -> Result<()> {
         // Ensure target directory exists
         if let Some(parent) = action.target.parent() {
-            std::fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, parent))?;
         }
 
         // Try symlink first
-        let link_type = self.create_symlink_or_copy(&action.source, &action.target)?;
+        let source = action.source.clone();
+        let target = action.target.clone();
+        let link_type =
+            tokio::task::spawn_blocking(move || Self::create_symlink_or_copy(&source, &target))
+                .await
+                .map_err(|e| {
+                    PumasError::Other(format!("Failed to join create_link task: {}", e))
+                })??;
 
         // Register the link
         let entry = create_link_entry(
@@ -460,7 +470,7 @@ impl ModelMapper {
     }
 
     /// Create a symlink, falling back to hardlink or copy.
-    fn create_symlink_or_copy(&self, source: &Path, target: &Path) -> Result<LinkType> {
+    fn create_symlink_or_copy(source: &Path, target: &Path) -> Result<LinkType> {
         // Try symlink first
         #[cfg(unix)]
         {
@@ -487,6 +497,7 @@ impl ModelMapper {
     }
 
     /// Get a renamed path to avoid conflict.
+    #[cfg(test)]
     fn get_renamed_path(&self, path: &Path) -> PathBuf {
         let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -502,6 +513,29 @@ impl ModelMapper {
             let new_path = path.with_file_name(new_name);
             if !new_path.exists() {
                 return new_path;
+            }
+            counter += 1;
+        }
+    }
+
+    async fn get_renamed_path_async(&self, path: &Path) -> Result<PathBuf> {
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+        let mut counter = 1;
+        loop {
+            let new_name = if ext.is_empty() {
+                format!("{}_{}", stem, counter)
+            } else {
+                format!("{}_{}.{}", stem, counter, ext)
+            };
+
+            let new_path = path.with_file_name(new_name);
+            if !fs::try_exists(&new_path)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, &new_path))?
+            {
+                return Ok(new_path);
             }
             counter += 1;
         }

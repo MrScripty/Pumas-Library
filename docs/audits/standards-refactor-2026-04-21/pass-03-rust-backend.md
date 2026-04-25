@@ -194,6 +194,10 @@ Implementation notes:
   ids through async helpers and builds mapping previews on a blocking task, so mapping preview and
   mapping-apply preparation no longer perform config scans, exclusion lookups, model-file
   enumeration, or target-path inspection inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/mapper.rs` now uses async link-removal, async parent
+  directory creation, blocking-task link creation, and async rename-target probing in
+  mapping-apply flows, so mapping apply/sync request paths no longer perform those filesystem
+  mutations inline on async runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

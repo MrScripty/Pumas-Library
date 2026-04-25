@@ -1200,7 +1200,17 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
                 );
             }
 
-            let pre_cleanup = primary.model_library.cleanup_duplicate_repo_entries()?;
+            let pre_cleanup = tokio::task::spawn_blocking({
+                let library = primary.model_library.clone();
+                move || library.cleanup_duplicate_repo_entries()
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join duplicate repo cleanup task: {}",
+                    err
+                ))
+            })??;
             if pre_cleanup.duplicate_repo_groups > 0 {
                 tracing::info!(
                     "Reconcile(all): pre-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",
@@ -1219,7 +1229,17 @@ async fn run_scope(primary: &PrimaryState, scope: &ReconcileScope) -> Result<()>
                 );
             }
 
-            let post_cleanup = primary.model_library.cleanup_duplicate_repo_entries()?;
+            let post_cleanup = tokio::task::spawn_blocking({
+                let library = primary.model_library.clone();
+                move || library.cleanup_duplicate_repo_entries()
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join duplicate repo cleanup task: {}",
+                    err
+                ))
+            })??;
             if post_cleanup.duplicate_repo_groups > 0 {
                 tracing::info!(
                     "Reconcile(all): post-reclassify duplicate cleanup groups={}, removed={}, unresolved_groups={}, normalized_ids={}",

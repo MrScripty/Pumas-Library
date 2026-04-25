@@ -480,6 +480,10 @@ Implementation notes:
   `resolve_model_execution_descriptor` through the async effective-metadata helper, so execution
   descriptor requests no longer perform synchronous effective metadata projection reads inline on
   async runtime threads.
+- Completed: `pumas-core/src/api/reconciliation.rs` now routes duplicate repo cleanup through
+  `tokio::task::spawn_blocking`, so full-library reconciliation no longer performs synchronous
+  duplicate-directory inspection and cleanup inline on async runtime threads before and after
+  reclassification.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

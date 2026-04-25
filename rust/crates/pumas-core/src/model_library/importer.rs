@@ -1848,6 +1848,27 @@ mod tests {
         assert!(importer.has_orphan_candidates_async().await);
     }
 
+    #[tokio::test]
+    async fn test_recover_incomplete_shards_async_detects_missing_shard_set() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+        let shard_dir = library
+            .library_root()
+            .join("llm")
+            .join("llama")
+            .join("tiny-model");
+        std::fs::create_dir_all(&shard_dir).unwrap();
+        create_test_file(&shard_dir, "weights-00001-of-00002.gguf", b"partial");
+
+        let recoveries = importer.recover_incomplete_shards_async().await;
+        assert_eq!(recoveries.len(), 1);
+        assert_eq!(recoveries[0].repo_id, "llama/tiny-model");
+        assert_eq!(
+            recoveries[0].existing_files,
+            vec!["weights-00001-of-00002.gguf"]
+        );
+    }
+
     fn write_min_safetensors(path: &Path) {
         let header = b"{}";
         let header_size: u64 = header.len() as u64;

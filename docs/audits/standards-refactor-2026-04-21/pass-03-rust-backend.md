@@ -359,6 +359,10 @@ Implementation notes:
   async `ModelImporter` wrapper backed by `spawn_blocking`, so API initialization no longer
   performs a synchronous library tree orphan scan inline on the async builder path before deciding
   whether to spawn orphan adoption work.
+- Completed: `pumas-core/src/api/builder.rs` now discovers incomplete shard recoveries through an
+  async `ModelImporter` wrapper backed by `spawn_blocking`, so background startup recovery no
+  longer performs its recursive library scan and shard-set classification inline on an async task
+  before scheduling HuggingFace resume work.
 - Completed: `pumas-core/src/api/hf.rs` and `api/state_hf.rs` now validate partial-download
   destination directories with `tokio::fs::metadata`, so direct API and mirrored IPC recovery
   requests no longer perform synchronous destination `is_dir` probes inline on async runtime

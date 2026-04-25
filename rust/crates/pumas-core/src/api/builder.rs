@@ -84,7 +84,7 @@ fn start_primary_background_work(
     {
         let ps = primary_state.clone();
         runtime_tasks.spawn(async move {
-            let recoveries = ps.model_importer.recover_incomplete_shards();
+            let recoveries = ps.model_importer.recover_incomplete_shards_async().await;
             if recoveries.is_empty() {
                 return;
             }

@@ -225,6 +225,14 @@ impl ModelImporter {
         results
     }
 
+    /// Async wrapper for shard recovery discovery used on startup paths.
+    pub async fn recover_incomplete_shards_async(&self) -> Vec<IncompleteShardRecovery> {
+        let importer = self.clone();
+        tokio::task::spawn_blocking(move || importer.recover_incomplete_shards())
+            .await
+            .unwrap_or_default()
+    }
+
     /// Find directories with interrupted downloads (`.part` files) that have
     /// no download persistence entry and no metadata.
     ///

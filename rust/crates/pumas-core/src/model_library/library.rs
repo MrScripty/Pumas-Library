@@ -1693,14 +1693,14 @@ impl ModelLibrary {
     pub async fn delete_model(&self, model_id: &str, cascade: bool) -> Result<()> {
         let model_dir = self.library_root.join(model_id);
 
-        if !model_dir.exists() {
+        if !tokio::fs::try_exists(&model_dir).await? {
             return Err(PumasError::ModelNotFound {
                 model_id: model_id.to_string(),
             });
         }
 
-        let storage_kind = self
-            .load_metadata(&model_dir)?
+        let storage_kind = load_model_metadata_async(self.clone(), model_dir.clone())
+            .await?
             .and_then(|metadata| metadata.storage_kind)
             .unwrap_or(StorageKind::LibraryOwned);
 
@@ -1709,13 +1709,13 @@ impl ModelLibrary {
 
         // Cascade delete symlinks if requested
         if cascade {
-            let registry = self.link_registry.read().await;
+            let registry = self.link_registry.read().await.clone();
             let link_targets = registry.remove_all_for_model(model_id).await?;
 
             // Actually delete the symlinks
             for target in link_targets {
-                if target.is_symlink() {
-                    if let Err(e) = std::fs::remove_file(&target) {
+                if path_is_symlink_async(&target).await? {
+                    if let Err(e) = tokio::fs::remove_file(&target).await {
                         tracing::warn!("Failed to remove symlink {:?}: {}", target, e);
                     }
                 }
@@ -1723,15 +1723,10 @@ impl ModelLibrary {
         }
 
         // Delete the library-owned registry artifact directory only.
-        std::fs::remove_dir_all(&model_dir)?;
+        tokio::fs::remove_dir_all(&model_dir).await?;
 
         // Try to clean up empty parent directories
-        if let Some(parent) = model_dir.parent() {
-            let _ = std::fs::remove_dir(parent); // Only succeeds if empty
-            if let Some(grandparent) = parent.parent() {
-                let _ = std::fs::remove_dir(grandparent);
-            }
-        }
+        cleanup_empty_parent_dirs_after_move_async(&model_dir, &self.library_root).await;
 
         if storage_kind == StorageKind::ExternalReference {
             tracing::info!("Unregistered external model: {}", model_id);
@@ -2488,6 +2483,14 @@ async fn directories_have_identical_contents_async(left: PathBuf, right: PathBuf
         .map_err(|err| {
             PumasError::Other(format!("Failed to join directory comparison task: {}", err))
         })?
+}
+
+async fn path_is_symlink_async(path: &Path) -> Result<bool> {
+    match tokio::fs::symlink_metadata(path).await {
+        Ok(metadata) => Ok(metadata.file_type().is_symlink()),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(err) => Err(PumasError::io_with_path(err, path)),
+    }
 }
 
 async fn cleanup_empty_parent_dirs_after_move_async(model_dir: &Path, library_root: &Path) {

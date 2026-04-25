@@ -17,7 +17,7 @@ use tokio::sync::RwLock;
 /// - Cascade delete when a model is removed
 /// - Finding all links pointing to a specific model
 /// - Cleaning up broken links
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct LinkRegistry {
     /// Path to the registry JSON file
     registry_path: PathBuf,

@@ -402,6 +402,11 @@ Implementation notes:
   directories, and performs reclassify path collision/move cleanup through async fs helpers and
   contained blocking tasks, so `reclassify_model` no longer performs those filesystem operations
   inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` and `model_library/link_registry.rs` now
+  use async path probes, async link removal, async directory removal, and cloned registry state in
+  `delete_model`, so model deletion no longer performs synchronous existence checks, metadata
+  loads, symlink deletion, or directory cleanup inline on async runtime threads or hold the outer
+  registry lock across an await.
 - Completed: `pumas-core/src/api/builder.rs` now initializes the HuggingFace search cache and
   `HuggingFaceClient` through `tokio::task::spawn_blocking`, so API startup no longer performs
   synchronous cache-database setup, HF cache directory creation, or token-file resolution inline

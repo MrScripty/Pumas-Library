@@ -221,6 +221,10 @@ Implementation notes:
   directory move or cleanup work through explicit async boundaries, and it uses async destination
   existence checks, so library merge no longer performs synchronous metadata loads or recursive
   filesystem mutations inline on async runtime threads.
+- Completed: `pumas-core/src/model_library/library.rs` now routes bulk model-directory
+  enumeration through a blocking-task helper in deep scan, total-size, re-detect-all, and
+  reclassify-all flows, so those async library lifecycle paths no longer begin with a synchronous
+  full-library directory walk inline on runtime threads.
 - Completed: `pumas-core/src/api/models.rs` and the mirrored model metadata/mapping-preview IPC
   helpers in `api/state.rs` now use async model-directory and mapping-path existence checks so
   inference-settings, notes, and mapping-preview entry points no longer perform synchronous path

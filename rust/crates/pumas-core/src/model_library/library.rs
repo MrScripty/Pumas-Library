@@ -965,7 +965,7 @@ impl ModelLibrary {
         tracing::info!("Starting deep scan (verify_hashes={})", verify_hashes);
 
         // Collect all model directories first
-        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let model_dirs = collect_model_dirs_async(self.clone()).await?;
         let total = model_dirs.len();
 
         let mut result = DeepScanResult {
@@ -1752,7 +1752,7 @@ impl ModelLibrary {
 
     /// Get the total size of all models in the library.
     pub async fn total_size(&self) -> Result<u64> {
-        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let model_dirs = collect_model_dirs_async(self.clone()).await?;
         calculate_total_size_async(model_dirs).await
     }
 
@@ -1931,7 +1931,7 @@ impl ModelLibrary {
         tracing::info!("Re-detecting model types for all models in library");
 
         let mut updated_count = 0;
-        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let model_dirs = collect_model_dirs_async(self.clone()).await?;
         let total = model_dirs.len();
 
         for (idx, model_dir) in model_dirs.iter().enumerate() {
@@ -2295,7 +2295,7 @@ impl ModelLibrary {
 
         let mut result = ReclassifyResult::default();
         // Collect model_dirs first to avoid iterator invalidation during moves
-        let model_dirs: Vec<_> = self.model_dirs().collect();
+        let model_dirs = collect_model_dirs_async(self.clone()).await?;
         result.total = model_dirs.len();
 
         for model_dir in &model_dirs {
@@ -2656,6 +2656,17 @@ async fn calculate_total_size_async(model_dirs: Vec<PathBuf>) -> Result<u64> {
             err
         ))
     })?
+}
+
+async fn collect_model_dirs_async(library: ModelLibrary) -> Result<Vec<PathBuf>> {
+    tokio::task::spawn_blocking(move || library.model_dirs().collect())
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join model directory enumeration task: {}",
+                err
+            ))
+        })
 }
 
 async fn directories_have_identical_contents_async(left: PathBuf, right: PathBuf) -> Result<bool> {

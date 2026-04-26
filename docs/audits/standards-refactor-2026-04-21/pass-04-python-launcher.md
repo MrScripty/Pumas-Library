@@ -95,6 +95,7 @@ Launcher positives are strong. Remaining gaps:
 
 - Completed: `--run` now checks the debug backend binary produced by `--build` and passes that path to Electron through `PUMAS_RPC_BINARY`.
 - Completed: `--run-release` and `--release-smoke` pass the release backend binary produced by `--build-release`.
+- Completed: `launcher.sh` no longer short-circuits `--run-release` into a stale `electron/release/linux-unpacked` binary when one happens to exist; the flag now consistently delegates through `scripts/launcher/cli.mjs` and runs the current release build outputs from `frontend/dist`, `electron/dist`, and `rust/target/release`.
 - Completed: Electron backend path resolution has package-local tests for launcher overrides, source build profiles, packaged resource paths, and platform executable names.
 - Completed: CI smoke behavior is visible in `.github/workflows/build.yml` through bounded release smoke.
 - Completed: `installDependencies` has injectable plan coverage for dependency command checks, workspace install invocation, check/install/recheck sequencing, failed installs, failed verification, and missing runtime dependency errors.

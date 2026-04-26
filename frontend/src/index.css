@@ -414,6 +414,14 @@
     transition: opacity 0.15s ease;
   }
 
+  .download-progress-ring.is-retained {
+    background: conic-gradient(
+      hsl(var(--text-muted)/0.8) var(--progress, 0deg),
+      hsl(var(--launcher-border)/0.4) 0deg
+    );
+    opacity: 0.9;
+  }
+
   .download-resume-btn:hover .download-progress-ring.is-paused {
     background: conic-gradient(
       hsl(var(--launcher-accent-primary)/0.8) var(--progress, 0deg),

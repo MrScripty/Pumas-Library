@@ -5,6 +5,7 @@ export interface LocalModelRowState {
   canRecoverPartial: boolean;
   canResume: boolean;
   canShowRelated: boolean;
+  hasRetainedProgressRing: boolean;
   isActiveDownload: boolean;
   isConvertible: boolean;
   isDownloading: boolean;
@@ -26,6 +27,7 @@ export interface LocalModelRowState {
 interface DownloadCapabilities {
   canPause: boolean;
   canResume: boolean;
+  hasRetainedProgressRing: boolean;
   isActiveDownload: boolean;
   isPaused: boolean;
   isQueued: boolean;
@@ -59,6 +61,11 @@ function getDownloadCapabilities({
   const isQueued = model.downloadStatus === 'queued';
   const isPaused = model.downloadStatus === 'paused';
   const hasDownloadRepo = Boolean(model.downloadRepoId);
+  const downloadProgress = model.downloadProgress ?? 0;
+  const hasRetainedProgressRing =
+    !isDownloading &&
+    downloadProgress > 0 &&
+    (Boolean(model.isPartialDownload) || Boolean(model.downloadStatus));
 
   return {
     canPause:
@@ -71,6 +78,7 @@ function getDownloadCapabilities({
       (isPaused || model.downloadStatus === 'error') &&
       canResumeDownload &&
       hasDownloadRepo,
+    hasRetainedProgressRing,
     isActiveDownload: ['queued', 'downloading', 'pausing', 'cancelling'].includes(model.downloadStatus ?? ''),
     isPaused,
     isQueued,
@@ -156,6 +164,7 @@ export function getLocalModelRowState({
     canRecoverPartial: partial.canRecoverPartial,
     canResume: download.canResume,
     canShowRelated: Boolean(model.relatedAvailable) && !isDownloading && !isPartialDownload,
+    hasRetainedProgressRing: download.hasRetainedProgressRing,
     isActiveDownload: download.isActiveDownload,
     isConvertible: !isDownloading && !isPartialDownload && Boolean(model.primaryFormat) && canConvertModel,
     isDownloading,

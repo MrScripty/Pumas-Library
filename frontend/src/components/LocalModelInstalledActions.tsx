@@ -1,5 +1,6 @@
 import { ArrowRightLeft, Download, Link2 } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
+import { LocalModelDownloadProgressRing } from './LocalModelDownloadProgressRing';
 import { HoldToDeleteButton, IconButton } from './ui';
 import type { LocalModelRowState } from './LocalModelRowState';
 
@@ -18,6 +19,17 @@ function getConvertTooltip(model: ModelInfo): string {
     return 'Convert / Quantize';
   }
   return 'Convert / Re-quantize';
+}
+
+function RecoverPartialDownloadIcon({ rowState }: { rowState: LocalModelRowState }) {
+  return (
+    <>
+      {rowState.hasRetainedProgressRing && (
+        <LocalModelDownloadProgressRing isRetained={true} ringDegrees={rowState.ringDegrees} />
+      )}
+      <Download />
+    </>
+  );
 }
 
 export function LocalModelInstalledActions({
@@ -46,7 +58,7 @@ export function LocalModelInstalledActions({
       />
       {rowState.canRecoverPartial && onRecoverPartialDownload && (
         <IconButton
-          icon={<Download />}
+          icon={<RecoverPartialDownloadIcon rowState={rowState} />}
           tooltip={rowState.isRecoveringPartial ? 'Resuming partial download...' : 'Resume partial download'}
           onClick={rowState.isRecoveringPartial ? undefined : () => onRecoverPartialDownload(model)}
           disabled={rowState.isRecoveringPartial}

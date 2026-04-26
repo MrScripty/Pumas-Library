@@ -1,6 +1,6 @@
-import type { CSSProperties } from 'react';
 import { Download, Pause } from 'lucide-react';
 import type { ModelInfo } from '../types/apps';
+import { LocalModelDownloadProgressRing } from './LocalModelDownloadProgressRing';
 import { HoldToDeleteButton } from './ui';
 import type { LocalModelRowState } from './LocalModelRowState';
 
@@ -44,22 +44,6 @@ function handleDownloadAction({
   }
 }
 
-function DownloadProgressRings({ rowState }: { rowState: LocalModelRowState }) {
-  if (!rowState.isActiveDownload) {
-    return null;
-  }
-
-  return (
-    <>
-      <span
-        className={`download-progress-ring ${rowState.isQueued ? 'is-waiting' : ''} ${rowState.isPaused ? 'is-paused' : ''}`}
-        style={{ '--progress': `${rowState.ringDegrees}deg` } as CSSProperties}
-      />
-      {!rowState.isQueued && !rowState.isPaused && <span className="download-scan-ring" />}
-    </>
-  );
-}
-
 function DownloadActionIcon({ canPause }: { canPause: boolean }) {
   if (canPause) {
     return (
@@ -89,7 +73,13 @@ export function LocalModelDownloadActions({
         title={getDownloadActionTitle(model, rowState)}
         onClick={() => handleDownloadAction({ model, rowState, onPauseDownload, onResumeDownload })}
       >
-        <DownloadProgressRings rowState={rowState} />
+        {rowState.isActiveDownload && (
+          <LocalModelDownloadProgressRing
+            isPaused={rowState.isPaused}
+            isQueued={rowState.isQueued}
+            ringDegrees={rowState.ringDegrees}
+          />
+        )}
         <DownloadActionIcon canPause={rowState.canPause} />
       </button>
       {onCancelDownload && model.downloadRepoId && (

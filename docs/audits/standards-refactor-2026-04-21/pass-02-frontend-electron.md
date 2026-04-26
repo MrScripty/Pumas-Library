@@ -158,6 +158,7 @@ Rectification:
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/ModelMetadataModal.tsx` from the oversized-file baseline after it reached 275 effective lines.
 - Completed: move remote model metadata summary rendering from `RemoteModelListItem.tsx` into `frontend/src/components/RemoteModelSummary.tsx` with metadata, developer-search, auth, and retry tests.
 - Completed: `frontend/scripts/file-size-baseline.json` removes `src/components/RemoteModelListItem.tsx` from the oversized-file baseline after it reached 225 effective lines.
+- Completed: keep retained partial-download progress visualization in the local model row state and render non-active progress with the same ring surface in a grey treatment, with focused row-state and installed-action tests.
 - Completed: move physics drag pointer lifecycle, delete completion, undo restoration, and settle animation from `usePhysicsDrag.ts` into `frontend/src/hooks/usePhysicsDragPointerEvents.ts`, `frontend/src/hooks/usePhysicsDragDelete.ts`, `frontend/src/hooks/usePhysicsDragUndo.ts`, and `frontend/src/hooks/usePhysicsDragSettle.ts`, preserving drag/reorder/delete tests.
 - Completed: split `frontend/src/types/api.ts` into domain response modules, bridge-domain interfaces, and Electron global augmentation while keeping `api.ts` as the public re-export barrel.
 - Remaining: classify each remaining local state variable as transient UI, form input, derived view state, or backend-owned.

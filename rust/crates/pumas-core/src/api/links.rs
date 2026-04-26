@@ -163,6 +163,17 @@ impl PumasApi {
         app_id: &str,
         excluded: bool,
     ) -> Result<models::BaseResponse> {
+        if self.try_client().is_some() {
+            return self.call_client_method_blocking(
+                "set_model_link_exclusion",
+                serde_json::json!({
+                    "model_id": model_id,
+                    "app_id": app_id,
+                    "excluded": excluded,
+                }),
+            );
+        }
+
         self.primary()
             .model_library
             .index()
@@ -172,6 +183,13 @@ impl PumasApi {
 
     /// Get all model IDs excluded from linking for a given app.
     pub fn get_link_exclusions(&self, app_id: &str) -> Result<models::LinkExclusionsResponse> {
+        if self.try_client().is_some() {
+            return self.call_client_method_blocking(
+                "get_link_exclusions",
+                serde_json::json!({ "app_id": app_id }),
+            );
+        }
+
         let excluded = self
             .primary()
             .model_library

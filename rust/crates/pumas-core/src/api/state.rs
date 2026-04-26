@@ -664,6 +664,42 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     links: link_info,
                 })?)
             }
+            "set_model_link_exclusion" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let app_id =
+                    params["app_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "app_id is required".to_string(),
+                        })?;
+                let excluded = params
+                    .get("excluded")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(true);
+                self.model_library
+                    .index()
+                    .set_link_exclusion(model_id, app_id, excluded)?;
+                Ok(serde_json::to_value(models::BaseResponse::success())?)
+            }
+            "get_link_exclusions" => {
+                let app_id =
+                    params["app_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "app_id is required".to_string(),
+                        })?;
+                let excluded = self.model_library.index().get_excluded_model_ids(app_id)?;
+                Ok(serde_json::to_value(models::LinkExclusionsResponse {
+                    success: true,
+                    error: None,
+                    excluded_model_ids: excluded,
+                })?)
+            }
             "preview_model_mapping" => {
                 let version_tag =
                     params["version_tag"]

@@ -96,6 +96,11 @@ Implementation notes:
   manager map before awaiting, and the shared size calculator now uses a Tokio mutex in server
   state so release handlers no longer hold async read/write guards across awaited work. This
   restores `pumas-rpc` compilation by satisfying Axum's `Handler` bound for `handle_rpc`.
+- Completed: `pumas-core/src/api/links.rs` now proxies `get_link_exclusions` and
+  `set_model_link_exclusion` through blocking IPC when the API instance is a client, and
+  `pumas-core/src/api/state.rs` now exposes those link-exclusion methods on the IPC server, so
+  RPC startup against an existing primary no longer panics or fails parameter dispatch during
+  initial frontend preference loading.
 
 ### R04 - Background Task Ownership Is Incomplete
 Status: compliant

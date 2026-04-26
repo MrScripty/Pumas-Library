@@ -41,6 +41,8 @@ export function LocalModelInstalledActions({
   onRecoverPartialDownload,
   onToggleLink,
 }: LocalModelInstalledActionsProps) {
+  const showRetainedDownloadIndicator = rowState.hasRetainedProgressRing;
+
   return (
     <>
       <IconButton
@@ -56,12 +58,22 @@ export function LocalModelInstalledActions({
         active={rowState.isLinked}
         className={rowState.isLinked ? 'text-[hsl(var(--accent-success))]' : 'opacity-40'}
       />
-      {rowState.canRecoverPartial && onRecoverPartialDownload && (
+      {showRetainedDownloadIndicator && (
         <IconButton
           icon={<RecoverPartialDownloadIcon rowState={rowState} />}
-          tooltip={rowState.isRecoveringPartial ? 'Resuming partial download...' : 'Resume partial download'}
-          onClick={rowState.isRecoveringPartial ? undefined : () => onRecoverPartialDownload(model)}
-          disabled={rowState.isRecoveringPartial}
+          tooltip={
+            rowState.canRecoverPartial && onRecoverPartialDownload
+              ? rowState.isRecoveringPartial
+                ? 'Resuming partial download...'
+                : 'Resume partial download'
+              : 'Partial download'
+          }
+          onClick={
+            rowState.canRecoverPartial && onRecoverPartialDownload && !rowState.isRecoveringPartial
+              ? () => onRecoverPartialDownload(model)
+              : undefined
+          }
+          disabled={!rowState.canRecoverPartial || rowState.isRecoveringPartial}
           size="sm"
         />
       )}

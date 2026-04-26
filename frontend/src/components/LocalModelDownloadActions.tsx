@@ -64,6 +64,8 @@ export function LocalModelDownloadActions({
   onPauseDownload,
   onResumeDownload,
 }: LocalModelDownloadActionsProps) {
+  const showProgressRing = rowState.isActiveDownload || rowState.isPaused || model.downloadStatus === 'error';
+
   return (
     <>
       <button
@@ -73,9 +75,9 @@ export function LocalModelDownloadActions({
         title={getDownloadActionTitle(model, rowState)}
         onClick={() => handleDownloadAction({ model, rowState, onPauseDownload, onResumeDownload })}
       >
-        {rowState.isActiveDownload && (
+        {showProgressRing && (
           <LocalModelDownloadProgressRing
-            isPaused={rowState.isPaused}
+            isPaused={rowState.isPaused || model.downloadStatus === 'error'}
             isQueued={rowState.isQueued}
             ringDegrees={rowState.ringDegrees}
           />

@@ -44,6 +44,9 @@ interface PartialDownloadState {
 function getRingDegrees(model: ModelInfo, isQueued: boolean): number {
   const progressValue = Math.min(1, Math.max(0, model.downloadProgress ?? 0));
   const progressDegrees = Math.round(progressValue * 360);
+  if (!model.isDownloading && model.isPartialDownload && progressDegrees === 0) {
+    return 360;
+  }
   return isQueued ? 60 : Math.min(360, Math.max(0, progressDegrees));
 }
 
@@ -61,11 +64,7 @@ function getDownloadCapabilities({
   const isQueued = model.downloadStatus === 'queued';
   const isPaused = model.downloadStatus === 'paused';
   const hasDownloadRepo = Boolean(model.downloadRepoId);
-  const downloadProgress = model.downloadProgress ?? 0;
-  const hasRetainedProgressRing =
-    !isDownloading &&
-    downloadProgress > 0 &&
-    (Boolean(model.isPartialDownload) || Boolean(model.downloadStatus));
+  const hasRetainedProgressRing = !isDownloading && Boolean(model.isPartialDownload);
 
   return {
     canPause:

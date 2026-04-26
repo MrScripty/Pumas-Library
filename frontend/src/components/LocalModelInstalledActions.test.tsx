@@ -57,4 +57,25 @@ describe('LocalModelInstalledActions', () => {
     const button = screen.getByRole('button', { name: /resume partial download/i });
     expect(button.querySelector('.download-progress-ring.is-retained')).not.toBeNull();
   });
+
+  it('renders a disabled grey retained progress ring when the partial download is not recoverable', () => {
+    render(
+      <LocalModelInstalledActions
+        model={createModel({ isPartialDownload: true })}
+        rowState={createRowState({
+          canRecoverPartial: false,
+          hasRetainedProgressRing: true,
+          isPartialDownload: true,
+          ringDegrees: 360,
+        })}
+        selectedAppId="comfyui"
+        onRecoverPartialDownload={vi.fn()}
+        onToggleLink={vi.fn()}
+      />
+    );
+
+    const button = screen.getByRole('button', { name: /partial download/i });
+    expect(button).toBeDisabled();
+    expect(button.querySelector('.download-progress-ring.is-retained')).not.toBeNull();
+  });
 });

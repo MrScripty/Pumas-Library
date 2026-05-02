@@ -3,6 +3,7 @@
 mod dependency_profiles;
 mod governance;
 mod metadata_overlays;
+mod package_facts_cache;
 
 use crate::{PumasError, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
@@ -30,6 +31,38 @@ pub struct ModelRecord {
     pub tags: Vec<String>,
     pub hashes: HashMap<String, String>,
     pub metadata: serde_json::Value,
+    pub updated_at: String,
+}
+
+/// Package-facts cache scope.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPackageFactsCacheScope {
+    Summary,
+    Detail,
+}
+
+impl ModelPackageFactsCacheScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Summary => "summary",
+            Self::Detail => "detail",
+        }
+    }
+}
+
+/// Durable package-facts cache row owned by a model record.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelPackageFactsCacheRecord {
+    pub model_id: String,
+    pub selected_artifact_id: String,
+    pub cache_scope: ModelPackageFactsCacheScope,
+    pub package_facts_contract_version: i64,
+    pub producer_revision: Option<String>,
+    pub source_fingerprint: String,
+    pub facts_json: String,
+    pub cached_at: String,
     pub updated_at: String,
 }
 
@@ -211,6 +244,7 @@ impl ModelIndex {
     fn configure_connection(conn: &Connection) -> Result<()> {
         conn.execute_batch(
             "
+            PRAGMA foreign_keys=ON;
             PRAGMA journal_mode=WAL;
             PRAGMA busy_timeout=30000;
             PRAGMA synchronous=NORMAL;
@@ -259,6 +293,7 @@ impl ModelIndex {
         )?;
 
         Self::ensure_metadata_v2_schema(conn)?;
+        Self::ensure_package_facts_cache_schema(conn)?;
         Self::seed_metadata_v2_rows(conn)?;
 
         Ok(())
@@ -778,6 +813,25 @@ mod tests {
         }
     }
 
+    fn create_package_facts_cache_record(
+        model_id: &str,
+        scope: ModelPackageFactsCacheScope,
+        source_fingerprint: &str,
+        facts_json: String,
+    ) -> ModelPackageFactsCacheRecord {
+        ModelPackageFactsCacheRecord {
+            model_id: model_id.to_string(),
+            selected_artifact_id: String::new(),
+            cache_scope: scope,
+            package_facts_contract_version: 1,
+            producer_revision: Some("test-producer".to_string()),
+            source_fingerprint: source_fingerprint.to_string(),
+            facts_json,
+            cached_at: "2026-05-02T00:00:00.000Z".to_string(),
+            updated_at: "2026-05-02T00:00:00.000Z".to_string(),
+        }
+    }
+
     #[test]
     fn test_upsert_and_get() {
         let (index, _temp) = create_test_index();
@@ -814,6 +868,122 @@ mod tests {
         assert!(deleted);
 
         assert!(index.get("delete-me").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_package_facts_cache_round_trips_detail_json() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let facts_json = serde_json::json!({
+            "package_facts_contract_version": 1,
+            "artifact": {"artifact_kind": "safetensors"}
+        })
+        .to_string();
+        let record = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Detail,
+            "fingerprint-v1",
+            facts_json.clone(),
+        );
+
+        assert!(index.upsert_model_package_facts_cache(&record).unwrap());
+
+        let loaded = index
+            .get_model_package_facts_cache("facts-model", None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.model_id, "facts-model");
+        assert_eq!(loaded.cache_scope, ModelPackageFactsCacheScope::Detail);
+        assert_eq!(loaded.source_fingerprint, "fingerprint-v1");
+        assert_eq!(loaded.facts_json, facts_json);
+    }
+
+    #[test]
+    fn test_package_facts_cache_upsert_reports_changes() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let first = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Summary,
+            "fingerprint-v1",
+            serde_json::json!({"summary": {"backend_hints": ["mlx"]}}).to_string(),
+        );
+        assert!(index.upsert_model_package_facts_cache(&first).unwrap());
+        assert!(!index.upsert_model_package_facts_cache(&first).unwrap());
+
+        let mut changed = first.clone();
+        changed.source_fingerprint = "fingerprint-v2".to_string();
+        changed.facts_json =
+            serde_json::json!({"summary": {"backend_hints": ["vllm"]}}).to_string();
+        changed.updated_at = "2026-05-02T00:01:00.000Z".to_string();
+        assert!(index.upsert_model_package_facts_cache(&changed).unwrap());
+
+        let loaded = index
+            .get_model_package_facts_cache(
+                "facts-model",
+                Some(""),
+                ModelPackageFactsCacheScope::Summary,
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.cached_at, first.cached_at);
+        assert_eq!(loaded.updated_at, changed.updated_at);
+        assert_eq!(loaded.source_fingerprint, "fingerprint-v2");
+    }
+
+    #[test]
+    fn test_package_facts_cache_delete_removes_model_rows() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let record = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Detail,
+            "fingerprint-v1",
+            serde_json::json!({"detail": true}).to_string(),
+        );
+        index.upsert_model_package_facts_cache(&record).unwrap();
+
+        assert_eq!(
+            index
+                .delete_model_package_facts_cache("facts-model")
+                .unwrap(),
+            1
+        );
+        assert!(index
+            .get_model_package_facts_cache("facts-model", None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_package_facts_cache_cascades_when_model_deleted() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let record = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Detail,
+            "fingerprint-v1",
+            serde_json::json!({"detail": true}).to_string(),
+        );
+        index.upsert_model_package_facts_cache(&record).unwrap();
+
+        assert!(index.delete("facts-model").unwrap());
+        assert!(index
+            .get_model_package_facts_cache("facts-model", None, ModelPackageFactsCacheScope::Detail)
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -972,7 +1142,8 @@ mod tests {
                     'model_metadata_history',
                     'dependency_profiles',
                     'model_dependency_bindings',
-                    'dependency_binding_history'
+                    'dependency_binding_history',
+                    'model_package_facts_cache'
                  )",
             )
             .unwrap();
@@ -982,7 +1153,7 @@ mod tests {
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap();
 
-        assert_eq!(rows.len(), 9);
+        assert_eq!(rows.len(), 10);
     }
 
     #[test]

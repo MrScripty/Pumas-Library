@@ -12,7 +12,8 @@ mod query;
 pub use fts5::{FTS5Config, FTS5Manager};
 pub use model_index::{
     DependencyBindingHistoryRecord, DependencyProfileRecord, ForeignKeyViolation,
-    ModelDependencyBindingRecord, ModelIndex, ModelRecord, ModelTypeArchRule, ModelTypeConfigRule,
-    SearchResult, TaskSignatureMapping,
+    ModelDependencyBindingRecord, ModelIndex, ModelPackageFactsCacheRecord,
+    ModelPackageFactsCacheScope, ModelRecord, ModelTypeArchRule, ModelTypeConfigRule, SearchResult,
+    TaskSignatureMapping,
 };
 pub use query::{build_fts5_query, escape_fts5_term};

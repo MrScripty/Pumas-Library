@@ -12,7 +12,8 @@ mod projection;
 
 use crate::error::{PumasError, Result};
 use crate::index::{
-    DependencyProfileRecord, ModelDependencyBindingRecord, ModelIndex, ModelRecord, SearchResult,
+    DependencyProfileRecord, ModelDependencyBindingRecord, ModelIndex,
+    ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope, ModelRecord, SearchResult,
 };
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::model_library::external_assets::{
@@ -40,11 +41,13 @@ use crate::models::{
     TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::UNIX_EPOCH;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
@@ -2094,6 +2097,34 @@ impl ModelLibrary {
             })?;
 
         let selected_files = package_selected_files(&model_dir, &metadata).await?;
+        let source_fingerprint =
+            package_facts_source_fingerprint(&model_dir, &descriptor, &metadata, &selected_files)
+                .await?;
+        let can_persist_package_facts = self.index.get(model_id)?.is_some();
+        if can_persist_package_facts {
+            if let Some(cached) = self.index.get_model_package_facts_cache(
+                model_id,
+                None,
+                ModelPackageFactsCacheScope::Detail,
+            )? {
+                if cached.package_facts_contract_version
+                    == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+                    && cached.source_fingerprint == source_fingerprint
+                {
+                    match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
+                        Ok(facts) => return Ok(facts),
+                        Err(err) => {
+                            tracing::warn!(
+                                model_id,
+                                error = %err,
+                                "Ignoring invalid cached model package facts"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
         let artifact_kind = package_artifact_kind(&model_dir, &metadata, &selected_files).await?;
         let component_facts = package_component_facts(&model_dir).await?;
         let transformers =
@@ -2103,7 +2134,7 @@ impl ModelLibrary {
         let requires_custom_code =
             metadata.requires_custom_code.unwrap_or(false) || !auto_map_sources.is_empty();
 
-        Ok(ResolvedModelPackageFacts {
+        let facts = ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
             model_ref: PumasModelRef {
                 model_id: model_id.to_string(),
@@ -2150,7 +2181,24 @@ impl ModelLibrary {
                 metadata.runtime_engine_hints.as_deref().unwrap_or(&[]),
             ),
             diagnostics: Vec::new(),
-        })
+        };
+        if can_persist_package_facts {
+            let now = chrono::Utc::now().to_rfc3339();
+            self.index
+                .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
+                    model_id: model_id.to_string(),
+                    selected_artifact_id: String::new(),
+                    cache_scope: ModelPackageFactsCacheScope::Detail,
+                    package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
+                    producer_revision: metadata.updated_date.clone(),
+                    source_fingerprint,
+                    facts_json: serde_json::to_string(&facts)?,
+                    cached_at: now.clone(),
+                    updated_at: now,
+                })?;
+        }
+
+        Ok(facts)
     }
 
     /// Reclassify a model: re-detect its type and move to the correct directory if needed.
@@ -4871,6 +4919,92 @@ async fn package_selected_files(model_dir: &Path, metadata: &ModelMetadata) -> R
     })
     .await
     .map_err(|err| PumasError::Other(format!("Failed to join package file scan: {}", err)))?
+}
+
+async fn package_facts_source_fingerprint(
+    model_dir: &Path,
+    descriptor: &ModelExecutionDescriptor,
+    metadata: &ModelMetadata,
+    selected_files: &[String],
+) -> Result<String> {
+    let model_dir = model_dir.to_path_buf();
+    let descriptor_json = serde_json::to_string(descriptor)?;
+    let metadata_json = serde_json::to_string(metadata)?;
+    let selected_files = selected_files.iter().cloned().collect::<BTreeSet<_>>();
+
+    tokio::task::spawn_blocking(move || {
+        let mut hasher = Sha256::new();
+        let mut fingerprint_files = selected_files;
+        if let Ok(entries) = std::fs::read_dir(model_dir.join("chat_templates")) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("jinja")
+                {
+                    if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                        fingerprint_files.insert(format!("chat_templates/{}", name));
+                    }
+                }
+            }
+        }
+
+        update_package_facts_hash_part(
+            &mut hasher,
+            "contract_version",
+            &PACKAGE_FACTS_CONTRACT_VERSION.to_string(),
+        );
+        update_package_facts_hash_part(&mut hasher, "descriptor", &descriptor_json);
+        update_package_facts_hash_part(&mut hasher, "metadata", &metadata_json);
+
+        for relative_path in fingerprint_files {
+            update_package_facts_hash_part(&mut hasher, "file", &relative_path);
+            let path = model_dir.join(&relative_path);
+            match std::fs::metadata(&path) {
+                Ok(metadata) => {
+                    update_package_facts_hash_part(&mut hasher, "file_state", "present");
+                    update_package_facts_hash_part(
+                        &mut hasher,
+                        "file_len",
+                        &metadata.len().to_string(),
+                    );
+                    let modified = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|time| time.duration_since(UNIX_EPOCH).ok());
+                    if let Some(modified) = modified {
+                        update_package_facts_hash_part(
+                            &mut hasher,
+                            "file_mtime_secs",
+                            &modified.as_secs().to_string(),
+                        );
+                        update_package_facts_hash_part(
+                            &mut hasher,
+                            "file_mtime_nanos",
+                            &modified.subsec_nanos().to_string(),
+                        );
+                    }
+                }
+                Err(_) => {
+                    update_package_facts_hash_part(&mut hasher, "file_state", "missing");
+                }
+            }
+        }
+
+        Ok::<_, PumasError>(hex::encode(hasher.finalize()))
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join package facts fingerprint task: {}",
+            err
+        ))
+    })?
+}
+
+fn update_package_facts_hash_part(hasher: &mut Sha256, label: &str, value: &str) {
+    hasher.update(label.as_bytes());
+    hasher.update([0]);
+    hasher.update(value.as_bytes());
+    hasher.update([0xff]);
 }
 
 const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[

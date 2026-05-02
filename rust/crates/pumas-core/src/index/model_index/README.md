@@ -9,6 +9,7 @@ This directory splits specialized `ModelIndex` table logic out of the main `mode
 | `governance.rs` | Metadata-v2 schema/bootstrap helpers plus link-exclusion, task-signature mapping, and model-type rule queries. |
 | `dependency_profiles.rs` | `ModelIndex` methods for dependency profile versioning and model-to-profile binding rows. |
 | `metadata_overlays.rs` | `ModelIndex` methods for metadata overlays, baselines, effective metadata reads, and append-only history records. |
+| `package_facts_cache.rs` | `ModelIndex` methods for durable summary/detail package-facts cache rows keyed by model and selected artifact scope. |
 
 ## Problem
 The model index owns more than search rows: it also persists governance tables for task-signature mappings and model-type rules, dependency profile contracts, and metadata override history. Those concerns need transactional SQLite access through the same `ModelIndex` connection, but leaving all of that logic in `model_index.rs` makes the index boundary harder to review and maintain.
@@ -19,6 +20,7 @@ The model index owns more than search rows: it also persists governance tables f
 - Dependency profile versions must be immutable once published for a given `(profile_id, profile_version)`.
 - Effective metadata reads must merge a baseline row plus the latest active overlay deterministically.
 - History rows must remain ordered and append-only enough to support audits and repair flows.
+- Package-facts cache rows are derived projections; missing or stale rows must be regenerable from model metadata and bounded package-file inspection.
 
 ## Decision
 - Keep these methods as `impl ModelIndex` blocks in separate files so they still share the same connection, transactions, and error types.
@@ -37,6 +39,7 @@ The model index owns more than search rows: it also persists governance tables f
 - Effective metadata is always computed as `baseline + latest active overlay`.
 - Metadata history rows are returned in deterministic `(created_at, event_id)` order.
 - Overlay writes and supersession happen transactionally so readers never observe a half-applied transition.
+- Package-facts cache rows must stay model-owned and be removed when their parent model row is deleted.
 
 ## Revisit Triggers
 - New index-owned table families are added and start competing for ownership inside `ModelIndex`.
@@ -75,8 +78,10 @@ let model_type = index.resolve_model_type_hint("image-text-to-text")?;
 - `model_dependency_bindings` rows reference immutable profile versions and are the authoritative active binding source for downstream projection.
 - `model_metadata_overlays` store merge-patch JSON fragments, not full metadata snapshots.
 - `model_metadata_history` is append-oriented audit data and must preserve deterministic ordering for consumers that diff or replay changes.
+- `model_package_facts_cache` stores JSON facts with SQLite `json_valid` enforcement and uses package-facts contract version plus source fingerprint columns for stale checks.
 - Compatibility rule: new optional fields may be added to these row projections, but existing rows must remain readable by current index code.
 
 ## Regeneration Rules
 - Recompute `profile_hash` from canonicalized JSON before comparing or writing dependency profile rows.
 - Rebuild effective metadata by reapplying the active overlay to the stored baseline rather than mutating the baseline in place.
+- Regenerate package-facts cache rows when the stored contract version or source fingerprint does not match the current model package evidence.

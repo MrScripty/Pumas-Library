@@ -1,3 +1,4 @@
+use pumas_library::index::ModelPackageFactsCacheScope;
 use pumas_library::models::{
     BackendHintLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind, PackageFactStatus,
     ProcessorComponentKind,
@@ -9,6 +10,30 @@ async fn setup_library() -> (TempDir, ModelLibrary) {
     let temp_dir = TempDir::new().unwrap();
     let library = ModelLibrary::new(temp_dir.path()).await.unwrap();
     (temp_dir, library)
+}
+
+async fn create_cache_test_model(library: &ModelLibrary, model_id: &str) {
+    let model_dir = library.build_model_path("llm", "example", "cache-test");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("cache-test".to_string()),
+        official_name: Some("Cache Test".to_string()),
+        task_type_primary: Some("text_generation".to_string()),
+        updated_date: Some("2026-05-02T00:00:00Z".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.rebuild_index().await.unwrap();
 }
 
 #[tokio::test]
@@ -292,4 +317,72 @@ async fn extracts_processor_component_class_names_and_chat_templates() {
         component.kind == ProcessorComponentKind::ChatTemplate
             && component.relative_path.as_deref() == Some("chat_templates/default.jinja")
     }));
+}
+
+#[tokio::test]
+async fn reuses_fresh_package_facts_detail_cache() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let first = library.resolve_model_package_facts(model_id).await.unwrap();
+    let cached = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let mut cached_facts = first.clone();
+    cached_facts.task.task_type_primary = Some("cached_text_generation".to_string());
+    let mut cached_row = cached.clone();
+    cached_row.facts_json = serde_json::to_string(&cached_facts).unwrap();
+    cached_row.updated_at = "2026-05-02T00:01:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&cached_row)
+        .unwrap());
+
+    let resolved = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert_eq!(
+        resolved.task.task_type_primary.as_deref(),
+        Some("cached_text_generation")
+    );
+}
+
+#[tokio::test]
+async fn regenerates_stale_package_facts_detail_cache() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let first = library.resolve_model_package_facts(model_id).await.unwrap();
+    let cached = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let mut stale_facts = first.clone();
+    stale_facts.task.task_type_primary = Some("stale_cached_task".to_string());
+    let mut stale_row = cached.clone();
+    stale_row.source_fingerprint = "stale-fingerprint".to_string();
+    stale_row.facts_json = serde_json::to_string(&stale_facts).unwrap();
+    stale_row.updated_at = "2026-05-02T00:01:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&stale_row)
+        .unwrap());
+
+    let resolved = library.resolve_model_package_facts(model_id).await.unwrap();
+    let refreshed = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        resolved.task.task_type_primary.as_deref(),
+        Some("text_generation")
+    );
+    assert_ne!(refreshed.source_fingerprint, "stale-fingerprint");
+    assert!(!refreshed.facts_json.contains("stale_cached_task"));
 }

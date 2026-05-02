@@ -65,6 +65,9 @@ Provide a single backend-owned model registry that can import, classify, validat
   system instead of introducing a second registry or runtime-routing contract.
 - **Backend-owned path classification**: Drag/drop and picker intake must classify raw paths
   through the model library before import so bundle/container decisions stay deterministic.
+- **Package facts as read-only projection**: `resolve_model_package_facts`
+  exposes bounded package evidence from existing metadata and package files
+  without adding runtime selection policy or a new persisted source of truth.
 - **Recovery helper split**: Filesystem repair and recovery scans stay in `importer/` child
   modules so the main importer keeps the copy/hash/metadata pipeline readable without widening
   `ModelImporter` visibility.
@@ -82,6 +85,9 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Duplicate cleanup, reclassification, and index rebuild must be idempotent on unchanged libraries.
 - Saved Hugging Face evidence must remain available for future backfill and
   reclassification passes even when the original remote lookup is not repeated.
+- Package-fact resolution must stay read-only until lazy package-fact
+  persistence is explicitly introduced. It may parse bounded package metadata
+  files, but it must not execute Python or load Transformers classes.
 
 ## Revisit Triggers
 - A second persisted source of truth is introduced for model-state queries.

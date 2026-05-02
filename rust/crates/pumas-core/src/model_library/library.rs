@@ -32,7 +32,13 @@ use crate::model_library::{
     push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
     LinkRegistry, ModelTypeResolution, TaskNormalizationStatus,
 };
-use crate::models::{AssetValidationState, ModelExecutionDescriptor, StorageKind};
+use crate::models::{
+    AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
+    GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic, PackageArtifactKind,
+    PackageFactStatus, ProcessorComponentFacts, ProcessorComponentKind, PumasModelRef,
+    ResolvedArtifactFacts, ResolvedModelPackageFacts, StorageKind, TaskEvidence,
+    TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::io::{BufReader, Read};
@@ -2071,6 +2077,76 @@ impl ModelLibrary {
             storage_kind,
             validation_state,
             dependency_resolution,
+        })
+    }
+
+    /// Resolve versioned package facts for a model without selecting a runtime.
+    pub async fn resolve_model_package_facts(
+        &self,
+        model_id: &str,
+    ) -> Result<ResolvedModelPackageFacts> {
+        let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
+        let model_dir = self.library_root.join(model_id);
+        let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
+            .await?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+
+        let selected_files = package_selected_files(&model_dir, &metadata).await?;
+        let artifact_kind = package_artifact_kind(&model_dir, &metadata, &selected_files).await?;
+        let component_facts = package_component_facts(&model_dir).await?;
+        let transformers =
+            transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
+        let generation_defaults = generation_default_facts(&model_dir).await?;
+
+        Ok(ResolvedModelPackageFacts {
+            package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
+            model_ref: PumasModelRef {
+                model_id: model_id.to_string(),
+                revision: None,
+                selected_artifact_id: None,
+                selected_artifact_path: Some(descriptor.entry_path.clone()),
+                migration_diagnostics: Vec::new(),
+            },
+            artifact: ResolvedArtifactFacts {
+                artifact_kind,
+                entry_path: descriptor.entry_path,
+                storage_kind: descriptor.storage_kind,
+                validation_state: descriptor.validation_state,
+                validation_errors: metadata.validation_errors.clone().unwrap_or_default(),
+                companion_artifacts: companion_artifacts(&selected_files),
+                selected_files: selected_files.clone(),
+            },
+            components: component_facts,
+            transformers,
+            task: TaskEvidence {
+                pipeline_tag: metadata.pipeline_tag.clone().or_else(|| {
+                    metadata
+                        .huggingface_evidence
+                        .as_ref()
+                        .and_then(|evidence| evidence.pipeline_tag.clone())
+                }),
+                task_type_primary: metadata.task_type_primary.clone(),
+                input_modalities: metadata.input_modalities.clone().unwrap_or_default(),
+                output_modalities: metadata.output_modalities.clone().unwrap_or_default(),
+            },
+            generation_defaults,
+            custom_code: CustomCodeFacts {
+                requires_custom_code: metadata.requires_custom_code.unwrap_or(false),
+                custom_code_sources: metadata.custom_code_sources.clone().unwrap_or_default(),
+                auto_map_sources: Vec::new(),
+                dependency_manifests: selected_files
+                    .iter()
+                    .filter(|path| path.as_str() == "requirements.txt")
+                    .cloned()
+                    .collect(),
+            },
+            backend_hints: backend_hint_facts(
+                metadata.recommended_backend.as_deref(),
+                metadata.runtime_engine_hints.as_deref().unwrap_or(&[]),
+            ),
+            diagnostics: Vec::new(),
         })
     }
 
@@ -4745,6 +4821,336 @@ fn collect_format_hints(metadata: &ModelMetadata) -> Vec<String> {
     }
 
     formats.into_iter().collect()
+}
+
+async fn package_selected_files(model_dir: &Path, metadata: &ModelMetadata) -> Result<Vec<String>> {
+    let mut names = BTreeSet::new();
+    if let Some(files) = metadata.files.as_ref() {
+        names.extend(files.iter().map(|file| file.name.clone()));
+        names.extend(
+            metadata
+                .expected_files
+                .iter()
+                .flatten()
+                .map(std::string::ToString::to_string),
+        );
+    }
+
+    for filename in STANDARD_PACKAGE_FACT_FILENAMES {
+        if tokio::fs::try_exists(model_dir.join(filename)).await? {
+            names.insert((*filename).to_string());
+        }
+    }
+
+    if !names.is_empty() {
+        return Ok(names.into_iter().collect());
+    }
+
+    let model_dir = model_dir.to_path_buf();
+    tokio::task::spawn_blocking(move || {
+        let files = WalkDir::new(model_dir)
+            .min_depth(1)
+            .max_depth(2)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_type().is_file())
+            .filter_map(|entry| {
+                entry
+                    .path()
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(std::string::ToString::to_string)
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        Ok::<_, PumasError>(files)
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join package file scan: {}", err)))?
+}
+
+const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
+    "config.json",
+    "generation_config.json",
+    "tokenizer.json",
+    "tokenizer_config.json",
+    "processor_config.json",
+    "preprocessor_config.json",
+    "image_processor_config.json",
+    "video_processor_config.json",
+    "feature_extractor_config.json",
+    "chat_template.jinja",
+    "model_index.json",
+    "requirements.txt",
+];
+
+async fn package_artifact_kind(
+    model_dir: &Path,
+    metadata: &ModelMetadata,
+    selected_files: &[String],
+) -> Result<PackageArtifactKind> {
+    if is_diffusers_bundle(metadata) {
+        return Ok(PackageArtifactKind::DiffusersBundle);
+    }
+    if selected_files
+        .iter()
+        .any(|file| file.to_lowercase().ends_with(".gguf"))
+    {
+        return Ok(PackageArtifactKind::Gguf);
+    }
+    if selected_files
+        .iter()
+        .any(|file| file.to_lowercase().ends_with(".onnx"))
+    {
+        return Ok(PackageArtifactKind::Onnx);
+    }
+    if selected_files
+        .iter()
+        .any(|file| file.to_lowercase().ends_with(".safetensors"))
+    {
+        if tokio::fs::try_exists(model_dir.join("config.json")).await? {
+            return Ok(PackageArtifactKind::HfCompatibleDirectory);
+        }
+        return Ok(PackageArtifactKind::Safetensors);
+    }
+    if tokio::fs::try_exists(model_dir.join("config.json")).await? {
+        return Ok(PackageArtifactKind::HfCompatibleDirectory);
+    }
+    Ok(PackageArtifactKind::Unknown)
+}
+
+async fn package_component_facts(model_dir: &Path) -> Result<Vec<ProcessorComponentFacts>> {
+    let candidates = [
+        (ProcessorComponentKind::Config, "config.json"),
+        (ProcessorComponentKind::Tokenizer, "tokenizer.json"),
+        (
+            ProcessorComponentKind::TokenizerConfig,
+            "tokenizer_config.json",
+        ),
+        (ProcessorComponentKind::Processor, "processor_config.json"),
+        (
+            ProcessorComponentKind::Preprocessor,
+            "preprocessor_config.json",
+        ),
+        (
+            ProcessorComponentKind::ImageProcessor,
+            "image_processor_config.json",
+        ),
+        (
+            ProcessorComponentKind::VideoProcessor,
+            "video_processor_config.json",
+        ),
+        (
+            ProcessorComponentKind::AudioFeatureExtractor,
+            "feature_extractor_config.json",
+        ),
+        (ProcessorComponentKind::ChatTemplate, "chat_template.jinja"),
+        (
+            ProcessorComponentKind::GenerationConfig,
+            "generation_config.json",
+        ),
+        (ProcessorComponentKind::ModelIndex, "model_index.json"),
+    ];
+    let mut facts = Vec::new();
+    for (kind, relative_path) in candidates {
+        if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+            facts.push(ProcessorComponentFacts {
+                kind,
+                status: PackageFactStatus::Present,
+                relative_path: Some(relative_path.to_string()),
+                class_name: None,
+                message: None,
+            });
+        }
+    }
+    Ok(facts)
+}
+
+async fn transformers_package_evidence(
+    model_dir: &Path,
+    metadata: &ModelMetadata,
+    selected_files: &[String],
+) -> Result<Option<TransformersPackageEvidence>> {
+    let config_path = model_dir.join("config.json");
+    let config_exists = tokio::fs::try_exists(&config_path).await?;
+    let generation_config_exists =
+        tokio::fs::try_exists(model_dir.join("generation_config.json")).await?;
+    if !config_exists && !generation_config_exists {
+        return Ok(None);
+    }
+
+    let config = if config_exists {
+        let config_path = config_path.clone();
+        tokio::task::spawn_blocking(move || {
+            std::fs::read_to_string(config_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        })
+        .await
+        .map_err(|err| PumasError::Other(format!("Failed to join config parse: {}", err)))?
+    } else {
+        None
+    };
+
+    let architectures = config
+        .as_ref()
+        .and_then(|value| value.get("architectures"))
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .or_else(|| {
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.architectures.clone())
+        })
+        .unwrap_or_default();
+
+    Ok(Some(TransformersPackageEvidence {
+        config_status: if config_exists {
+            PackageFactStatus::Present
+        } else {
+            PackageFactStatus::Missing
+        },
+        config_model_type: config
+            .as_ref()
+            .and_then(|value| value.get("model_type"))
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .or_else(|| {
+                metadata
+                    .huggingface_evidence
+                    .as_ref()
+                    .and_then(|evidence| evidence.config_model_type.clone())
+            }),
+        architectures,
+        dtype: config
+            .as_ref()
+            .and_then(|value| value.get("dtype"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        torch_dtype: config
+            .as_ref()
+            .and_then(|value| value.get("torch_dtype"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        auto_map: config
+            .as_ref()
+            .and_then(|value| value.get("auto_map"))
+            .and_then(Value::as_object)
+            .map(|map| map.keys().cloned().collect())
+            .unwrap_or_default(),
+        processor_class: config
+            .as_ref()
+            .and_then(|value| value.get("processor_class"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        generation_config_status: if generation_config_exists {
+            PackageFactStatus::Present
+        } else {
+            PackageFactStatus::Missing
+        },
+        source_revision: None,
+        selected_files: selected_files
+            .iter()
+            .filter(|file| {
+                file.as_str() == "config.json" || file.as_str() == "generation_config.json"
+            })
+            .cloned()
+            .collect(),
+    }))
+}
+
+async fn generation_default_facts(model_dir: &Path) -> Result<GenerationDefaultFacts> {
+    let generation_config_path = model_dir.join("generation_config.json");
+    if !tokio::fs::try_exists(&generation_config_path).await? {
+        return Ok(GenerationDefaultFacts {
+            status: PackageFactStatus::Missing,
+            source_path: None,
+            defaults: None,
+            diagnostics: Vec::new(),
+        });
+    }
+
+    let parsed = tokio::task::spawn_blocking(move || {
+        std::fs::read_to_string(generation_config_path)
+            .map_err(|err| err.to_string())
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).map_err(|err| err.to_string()))
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join generation config parse: {}", err)))?;
+
+    match parsed {
+        Ok(defaults) => Ok(GenerationDefaultFacts {
+            status: PackageFactStatus::Present,
+            source_path: Some("generation_config.json".to_string()),
+            defaults: Some(defaults),
+            diagnostics: Vec::new(),
+        }),
+        Err(message) => Ok(GenerationDefaultFacts {
+            status: PackageFactStatus::Invalid,
+            source_path: Some("generation_config.json".to_string()),
+            defaults: None,
+            diagnostics: vec![ModelPackageDiagnostic {
+                code: "invalid_generation_config_json".to_string(),
+                message,
+                path: Some("generation_config.json".to_string()),
+            }],
+        }),
+    }
+}
+
+fn backend_hint_facts(
+    recommended_backend: Option<&str>,
+    runtime_engine_hints: &[String],
+) -> BackendHintFacts {
+    let mut raw = BTreeSet::new();
+    if let Some(backend) = recommended_backend.filter(|backend| !backend.trim().is_empty()) {
+        raw.insert(backend.trim().to_string());
+    }
+    raw.extend(
+        runtime_engine_hints
+            .iter()
+            .filter(|hint| !hint.trim().is_empty())
+            .map(|hint| hint.trim().to_string()),
+    );
+
+    let mut accepted = Vec::new();
+    let mut unsupported = Vec::new();
+    for hint in &raw {
+        match hint.to_lowercase().as_str() {
+            "transformers" => accepted.push(BackendHintLabel::Transformers),
+            "llama.cpp" | "llamacpp" | "llama-cpp" => accepted.push(BackendHintLabel::LlamaCpp),
+            "vllm" => accepted.push(BackendHintLabel::Vllm),
+            "mlx" => accepted.push(BackendHintLabel::Mlx),
+            "candle" => accepted.push(BackendHintLabel::Candle),
+            "diffusers" => accepted.push(BackendHintLabel::Diffusers),
+            "onnx-runtime" | "onnxruntime" => accepted.push(BackendHintLabel::OnnxRuntime),
+            _ => unsupported.push(hint.clone()),
+        }
+    }
+    accepted.sort_by_key(|hint| serde_json::to_string(hint).unwrap_or_default());
+    accepted.dedup();
+
+    BackendHintFacts {
+        accepted,
+        raw: raw.into_iter().collect(),
+        unsupported,
+    }
+}
+
+fn companion_artifacts(selected_files: &[String]) -> Vec<String> {
+    selected_files
+        .iter()
+        .filter(|file| file.to_lowercase().contains("mmproj"))
+        .cloned()
+        .collect()
 }
 
 /// Result of a deep scan operation.

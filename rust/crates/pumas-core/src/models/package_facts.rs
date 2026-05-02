@@ -99,6 +99,7 @@ pub enum ProcessorComponentKind {
     GenerationConfig,
     ModelIndex,
     WeightIndex,
+    Shard,
     Weights,
     Adapter,
     Quantization,

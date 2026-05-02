@@ -389,6 +389,93 @@ async fn extracts_processor_component_class_names_and_chat_templates() {
 }
 
 #[tokio::test]
+async fn extracts_weight_index_and_shard_component_evidence() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/sharded-transformers";
+    let model_dir = library.build_model_path("llm", "example", "sharded-transformers");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(
+        model_dir.join("model.safetensors.index.json"),
+        r#"{
+          "metadata": {"total_size": 24},
+          "weight_map": {
+            "model.embed_tokens.weight": "model-00001-of-00002.safetensors",
+            "model.layers.0.weight": "model-00002-of-00002.safetensors"
+          }
+        }"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("model-00001-of-00002.safetensors"),
+        "shard-1",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("model-00002-of-00002.safetensors"),
+        "shard-2",
+    )
+    .await
+    .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("sharded-transformers".to_string()),
+        official_name: Some("Sharded Transformers".to_string()),
+        files: Some(vec![
+            ModelFileInfo {
+                name: "model.safetensors.index.json".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "model-00001-of-00002.safetensors".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "model-00002-of-00002.safetensors".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+        ]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::WeightIndex
+            && component.relative_path.as_deref() == Some("model.safetensors.index.json")
+    }));
+    assert_eq!(
+        facts
+            .components
+            .iter()
+            .filter(|component| component.kind == ProcessorComponentKind::Shard)
+            .count(),
+        2
+    );
+    assert!(facts
+        .artifact
+        .selected_files
+        .contains(&"model.safetensors.index.json".to_string()));
+}
+
+#[tokio::test]
 async fn reuses_fresh_package_facts_detail_cache() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

@@ -2173,7 +2173,7 @@ impl ModelLibrary {
         }
 
         let artifact_kind = package_artifact_kind(&model_dir, &metadata, &selected_files).await?;
-        let component_facts = package_component_facts(&model_dir).await?;
+        let component_facts = package_component_facts(&model_dir, &selected_files).await?;
         let transformers =
             transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
         let generation_defaults = generation_default_facts(&model_dir).await?;
@@ -5080,6 +5080,8 @@ const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
     "feature_extractor_config.json",
     "chat_template.jinja",
     "model_index.json",
+    "model.safetensors.index.json",
+    "pytorch_model.bin.index.json",
     "requirements.txt",
 ];
 
@@ -5118,7 +5120,10 @@ async fn package_artifact_kind(
     Ok(PackageArtifactKind::Unknown)
 }
 
-async fn package_component_facts(model_dir: &Path) -> Result<Vec<ProcessorComponentFacts>> {
+async fn package_component_facts(
+    model_dir: &Path,
+    selected_files: &[String],
+) -> Result<Vec<ProcessorComponentFacts>> {
     struct ComponentCandidate {
         kind: ProcessorComponentKind,
         relative_path: &'static str,
@@ -5203,7 +5208,79 @@ async fn package_component_facts(model_dir: &Path) -> Result<Vec<ProcessorCompon
         }
     }
     facts.extend(chat_template_directory_facts(model_dir).await?);
+    facts.extend(weight_component_facts(model_dir, selected_files).await?);
     Ok(facts)
+}
+
+async fn weight_component_facts(
+    model_dir: &Path,
+    selected_files: &[String],
+) -> Result<Vec<ProcessorComponentFacts>> {
+    let mut facts = Vec::new();
+    let mut seen_paths = BTreeSet::new();
+    for relative_path in selected_files {
+        if !seen_paths.insert(relative_path.clone()) {
+            continue;
+        }
+        if !tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+            continue;
+        }
+        let lower = relative_path.to_lowercase();
+        let kind = if is_transformers_weight_index_file(&lower) {
+            Some(ProcessorComponentKind::WeightIndex)
+        } else if is_transformers_shard_file(&lower) {
+            Some(ProcessorComponentKind::Shard)
+        } else if is_weight_file(&lower) {
+            Some(ProcessorComponentKind::Weights)
+        } else {
+            None
+        };
+
+        if let Some(kind) = kind {
+            facts.push(ProcessorComponentFacts {
+                kind,
+                status: PackageFactStatus::Present,
+                relative_path: Some(relative_path.clone()),
+                class_name: None,
+                message: None,
+            });
+        }
+    }
+    facts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(facts)
+}
+
+fn is_transformers_weight_index_file(relative_path: &str) -> bool {
+    relative_path.ends_with(".safetensors.index.json")
+        || relative_path.ends_with(".bin.index.json")
+        || relative_path.ends_with(".pt.index.json")
+}
+
+fn is_transformers_shard_file(relative_path: &str) -> bool {
+    let Some(file_name) = Path::new(relative_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+    else {
+        return false;
+    };
+    let parts = file_name.split('-').collect::<Vec<_>>();
+    parts.len() >= 3
+        && parts.iter().enumerate().any(|(index, part)| {
+            *part == "of"
+                && index > 0
+                && index + 1 < parts.len()
+                && parts[index - 1].chars().all(|ch| ch.is_ascii_digit())
+                && parts[index + 1]
+                    .split('.')
+                    .next()
+                    .is_some_and(|total| total.chars().all(|ch| ch.is_ascii_digit()))
+        })
+}
+
+fn is_weight_file(relative_path: &str) -> bool {
+    ["safetensors", "bin", "pt", "pth", "ckpt", "gguf", "onnx"]
+        .iter()
+        .any(|extension| relative_path.ends_with(&format!(".{extension}")))
 }
 
 async fn component_class_name(path: PathBuf, class_keys: &[&str]) -> Result<Option<String>> {

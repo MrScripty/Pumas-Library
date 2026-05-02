@@ -45,6 +45,23 @@ describe('RemoteModelSummary', () => {
     expect(screen.getByText('llama.cpp')).toBeInTheDocument();
   });
 
+  it('renders MLX and vLLM compatibility tags for Hugging Face search results', () => {
+    render(
+      <RemoteModelSummary
+        model={createModel({
+          formats: ['safetensors'],
+          compatibleEngines: ['transformers', 'vllm', 'mlx'],
+        })}
+        quantLabels={[]}
+        isHydratingDetails={false}
+      />
+    );
+
+    expect(screen.getByText('transformers')).toBeInTheDocument();
+    expect(screen.getByText('vllm')).toBeInTheDocument();
+    expect(screen.getByText('mlx')).toBeInTheDocument();
+  });
+
   it('searches by developer when the developer action is available', () => {
     const onSearchDeveloper = vi.fn();
 

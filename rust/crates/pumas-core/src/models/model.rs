@@ -591,9 +591,9 @@ fn default_kind() -> String {
 ///
 /// Maps file formats to the inference engines that can load them:
 /// - GGUF: Ollama, llama.cpp
-/// - SafeTensors: Candle, Diffusers, transformers
+/// - SafeTensors: Candle, Diffusers, transformers, vLLM, MLX
 /// - ONNX: ONNX Runtime
-/// - PyTorch (.bin, .pt, .pth): transformers, Diffusers
+/// - PyTorch (.bin, .pt, .pth): transformers, Diffusers, vLLM, MLX
 pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
     use std::collections::HashSet;
 
@@ -612,10 +612,14 @@ pub fn detect_compatible_engines(formats: &[String]) -> Vec<String> {
                 engines.insert("candle");
                 engines.insert("transformers");
                 engines.insert("diffusers");
+                engines.insert("vllm");
+                engines.insert("mlx");
             }
             "pytorch" | "bin" => {
                 engines.insert("transformers");
                 engines.insert("diffusers");
+                engines.insert("vllm");
+                engines.insert("mlx");
             }
             "onnx" => {
                 engines.insert("onnx-runtime");
@@ -971,6 +975,15 @@ mod tests {
         assert!(metadata.source_path.is_none());
         assert!(metadata.entry_path.is_none());
         assert!(metadata.storage_kind.is_none());
+    }
+
+    #[test]
+    fn detect_compatible_engines_includes_hf_search_transformers_tags() {
+        let engines = detect_compatible_engines(&["safetensors".to_string()]);
+
+        assert!(engines.contains(&"transformers".to_string()));
+        assert!(engines.contains(&"vllm".to_string()));
+        assert!(engines.contains(&"mlx".to_string()));
     }
 
     #[test]

@@ -141,6 +141,8 @@ pub struct ModelLibrary {
     link_registry: Arc<RwLock<LinkRegistry>>,
     /// Write lock for metadata operations (exclusive access only)
     write_lock: Arc<Mutex<()>>,
+    /// Per-model locks for package-facts cache read/regenerate/write cycles.
+    package_facts_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
     /// Optional callback used by primaries to suppress watcher feedback from
     /// Pumas-owned metadata projection writes.
     metadata_write_notifier: Arc<StdMutex<Option<MetadataWriteNotifier>>>,
@@ -181,6 +183,7 @@ impl ModelLibrary {
             index,
             link_registry: Arc::new(RwLock::new(link_registry)),
             write_lock: Arc::new(Mutex::new(())),
+            package_facts_locks: Arc::new(Mutex::new(HashMap::new())),
             metadata_write_notifier: Arc::new(StdMutex::new(None)),
         };
 
@@ -2088,6 +2091,8 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ResolvedModelPackageFacts> {
+        let package_facts_lock = self.package_facts_lock(model_id, None).await;
+        let _package_facts_guard = package_facts_lock.lock().await;
         let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
         let model_dir = self.library_root.join(model_id);
         let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
@@ -2199,6 +2204,19 @@ impl ModelLibrary {
         }
 
         Ok(facts)
+    }
+
+    async fn package_facts_lock(
+        &self,
+        model_id: &str,
+        selected_artifact_id: Option<&str>,
+    ) -> Arc<Mutex<()>> {
+        let key = format!("{}::{}", model_id, selected_artifact_id.unwrap_or_default());
+        let mut locks = self.package_facts_locks.lock().await;
+        locks
+            .entry(key)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
     }
 
     /// Reclassify a model: re-detect its type and move to the correct directory if needed.

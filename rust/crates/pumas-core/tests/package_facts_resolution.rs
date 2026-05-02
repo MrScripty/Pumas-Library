@@ -386,3 +386,30 @@ async fn regenerates_stale_package_facts_detail_cache() {
     assert_ne!(refreshed.source_fingerprint, "stale-fingerprint");
     assert!(!refreshed.facts_json.contains("stale_cached_task"));
 }
+
+#[tokio::test]
+async fn concurrent_package_facts_requests_share_cache_path() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let left_library = library.clone();
+    let right_library = library.clone();
+    let (left, right) = tokio::join!(
+        left_library.resolve_model_package_facts(model_id),
+        right_library.resolve_model_package_facts(model_id)
+    );
+    let left = left.unwrap();
+    let right = right.unwrap();
+    let cached = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(left, right);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&cached.facts_json).unwrap(),
+        serde_json::to_value(left).unwrap()
+    );
+}

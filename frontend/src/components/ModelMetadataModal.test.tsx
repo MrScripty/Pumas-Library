@@ -84,6 +84,8 @@ describe('ModelMetadataModal', () => {
 
     render(<ModelMetadataModal modelId="model-1" modelName="Test Model" onClose={vi.fn()} />);
 
+    expect(resolveModelPackageFactsMock).not.toHaveBeenCalled();
+
     fireEvent.click(await screen.findByRole('button', { name: 'Execution Facts' }));
 
     expect(resolveModelPackageFactsMock).toHaveBeenCalledWith('model-1');

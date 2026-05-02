@@ -66,6 +66,43 @@ describe('LocalModelsList', () => {
     expect(screen.queryByText('Size')).not.toBeInTheDocument();
   });
 
+  it('does not render backend compatibility badges on local model rows', () => {
+    const firstModel = modelGroups[0]?.models[0];
+    if (firstModel === undefined) {
+      throw new TypeError('Expected a model fixture');
+    }
+
+    render(
+      <LocalModelsList
+        modelGroups={[
+          {
+            category: 'llm',
+            models: [
+              {
+                ...firstModel,
+                compatibleEngines: ['mlx', 'vllm'],
+              } as typeof firstModel,
+            ],
+          },
+        ]}
+        starredModels={new Set()}
+        excludedModels={new Set()}
+        onToggleStar={vi.fn()}
+        onToggleLink={vi.fn()}
+        selectedAppId="comfyui"
+        totalModels={1}
+        hasFilters={false}
+        relatedModelsById={{}}
+        expandedRelated={new Set()}
+        onToggleRelated={vi.fn()}
+        onOpenRelatedUrl={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByText('MLX')).not.toBeInTheDocument();
+    expect(screen.queryByText('vLLM')).not.toBeInTheDocument();
+  });
+
   it('opens the metadata modal on ctrl-click of a model name', () => {
     render(
       <LocalModelsList

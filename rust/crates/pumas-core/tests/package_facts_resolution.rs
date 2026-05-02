@@ -323,6 +323,12 @@ async fn extracts_processor_component_class_names_and_chat_templates() {
     .await
     .unwrap();
     tokio::fs::write(
+        model_dir.join("special_tokens_map.json"),
+        r#"{"bos_token":"<s>","eos_token":"</s>"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
         model_dir.join("processor_config.json"),
         r#"{"processor_class":"LlavaProcessor"}"#,
     )
@@ -363,6 +369,10 @@ async fn extracts_processor_component_class_names_and_chat_templates() {
     assert!(facts.components.iter().any(|component| {
         component.kind == ProcessorComponentKind::TokenizerConfig
             && component.class_name.as_deref() == Some("LlamaTokenizerFast")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::SpecialTokensMap
+            && component.relative_path.as_deref() == Some("special_tokens_map.json")
     }));
     assert!(facts.components.iter().any(|component| {
         component.kind == ProcessorComponentKind::Processor

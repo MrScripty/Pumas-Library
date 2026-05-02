@@ -5100,6 +5100,11 @@ async fn package_component_facts(model_dir: &Path) -> Result<Vec<ProcessorCompon
             class_keys: &["tokenizer_class"],
         },
         ComponentCandidate {
+            kind: ProcessorComponentKind::SpecialTokensMap,
+            relative_path: "special_tokens_map.json",
+            class_keys: &[],
+        },
+        ComponentCandidate {
             kind: ProcessorComponentKind::Processor,
             relative_path: "processor_config.json",
             class_keys: &["processor_class"],

@@ -88,6 +88,7 @@ pub enum ProcessorComponentKind {
     Config,
     Tokenizer,
     TokenizerConfig,
+    SpecialTokensMap,
     Processor,
     Preprocessor,
     ImageProcessor,

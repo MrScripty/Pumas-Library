@@ -14,6 +14,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `api_response.rs` | `ApiResponse<T>` - Generic response wrapper with `success`/`error` fields and flattened data |
 | `responses.rs` | `BaseResponse` and concrete response types matching frontend TypeScript interfaces |
 | `model.rs` | Model-related types: `ModelData`, `HuggingFaceModel`, `ModelMetadata`, external-asset metadata fields, and download/import types |
+| `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
 | `github.rs` | GitHub-specific types for release and asset data |
 | `custom_node.rs` | Custom node metadata: `CompatibilityStatus`, `CustomNodeVersionStatus` |
@@ -47,5 +48,8 @@ frontend, ensuring type-compatible serialization across all layers.
   `import_state`, and asset-level validation fields.
 - `ModelExecutionDescriptor` is the runtime-facing contract for executable model assets and is
   intended to replace file-centric execution-path assumptions for external bundles.
+- `ResolvedModelPackageFacts` is the richer package-evidence contract. It stays separate from
+  `ModelExecutionDescriptor` so consumers can inspect compatibility, trust, and package layout
+  facts without forcing every execution-summary caller to deserialize the full package contract.
 - Compatibility policy is append-only for milestone one: new optional fields may appear, but
   existing file-based fields and semantics must remain valid.

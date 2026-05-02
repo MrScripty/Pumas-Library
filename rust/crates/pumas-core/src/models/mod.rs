@@ -9,6 +9,7 @@ mod custom_node;
 mod github;
 mod inference_defaults;
 mod model;
+mod package_facts;
 mod responses;
 mod version;
 
@@ -17,5 +18,6 @@ pub use custom_node::*;
 pub use github::*;
 pub use inference_defaults::*;
 pub use model::*;
+pub use package_facts::*;
 pub use responses::*;
 pub use version::*;

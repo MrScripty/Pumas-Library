@@ -9,5 +9,10 @@ Fixtures must be deterministic, minimal, and named for the behavior they cover. 
 ## Consumer Contract
 Tests should load fixtures read-only and copy them into temporary directories before mutation.
 
+## Fixture Families
+
+- `dependency_requirements/`: versioned dependency-resolution contract fixtures.
+- `package_facts/`: versioned model package-facts contract fixtures.
+
 ## Non-Goals
 Large runtime model artifacts are out of scope. Reason: fixtures must remain lightweight for source control and CI. Revisit trigger: add artifact download fixtures behind an explicit integration-test gate.

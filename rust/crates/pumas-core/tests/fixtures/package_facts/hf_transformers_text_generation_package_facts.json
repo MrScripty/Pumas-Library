@@ -1,0 +1,100 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "llm/example/tiny-transformers",
+    "revision": "abc123",
+    "selected_artifact_id": "main",
+    "selected_artifact_path": "llm/example/tiny-transformers"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "llm/example/tiny-transformers",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "config.json",
+      "generation_config.json",
+      "model.safetensors",
+      "tokenizer.json"
+    ]
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "present",
+      "relative_path": "tokenizer.json"
+    },
+    {
+      "kind": "generation_config",
+      "status": "present",
+      "relative_path": "generation_config.json"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "llama",
+    "architectures": [
+      "LlamaForCausalLM"
+    ],
+    "torch_dtype": "bfloat16",
+    "auto_map": [
+      "AutoConfig",
+      "AutoModelForCausalLM"
+    ],
+    "generation_config_status": "present",
+    "source_revision": "abc123",
+    "selected_files": [
+      "config.json",
+      "generation_config.json"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "text-generation",
+    "task_type_primary": "text_generation",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "present",
+    "source_path": "generation_config.json",
+    "defaults": {
+      "max_new_tokens": 128,
+      "temperature": 0.7,
+      "top_p": 0.95
+    }
+  },
+  "custom_code": {
+    "requires_custom_code": true,
+    "custom_code_sources": [
+      "configuration_tiny.py"
+    ],
+    "auto_map_sources": [
+      "AutoConfig",
+      "AutoModelForCausalLM"
+    ],
+    "dependency_manifests": [
+      "requirements.txt"
+    ]
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers",
+      "vllm",
+      "mlx"
+    ],
+    "raw": [
+      "transformers",
+      "vllm",
+      "mlx"
+    ]
+  }
+}

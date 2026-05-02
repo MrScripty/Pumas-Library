@@ -60,6 +60,37 @@ function EntryBadge({ entry }: { entry: ImportEntryStatus }) {
   );
 }
 
+function ImportPackageEvidence({ entry }: { entry: ImportEntryStatus }) {
+  const facts = [
+    entry.detectedFileType ? ['Format', entry.detectedFileType] : null,
+    entry.bundleFormat ? ['Bundle', entry.bundleFormat] : null,
+    entry.pipelineClass ? ['Pipeline', entry.pipelineClass] : null,
+    entry.componentManifest?.length
+      ? ['Components', String(entry.componentManifest.length)]
+      : null,
+    entry.hfMetadata?.repo_id ? ['HF', entry.hfMetadata.repo_id] : null,
+  ].filter((fact): fact is [string, string] => fact !== null);
+
+  if (facts.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {facts.map(([label, value]) => (
+        <span
+          key={`${label}:${value}`}
+          className="inline-flex max-w-full items-center gap-1 rounded border border-[hsl(var(--launcher-border))] px-1.5 py-0.5 text-[10px] text-[hsl(var(--launcher-text-muted))]"
+          title={`${label}: ${value}`}
+        >
+          <span className="font-medium text-[hsl(var(--launcher-text-secondary))]">{label}</span>
+          <span className="truncate">{value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 interface ImportReviewStepProps {
   blockedFindings: DirectoryReviewFinding[];
   classificationError: string | null;
@@ -224,6 +255,7 @@ export function ImportReviewStep({
                     Expanded from {entry.containerPath}
                   </p>
                 )}
+                <ImportPackageEvidence entry={entry} />
                 <ImportBundleComponents entry={entry} />
               </div>
               <EntryBadge entry={entry} />

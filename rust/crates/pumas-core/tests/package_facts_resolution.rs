@@ -476,6 +476,59 @@ async fn extracts_weight_index_and_shard_component_evidence() {
 }
 
 #[tokio::test]
+async fn extracts_quantization_component_evidence_from_config_and_filenames() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/quantized-package";
+    let model_dir = library.build_model_path("llm", "example", "quantized-package");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(
+        model_dir.join("config.json"),
+        r#"{
+          "model_type": "llama",
+          "quantization_config": {
+            "quant_method": "bitsandbytes",
+            "load_in_4bit": true
+          }
+        }"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("model-Q4_K_M.gguf"), "gguf")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("quantized-package".to_string()),
+        official_name: Some("Quantized Package".to_string()),
+        files: Some(vec![ModelFileInfo {
+            name: "model-Q4_K_M.gguf".to_string(),
+            original_name: None,
+            size: None,
+            sha256: None,
+            blake3: None,
+        }]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Quantization
+            && component.relative_path.as_deref() == Some("config.json")
+            && component.message.as_deref() == Some("bitsandbytes")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Quantization
+            && component.relative_path.as_deref() == Some("model-Q4_K_M.gguf")
+            && component.message.as_deref() == Some("Q4_K_M")
+    }));
+}
+
+#[tokio::test]
 async fn reuses_fresh_package_facts_detail_cache() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

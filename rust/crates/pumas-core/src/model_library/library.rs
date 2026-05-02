@@ -5209,6 +5209,7 @@ async fn package_component_facts(
     }
     facts.extend(chat_template_directory_facts(model_dir).await?);
     facts.extend(weight_component_facts(model_dir, selected_files).await?);
+    facts.extend(quantization_component_facts(model_dir, selected_files).await?);
     Ok(facts)
 }
 
@@ -5282,6 +5283,106 @@ fn is_weight_file(relative_path: &str) -> bool {
         .iter()
         .any(|extension| relative_path.ends_with(&format!(".{extension}")))
 }
+
+async fn quantization_component_facts(
+    model_dir: &Path,
+    selected_files: &[String],
+) -> Result<Vec<ProcessorComponentFacts>> {
+    let mut facts = Vec::new();
+    if let Some(message) = quantization_message_from_config(model_dir).await? {
+        facts.push(ProcessorComponentFacts {
+            kind: ProcessorComponentKind::Quantization,
+            status: PackageFactStatus::Present,
+            relative_path: Some("config.json".to_string()),
+            class_name: None,
+            message: Some(message),
+        });
+    }
+
+    let mut seen_messages = BTreeSet::new();
+    for relative_path in selected_files {
+        if !relative_path.to_lowercase().ends_with(".gguf")
+            || !tokio::fs::try_exists(model_dir.join(relative_path)).await?
+        {
+            continue;
+        }
+        let Some(quant) = quantization_from_filename(relative_path) else {
+            continue;
+        };
+        if !seen_messages.insert(quant.clone()) {
+            continue;
+        }
+        facts.push(ProcessorComponentFacts {
+            kind: ProcessorComponentKind::Quantization,
+            status: PackageFactStatus::Present,
+            relative_path: Some(relative_path.clone()),
+            class_name: None,
+            message: Some(quant),
+        });
+    }
+
+    facts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+    Ok(facts)
+}
+
+async fn quantization_message_from_config(model_dir: &Path) -> Result<Option<String>> {
+    let config_path = model_dir.join("config.json");
+    if !tokio::fs::try_exists(&config_path).await? {
+        return Ok(None);
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let Some(config) = std::fs::read_to_string(config_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        else {
+            return Ok(None);
+        };
+        let Some(quantization_config) =
+            config.get("quantization_config").and_then(Value::as_object)
+        else {
+            return Ok(None);
+        };
+        if let Some(method) = quantization_config
+            .get("quant_method")
+            .and_then(Value::as_str)
+        {
+            return Ok(Some(method.to_string()));
+        }
+        if quantization_config
+            .get("load_in_4bit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Ok(Some("load_in_4bit".to_string()));
+        }
+        if quantization_config
+            .get("load_in_8bit")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+        {
+            return Ok(Some("load_in_8bit".to_string()));
+        }
+        Ok::<_, PumasError>(Some("config.quantization_config".to_string()))
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join quantization parse: {}", err)))?
+}
+
+fn quantization_from_filename(relative_path: &str) -> Option<String> {
+    let file_name = Path::new(relative_path).file_name()?.to_str()?;
+    let upper = file_name.to_uppercase();
+    KNOWN_GGUF_QUANTS
+        .iter()
+        .find(|quant| upper.contains(**quant))
+        .map(|quant| (*quant).to_string())
+}
+
+const KNOWN_GGUF_QUANTS: &[&str] = &[
+    "IQ2_XXS", "IQ3_XXS", "Q3_K_S", "Q3_K_M", "Q3_K_L", "Q4_K_S", "Q4_K_M", "Q5_K_S", "Q5_K_M",
+    "IQ2_XS", "IQ3_XS", "IQ4_XS", "IQ4_NL", "IQ1_S", "IQ1_M", "IQ2_S", "IQ2_M", "IQ3_S", "IQ3_M",
+    "Q2_K", "Q3_K", "Q4_0", "Q4_1", "Q4_K", "Q5_0", "Q5_1", "Q5_K", "Q6_K", "Q8_0",
+];
 
 async fn component_class_name(path: PathBuf, class_keys: &[&str]) -> Result<Option<String>> {
     if class_keys.is_empty() {

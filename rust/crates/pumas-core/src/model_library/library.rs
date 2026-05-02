@@ -5071,6 +5071,12 @@ const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
     "config.json",
     "generation_config.json",
     "tokenizer.json",
+    "vocab.json",
+    "merges.txt",
+    "vocab.txt",
+    "spiece.model",
+    "sentencepiece.bpe.model",
+    "tokenizer.model",
     "tokenizer_config.json",
     "special_tokens_map.json",
     "processor_config.json",
@@ -5218,11 +5224,56 @@ async fn package_component_facts(
             });
         }
     }
+    facts.extend(tokenizer_vocabulary_component_facts(model_dir).await?);
     facts.extend(chat_template_directory_facts(model_dir).await?);
     facts.extend(weight_component_facts(model_dir, selected_files).await?);
     facts.extend(quantization_component_facts(model_dir, selected_files).await?);
     Ok(facts)
 }
+
+async fn tokenizer_vocabulary_component_facts(
+    model_dir: &Path,
+) -> Result<Vec<ProcessorComponentFacts>> {
+    let mut facts = Vec::new();
+    for relative_path in TOKENIZER_VOCABULARY_FILENAMES {
+        if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+            facts.push(ProcessorComponentFacts {
+                kind: ProcessorComponentKind::Tokenizer,
+                status: PackageFactStatus::Present,
+                relative_path: Some((*relative_path).to_string()),
+                class_name: None,
+                message: None,
+            });
+        }
+    }
+
+    if facts.is_empty()
+        && !tokio::fs::try_exists(model_dir.join("tokenizer.json")).await?
+        && tokio::fs::try_exists(model_dir.join("tokenizer_config.json")).await?
+    {
+        facts.push(ProcessorComponentFacts {
+            kind: ProcessorComponentKind::Tokenizer,
+            status: PackageFactStatus::Missing,
+            relative_path: None,
+            class_name: None,
+            message: Some(
+                "tokenizer_config.json is present without a known tokenizer vocabulary file"
+                    .to_string(),
+            ),
+        });
+    }
+
+    Ok(facts)
+}
+
+const TOKENIZER_VOCABULARY_FILENAMES: &[&str] = &[
+    "vocab.json",
+    "merges.txt",
+    "vocab.txt",
+    "spiece.model",
+    "sentencepiece.bpe.model",
+    "tokenizer.model",
+];
 
 async fn weight_component_facts(
     model_dir: &Path,

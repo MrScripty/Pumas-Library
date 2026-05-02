@@ -389,6 +389,89 @@ async fn extracts_processor_component_class_names_and_chat_templates() {
 }
 
 #[tokio::test]
+async fn extracts_tokenizer_vocabulary_files_and_missing_diagnostics() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/tokenizer-vocab";
+    let model_dir = library.build_model_path("llm", "example", "tokenizer-vocab");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"bert"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(
+        model_dir.join("tokenizer_config.json"),
+        r#"{"tokenizer_class":"BertTokenizer"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("vocab.txt"), "[PAD]\n[UNK]\n")
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("tokenizer-vocab".to_string()),
+        official_name: Some("Tokenizer Vocab".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Tokenizer
+            && component.status == PackageFactStatus::Present
+            && component.relative_path.as_deref() == Some("vocab.txt")
+    }));
+
+    let missing_id = "llm/example/tokenizer-missing-vocab";
+    let missing_dir = library.build_model_path("llm", "example", "tokenizer-missing-vocab");
+    tokio::fs::create_dir_all(&missing_dir).await.unwrap();
+    tokio::fs::write(missing_dir.join("config.json"), r#"{"model_type":"bert"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(
+        missing_dir.join("tokenizer_config.json"),
+        r#"{"tokenizer_class":"BertTokenizer"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(missing_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let missing_metadata = ModelMetadata {
+        model_id: Some(missing_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("tokenizer-missing-vocab".to_string()),
+        official_name: Some("Tokenizer Missing Vocab".to_string()),
+        ..Default::default()
+    };
+    library
+        .save_metadata(&missing_dir, &missing_metadata)
+        .await
+        .unwrap();
+
+    let missing_facts = library
+        .resolve_model_package_facts(missing_id)
+        .await
+        .unwrap();
+
+    assert!(missing_facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Tokenizer
+            && component.status == PackageFactStatus::Missing
+            && component.message.as_deref().is_some_and(|message| {
+                message.contains("without a known tokenizer vocabulary file")
+            })
+    }));
+}
+
+#[tokio::test]
 async fn extracts_weight_index_and_shard_component_evidence() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/sharded-transformers";

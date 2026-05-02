@@ -8,7 +8,11 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { modelsAPI } from '../api/models';
-import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
+import type {
+  BundleComponentManifestEntry,
+  InferenceParamSchema,
+  ResolvedModelPackageFacts,
+} from '../types/api';
 import { getStoredNotes, type MetadataSource } from './ModelMetadataFieldConfig';
 import { ModelMetadataModalContent } from './ModelMetadataModalContent';
 import { ModelMetadataModalFrame } from './ModelMetadataModalFrame';
@@ -38,6 +42,9 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
   const [refetchError, setRefetchError] = useState<string | null>(null);
   const [expandedFieldKeys, setExpandedFieldKeys] = useState<Set<string>>(new Set());
   const [copiedFieldKey, setCopiedFieldKey] = useState<string | null>(null);
+  const [executionFacts, setExecutionFacts] = useState<ResolvedModelPackageFacts | null>(null);
+  const [executionFactsLoading, setExecutionFactsLoading] = useState(false);
+  const [executionFactsError, setExecutionFactsError] = useState<string | null>(null);
 
   // Inference settings state
   const [inferenceSettings, setInferenceSettings] = useState<InferenceParamSchema[]>([]);
@@ -116,7 +123,46 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
     setNotesPreview(false);
     setNotesSaveError(null);
     setNotesSaveSuccess(false);
+    setExecutionFacts(null);
+    setExecutionFactsLoading(false);
+    setExecutionFactsError(null);
   }, [modelId]);
+
+  useEffect(() => {
+    if (
+      activeSource !== 'execution' ||
+      executionFacts ||
+      executionFactsLoading ||
+      executionFactsError
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    setExecutionFactsLoading(true);
+    setExecutionFactsError(null);
+    modelsAPI
+      .resolveModelPackageFacts(modelId)
+      .then((facts) => {
+        if (!cancelled) {
+          setExecutionFacts(facts);
+        }
+      })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setExecutionFactsError(e instanceof Error ? e.message : 'Failed to load execution facts');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setExecutionFactsLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSource, executionFacts, executionFactsError, modelId]);
 
   // ========================================
   // Inference settings handlers
@@ -265,6 +311,9 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               copiedFieldKey={copiedFieldKey}
               embeddedFileType={embeddedFileType}
               embeddedMetadata={embeddedMetadata}
+              executionFacts={executionFacts}
+              executionFactsError={executionFactsError}
+              executionFactsLoading={executionFactsLoading}
               expandedFieldKeys={expandedFieldKeys}
               inferenceSettings={inferenceSettings}
               newParam={newParam}

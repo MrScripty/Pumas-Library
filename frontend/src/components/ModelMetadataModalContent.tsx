@@ -1,5 +1,9 @@
-import { Database, FileText, PencilLine, Settings } from 'lucide-react';
-import type { BundleComponentManifestEntry, InferenceParamSchema } from '../types/api';
+import { ActivitySquare, Database, FileText, PencilLine, Settings } from 'lucide-react';
+import type {
+  BundleComponentManifestEntry,
+  InferenceParamSchema,
+  ResolvedModelPackageFacts,
+} from '../types/api';
 import {
   formatFieldName,
   formatMetadataValue,
@@ -20,6 +24,9 @@ interface ModelMetadataModalContentProps {
   copiedFieldKey: string | null;
   embeddedFileType: string | null;
   embeddedMetadata: Record<string, unknown> | null;
+  executionFacts: ResolvedModelPackageFacts | null;
+  executionFactsError: string | null;
+  executionFactsLoading: boolean;
   expandedFieldKeys: Set<string>;
   inferenceSettings: InferenceParamSchema[];
   newParam: {
@@ -77,6 +84,9 @@ export function ModelMetadataModalContent({
   copiedFieldKey,
   embeddedFileType,
   embeddedMetadata,
+  executionFacts,
+  executionFactsError,
+  executionFactsLoading,
   expandedFieldKeys,
   inferenceSettings,
   newParam,
@@ -118,7 +128,7 @@ export function ModelMetadataModalContent({
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button
           onClick={() => onActiveSourceChange('embedded')}
           className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
@@ -153,6 +163,17 @@ export function ModelMetadataModalContent({
         >
           <Settings className="w-4 h-4" />
           Inference
+        </button>
+        <button
+          onClick={() => onActiveSourceChange('execution')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
+            activeSource === 'execution'
+              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
+              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
+          }`}
+        >
+          <ActivitySquare className="w-4 h-4" />
+          Execution Facts
         </button>
         <button
           onClick={() => onActiveSourceChange('notes')}
@@ -216,6 +237,37 @@ export function ModelMetadataModalContent({
           onSave={onSaveInferenceSettings}
           onSetAddingParam={onSetAddingParam}
         />
+      ) : activeSource === 'execution' ? (
+        executionFactsLoading ? (
+          <div className="text-center py-4 text-[hsl(var(--text-muted))]">
+            Loading execution facts...
+          </div>
+        ) : executionFactsError ? (
+          <div className="text-center py-4 text-[hsl(var(--accent-error))]">
+            {executionFactsError}
+          </div>
+        ) : executionFacts ? (
+          <ModelMetadataGrid
+            metadata={executionFacts as unknown as Record<string, unknown>}
+            isGguf={false}
+            sourceKey={activeSource}
+            showAllFields={true}
+            expandedFieldKeys={expandedFieldKeys}
+            copiedFieldKey={copiedFieldKey}
+            onToggleShowAllFields={onToggleShowAllFields}
+            onToggleFieldExpanded={onToggleFieldExpanded}
+            onCopyFieldValue={onCopyFieldValue}
+            formatFieldName={formatFieldName}
+            formatMetadataValue={formatMetadataValue}
+            isPriorityGgufField={isPriorityGgufField}
+            isHiddenGgufField={isHiddenGgufField}
+            linkedGgufFields={LINKED_GGUF_FIELDS}
+          />
+        ) : (
+          <div className="text-center py-4 text-[hsl(var(--text-muted))]">
+            No execution facts available
+          </div>
+        )
       ) : activeSource === 'notes' ? (
         <ModelNotesEditor
           notesDraft={notesDraft}

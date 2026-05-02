@@ -51,5 +51,14 @@ frontend, ensuring type-compatible serialization across all layers.
 - `ResolvedModelPackageFacts` is the richer package-evidence contract. It stays separate from
   `ModelExecutionDescriptor` so consumers can inspect compatibility, trust, and package layout
   facts without forcing every execution-summary caller to deserialize the full package contract.
+- Package facts have two stability classes:
+  - Stable reference facts: contract version, model ref, selected artifact identity, artifact kind,
+    storage kind, validation summary, task evidence, backend hint labels, and custom-code trust
+    state. These can be persisted or cached when tied to an artifact signature.
+  - Volatile inspection facts: selected files, sibling files, component presence, parse diagnostics,
+    generation defaults, `auto_map` evidence, and source revision details. These may be regenerated
+    from package files when the artifact signature or package-facts contract version changes.
+- `ModelLibraryUpdateEvent` is a host-agnostic cache-invalidation contract. It identifies model and
+  fact-family changes without prescribing consumer cache shape, runtime selection, or scheduling.
 - Compatibility policy is append-only for milestone one: new optional fields may appear, but
   existing file-based fields and semantics must remain valid.

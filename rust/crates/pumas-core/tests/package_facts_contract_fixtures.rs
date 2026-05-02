@@ -1,5 +1,6 @@
 use pumas_library::models::{
-    BackendHintLabel, PackageArtifactKind, PackageFactStatus, ProcessorComponentKind,
+    BackendHintLabel, ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
+    ModelLibraryUpdateEvent, PackageArtifactKind, PackageFactStatus, ProcessorComponentKind,
     ResolvedModelPackageFacts, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
@@ -20,6 +21,15 @@ fn load_fixture(name: &str) -> (Value, ResolvedModelPackageFacts) {
     let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
     let parsed: ResolvedModelPackageFacts =
         serde_json::from_str(&content).expect("fixture should match package facts contract");
+    (raw, parsed)
+}
+
+fn load_update_event_fixture(name: &str) -> (Value, ModelLibraryUpdateEvent) {
+    let path = fixture_path(name);
+    let content = fs::read_to_string(&path).expect("fixture should be readable");
+    let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
+    let parsed: ModelLibraryUpdateEvent =
+        serde_json::from_str(&content).expect("fixture should match update event contract");
     (raw, parsed)
 }
 
@@ -96,4 +106,29 @@ fn hf_text_generation_fixture_matches_contract() {
 #[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
+}
+
+#[test]
+fn model_library_update_event_fixture_matches_contract() {
+    let (raw, parsed) =
+        load_update_event_fixture("model_library_package_facts_modified_event.json");
+
+    assert_eq!(parsed.cursor, "0000000000000001");
+    assert_eq!(parsed.model_id, "llm/example/tiny-transformers");
+    assert_eq!(
+        parsed.change_kind,
+        ModelLibraryChangeKind::PackageFactsModified
+    );
+    assert_eq!(parsed.fact_family, ModelFactFamily::PackageFacts);
+    assert_eq!(parsed.refresh_scope, ModelLibraryRefreshScope::Detail);
+    assert_eq!(parsed.selected_artifact_id.as_deref(), Some("main"));
+
+    assert_eq!(
+        raw.get("change_kind").and_then(Value::as_str),
+        Some("package_facts_modified")
+    );
+    assert_eq!(
+        raw.get("refresh_scope").and_then(Value::as_str),
+        Some("detail")
+    );
 }

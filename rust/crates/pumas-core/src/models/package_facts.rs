@@ -220,6 +220,54 @@ pub struct ModelPackageDiagnostic {
     pub path: Option<String>,
 }
 
+/// Top-level fact family that changed or needs refresh.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelFactFamily {
+    ModelRecord,
+    Metadata,
+    PackageFacts,
+    DependencyBindings,
+    Validation,
+    SearchIndex,
+}
+
+/// Model-library change kind for host cache invalidation.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelLibraryChangeKind {
+    ModelAdded,
+    ModelRemoved,
+    MetadataModified,
+    PackageFactsModified,
+    StaleFactsInvalidated,
+    DependencyBindingModified,
+}
+
+/// Consumer refresh scope implied by a model-library change event.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelLibraryRefreshScope {
+    Summary,
+    Detail,
+    SummaryAndDetail,
+}
+
+/// Host-agnostic model-library update event for cache invalidation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelLibraryUpdateEvent {
+    pub cursor: String,
+    pub model_id: String,
+    pub change_kind: ModelLibraryChangeKind,
+    pub fact_family: ModelFactFamily,
+    pub refresh_scope: ModelLibraryRefreshScope,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_artifact_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_revision: Option<String>,
+}
+
 /// Versioned inference-facing model package facts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

@@ -64,6 +64,25 @@ describe('mapModelRecordToInfo', () => {
     expect(info.primaryFormat).toBeUndefined();
     expect(info.hasDependencies).toBe(false);
   });
+
+  it('uses dedicated row fields instead of cleaned metadata duplicates', () => {
+    const info = mapModelRecordToInfo(
+      makeModelRecord({
+        modelType: '',
+        metadata: {
+          model_type: 'legacy-metadata-type',
+          conversion_source: {
+            source_format: 'safetensors',
+            was_dequantized: true,
+          },
+        },
+      })
+    );
+
+    expect(info.category).toBe('uncategorized');
+    expect(info.wasDequantized).toBeUndefined();
+    expect(info.convertedFrom).toBeUndefined();
+  });
 });
 
 describe('groupModelRecords', () => {

@@ -1,5 +1,4 @@
 import type { BaseResponse } from './api-common';
-import type { ConversionSource } from './api-conversion';
 import type { AssetValidationError, AssetValidationState, StorageKind } from './api-import';
 
 // ============================================================================
@@ -7,14 +6,7 @@ import type { AssetValidationError, AssetValidationState, StorageKind } from './
 // ============================================================================
 
 export interface ModelRecordMetadata {
-  conversion_source?: ConversionSource;
-  model_id?: string;
   family?: string;
-  model_type?: string;
-  subtype?: string;
-  official_name?: string;
-  cleaned_name?: string;
-  tags?: string[];
   added_date?: string;
   updated_date?: string;
   size_bytes?: number;

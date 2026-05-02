@@ -39,12 +39,11 @@ export function mapModelRecordToInfo(model: ModelRecord): ModelInfo {
   const displayName = model.officialName ?? model.cleanedName ?? fileName;
   const dependencyBindings = asArray(metadata.dependency_bindings);
   const format = asString(metadata.primary_format);
-  const conversionSource = metadata.conversion_source as Record<string, unknown> | undefined;
 
   return {
     id: model.id,
     name: displayName,
-    category: model.modelType || metadata.model_type || 'uncategorized',
+    category: model.modelType || 'uncategorized',
     path: model.id,
     modelDir: model.path,
     format,
@@ -53,8 +52,6 @@ export function mapModelRecordToInfo(model: ModelRecord): ModelInfo {
     date: asString(metadata.added_date),
     relatedAvailable: asBoolean(metadata.related_available) ?? false,
     isPartialDownload: asBoolean(metadata.download_incomplete) ?? false,
-    wasDequantized: asBoolean(conversionSource?.['was_dequantized']) ?? false,
-    convertedFrom: asString(conversionSource?.['source_format']),
     repoId: asString(metadata.repo_id),
     hasDependencies: dependencyBindings.length > 0,
     dependencyCount: dependencyBindings.length || undefined,

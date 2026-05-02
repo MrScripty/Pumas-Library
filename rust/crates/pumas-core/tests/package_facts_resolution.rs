@@ -204,6 +204,65 @@ async fn reports_invalid_generation_config_without_failing_package_resolution() 
 }
 
 #[tokio::test]
+async fn extracts_legacy_generation_defaults_from_config_when_generation_config_is_missing() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/legacy-generation-config";
+    let model_dir = library.build_model_path("llm", "example", "legacy-generation-config");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(
+        model_dir.join("config.json"),
+        r#"{
+          "model_type": "llama",
+          "max_length": 2048,
+          "temperature": 0.6,
+          "top_p": 0.9
+        }"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("legacy-generation-config".to_string()),
+        official_name: Some("Legacy Generation Config".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let defaults = facts
+        .generation_defaults
+        .defaults
+        .as_ref()
+        .and_then(serde_json::Value::as_object)
+        .unwrap();
+
+    assert_eq!(facts.generation_defaults.status, PackageFactStatus::Present);
+    assert_eq!(
+        facts.generation_defaults.source_path.as_deref(),
+        Some("config.json")
+    );
+    assert_eq!(
+        defaults.get("max_length").and_then(|value| value.as_i64()),
+        Some(2048)
+    );
+    assert_eq!(
+        defaults.get("temperature").and_then(|value| value.as_f64()),
+        Some(0.6)
+    );
+    assert!(facts
+        .generation_defaults
+        .diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "legacy_config_generation_defaults"));
+}
+
+#[tokio::test]
 async fn preserves_unsupported_backend_hints_as_raw_package_facts() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/ollama-hint";

@@ -177,3 +177,43 @@ async fn reports_invalid_generation_config_without_failing_package_resolution() 
         .iter()
         .any(|diagnostic| diagnostic.code == "invalid_generation_config_json"));
 }
+
+#[tokio::test]
+async fn preserves_unsupported_backend_hints_as_raw_package_facts() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/ollama-hint";
+    let model_dir = library.build_model_path("llm", "example", "ollama-hint");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("model.gguf"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("ollama-hint".to_string()),
+        official_name: Some("Ollama Hint".to_string()),
+        recommended_backend: Some("ollama".to_string()),
+        runtime_engine_hints: Some(vec!["transformers".to_string()]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::Transformers));
+    assert!(!facts
+        .backend_hints
+        .accepted
+        .iter()
+        .any(|hint| serde_json::to_string(hint).unwrap() == "\"ollama\""));
+    assert!(facts.backend_hints.raw.contains(&"ollama".to_string()));
+    assert!(facts
+        .backend_hints
+        .unsupported
+        .contains(&"ollama".to_string()));
+}

@@ -65,6 +65,7 @@ pub use importer::{
     OrphanScanResult,
 };
 pub use library::{
+    MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport,
     MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
     MigrationPlannedMove, MigrationReportArtifact, ModelLibrary, ReclassifyResult,
 };

@@ -1,5 +1,33 @@
 use super::*;
 
+/// Non-mutating report for SQLite metadata projection cleanup.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetadataProjectionCleanupDryRunReport {
+    pub generated_at: String,
+    pub total_models: usize,
+    pub models_with_cleanup: usize,
+    pub total_removed_field_count: usize,
+    pub before_payload_bytes: usize,
+    pub after_payload_bytes: usize,
+    pub payload_size_reduction_bytes: usize,
+    pub removed_field_counts: std::collections::BTreeMap<String, usize>,
+    pub preserved_exception_fields: Vec<String>,
+    pub items: Vec<MetadataProjectionCleanupDryRunItem>,
+}
+
+/// Per-model row for SQLite metadata projection cleanup reporting.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetadataProjectionCleanupDryRunItem {
+    pub model_id: String,
+    pub removed_fields: Vec<String>,
+    pub preserved_exception_fields: Vec<String>,
+    pub before_payload_bytes: usize,
+    pub after_payload_bytes: usize,
+    pub payload_size_reduction_bytes: usize,
+}
+
 /// Convert `ModelMetadata` into the canonical index row projection.
 pub(super) fn metadata_to_record(
     model_id: &str,
@@ -204,6 +232,88 @@ fn cleanup_metadata_projection_fields(metadata: &mut serde_json::Map<String, Val
         metadata.remove("validation_errors");
     }
 }
+
+pub(super) fn metadata_projection_cleanup_dry_run_report(
+    records: &[ModelRecord],
+) -> MetadataProjectionCleanupDryRunReport {
+    let mut report = MetadataProjectionCleanupDryRunReport {
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        total_models: records.len(),
+        ..Default::default()
+    };
+    let mut preserved_exception_fields = BTreeSet::new();
+
+    for record in records {
+        let item = metadata_projection_cleanup_dry_run_item(record);
+        report.before_payload_bytes += item.before_payload_bytes;
+        report.after_payload_bytes += item.after_payload_bytes;
+        report.payload_size_reduction_bytes += item.payload_size_reduction_bytes;
+        for field in &item.preserved_exception_fields {
+            preserved_exception_fields.insert(field.clone());
+        }
+        for field in &item.removed_fields {
+            *report
+                .removed_field_counts
+                .entry(field.clone())
+                .or_default() += 1;
+        }
+        report.total_removed_field_count += item.removed_fields.len();
+        if !item.removed_fields.is_empty() {
+            report.models_with_cleanup += 1;
+            report.items.push(item);
+        }
+    }
+
+    report.preserved_exception_fields = preserved_exception_fields.into_iter().collect();
+    report
+        .items
+        .sort_by(|left, right| left.model_id.cmp(&right.model_id));
+    report
+}
+
+fn metadata_projection_cleanup_dry_run_item(
+    record: &ModelRecord,
+) -> MetadataProjectionCleanupDryRunItem {
+    let before_payload_bytes = serde_json::to_vec(&record.metadata)
+        .map(|payload| payload.len())
+        .unwrap_or_default();
+    let mut after = record.metadata.clone();
+    let mut removed_fields = Vec::new();
+    let mut preserved_exception_fields = Vec::new();
+
+    if let Some(after_obj) = after.as_object_mut() {
+        let before_keys = after_obj.keys().cloned().collect::<BTreeSet<_>>();
+        cleanup_metadata_projection_fields(after_obj);
+        let after_keys = after_obj.keys().cloned().collect::<BTreeSet<_>>();
+        removed_fields = before_keys.difference(&after_keys).cloned().collect();
+        preserved_exception_fields = METADATA_PROJECTION_CLEANUP_EXCEPTION_FIELDS
+            .iter()
+            .filter(|field| after_obj.contains_key(**field))
+            .map(|field| (*field).to_string())
+            .collect();
+    }
+
+    let after_payload_bytes = serde_json::to_vec(&after)
+        .map(|payload| payload.len())
+        .unwrap_or(before_payload_bytes);
+
+    MetadataProjectionCleanupDryRunItem {
+        model_id: record.id.clone(),
+        removed_fields,
+        preserved_exception_fields,
+        before_payload_bytes,
+        after_payload_bytes,
+        payload_size_reduction_bytes: before_payload_bytes.saturating_sub(after_payload_bytes),
+    }
+}
+
+const METADATA_PROJECTION_CLEANUP_EXCEPTION_FIELDS: &[&str] = &[
+    "license",
+    "license_status",
+    "model_card",
+    "notes",
+    "preview_image",
+];
 
 fn derive_primary_format(metadata: &serde_json::Map<String, Value>) -> Option<String> {
     conversion_source_format(metadata)

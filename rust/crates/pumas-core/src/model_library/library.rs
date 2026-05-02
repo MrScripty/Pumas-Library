@@ -57,9 +57,10 @@ pub use migration::{
     MigrationPlannedMove, MigrationReportArtifact,
 };
 use projection::{
-    canonicalize_display_path, metadata_to_record, payload_filesystem_is_newer,
-    project_display_fields_for_record,
+    canonicalize_display_path, metadata_projection_cleanup_dry_run_report, metadata_to_record,
+    payload_filesystem_is_newer, project_display_fields_for_record,
 };
+pub use projection::{MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport};
 
 fn parse_model_card_json(model_card_json: Option<&str>) -> Option<HashMap<String, Value>> {
     let raw = model_card_json?.trim();
@@ -1077,6 +1078,18 @@ impl ModelLibrary {
         tokio::task::spawn_blocking(move || library.list_models_sync())
             .await
             .map_err(|err| PumasError::Other(format!("Failed to join list_models task: {}", err)))?
+    }
+
+    /// Generate a non-mutating report for SQLite metadata projection cleanup.
+    pub fn generate_metadata_projection_cleanup_dry_run_report(
+        &self,
+    ) -> Result<MetadataProjectionCleanupDryRunReport> {
+        let total = self.index.count()?;
+        if total == 0 {
+            return Ok(metadata_projection_cleanup_dry_run_report(&[]));
+        }
+        let rows = self.index.search("", None, None, total, 0)?.models;
+        Ok(metadata_projection_cleanup_dry_run_report(&rows))
     }
 
     /// Get a single model by ID.
@@ -8999,6 +9012,84 @@ mod tests {
                 .and_then(Value::as_str),
             Some("Q5_K_M")
         );
+    }
+
+    #[tokio::test]
+    async fn test_metadata_projection_cleanup_dry_run_reports_legacy_index_rows() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/legacy-cleanup";
+        let model_dir = library.build_model_path("llm", "llama", "legacy-cleanup");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let record = ModelRecord {
+            id: model_id.to_string(),
+            path: model_dir.display().to_string(),
+            cleaned_name: "legacy-cleanup".to_string(),
+            official_name: "Legacy Cleanup".to_string(),
+            model_type: "llm".to_string(),
+            tags: vec!["gguf".to_string()],
+            hashes: HashMap::from([("sha256".to_string(), "abc".to_string())]),
+            metadata: serde_json::json!({
+                "schema_version": 2,
+                "model_id": model_id,
+                "model_type": "llm",
+                "cleaned_name": "legacy-cleanup",
+                "official_name": "Legacy Cleanup",
+                "tags": ["gguf"],
+                "hashes": {"sha256": "abc"},
+                "compatible_apps": [],
+                "reviewed_by": "",
+                "validation_errors": [],
+                "license": "mit",
+                "license_status": "allowed",
+                "model_card": {"summary": "kept"},
+                "notes": "keep me",
+                "preview_image": "preview.png"
+            }),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+        };
+        library.index().upsert(&record).unwrap();
+
+        let report = library
+            .generate_metadata_projection_cleanup_dry_run_report()
+            .unwrap();
+
+        assert_eq!(report.total_models, 1);
+        assert_eq!(report.models_with_cleanup, 1);
+        assert!(report.payload_size_reduction_bytes > 0);
+        assert_eq!(report.items.len(), 1);
+        let item = &report.items[0];
+        for field in [
+            "model_id",
+            "model_type",
+            "cleaned_name",
+            "official_name",
+            "tags",
+            "hashes",
+            "compatible_apps",
+            "reviewed_by",
+            "validation_errors",
+        ] {
+            assert!(
+                item.removed_fields.contains(&field.to_string()),
+                "{field} should be reported as removed"
+            );
+        }
+        for field in [
+            "license",
+            "license_status",
+            "model_card",
+            "notes",
+            "preview_image",
+        ] {
+            assert!(
+                item.preserved_exception_fields.contains(&field.to_string()),
+                "{field} should be reported as preserved"
+            );
+        }
+
+        let raw = library.index().get(model_id).unwrap().unwrap();
+        assert!(raw.metadata.get("model_id").is_some());
     }
 
     #[tokio::test]

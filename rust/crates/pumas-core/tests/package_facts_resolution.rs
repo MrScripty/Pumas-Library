@@ -303,6 +303,60 @@ async fn preserves_unsupported_backend_hints_as_raw_package_facts() {
 }
 
 #[tokio::test]
+async fn extracts_custom_generate_code_evidence_without_loading_python() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/custom-generate";
+    let model_dir = library.build_model_path("llm", "example", "custom-generate");
+    tokio::fs::create_dir_all(model_dir.join("custom_generate"))
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(
+        model_dir.join("custom_generate/generate.py"),
+        "def generate(): pass",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("custom_generate/requirements.txt"),
+        "accelerate\n",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("custom-generate".to_string()),
+        official_name: Some("Custom Generate".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts.custom_code.requires_custom_code);
+    assert!(facts
+        .custom_code
+        .custom_code_sources
+        .contains(&"custom_generate/generate.py".to_string()));
+    assert!(facts
+        .custom_code
+        .dependency_manifests
+        .contains(&"custom_generate/requirements.txt".to_string()));
+    assert!(facts
+        .artifact
+        .selected_files
+        .contains(&"custom_generate/generate.py".to_string()));
+}
+
+#[tokio::test]
 async fn extracts_processor_component_class_names_and_chat_templates() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "vlm/example/component-evidence";

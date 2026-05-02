@@ -2178,8 +2178,12 @@ impl ModelLibrary {
             transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
         let generation_defaults = generation_default_facts(&model_dir).await?;
         let auto_map_sources = auto_map_sources_from_config(&model_dir).await?;
-        let requires_custom_code =
-            metadata.requires_custom_code.unwrap_or(false) || !auto_map_sources.is_empty();
+        let custom_generate_sources = custom_generate_sources(&model_dir).await?;
+        let custom_generate_dependency_manifests =
+            custom_generate_dependency_manifests(&model_dir).await?;
+        let requires_custom_code = metadata.requires_custom_code.unwrap_or(false)
+            || !auto_map_sources.is_empty()
+            || !custom_generate_sources.is_empty();
 
         let facts = ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
@@ -2215,13 +2219,19 @@ impl ModelLibrary {
             generation_defaults,
             custom_code: CustomCodeFacts {
                 requires_custom_code,
-                custom_code_sources: metadata.custom_code_sources.clone().unwrap_or_default(),
+                custom_code_sources: merge_string_lists(
+                    metadata.custom_code_sources.clone().unwrap_or_default(),
+                    custom_generate_sources,
+                ),
                 auto_map_sources,
-                dependency_manifests: selected_files
-                    .iter()
-                    .filter(|path| path.as_str() == "requirements.txt")
-                    .cloned()
-                    .collect(),
+                dependency_manifests: merge_string_lists(
+                    selected_files
+                        .iter()
+                        .filter(|path| path.as_str() == "requirements.txt")
+                        .cloned()
+                        .collect(),
+                    custom_generate_dependency_manifests,
+                ),
             },
             backend_hints: backend_hint_facts(
                 metadata.recommended_backend.as_deref(),
@@ -5092,6 +5102,8 @@ const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
     "model.safetensors.index.json",
     "pytorch_model.bin.index.json",
     "requirements.txt",
+    "custom_generate/generate.py",
+    "custom_generate/requirements.txt",
 ];
 
 async fn package_artifact_kind(
@@ -5814,6 +5826,30 @@ async fn auto_map_sources_from_config(model_dir: &Path) -> Result<Vec<String>> {
     })
     .await
     .map_err(|err| PumasError::Other(format!("Failed to join auto_map parse: {}", err)))?
+}
+
+async fn custom_generate_sources(model_dir: &Path) -> Result<Vec<String>> {
+    let relative_path = "custom_generate/generate.py";
+    if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+        return Ok(vec![relative_path.to_string()]);
+    }
+    Ok(Vec::new())
+}
+
+async fn custom_generate_dependency_manifests(model_dir: &Path) -> Result<Vec<String>> {
+    let relative_path = "custom_generate/requirements.txt";
+    if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+        return Ok(vec![relative_path.to_string()]);
+    }
+    Ok(Vec::new())
+}
+
+fn merge_string_lists(left: Vec<String>, right: Vec<String>) -> Vec<String> {
+    left.into_iter()
+        .chain(right)
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 fn backend_hint_facts(

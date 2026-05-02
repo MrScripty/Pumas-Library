@@ -357,6 +357,81 @@ async fn extracts_custom_generate_code_evidence_without_loading_python() {
 }
 
 #[tokio::test]
+async fn resolves_canonical_model_refs_and_reports_unresolved_legacy_paths() {
+    let temp_dir = TempDir::new().unwrap();
+    let library = ModelLibrary::new(temp_dir.path().join("library"))
+        .await
+        .unwrap();
+    let model_id = "llm/example/ref-model";
+    let model_dir = library.build_model_path("llm", "example", "ref-model");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("ref-model".to_string()),
+        official_name: Some("Ref Model".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.rebuild_index().await.unwrap();
+
+    let by_id = library.resolve_pumas_model_ref(model_id).await.unwrap();
+    assert_eq!(by_id.model_id, model_id);
+    assert!(by_id.migration_diagnostics.is_empty());
+
+    let by_file = library
+        .resolve_pumas_model_ref(
+            model_dir
+                .join("model.safetensors")
+                .to_string_lossy()
+                .as_ref(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(by_file.model_id, model_id);
+    assert_eq!(
+        by_file.selected_artifact_path.as_deref(),
+        Some(
+            model_dir
+                .join("model.safetensors")
+                .canonicalize()
+                .unwrap()
+                .to_string_lossy()
+                .as_ref()
+        )
+    );
+
+    let unknown_id = library
+        .resolve_pumas_model_ref("llm/example/missing")
+        .await
+        .unwrap();
+    assert_eq!(unknown_id.model_id, "");
+    assert!(unknown_id
+        .migration_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "unknown_model_id"));
+
+    let outside_path = temp_dir.path().join("outside-model.gguf");
+    tokio::fs::write(&outside_path, "gguf").await.unwrap();
+    let outside = library
+        .resolve_pumas_model_ref(outside_path.to_string_lossy().as_ref())
+        .await
+        .unwrap();
+    assert_eq!(outside.model_id, "");
+    assert!(outside
+        .migration_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "legacy_path_outside_library"));
+}
+
+#[tokio::test]
 async fn extracts_processor_component_class_names_and_chat_templates() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "vlm/example/component-evidence";

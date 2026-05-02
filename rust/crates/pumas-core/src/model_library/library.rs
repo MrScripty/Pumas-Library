@@ -35,10 +35,10 @@ use crate::model_library::{
 };
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
-    GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic, PackageArtifactKind,
-    PackageFactStatus, ProcessorComponentFacts, ProcessorComponentKind, PumasModelRef,
-    ResolvedArtifactFacts, ResolvedModelPackageFacts, StorageKind, TaskEvidence,
-    TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+    GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic,
+    ModelRefMigrationDiagnostic, PackageArtifactKind, PackageFactStatus, ProcessorComponentFacts,
+    ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
+    StorageKind, TaskEvidence, TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -2256,6 +2256,82 @@ impl ModelLibrary {
         }
 
         Ok(facts)
+    }
+
+    /// Resolve a canonical model id or legacy local path into a Pumas model ref.
+    ///
+    /// Unresolved path inputs return a ref with migration diagnostics instead
+    /// of guessing a replacement model.
+    pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<PumasModelRef> {
+        if self.index.get(input)?.is_some() {
+            return Ok(PumasModelRef {
+                model_id: input.to_string(),
+                revision: None,
+                selected_artifact_id: None,
+                selected_artifact_path: Some(self.library_root.join(input).display().to_string()),
+                migration_diagnostics: Vec::new(),
+            });
+        }
+
+        let path = PathBuf::from(input);
+        if path.components().count() == 0 {
+            return Ok(unresolved_model_ref(
+                input,
+                "empty_model_ref",
+                "model reference input is empty",
+            ));
+        }
+
+        if !path.is_absolute() && !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+            return Ok(unresolved_model_ref(
+                input,
+                "unknown_model_id",
+                "input does not match a known Pumas model id",
+            ));
+        }
+
+        let canonical_input = match tokio::fs::canonicalize(&path).await {
+            Ok(path) => path,
+            Err(_) => {
+                return Ok(unresolved_model_ref(
+                    input,
+                    "legacy_path_unresolved",
+                    "legacy path does not resolve to an existing local model path",
+                ));
+            }
+        };
+
+        for model_id in self.index.get_all_ids()? {
+            let Some(record) = self.index.get(&model_id)? else {
+                continue;
+            };
+            let Ok(record_path) = tokio::fs::canonicalize(&record.path).await else {
+                continue;
+            };
+            if canonical_input == record_path || canonical_input.starts_with(&record_path) {
+                return Ok(PumasModelRef {
+                    model_id,
+                    revision: None,
+                    selected_artifact_id: None,
+                    selected_artifact_path: Some(canonical_input.display().to_string()),
+                    migration_diagnostics: Vec::new(),
+                });
+            }
+        }
+
+        if canonical_input.starts_with(&self.library_root) {
+            return Ok(unresolved_model_ref(
+                input,
+                "legacy_path_not_indexed",
+                "legacy path is inside the Pumas library but does not match an indexed model",
+            ));
+        }
+
+        Ok(unresolved_model_ref(
+            input,
+            "legacy_path_outside_library",
+            "legacy path is outside the Pumas library and requires user model selection",
+        ))
     }
 
     async fn package_facts_lock(
@@ -5075,6 +5151,20 @@ fn update_package_facts_hash_part(hasher: &mut Sha256, label: &str, value: &str)
     hasher.update([0]);
     hasher.update(value.as_bytes());
     hasher.update([0xff]);
+}
+
+fn unresolved_model_ref(input: &str, code: &str, message: &str) -> PumasModelRef {
+    PumasModelRef {
+        model_id: String::new(),
+        revision: None,
+        selected_artifact_id: None,
+        selected_artifact_path: None,
+        migration_diagnostics: vec![ModelRefMigrationDiagnostic {
+            code: code.to_string(),
+            message: message.to_string(),
+            input: Some(input.to_string()),
+        }],
+    }
 }
 
 const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[

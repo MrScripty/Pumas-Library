@@ -217,3 +217,79 @@ async fn preserves_unsupported_backend_hints_as_raw_package_facts() {
         .unsupported
         .contains(&"ollama".to_string()));
 }
+
+#[tokio::test]
+async fn extracts_processor_component_class_names_and_chat_templates() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "vlm/example/component-evidence";
+    let model_dir = library.build_model_path("vlm", "example", "component-evidence");
+    tokio::fs::create_dir_all(model_dir.join("chat_templates"))
+        .await
+        .unwrap();
+    tokio::fs::write(
+        model_dir.join("config.json"),
+        r#"{"model_type":"llava","architectures":["LlavaForConditionalGeneration"]}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("tokenizer_config.json"),
+        r#"{"tokenizer_class":"LlamaTokenizerFast"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("processor_config.json"),
+        r#"{"processor_class":"LlavaProcessor"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("image_processor_config.json"),
+        r#"{"image_processor_type":"CLIPImageProcessor"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(
+        model_dir.join("chat_templates/default.jinja"),
+        "{{ messages }}",
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("vlm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("component-evidence".to_string()),
+        official_name: Some("Component Evidence".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Config
+            && component.class_name.as_deref() == Some("LlavaForConditionalGeneration")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::TokenizerConfig
+            && component.class_name.as_deref() == Some("LlamaTokenizerFast")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Processor
+            && component.class_name.as_deref() == Some("LlavaProcessor")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::ImageProcessor
+            && component.class_name.as_deref() == Some("CLIPImageProcessor")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::ChatTemplate
+            && component.relative_path.as_deref() == Some("chat_templates/default.jinja")
+    }));
+}

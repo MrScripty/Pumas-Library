@@ -4878,6 +4878,7 @@ const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
     "generation_config.json",
     "tokenizer.json",
     "tokenizer_config.json",
+    "special_tokens_map.json",
     "processor_config.json",
     "preprocessor_config.json",
     "image_processor_config.json",
@@ -4924,50 +4925,157 @@ async fn package_artifact_kind(
 }
 
 async fn package_component_facts(model_dir: &Path) -> Result<Vec<ProcessorComponentFacts>> {
+    struct ComponentCandidate {
+        kind: ProcessorComponentKind,
+        relative_path: &'static str,
+        class_keys: &'static [&'static str],
+    }
+
     let candidates = [
-        (ProcessorComponentKind::Config, "config.json"),
-        (ProcessorComponentKind::Tokenizer, "tokenizer.json"),
-        (
-            ProcessorComponentKind::TokenizerConfig,
-            "tokenizer_config.json",
-        ),
-        (ProcessorComponentKind::Processor, "processor_config.json"),
-        (
-            ProcessorComponentKind::Preprocessor,
-            "preprocessor_config.json",
-        ),
-        (
-            ProcessorComponentKind::ImageProcessor,
-            "image_processor_config.json",
-        ),
-        (
-            ProcessorComponentKind::VideoProcessor,
-            "video_processor_config.json",
-        ),
-        (
-            ProcessorComponentKind::AudioFeatureExtractor,
-            "feature_extractor_config.json",
-        ),
-        (ProcessorComponentKind::ChatTemplate, "chat_template.jinja"),
-        (
-            ProcessorComponentKind::GenerationConfig,
-            "generation_config.json",
-        ),
-        (ProcessorComponentKind::ModelIndex, "model_index.json"),
+        ComponentCandidate {
+            kind: ProcessorComponentKind::Config,
+            relative_path: "config.json",
+            class_keys: &["architectures"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::Tokenizer,
+            relative_path: "tokenizer.json",
+            class_keys: &[],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::TokenizerConfig,
+            relative_path: "tokenizer_config.json",
+            class_keys: &["tokenizer_class"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::Processor,
+            relative_path: "processor_config.json",
+            class_keys: &["processor_class"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::Preprocessor,
+            relative_path: "preprocessor_config.json",
+            class_keys: &["processor_class", "feature_extractor_type"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::ImageProcessor,
+            relative_path: "image_processor_config.json",
+            class_keys: &["image_processor_type"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::VideoProcessor,
+            relative_path: "video_processor_config.json",
+            class_keys: &["video_processor_type"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::AudioFeatureExtractor,
+            relative_path: "feature_extractor_config.json",
+            class_keys: &["feature_extractor_type"],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::ChatTemplate,
+            relative_path: "chat_template.jinja",
+            class_keys: &[],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::GenerationConfig,
+            relative_path: "generation_config.json",
+            class_keys: &[],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::ModelIndex,
+            relative_path: "model_index.json",
+            class_keys: &[],
+        },
     ];
     let mut facts = Vec::new();
-    for (kind, relative_path) in candidates {
+    for candidate in candidates {
+        let relative_path = candidate.relative_path;
         if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
+            let class_name =
+                component_class_name(model_dir.join(relative_path), candidate.class_keys).await?;
             facts.push(ProcessorComponentFacts {
-                kind,
+                kind: candidate.kind,
                 status: PackageFactStatus::Present,
                 relative_path: Some(relative_path.to_string()),
-                class_name: None,
+                class_name,
                 message: None,
             });
         }
     }
+    facts.extend(chat_template_directory_facts(model_dir).await?);
     Ok(facts)
+}
+
+async fn component_class_name(path: PathBuf, class_keys: &[&str]) -> Result<Option<String>> {
+    if class_keys.is_empty() {
+        return Ok(None);
+    }
+    let class_keys = class_keys
+        .iter()
+        .map(|key| (*key).to_string())
+        .collect::<Vec<_>>();
+    tokio::task::spawn_blocking(move || {
+        let Some(config) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        else {
+            return Ok(None);
+        };
+        for key in class_keys {
+            match config.get(&key) {
+                Some(Value::String(value)) => return Ok(Some(value.clone())),
+                Some(Value::Array(values)) => {
+                    if let Some(value) = values.iter().filter_map(Value::as_str).next() {
+                        return Ok(Some(value.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        Ok::<_, PumasError>(None)
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join component class parse: {}", err)))?
+}
+
+async fn chat_template_directory_facts(model_dir: &Path) -> Result<Vec<ProcessorComponentFacts>> {
+    let template_dir = model_dir.join("chat_templates");
+    if !tokio::fs::try_exists(&template_dir).await? {
+        return Ok(Vec::new());
+    }
+    tokio::task::spawn_blocking(move || {
+        let mut facts = Vec::new();
+        for entry in std::fs::read_dir(template_dir).map_err(|err| PumasError::Io {
+            message: "Failed to read chat_templates directory".to_string(),
+            path: None,
+            source: Some(err),
+        })? {
+            let entry = entry.map_err(|err| PumasError::Io {
+                message: "Failed to read chat_templates entry".to_string(),
+                path: None,
+                source: Some(err),
+            })?;
+            let path = entry.path();
+            if !path.is_file() || path.extension().and_then(|ext| ext.to_str()) != Some("jinja") {
+                continue;
+            }
+            let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                continue;
+            };
+            facts.push(ProcessorComponentFacts {
+                kind: ProcessorComponentKind::ChatTemplate,
+                status: PackageFactStatus::Present,
+                relative_path: Some(format!("chat_templates/{}", name)),
+                class_name: None,
+                message: None,
+            });
+        }
+        facts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
+        Ok::<_, PumasError>(facts)
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join chat template scan: {}", err)))?
 }
 
 async fn transformers_package_evidence(

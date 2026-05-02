@@ -66,8 +66,9 @@ pub use importer::{
 };
 pub use library::{
     MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport,
-    MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
-    MigrationPlannedMove, MigrationReportArtifact, ModelLibrary, ReclassifyResult,
+    MetadataProjectionCleanupExecutionReport, MigrationDryRunItem, MigrationDryRunReport,
+    MigrationExecutionItem, MigrationExecutionReport, MigrationPlannedMove,
+    MigrationReportArtifact, ModelLibrary, ReclassifyResult,
 };
 pub use link_registry::LinkRegistry;
 pub use mapper::ModelMapper;

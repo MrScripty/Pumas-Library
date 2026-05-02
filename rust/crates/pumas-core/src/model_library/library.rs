@@ -56,9 +56,11 @@ pub use migration::{
     MigrationDryRunItem, MigrationDryRunReport, MigrationExecutionItem, MigrationExecutionReport,
     MigrationPlannedMove, MigrationReportArtifact,
 };
+pub use projection::MetadataProjectionCleanupExecutionReport;
 use projection::{
-    canonicalize_display_path, metadata_projection_cleanup_dry_run_report, metadata_to_record,
-    payload_filesystem_is_newer, project_display_fields_for_record,
+    canonicalize_display_path, cleanup_metadata_projection_record,
+    metadata_projection_cleanup_dry_run_report, metadata_to_record, payload_filesystem_is_newer,
+    project_display_fields_for_record,
 };
 pub use projection::{MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport};
 
@@ -1084,12 +1086,39 @@ impl ModelLibrary {
     pub fn generate_metadata_projection_cleanup_dry_run_report(
         &self,
     ) -> Result<MetadataProjectionCleanupDryRunReport> {
+        let rows = self.raw_index_rows()?;
+        Ok(metadata_projection_cleanup_dry_run_report(&rows))
+    }
+
+    /// Apply SQLite metadata projection cleanup to existing index rows.
+    pub fn execute_metadata_projection_cleanup(
+        &self,
+    ) -> Result<MetadataProjectionCleanupExecutionReport> {
+        let rows = self.raw_index_rows()?;
+        let dry_run = metadata_projection_cleanup_dry_run_report(&rows);
+        let mut updated_models = 0;
+
+        for mut record in rows {
+            if cleanup_metadata_projection_record(&mut record) && self.index.upsert(&record)? {
+                updated_models += 1;
+            }
+        }
+
+        Ok(MetadataProjectionCleanupExecutionReport {
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            total_models: dry_run.total_models,
+            planned_models_with_cleanup: dry_run.models_with_cleanup,
+            updated_models,
+            dry_run,
+        })
+    }
+
+    fn raw_index_rows(&self) -> Result<Vec<ModelRecord>> {
         let total = self.index.count()?;
         if total == 0 {
-            return Ok(metadata_projection_cleanup_dry_run_report(&[]));
+            return Ok(Vec::new());
         }
-        let rows = self.index.search("", None, None, total, 0)?.models;
-        Ok(metadata_projection_cleanup_dry_run_report(&rows))
+        Ok(self.index.search("", None, None, total, 0)?.models)
     }
 
     /// Get a single model by ID.
@@ -9014,14 +9043,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_metadata_projection_cleanup_dry_run_reports_legacy_index_rows() {
-        let (_temp_dir, library) = setup_library().await;
-        let model_id = "llm/llama/legacy-cleanup";
-        let model_dir = library.build_model_path("llm", "llama", "legacy-cleanup");
-        std::fs::create_dir_all(&model_dir).unwrap();
-
-        let record = ModelRecord {
+    fn legacy_cleanup_record(model_id: &str, model_dir: &Path) -> ModelRecord {
+        ModelRecord {
             id: model_id.to_string(),
             path: model_dir.display().to_string(),
             cleaned_name: "legacy-cleanup".to_string(),
@@ -9047,8 +9070,20 @@ mod tests {
                 "preview_image": "preview.png"
             }),
             updated_at: chrono::Utc::now().to_rfc3339(),
-        };
-        library.index().upsert(&record).unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_metadata_projection_cleanup_dry_run_reports_legacy_index_rows() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/legacy-cleanup";
+        let model_dir = library.build_model_path("llm", "llama", "legacy-cleanup");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        library
+            .index()
+            .upsert(&legacy_cleanup_record(model_id, &model_dir))
+            .unwrap();
 
         let report = library
             .generate_metadata_projection_cleanup_dry_run_report()
@@ -9090,6 +9125,42 @@ mod tests {
 
         let raw = library.index().get(model_id).unwrap().unwrap();
         assert!(raw.metadata.get("model_id").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_metadata_projection_cleanup_execution_is_idempotent() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/legacy-cleanup";
+        let model_dir = library.build_model_path("llm", "llama", "legacy-cleanup");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        library
+            .index()
+            .upsert(&legacy_cleanup_record(model_id, &model_dir))
+            .unwrap();
+
+        let first = library.execute_metadata_projection_cleanup().unwrap();
+        assert_eq!(first.total_models, 1);
+        assert_eq!(first.planned_models_with_cleanup, 1);
+        assert_eq!(first.updated_models, 1);
+
+        let cleaned = library.index().get(model_id).unwrap().unwrap();
+        assert!(cleaned.metadata.get("model_id").is_none());
+        assert!(cleaned.metadata.get("hashes").is_none());
+        assert_eq!(
+            cleaned.metadata.get("license").and_then(Value::as_str),
+            Some("mit")
+        );
+        assert_eq!(
+            cleaned
+                .metadata
+                .get("preview_image")
+                .and_then(Value::as_str),
+            Some("preview.png")
+        );
+
+        let second = library.execute_metadata_projection_cleanup().unwrap();
+        assert_eq!(second.planned_models_with_cleanup, 0);
+        assert_eq!(second.updated_models, 0);
     }
 
     #[tokio::test]

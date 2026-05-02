@@ -28,6 +28,17 @@ pub struct MetadataProjectionCleanupDryRunItem {
     pub payload_size_reduction_bytes: usize,
 }
 
+/// Write-mode result for SQLite metadata projection cleanup.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct MetadataProjectionCleanupExecutionReport {
+    pub generated_at: String,
+    pub total_models: usize,
+    pub planned_models_with_cleanup: usize,
+    pub updated_models: usize,
+    pub dry_run: MetadataProjectionCleanupDryRunReport,
+}
+
 /// Convert `ModelMetadata` into the canonical index row projection.
 pub(super) fn metadata_to_record(
     model_id: &str,
@@ -269,6 +280,14 @@ pub(super) fn metadata_projection_cleanup_dry_run_report(
         .items
         .sort_by(|left, right| left.model_id.cmp(&right.model_id));
     report
+}
+
+pub(super) fn cleanup_metadata_projection_record(record: &mut ModelRecord) -> bool {
+    let before = record.metadata.clone();
+    if let Some(metadata) = record.metadata.as_object_mut() {
+        cleanup_metadata_projection_fields(metadata);
+    }
+    record.metadata != before
 }
 
 fn metadata_projection_cleanup_dry_run_item(

@@ -37,6 +37,7 @@ pub(super) fn metadata_to_record(
             QUANTIZATION_METADATA_KEY.to_string(),
             derive_quantization_value(obj),
         );
+        cleanup_metadata_projection_fields(obj);
     }
 
     ModelRecord {
@@ -166,6 +167,42 @@ fn derive_quantization_value(metadata: &serde_json::Map<String, Value>) -> Value
     derive_quantization(metadata)
         .map(Value::String)
         .unwrap_or(Value::Null)
+}
+
+const COLUMN_OWNED_METADATA_FIELDS: &[&str] = &[
+    "model_id",
+    "model_type",
+    "cleaned_name",
+    "official_name",
+    "hashes",
+    "tags",
+];
+
+const NON_MEANINGFUL_METADATA_PROJECTION_FIELDS: &[&str] = &[
+    "compatible_apps",
+    "conversion_source",
+    "last_lookup_attempt",
+    "license_artifact",
+    "model_card_artifact",
+    "reviewed_at",
+    "reviewed_by",
+    "subtype",
+];
+
+fn cleanup_metadata_projection_fields(metadata: &mut serde_json::Map<String, Value>) {
+    for field in COLUMN_OWNED_METADATA_FIELDS {
+        metadata.remove(*field);
+    }
+    for field in NON_MEANINGFUL_METADATA_PROJECTION_FIELDS {
+        metadata.remove(*field);
+    }
+    if metadata
+        .get("validation_errors")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty)
+    {
+        metadata.remove("validation_errors");
+    }
 }
 
 fn derive_primary_format(metadata: &serde_json::Map<String, Value>) -> Option<String> {
@@ -395,5 +432,103 @@ fn normalize_quant_token(value: &str) -> String {
         "INT8" => "INT8".to_string(),
         "INT4" => "INT4".to_string(),
         _ => normalized,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn metadata_projection_removes_column_owned_duplicates() {
+        let mut model_card = HashMap::new();
+        model_card.insert("summary".to_string(), Value::String("kept".to_string()));
+        let metadata = ModelMetadata {
+            model_id: Some("llm/test/projection-cleanup".to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("test".to_string()),
+            cleaned_name: Some("projection-cleanup".to_string()),
+            official_name: Some("Projection Cleanup".to_string()),
+            tags: Some(vec!["safetensors".to_string()]),
+            files: Some(vec![crate::models::ModelFileInfo {
+                name: "model.safetensors".to_string(),
+                original_name: None,
+                size: Some(4),
+                sha256: None,
+                blake3: None,
+            }]),
+            hashes: Some(crate::models::ModelHashes {
+                sha256: Some("abc".to_string()),
+                blake3: None,
+            }),
+            model_card: Some(model_card),
+            notes: Some("kept notes".to_string()),
+            preview_image: Some("preview.png".to_string()),
+            license_status: Some("allowed".to_string()),
+            ..Default::default()
+        };
+
+        let record = metadata_to_record(
+            "llm/test/projection-cleanup",
+            Path::new("/tmp/projection-cleanup"),
+            &metadata,
+        );
+        let projected = record.metadata.as_object().unwrap();
+
+        for key in [
+            "model_id",
+            "model_type",
+            "cleaned_name",
+            "official_name",
+            "tags",
+            "hashes",
+        ] {
+            assert!(!projected.contains_key(key), "{key} should be column-owned");
+        }
+        assert_eq!(record.tags, vec!["safetensors".to_string()]);
+        assert_eq!(record.hashes.get("sha256").map(String::as_str), Some("abc"));
+        assert!(projected.contains_key("model_card"));
+        assert!(projected.contains_key("notes"));
+        assert!(projected.contains_key("preview_image"));
+        assert!(projected.contains_key("license_status"));
+        assert_eq!(
+            projected
+                .get(PRIMARY_FORMAT_METADATA_KEY)
+                .and_then(Value::as_str),
+            Some("safetensors")
+        );
+    }
+
+    #[test]
+    fn metadata_projection_removes_non_meaningful_fields_but_keeps_exceptions() {
+        let mut metadata = serde_json::json!({
+            "compatible_apps": [],
+            "conversion_source": {"target_format": "gguf"},
+            "last_lookup_attempt": null,
+            "license_artifact": {"path": "license.txt"},
+            "model_card_artifact": {"path": "README.md"},
+            "reviewed_at": "",
+            "reviewed_by": "",
+            "subtype": "",
+            "validation_errors": [],
+            "license_status": "allowed",
+            "model_card": {"summary": "kept"},
+            "notes": "kept",
+            "preview_image": "preview.png"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        cleanup_metadata_projection_fields(&mut metadata);
+
+        for key in NON_MEANINGFUL_METADATA_PROJECTION_FIELDS {
+            assert!(!metadata.contains_key(*key), "{key} should be removed");
+        }
+        assert!(!metadata.contains_key("validation_errors"));
+        assert!(metadata.contains_key("license_status"));
+        assert!(metadata.contains_key("model_card"));
+        assert!(metadata.contains_key("notes"));
+        assert!(metadata.contains_key("preview_image"));
     }
 }

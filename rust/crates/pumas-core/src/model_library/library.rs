@@ -5080,6 +5080,9 @@ const STANDARD_PACKAGE_FACT_FILENAMES: &[&str] = &[
     "feature_extractor_config.json",
     "chat_template.jinja",
     "model_index.json",
+    "adapter_config.json",
+    "adapter_model.safetensors",
+    "adapter_model.bin",
     "model.safetensors.index.json",
     "pytorch_model.bin.index.json",
     "requirements.txt",
@@ -5092,6 +5095,9 @@ async fn package_artifact_kind(
 ) -> Result<PackageArtifactKind> {
     if is_diffusers_bundle(metadata) {
         return Ok(PackageArtifactKind::DiffusersBundle);
+    }
+    if tokio::fs::try_exists(model_dir.join("adapter_config.json")).await? {
+        return Ok(PackageArtifactKind::Adapter);
     }
     if selected_files
         .iter()
@@ -5190,6 +5196,11 @@ async fn package_component_facts(
             kind: ProcessorComponentKind::ModelIndex,
             relative_path: "model_index.json",
             class_keys: &[],
+        },
+        ComponentCandidate {
+            kind: ProcessorComponentKind::Adapter,
+            relative_path: "adapter_config.json",
+            class_keys: &["peft_type"],
         },
     ];
     let mut facts = Vec::new();

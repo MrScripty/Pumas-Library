@@ -529,6 +529,62 @@ async fn extracts_quantization_component_evidence_from_config_and_filenames() {
 }
 
 #[tokio::test]
+async fn extracts_adapter_package_evidence() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/lora-adapter";
+    let model_dir = library.build_model_path("llm", "example", "lora-adapter");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(
+        model_dir.join("adapter_config.json"),
+        r#"{"peft_type":"LORA","base_model_name_or_path":"org/base-model"}"#,
+    )
+    .await
+    .unwrap();
+    tokio::fs::write(model_dir.join("adapter_model.safetensors"), "adapter")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("lora-adapter".to_string()),
+        official_name: Some("LoRA Adapter".to_string()),
+        files: Some(vec![
+            ModelFileInfo {
+                name: "adapter_config.json".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "adapter_model.safetensors".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+        ]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert_eq!(facts.artifact.artifact_kind, PackageArtifactKind::Adapter);
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Adapter
+            && component.relative_path.as_deref() == Some("adapter_config.json")
+            && component.class_name.as_deref() == Some("LORA")
+    }));
+    assert!(facts
+        .artifact
+        .selected_files
+        .contains(&"adapter_model.safetensors".to_string()));
+}
+
+#[tokio::test]
 async fn reuses_fresh_package_facts_detail_cache() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

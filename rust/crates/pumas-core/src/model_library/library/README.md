@@ -81,6 +81,7 @@ let primary_format = record.metadata.get("primary_format");
 - Index/API consumers should treat `primary_format` and `quantization` as derived convenience fields that may be recomputed from canonical metadata and filesystem facts.
 - Metadata projection cleanup dry-run reports are diagnostics over SQLite cache rows; consumers must not treat them as source metadata deletion plans.
 - Metadata projection cleanup execution applies only the reviewed projection-row cleanup; source `metadata.json` files remain untouched.
+- Recovery after projection cleanup is a normal `rebuild_index()` from source metadata. This regenerates the current cleaned projection; restoring intentionally redundant legacy projection fields requires an external database backup rather than source metadata rollback.
 
 ## Structured Producer Contract
 - Persisted migration reports are written as a JSON/Markdown pair plus an index entry describing `generated_at`, `report_kind`, and both artifact paths.
@@ -89,9 +90,11 @@ let primary_format = record.metadata.get("primary_format");
 - Projected model records may add derived metadata fields such as `primary_format` and `quantization`, but those fields must remain consistent with canonical metadata and on-disk payload evidence.
 - Metadata projection cleanup reports include affected row counts, removed field names, preserved exception fields, and before/after JSON byte counts for review before any write-mode cleanup.
 - Metadata projection cleanup execution reports include the dry-run plan and the number of rows actually updated.
+- Projection cleanup does not write backup rows because source metadata remains the durable source of truth and SQLite is the derived index.
 - Compatibility rule: report payloads may gain new optional fields, but existing persisted reports should remain listable and deletable without migration-only tooling.
 
 ## Regeneration Rules
 - When execution reconciliation changes recorded action rows, rewrite the existing execution artifact pair instead of emitting a second canonical copy.
 - When pruning history, remove artifact files and update `migration-reports/index.json` together so the retained index never points at deleted files.
 - When metadata or payload facts change, recompute derived format/quantization fields from source metadata and payload evidence instead of patching derived fields independently.
+- If projection cleanup needs to be recovered, rebuild the index from source metadata; do not patch cleaned fields back into SQLite by hand.

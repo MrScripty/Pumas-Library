@@ -9164,6 +9164,55 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_metadata_projection_cleanup_recovers_from_source_rebuild() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/llama/legacy-cleanup";
+        let model_dir = library.build_model_path("llm", "llama", "legacy-cleanup");
+        std::fs::create_dir_all(&model_dir).unwrap();
+
+        let source_metadata = ModelMetadata {
+            model_id: Some(model_id.to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("llama".to_string()),
+            cleaned_name: Some("legacy-cleanup".to_string()),
+            official_name: Some("Legacy Cleanup".to_string()),
+            tags: Some(vec!["gguf".to_string()]),
+            notes: Some("keep me".to_string()),
+            preview_image: Some("preview.png".to_string()),
+            license_status: Some("allowed".to_string()),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&model_dir, &source_metadata)
+            .await
+            .unwrap();
+        library
+            .index()
+            .upsert(&legacy_cleanup_record(model_id, &model_dir))
+            .unwrap();
+
+        let cleanup = library.execute_metadata_projection_cleanup().unwrap();
+        assert_eq!(cleanup.updated_models, 1);
+
+        let rebuilt = library.rebuild_index().await.unwrap();
+        assert_eq!(rebuilt, 1);
+        let raw = library.index().get(model_id).unwrap().unwrap();
+        assert!(raw.metadata.get("model_id").is_none());
+        assert_eq!(
+            raw.metadata.get("notes").and_then(Value::as_str),
+            Some("keep me")
+        );
+        assert_eq!(
+            raw.metadata.get("preview_image").and_then(Value::as_str),
+            Some("preview.png")
+        );
+        assert_eq!(
+            raw.metadata.get("license_status").and_then(Value::as_str),
+            Some("allowed")
+        );
+    }
+
+    #[tokio::test]
     async fn test_projection_leaves_recommended_backend_unset_when_bindings_conflict() {
         let (_temp_dir, library) = setup_library().await;
         let model_id = "llm/llama/backend-conflict";

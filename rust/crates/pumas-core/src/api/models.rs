@@ -522,6 +522,26 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve package facts for a model on demand.
+    pub async fn resolve_model_package_facts(
+        &self,
+        model_id: &str,
+    ) -> Result<models::ResolvedModelPackageFacts> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_model_package_facts",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .model_library
+            .resolve_model_package_facts(model_id)
+            .await
+    }
+
     /// Audit dependency pin compliance across active model bindings.
     pub async fn audit_dependency_pin_compliance(
         &self,

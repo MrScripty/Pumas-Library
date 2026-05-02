@@ -1,5 +1,6 @@
 import type { BaseResponse } from './api-common';
 import type { ConversionSource } from './api-conversion';
+import type { AssetValidationError, AssetValidationState, StorageKind } from './api-import';
 
 // ============================================================================
 // Model Types
@@ -129,6 +130,137 @@ export interface UpdateInferenceSettingsResponse extends BaseResponse {
 export interface UpdateModelNotesResponse extends BaseResponse {
   model_id: string;
   notes?: string | null;
+}
+
+export type PackageArtifactKind =
+  | 'gguf'
+  | 'hf_compatible_directory'
+  | 'safetensors'
+  | 'diffusers_bundle'
+  | 'onnx'
+  | 'adapter'
+  | 'shard'
+  | 'unknown';
+
+export type PackageFactStatus = 'present' | 'missing' | 'invalid' | 'unsupported' | 'uninspected';
+
+export type ProcessorComponentKind =
+  | 'config'
+  | 'tokenizer'
+  | 'tokenizer_config'
+  | 'processor'
+  | 'preprocessor'
+  | 'image_processor'
+  | 'video_processor'
+  | 'audio_feature_extractor'
+  | 'feature_extractor'
+  | 'chat_template'
+  | 'generation_config'
+  | 'model_index'
+  | 'weight_index'
+  | 'weights'
+  | 'adapter'
+  | 'quantization'
+  | 'other';
+
+export type BackendHintLabel =
+  | 'transformers'
+  | 'llama.cpp'
+  | 'vllm'
+  | 'mlx'
+  | 'candle'
+  | 'diffusers'
+  | 'onnx-runtime';
+
+export interface ModelPackageDiagnostic {
+  code: string;
+  message: string;
+  path?: string | null;
+}
+
+export interface ModelRefMigrationDiagnostic {
+  code: string;
+  message: string;
+  input?: string | null;
+}
+
+export interface PumasModelRef {
+  model_id: string;
+  revision?: string | null;
+  selected_artifact_id?: string | null;
+  selected_artifact_path?: string | null;
+  migration_diagnostics?: ModelRefMigrationDiagnostic[];
+}
+
+export interface ResolvedArtifactFacts {
+  artifact_kind: PackageArtifactKind;
+  entry_path: string;
+  storage_kind: StorageKind;
+  validation_state: AssetValidationState;
+  validation_errors?: AssetValidationError[];
+  companion_artifacts?: string[];
+  selected_files?: string[];
+}
+
+export interface ProcessorComponentFacts {
+  kind: ProcessorComponentKind;
+  status: PackageFactStatus;
+  relative_path?: string | null;
+  class_name?: string | null;
+  message?: string | null;
+}
+
+export interface TransformersPackageEvidence {
+  config_status: PackageFactStatus;
+  config_model_type?: string | null;
+  architectures?: string[];
+  dtype?: string | null;
+  torch_dtype?: string | null;
+  auto_map?: string[];
+  processor_class?: string | null;
+  generation_config_status: PackageFactStatus;
+  source_revision?: string | null;
+  selected_files?: string[];
+}
+
+export interface TaskEvidence {
+  pipeline_tag?: string | null;
+  task_type_primary?: string | null;
+  input_modalities?: string[];
+  output_modalities?: string[];
+}
+
+export interface GenerationDefaultFacts {
+  status: PackageFactStatus;
+  source_path?: string | null;
+  defaults?: unknown;
+  diagnostics?: ModelPackageDiagnostic[];
+}
+
+export interface CustomCodeFacts {
+  requires_custom_code: boolean;
+  custom_code_sources?: string[];
+  auto_map_sources?: string[];
+  dependency_manifests?: string[];
+}
+
+export interface BackendHintFacts {
+  accepted?: BackendHintLabel[];
+  raw?: string[];
+  unsupported?: string[];
+}
+
+export interface ResolvedModelPackageFacts {
+  package_facts_contract_version: number;
+  model_ref: PumasModelRef;
+  artifact: ResolvedArtifactFacts;
+  components: ProcessorComponentFacts[];
+  transformers?: TransformersPackageEvidence | null;
+  task: TaskEvidence;
+  generation_defaults: GenerationDefaultFacts;
+  custom_code: CustomCodeFacts;
+  backend_hints: BackendHintFacts;
+  diagnostics?: ModelPackageDiagnostic[];
 }
 
 export interface SearchHFModelsResponse extends BaseResponse {

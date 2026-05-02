@@ -375,3 +375,62 @@ async fn test_get_inference_settings_applies_qwen_diffusion_overrides() {
     assert!(keys.contains(&"seed"));
     assert!(!keys.contains(&"guidance_scale"));
 }
+
+#[tokio::test]
+async fn test_resolve_model_package_facts_is_lazy_api_surface() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let model_id = "llm/test/lazy-package-facts";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(
+        model_dir.join("config.json"),
+        r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        model_dir.join("generation_config.json"),
+        r#"{"max_new_tokens":64}"#,
+    )
+    .unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": "Lazy Package Facts",
+            "cleaned_name": "lazy-package-facts",
+            "files": [{"name": "model.safetensors"}],
+            "runtime_engine_hints": ["transformers"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let facts = api.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert_eq!(facts.model_ref.model_id, model_id);
+    assert!(facts.artifact.entry_path.ends_with("model.safetensors"));
+    assert_eq!(
+        facts
+            .transformers
+            .and_then(|evidence| evidence.config_model_type),
+        Some("llama".to_string())
+    );
+    assert_eq!(
+        facts.generation_defaults.source_path.as_deref(),
+        Some("generation_config.json")
+    );
+}

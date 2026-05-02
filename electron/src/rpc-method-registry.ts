@@ -77,6 +77,7 @@ export const RPC_METHOD_REGISTRY = {
     'get_embedded_metadata',
     'get_library_model_metadata',
     'resolve_model_execution_descriptor',
+    'resolve_model_package_facts',
     'refetch_model_metadata_from_hf',
     'adopt_orphan_models',
     'import_model_in_place',

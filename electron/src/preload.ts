@@ -362,6 +362,8 @@ const electronAPI = {
     apiCall('get_library_model_metadata', { model_id: modelId }),
   refetch_model_metadata_from_hf: (modelId: string) =>
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
+  resolve_model_package_facts: (modelId: string) =>
+    apiCall('resolve_model_package_facts', { model_id: modelId }),
 
   // Inference Settings
   get_inference_settings: (modelId: string) =>

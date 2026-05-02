@@ -11,6 +11,7 @@ import type {
   InferenceParamSchema,
   InferenceSettingsResponse,
   ModelExecutionDescriptor,
+  ResolvedModelPackageFacts,
   UpdateModelNotesResponse,
   UpdateInferenceSettingsResponse,
 } from '../types/api';
@@ -119,6 +120,11 @@ class ModelsAPI {
   async resolveModelExecutionDescriptor(modelId: string): Promise<ModelExecutionDescriptor> {
     const api = this.getAPI();
     return await api.resolve_model_execution_descriptor(modelId);
+  }
+
+  async resolveModelPackageFacts(modelId: string): Promise<ResolvedModelPackageFacts> {
+    const api = this.getAPI();
+    return await api.resolve_model_package_facts(modelId);
   }
 
   /**

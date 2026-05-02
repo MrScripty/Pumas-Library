@@ -480,6 +480,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(descriptor)?)
             }
+            "resolve_model_package_facts" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let facts = self
+                    .model_library
+                    .resolve_model_package_facts(model_id)
+                    .await?;
+                Ok(serde_json::to_value(facts)?)
+            }
             "audit_dependency_pin_compliance" => {
                 let report = self.model_library.audit_dependency_pin_compliance().await?;
                 Ok(serde_json::to_value(report)?)

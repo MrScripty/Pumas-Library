@@ -29,6 +29,7 @@ import type {
   ModelsResponse,
   RecoverDownloadResponse,
   RelatedModelsResponse,
+  ResolvedModelPackageFacts,
   ResumePartialDownloadResponse,
   ScanSharedStorageResponse,
   SearchHFModelsResponse,
@@ -122,6 +123,11 @@ export interface DesktopBridgeModelAPI {
    * Resolve a runtime execution descriptor for a model.
    */
   resolve_model_execution_descriptor(modelId: string): Promise<ModelExecutionDescriptor>;
+
+  /**
+   * Resolve package facts for a model on demand.
+   */
+  resolve_model_package_facts(modelId: string): Promise<ResolvedModelPackageFacts>;
 
   /**
    * Refetch model metadata from HuggingFace

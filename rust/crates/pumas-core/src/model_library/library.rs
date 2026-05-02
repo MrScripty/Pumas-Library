@@ -2099,6 +2099,9 @@ impl ModelLibrary {
         let transformers =
             transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
         let generation_defaults = generation_default_facts(&model_dir).await?;
+        let auto_map_sources = auto_map_sources_from_config(&model_dir).await?;
+        let requires_custom_code =
+            metadata.requires_custom_code.unwrap_or(false) || !auto_map_sources.is_empty();
 
         Ok(ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
@@ -2133,9 +2136,9 @@ impl ModelLibrary {
             },
             generation_defaults,
             custom_code: CustomCodeFacts {
-                requires_custom_code: metadata.requires_custom_code.unwrap_or(false),
+                requires_custom_code,
                 custom_code_sources: metadata.custom_code_sources.clone().unwrap_or_default(),
-                auto_map_sources: Vec::new(),
+                auto_map_sources,
                 dependency_manifests: selected_files
                     .iter()
                     .filter(|path| path.as_str() == "requirements.txt")
@@ -5104,6 +5107,46 @@ async fn generation_default_facts(model_dir: &Path) -> Result<GenerationDefaultF
             }],
         }),
     }
+}
+
+async fn auto_map_sources_from_config(model_dir: &Path) -> Result<Vec<String>> {
+    let config_path = model_dir.join("config.json");
+    if !tokio::fs::try_exists(&config_path).await? {
+        return Ok(Vec::new());
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let Some(config) = std::fs::read_to_string(config_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        else {
+            return Ok(Vec::new());
+        };
+
+        let mut sources = BTreeSet::new();
+        if let Some(auto_map) = config.get("auto_map").and_then(Value::as_object) {
+            for value in auto_map.values() {
+                match value {
+                    Value::String(source) => {
+                        sources.insert(source.clone());
+                    }
+                    Value::Array(values) => {
+                        sources.extend(
+                            values
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(std::string::ToString::to_string),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        Ok::<_, PumasError>(sources.into_iter().collect())
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join auto_map parse: {}", err)))?
 }
 
 fn backend_hint_facts(

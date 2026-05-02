@@ -66,7 +66,6 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         output_modalities: Some(vec!["text".to_string()]),
         recommended_backend: Some("transformers".to_string()),
         runtime_engine_hints: Some(vec!["vllm".to_string(), "mlx".to_string()]),
-        requires_custom_code: Some(true),
         custom_code_sources: Some(vec!["modeling_tiny.py".to_string()]),
         ..Default::default()
     };
@@ -92,6 +91,14 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
     assert_eq!(facts.generation_defaults.status, PackageFactStatus::Present);
     assert_eq!(
         facts
+            .transformers
+            .as_ref()
+            .map(|evidence| evidence.auto_map.clone())
+            .unwrap_or_default(),
+        vec!["AutoConfig".to_string(), "AutoModelForCausalLM".to_string()]
+    );
+    assert_eq!(
+        facts
             .components
             .iter()
             .find(|component| component.kind == ProcessorComponentKind::Tokenizer)
@@ -99,6 +106,13 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         Some(PackageFactStatus::Present)
     );
     assert!(facts.custom_code.requires_custom_code);
+    assert_eq!(
+        facts.custom_code.auto_map_sources,
+        vec![
+            "configuration_tiny.TinyConfig".to_string(),
+            "modeling_tiny.TinyForCausalLM".to_string()
+        ]
+    );
     assert!(facts
         .artifact
         .selected_files

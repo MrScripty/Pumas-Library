@@ -1,0 +1,10 @@
+{
+  "model_id": "",
+  "migration_diagnostics": [
+    {
+      "code": "legacy_path_unresolved",
+      "message": "legacy path does not resolve to an existing local model path",
+      "input": "/legacy/graphs/missing-model.gguf"
+    }
+  ]
+}

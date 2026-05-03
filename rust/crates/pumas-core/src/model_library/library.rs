@@ -38,7 +38,8 @@ use crate::models::{
     GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic,
     ModelRefMigrationDiagnostic, PackageArtifactKind, PackageFactStatus, ProcessorComponentFacts,
     ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
-    StorageKind, TaskEvidence, TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+    ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, TransformersPackageEvidence,
+    PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -2159,7 +2160,15 @@ impl ModelLibrary {
                     && cached.source_fingerprint == source_fingerprint
                 {
                     match serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json) {
-                        Ok(facts) => return Ok(facts),
+                        Ok(facts) => {
+                            self.upsert_model_package_facts_summary_cache(
+                                model_id,
+                                metadata.updated_date.clone(),
+                                &source_fingerprint,
+                                &facts,
+                            )?;
+                            return Ok(facts);
+                        }
                         Err(err) => {
                             tracing::warn!(
                                 model_id,
@@ -2240,6 +2249,12 @@ impl ModelLibrary {
             diagnostics: Vec::new(),
         };
         if can_persist_package_facts {
+            self.upsert_model_package_facts_summary_cache(
+                model_id,
+                metadata.updated_date.clone(),
+                &source_fingerprint,
+                &facts,
+            )?;
             let now = chrono::Utc::now().to_rfc3339();
             self.index
                 .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
@@ -2256,6 +2271,30 @@ impl ModelLibrary {
         }
 
         Ok(facts)
+    }
+
+    fn upsert_model_package_facts_summary_cache(
+        &self,
+        model_id: &str,
+        producer_revision: Option<String>,
+        source_fingerprint: &str,
+        facts: &ResolvedModelPackageFacts,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let summary = ResolvedModelPackageFactsSummary::from(facts);
+        self.index
+            .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
+                model_id: model_id.to_string(),
+                selected_artifact_id: String::new(),
+                cache_scope: ModelPackageFactsCacheScope::Summary,
+                package_facts_contract_version: i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
+                producer_revision,
+                source_fingerprint: source_fingerprint.to_string(),
+                facts_json: serde_json::to_string(&summary)?,
+                cached_at: now.clone(),
+                updated_at: now,
+            })?;
+        Ok(())
     }
 
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.

@@ -288,3 +288,89 @@ pub struct ResolvedModelPackageFacts {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub diagnostics: Vec<ModelPackageDiagnostic>,
 }
+
+/// Compact package-fact summary intended for indexing, list views, and stale checks.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ResolvedModelPackageFactsSummary {
+    pub package_facts_contract_version: u32,
+    pub model_ref: PumasModelRef,
+    pub artifact_kind: PackageArtifactKind,
+    pub entry_path: String,
+    pub storage_kind: StorageKind,
+    pub validation_state: AssetValidationState,
+    pub task: TaskEvidence,
+    pub backend_hints: BackendHintFacts,
+    pub requires_custom_code: bool,
+    pub config_status: PackageFactStatus,
+    pub tokenizer_status: PackageFactStatus,
+    pub processor_status: PackageFactStatus,
+    pub generation_config_status: PackageFactStatus,
+    pub generation_defaults_status: PackageFactStatus,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub diagnostic_codes: Vec<String>,
+}
+
+impl From<&ResolvedModelPackageFacts> for ResolvedModelPackageFactsSummary {
+    fn from(facts: &ResolvedModelPackageFacts) -> Self {
+        Self {
+            package_facts_contract_version: facts.package_facts_contract_version,
+            model_ref: facts.model_ref.clone(),
+            artifact_kind: facts.artifact.artifact_kind,
+            entry_path: facts.artifact.entry_path.clone(),
+            storage_kind: facts.artifact.storage_kind,
+            validation_state: facts.artifact.validation_state,
+            task: facts.task.clone(),
+            backend_hints: facts.backend_hints.clone(),
+            requires_custom_code: facts.custom_code.requires_custom_code,
+            config_status: facts
+                .transformers
+                .as_ref()
+                .map(|evidence| evidence.config_status)
+                .unwrap_or(PackageFactStatus::Uninspected),
+            tokenizer_status: component_status(
+                &facts.components,
+                &[
+                    ProcessorComponentKind::Tokenizer,
+                    ProcessorComponentKind::TokenizerConfig,
+                    ProcessorComponentKind::SpecialTokensMap,
+                ],
+            ),
+            processor_status: component_status(
+                &facts.components,
+                &[
+                    ProcessorComponentKind::Processor,
+                    ProcessorComponentKind::Preprocessor,
+                    ProcessorComponentKind::ImageProcessor,
+                    ProcessorComponentKind::VideoProcessor,
+                    ProcessorComponentKind::AudioFeatureExtractor,
+                    ProcessorComponentKind::FeatureExtractor,
+                ],
+            ),
+            generation_config_status: facts
+                .transformers
+                .as_ref()
+                .map(|evidence| evidence.generation_config_status)
+                .unwrap_or(PackageFactStatus::Uninspected),
+            generation_defaults_status: facts.generation_defaults.status,
+            diagnostic_codes: facts
+                .diagnostics
+                .iter()
+                .chain(facts.generation_defaults.diagnostics.iter())
+                .map(|diagnostic| diagnostic.code.clone())
+                .collect(),
+        }
+    }
+}
+
+fn component_status(
+    components: &[ProcessorComponentFacts],
+    kinds: &[ProcessorComponentKind],
+) -> PackageFactStatus {
+    components
+        .iter()
+        .filter(|component| kinds.contains(&component.kind))
+        .map(|component| component.status)
+        .find(|status| *status != PackageFactStatus::Uninspected)
+        .unwrap_or(PackageFactStatus::Uninspected)
+}

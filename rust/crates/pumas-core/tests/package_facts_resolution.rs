@@ -1,7 +1,7 @@
 use pumas_library::index::ModelPackageFactsCacheScope;
 use pumas_library::models::{
     BackendHintLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind, PackageFactStatus,
-    ProcessorComponentKind,
+    ProcessorComponentKind, ResolvedModelPackageFactsSummary,
 };
 use pumas_library::ModelLibrary;
 use tempfile::TempDir;
@@ -895,6 +895,48 @@ async fn reuses_fresh_package_facts_detail_cache() {
         resolved.task.task_type_primary.as_deref(),
         Some("cached_text_generation")
     );
+}
+
+#[tokio::test]
+async fn persists_compact_package_facts_summary_cache() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+    let summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let summary =
+        serde_json::from_str::<ResolvedModelPackageFactsSummary>(&summary_row.facts_json).unwrap();
+
+    assert_eq!(summary.model_ref.model_id, model_id);
+    assert_eq!(summary.artifact_kind, facts.artifact.artifact_kind);
+    assert_eq!(summary.storage_kind, facts.artifact.storage_kind);
+    assert_eq!(summary.validation_state, facts.artifact.validation_state);
+    assert_eq!(
+        summary.task.task_type_primary.as_deref(),
+        Some("text_generation")
+    );
+    assert_eq!(summary.config_status, PackageFactStatus::Present);
+    assert_eq!(summary.tokenizer_status, PackageFactStatus::Uninspected);
+    assert_eq!(summary.generation_config_status, PackageFactStatus::Missing);
+    let summary_json = serde_json::from_str::<serde_json::Value>(&summary_row.facts_json).unwrap();
+    assert!(summary_json.get("source_fingerprint").is_none());
+    assert_eq!(
+        summary_row.source_fingerprint,
+        detail_row.source_fingerprint
+    );
+    assert!(summary_row.facts_json.len() < detail_row.facts_json.len());
+    assert!(!summary_row.facts_json.contains("\"components\""));
+    assert!(!summary_row.facts_json.contains("\"generation_defaults\""));
 }
 
 #[tokio::test]

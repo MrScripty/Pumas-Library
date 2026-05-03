@@ -2,7 +2,7 @@
 
 ![License](https://img.shields.io/badge/license-MIT-purple.svg)
 ![Rust](https://img.shields.io/badge/rust-1.92.0-orange.svg)
-![Electron](https://img.shields.io/badge/electron-38+-blue.svg)
+![Electron](https://img.shields.io/badge/electron-39-blue.svg)
 ![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20Windows%20%7C%20macOS-green.svg)
 ![Bindings](https://img.shields.io/badge/bindings-Python%20%7C%20C%23%20%7C%20Kotlin%20%7C%20Swift%20%7C%20Ruby%20%7C%20Elixir-violet.svg)
 
@@ -184,19 +184,34 @@ cd rust
 cargo build --release
 
 cd ..
-npm run -w frontend build
-npm run -w electron build
+corepack pnpm --filter ./frontend build
+corepack pnpm --filter ./electron build
 ```
 
 ### Package Desktop Releases
 
-From `electron/`:
+Desktop packages need the frontend build output plus a staged `pumas-rpc`
+sidecar under `electron/resources/bin/`. The CI workflow stages the binary from
+the Rust build artifact before invoking Electron Builder. For a local package
+from source:
+
+```bash
+./launcher.sh --build-release
+mkdir -p electron/resources/bin
+cp rust/target/release/pumas-rpc electron/resources/bin/pumas-rpc
+chmod +x electron/resources/bin/pumas-rpc
+```
+
+On Windows, stage `rust\target\release\pumas-rpc.exe` as
+`electron\resources\bin\pumas-rpc.exe`.
+
+Then package with:
 
 | Command | Output |
 | ------- | ------ |
-| `npm run package:linux` | AppImage and `.deb` |
-| `npm run package:win` | Windows installer and portable executable |
-| `npm run package:mac` | DMG |
+| `corepack pnpm --filter ./electron exec electron-builder --linux --publish never` | AppImage and `.deb` |
+| `corepack pnpm --filter ./electron exec electron-builder --win --publish never` | Windows installer and portable executable |
+| `corepack pnpm --filter ./electron exec electron-builder --mac --publish never` | DMG |
 
 ## Supported Platforms
 
@@ -215,15 +230,14 @@ corepack pnpm install --frozen-lockfile
 ./launcher.sh --test
 ./launcher.sh --release-smoke
 
-cd rust
-cargo test --workspace --exclude pumas_rustler
-cargo clippy --workspace --exclude pumas_rustler -- -D warnings
-cargo build --workspace --exclude pumas_rustler
-
-cd ..
+./scripts/rust/check.sh
 npm run -w frontend test:run
+npm run -w frontend lint
+npm run -w frontend check:size
 npm run -w frontend check:types
 npm run -w frontend build
+npm run -w electron lint
+npm run -w electron test
 npm run -w electron validate
 npm run -w electron build
 ```

@@ -855,6 +855,64 @@ async fn extracts_quantization_component_evidence_from_config_and_filenames() {
 }
 
 #[tokio::test]
+async fn keeps_gguf_companion_facts_distinct_from_transformers_evidence() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "vlm/llava/gguf-mmproj";
+    let model_dir = library.build_model_path("vlm", "llava", "gguf-mmproj");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("model-Q4_K_M.gguf"), "gguf")
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("mmproj-model-f16.gguf"), "mmproj")
+        .await
+        .unwrap();
+
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("vlm".to_string()),
+        family: Some("llava".to_string()),
+        cleaned_name: Some("gguf-mmproj".to_string()),
+        official_name: Some("GGUF MMProj".to_string()),
+        task_type_primary: Some("image_text_to_text".to_string()),
+        recommended_backend: Some("llama.cpp".to_string()),
+        files: Some(vec![
+            ModelFileInfo {
+                name: "model-Q4_K_M.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+            ModelFileInfo {
+                name: "mmproj-model-f16.gguf".to_string(),
+                original_name: None,
+                size: None,
+                sha256: None,
+                blake3: None,
+            },
+        ]),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+    let facts = library.resolve_model_package_facts(model_id).await.unwrap();
+
+    assert_eq!(facts.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    assert_eq!(
+        facts.artifact.companion_artifacts,
+        vec!["mmproj-model-f16.gguf".to_string()]
+    );
+    assert!(
+        facts.transformers.is_none(),
+        "GGUF companion evidence must not imply HF/Transformers package evidence"
+    );
+    assert!(facts
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::LlamaCpp));
+}
+
+#[tokio::test]
 async fn extracts_adapter_package_evidence() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/lora-adapter";

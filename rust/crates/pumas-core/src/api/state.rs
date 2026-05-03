@@ -493,6 +493,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(facts)?)
             }
+            "list_model_library_updates_since" => {
+                let cursor = params["cursor"].as_str();
+                let limit = params
+                    .get("limit")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(100);
+                let updates = self
+                    .model_library
+                    .list_model_library_updates_since(cursor, limit)
+                    .await?;
+                Ok(serde_json::to_value(updates)?)
+            }
             "resolve_pumas_model_ref" => {
                 let input = params["input"]
                     .as_str()

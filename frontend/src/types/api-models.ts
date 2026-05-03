@@ -264,6 +264,41 @@ export interface ResolvedModelPackageFacts {
   diagnostics?: ModelPackageDiagnostic[];
 }
 
+export type ModelFactFamily =
+  | 'model_record'
+  | 'metadata'
+  | 'package_facts'
+  | 'dependency_bindings'
+  | 'validation'
+  | 'search_index';
+
+export type ModelLibraryChangeKind =
+  | 'model_added'
+  | 'model_removed'
+  | 'metadata_modified'
+  | 'package_facts_modified'
+  | 'stale_facts_invalidated'
+  | 'dependency_binding_modified';
+
+export type ModelLibraryRefreshScope = 'summary' | 'detail' | 'summary_and_detail';
+
+export interface ModelLibraryUpdateEvent {
+  cursor: string;
+  model_id: string;
+  change_kind: ModelLibraryChangeKind;
+  fact_family: ModelFactFamily;
+  refresh_scope: ModelLibraryRefreshScope;
+  selected_artifact_id?: string | null;
+  producer_revision?: string | null;
+}
+
+export interface ModelLibraryUpdateFeed {
+  cursor: string;
+  events?: ModelLibraryUpdateEvent[];
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+}
+
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }

@@ -542,6 +542,27 @@ impl PumasApi {
             .await
     }
 
+    /// List model-library updates after an optional producer cursor.
+    pub async fn list_model_library_updates_since(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<models::ModelLibraryUpdateFeed> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "list_model_library_updates_since",
+                    serde_json::json!({ "cursor": cursor, "limit": limit }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .model_library
+            .list_model_library_updates_since(cursor, limit)
+            .await
+    }
+
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
         if self.try_client().is_some() {

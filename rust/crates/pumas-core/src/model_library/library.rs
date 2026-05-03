@@ -2312,6 +2312,15 @@ impl ModelLibrary {
         Ok(())
     }
 
+    /// List model-library update events after a producer cursor.
+    pub async fn list_model_library_updates_since(
+        &self,
+        cursor: Option<&str>,
+        limit: usize,
+    ) -> Result<crate::models::ModelLibraryUpdateFeed> {
+        self.index.list_model_library_updates_since(cursor, limit)
+    }
+
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     ///
     /// Unresolved path inputs return a ref with migration diagnostics instead

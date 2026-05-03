@@ -23,6 +23,7 @@ import type {
   InferenceParamSchema,
   InferenceSettingsResponse,
   ListInterruptedDownloadsResponse,
+  ModelLibraryUpdateFeed,
   ListModelDownloadsResponse,
   ModelDownloadResponse,
   ModelDownloadStatusResponse,
@@ -129,6 +130,14 @@ export interface DesktopBridgeModelAPI {
    * Resolve package facts for a model on demand.
    */
   resolve_model_package_facts(modelId: string): Promise<ResolvedModelPackageFacts>;
+
+  /**
+   * List model-library updates after an optional producer cursor.
+   */
+  list_model_library_updates_since(
+    cursor?: string | null,
+    limit?: number
+  ): Promise<ModelLibraryUpdateFeed>;
 
   /**
    * Resolve a canonical model id or legacy local path into a Pumas model ref.

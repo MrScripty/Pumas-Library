@@ -9,6 +9,7 @@
 
 #![warn(unsafe_code)]
 
+use pumas_library::models::{ModelFactFamily, ModelLibraryChangeKind};
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -433,6 +434,64 @@ async fn test_resolve_model_package_facts_is_lazy_api_surface() {
         facts.generation_defaults.source_path.as_deref(),
         Some("generation_config.json")
     );
+}
+
+#[tokio::test]
+async fn test_model_library_update_feed_api_surface() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let model_id = "llm/test/update-feed";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(
+        model_dir.join("config.json"),
+        r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
+    )
+    .unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": "Update Feed",
+            "cleaned_name": "update-feed",
+            "files": [{"name": "model.safetensors"}],
+            "runtime_engine_hints": ["transformers"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let initial = api
+        .list_model_library_updates_since(None, 100)
+        .await
+        .unwrap();
+    assert!(!initial.stale_cursor);
+    assert!(initial.events.is_empty());
+
+    api.resolve_model_package_facts(model_id).await.unwrap();
+    let feed = api
+        .list_model_library_updates_since(Some(&initial.cursor), 100)
+        .await
+        .unwrap();
+
+    assert!(feed.events.iter().any(|event| {
+        event.model_id == model_id
+            && event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+            && event.fact_family == ModelFactFamily::PackageFacts
+    }));
 }
 
 #[tokio::test]

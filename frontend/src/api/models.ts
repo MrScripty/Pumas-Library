@@ -11,6 +11,7 @@ import type {
   InferenceParamSchema,
   InferenceSettingsResponse,
   ModelExecutionDescriptor,
+  ModelLibraryUpdateFeed,
   PumasModelRef,
   ResolvedModelPackageFacts,
   UpdateModelNotesResponse,
@@ -126,6 +127,14 @@ class ModelsAPI {
   async resolveModelPackageFacts(modelId: string): Promise<ResolvedModelPackageFacts> {
     const api = this.getAPI();
     return await api.resolve_model_package_facts(modelId);
+  }
+
+  async listModelLibraryUpdatesSince(
+    cursor?: string | null,
+    limit?: number
+  ): Promise<ModelLibraryUpdateFeed> {
+    const api = this.getAPI();
+    return await api.list_model_library_updates_since(cursor, limit);
   }
 
   async resolvePumasModelRef(input: string): Promise<PumasModelRef> {

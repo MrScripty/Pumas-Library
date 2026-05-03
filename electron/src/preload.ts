@@ -364,6 +364,8 @@ const electronAPI = {
     apiCall('refetch_model_metadata_from_hf', { model_id: modelId }),
   resolve_model_package_facts: (modelId: string) =>
     apiCall('resolve_model_package_facts', { model_id: modelId }),
+  list_model_library_updates_since: (cursor?: string | null, limit?: number) =>
+    apiCall('list_model_library_updates_since', { cursor, limit }),
   resolve_pumas_model_ref: (input: string) =>
     apiCall('resolve_pumas_model_ref', { input }),
 

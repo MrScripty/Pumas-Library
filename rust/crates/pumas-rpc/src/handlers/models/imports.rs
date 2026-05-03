@@ -437,6 +437,32 @@ pub async fn resolve_model_execution_descriptor(
     Ok(serde_json::to_value(descriptor)?)
 }
 
+pub async fn resolve_model_package_facts(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let model_id = require_str_param(params, "model_id", "modelId")?;
+    let facts = state.api.resolve_model_package_facts(&model_id).await?;
+    Ok(serde_json::to_value(facts)?)
+}
+
+pub async fn list_model_library_updates_since(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let cursor = get_str_param(params, "cursor", "cursor").map(str::to_string);
+    let limit = params
+        .get("limit")
+        .and_then(|value| value.as_u64())
+        .map(|value| value as usize)
+        .unwrap_or(100);
+    let updates = state
+        .api
+        .list_model_library_updates_since(cursor.as_deref(), limit)
+        .await?;
+    Ok(serde_json::to_value(updates)?)
+}
+
 pub async fn adopt_orphan_models(
     state: &AppState,
     _params: &Value,

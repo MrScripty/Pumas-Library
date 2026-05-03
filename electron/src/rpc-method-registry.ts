@@ -78,6 +78,7 @@ export const RPC_METHOD_REGISTRY = {
     'get_library_model_metadata',
     'resolve_model_execution_descriptor',
     'resolve_model_package_facts',
+    'list_model_library_updates_since',
     'resolve_pumas_model_ref',
     'refetch_model_metadata_from_hf',
     'adopt_orphan_models',
@@ -280,6 +281,27 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
     },
   },
   get_model_download_status: REQUIRED_DOWNLOAD_ID_SCHEMA,
+  resolve_model_execution_descriptor: {
+    required: {
+      model_id: 'string',
+    },
+  },
+  resolve_model_package_facts: {
+    required: {
+      model_id: 'string',
+    },
+  },
+  list_model_library_updates_since: {
+    optional: {
+      cursor: 'string',
+      limit: 'number',
+    },
+  },
+  resolve_pumas_model_ref: {
+    required: {
+      input: 'string',
+    },
+  },
   cancel_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
   pause_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,
   resume_model_download: REQUIRED_DOWNLOAD_ID_SCHEMA,

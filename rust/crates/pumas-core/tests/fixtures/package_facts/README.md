@@ -40,5 +40,7 @@ selection policy.
 - `hf_multimodal_processor_package_facts.json`: HF-compatible multimodal
   package with processor, image processor, tokenizer, and chat template
   evidence.
+- `stale_package_facts.json`: durable package-facts cache row with stale
+  contract-version/source-fingerprint semantics and decodable detail payload.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.

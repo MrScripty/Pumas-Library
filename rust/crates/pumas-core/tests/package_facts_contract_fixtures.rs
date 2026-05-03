@@ -1,3 +1,4 @@
+use pumas_library::index::{ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope};
 use pumas_library::models::{
     BackendHintLabel, HuggingFaceModel, ModelFactFamily, ModelLibraryChangeKind,
     ModelLibraryRefreshScope, ModelLibraryUpdateEvent, PackageArtifactKind, PackageFactStatus,
@@ -39,6 +40,15 @@ fn load_hf_search_fixture(name: &str) -> (Value, HuggingFaceModel) {
     let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
     let parsed: HuggingFaceModel =
         serde_json::from_str(&content).expect("fixture should match HF search contract");
+    (raw, parsed)
+}
+
+fn load_cache_fixture(name: &str) -> (Value, ModelPackageFactsCacheRecord) {
+    let path = fixture_path(name);
+    let content = fs::read_to_string(&path).expect("fixture should be readable");
+    let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
+    let parsed: ModelPackageFactsCacheRecord =
+        serde_json::from_str(&content).expect("fixture should match cache record contract");
     (raw, parsed)
 }
 
@@ -331,6 +341,28 @@ fn hf_multimodal_processor_fixture_matches_contract() {
         component.kind == ProcessorComponentKind::ChatTemplate
             && component.relative_path.as_deref() == Some("chat_template.jinja")
     }));
+}
+
+#[test]
+fn stale_package_facts_fixture_matches_cache_contract() {
+    let (_raw, parsed) = load_cache_fixture("stale_package_facts.json");
+
+    assert_eq!(parsed.model_id, "llm/example/stale-cache");
+    assert_eq!(parsed.cache_scope, ModelPackageFactsCacheScope::Detail);
+    assert_ne!(
+        parsed.package_facts_contract_version,
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION),
+        "fixture must model a stale cache contract version"
+    );
+    assert_eq!(parsed.source_fingerprint, "stale-source-fingerprint");
+
+    let cached_facts: ResolvedModelPackageFacts =
+        serde_json::from_str(&parsed.facts_json).expect("facts_json should remain decodable");
+    assert_eq!(cached_facts.model_ref.model_id, parsed.model_id);
+    assert_eq!(
+        cached_facts.package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
 }
 
 #[test]

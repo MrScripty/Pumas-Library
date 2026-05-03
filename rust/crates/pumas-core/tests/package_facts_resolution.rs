@@ -700,7 +700,8 @@ async fn extracts_weight_index_and_shard_component_evidence() {
           "metadata": {"total_size": 24},
           "weight_map": {
             "model.embed_tokens.weight": "model-00001-of-00002.safetensors",
-            "model.layers.0.weight": "model-00002-of-00002.safetensors"
+            "model.layers.0.weight": "model-00002-of-00002.safetensors",
+            "model.layers.1.weight": "model-00003-of-00003.safetensors"
           }
         }"#,
     )
@@ -762,10 +763,22 @@ async fn extracts_weight_index_and_shard_component_evidence() {
         facts
             .components
             .iter()
-            .filter(|component| component.kind == ProcessorComponentKind::Shard)
+            .filter(|component| {
+                component.kind == ProcessorComponentKind::Shard
+                    && component.status == PackageFactStatus::Present
+            })
             .count(),
         2
     );
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Shard
+            && component.status == PackageFactStatus::Missing
+            && component.relative_path.as_deref() == Some("model-00003-of-00003.safetensors")
+            && component
+                .message
+                .as_deref()
+                .is_some_and(|message| message.contains("declared by model.safetensors.index.json"))
+    }));
     assert!(facts
         .artifact
         .selected_files

@@ -5465,8 +5465,76 @@ async fn weight_component_facts(
             });
         }
     }
+    facts.extend(weight_index_declared_shard_facts(model_dir, selected_files, &facts).await?);
     facts.sort_by(|left, right| left.relative_path.cmp(&right.relative_path));
     Ok(facts)
+}
+
+async fn weight_index_declared_shard_facts(
+    model_dir: &Path,
+    selected_files: &[String],
+    existing_facts: &[ProcessorComponentFacts],
+) -> Result<Vec<ProcessorComponentFacts>> {
+    let mut facts = Vec::new();
+    let mut seen_shards = existing_facts
+        .iter()
+        .filter(|fact| fact.kind == ProcessorComponentKind::Shard)
+        .filter_map(|fact| fact.relative_path.clone())
+        .collect::<BTreeSet<_>>();
+
+    for index_path in selected_files
+        .iter()
+        .filter(|path| is_transformers_weight_index_file(&path.to_lowercase()))
+    {
+        let declared_shards = declared_shards_from_weight_index(model_dir.join(index_path)).await?;
+        for shard_path in declared_shards {
+            if !seen_shards.insert(shard_path.clone()) {
+                continue;
+            }
+            let status = if tokio::fs::try_exists(model_dir.join(&shard_path)).await? {
+                PackageFactStatus::Present
+            } else {
+                PackageFactStatus::Missing
+            };
+            let message = if status == PackageFactStatus::Missing {
+                Some(format!("declared by {index_path} but file is missing"))
+            } else {
+                Some(format!("declared by {index_path}"))
+            };
+            facts.push(ProcessorComponentFacts {
+                kind: ProcessorComponentKind::Shard,
+                status,
+                relative_path: Some(shard_path),
+                class_name: None,
+                message,
+            });
+        }
+    }
+
+    Ok(facts)
+}
+
+async fn declared_shards_from_weight_index(path: PathBuf) -> Result<Vec<String>> {
+    tokio::task::spawn_blocking(move || {
+        let Some(index) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        else {
+            return Ok(Vec::new());
+        };
+        let Some(weight_map) = index.get("weight_map").and_then(Value::as_object) else {
+            return Ok(Vec::new());
+        };
+
+        let shards = weight_map
+            .values()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect::<BTreeSet<_>>();
+        Ok::<_, PumasError>(shards.into_iter().collect())
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join weight index parse: {}", err)))?
 }
 
 fn is_transformers_weight_index_file(relative_path: &str) -> bool {

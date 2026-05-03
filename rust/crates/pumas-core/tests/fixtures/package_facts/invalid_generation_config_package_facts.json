@@ -1,0 +1,71 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "llm/example/invalid-generation-config",
+    "selected_artifact_path": "llm/example/invalid-generation-config"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "llm/example/invalid-generation-config",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "config.json",
+      "generation_config.json",
+      "model.safetensors"
+    ]
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json"
+    },
+    {
+      "kind": "generation_config",
+      "status": "present",
+      "relative_path": "generation_config.json"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "llama",
+    "generation_config_status": "present",
+    "selected_files": [
+      "config.json",
+      "generation_config.json"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "text-generation",
+    "task_type_primary": "text_generation",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "invalid",
+    "source_path": "generation_config.json",
+    "diagnostics": [
+      {
+        "code": "invalid_generation_config_json",
+        "message": "expected value at line 1 column 1",
+        "path": "generation_config.json"
+      }
+    ]
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers"
+    ],
+    "raw": [
+      "transformers"
+    ]
+  }
+}

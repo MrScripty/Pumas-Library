@@ -171,6 +171,62 @@ fn gguf_embedding_fixture_matches_contract() {
 }
 
 #[test]
+fn unsupported_ollama_hint_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("unsupported_ollama_hint_package_facts.json");
+
+    assert_eq!(parsed.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    assert!(parsed.backend_hints.accepted.is_empty());
+    assert_eq!(parsed.backend_hints.raw, vec!["ollama".to_string()]);
+    assert_eq!(parsed.backend_hints.unsupported, vec!["ollama".to_string()]);
+}
+
+#[test]
+fn invalid_generation_config_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("invalid_generation_config_package_facts.json");
+
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert_eq!(
+        parsed.generation_defaults.status,
+        PackageFactStatus::Invalid
+    );
+    assert!(parsed
+        .generation_defaults
+        .diagnostics
+        .iter()
+        .any(
+            |diagnostic| diagnostic.code == "invalid_generation_config_json"
+                && diagnostic.path.as_deref() == Some("generation_config.json")
+        ));
+    assert!(parsed
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::Transformers));
+}
+
+#[test]
+fn missing_tokenizer_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("missing_tokenizer_package_facts.json");
+
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Tokenizer
+            && component.status == PackageFactStatus::Missing
+            && component.message.as_deref().is_some_and(|message| {
+                message.contains("without a known tokenizer vocabulary file")
+            })
+    }));
+    assert!(parsed.components.iter().any(|component| component.kind
+        == ProcessorComponentKind::TokenizerConfig
+        && component.class_name.as_deref() == Some("LlamaTokenizer")));
+}
+
+#[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
 }

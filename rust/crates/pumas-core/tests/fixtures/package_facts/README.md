@@ -25,5 +25,11 @@ selection policy.
   processor requirements.
 - `gguf_embedding_package_facts.json`: GGUF embedding artifact proving embedding
   tasks use the same package-facts contract as generation models.
+- `unsupported_ollama_hint_package_facts.json`: ecosystem hint preserved as
+  unsupported evidence rather than converted into executable support.
+- `invalid_generation_config_package_facts.json`: invalid model-provided
+  generation defaults with parse diagnostics.
+- `missing_tokenizer_package_facts.json`: tokenizer configuration without a
+  known tokenizer vocabulary companion.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.

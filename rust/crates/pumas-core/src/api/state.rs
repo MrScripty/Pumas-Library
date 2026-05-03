@@ -1247,13 +1247,13 @@ impl ipc::server::IpcDispatch for PrimaryState {
             "check_launcher_updates" => {
                 let force_refresh = params["force_refresh"].as_bool().unwrap_or(false);
                 let updater =
-                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
+                    crate::launcher::LauncherUpdater::new(launcher_root_from_primary(self));
                 let result = updater.check_for_updates(force_refresh).await;
                 Ok(serde_json::to_value(result)?)
             }
             "apply_launcher_update" => {
                 let updater =
-                    crate::launcher::LauncherUpdater::new(&launcher_root_from_primary(self));
+                    crate::launcher::LauncherUpdater::new(launcher_root_from_primary(self));
                 let result = updater.apply_update().await;
                 Ok(serde_json::to_value(result)?)
             }

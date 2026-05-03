@@ -65,20 +65,15 @@ pub enum BackendHintLabel {
 }
 
 /// Normalized state for package-file inspection.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PackageFactStatus {
     Present,
     Missing,
     Invalid,
     Unsupported,
+    #[default]
     Uninspected,
-}
-
-impl Default for PackageFactStatus {
-    fn default() -> Self {
-        Self::Uninspected
-    }
 }
 
 /// Package component kind with stable labels for consumer diagnostics.

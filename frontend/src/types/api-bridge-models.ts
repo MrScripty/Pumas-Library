@@ -26,20 +26,22 @@ import type {
   ListModelDownloadsResponse,
   ModelDownloadResponse,
   ModelDownloadStatusResponse,
-  ModelLibraryUpdateFeed,
-  ModelPackageFactsSummaryResult,
-  ModelPackageFactsSummarySnapshot,
   ModelsResponse,
-  PumasModelRef,
   RecoverDownloadResponse,
   RelatedModelsResponse,
-  ResolvedModelPackageFacts,
   ResumePartialDownloadResponse,
   ScanSharedStorageResponse,
   SearchHFModelsResponse,
   UpdateInferenceSettingsResponse,
   UpdateModelNotesResponse,
 } from './api-models';
+import type {
+  ModelLibraryUpdateFeed,
+  ModelPackageFactsSummaryResult,
+  ModelPackageFactsSummarySnapshot,
+  PumasModelRef,
+  ResolvedModelPackageFacts,
+} from './api-package-facts';
 
 export interface DesktopBridgeModelAPI {
   // ========================================

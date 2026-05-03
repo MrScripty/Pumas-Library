@@ -148,10 +148,7 @@ impl InstallationProgressTracker {
     /// This prevents stale "completed" states from persisting across restarts.
     async fn clear_stale_state_file_async(&self) {
         let state_path = self.cache_dir.join(&self.state_filename);
-        let exists = match fs::try_exists(&state_path).await {
-            Ok(exists) => exists,
-            Err(_) => false,
-        };
+        let exists: bool = fs::try_exists(&state_path).await.unwrap_or_default();
         if !exists {
             return;
         }

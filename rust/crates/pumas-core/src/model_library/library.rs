@@ -1322,6 +1322,10 @@ impl ModelLibrary {
         )?;
         set_object_field(&mut target_value, "reviewed_at", Value::String(now.clone()))?;
 
+        if let Some(record) = self.index.get(model_id)? {
+            hydrate_column_owned_metadata_fields(&record, &mut target_value)?;
+        }
+
         let mut target_metadata: ModelMetadata = serde_json::from_value(target_value.clone())?;
         if let Some(ref mut reasons) = target_metadata.review_reasons {
             normalize_review_reasons(reasons);
@@ -1442,7 +1446,11 @@ impl ModelLibrary {
 
     fn load_effective_metadata_by_id(&self, model_id: &str) -> Result<Option<ModelMetadata>> {
         if let Some(effective_json) = self.index.get_effective_metadata_json(model_id)? {
-            let mut metadata: ModelMetadata = serde_json::from_str(&effective_json)?;
+            let mut effective_value: Value = serde_json::from_str(&effective_json)?;
+            if let Some(record) = self.index.get(model_id)? {
+                hydrate_column_owned_metadata_fields(&record, &mut effective_value)?;
+            }
+            let mut metadata: ModelMetadata = serde_json::from_value(effective_value)?;
             self.project_active_dependency_refs(model_id, &mut metadata)?;
             Ok(Some(metadata))
         } else {
@@ -2838,9 +2846,9 @@ impl ModelLibrary {
                     continue;
                 }
 
-                let removable = if duplicate.payload_file_count == 0 {
-                    true
-                } else if duplicate.download_incomplete && !preferred.download_incomplete {
+                let removable = if duplicate.payload_file_count == 0
+                    || (duplicate.download_incomplete && !preferred.download_incomplete)
+                {
                     true
                 } else if preferred.payload_file_count == 0 {
                     // Preferred candidate should normally be payload-bearing due score ordering.
@@ -3478,6 +3486,26 @@ fn set_object_field(target: &mut Value, key: &str, value: Value) -> Result<()> {
             message: "effective metadata must be a JSON object".to_string(),
         })?;
     object.insert(key.to_string(), value);
+    Ok(())
+}
+
+fn hydrate_column_owned_metadata_fields(record: &ModelRecord, target: &mut Value) -> Result<()> {
+    ensure_object_field(target, "model_id", Value::String(record.id.clone()))?;
+    ensure_object_field(
+        target,
+        "model_type",
+        Value::String(record.model_type.clone()),
+    )?;
+    ensure_object_field(
+        target,
+        "cleaned_name",
+        Value::String(record.cleaned_name.clone()),
+    )?;
+    ensure_object_field(
+        target,
+        "official_name",
+        Value::String(record.official_name.clone()),
+    )?;
     Ok(())
 }
 
@@ -10696,7 +10724,6 @@ mod tests {
                         "comfyui".to_string(),
                         ">=0.0.1".to_string(),
                     )])),
-                    ..Default::default()
                 },
             )
             .await

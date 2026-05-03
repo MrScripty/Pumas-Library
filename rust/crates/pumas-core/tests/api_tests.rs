@@ -203,7 +203,7 @@ async fn test_open_path_with_invalid_path() {
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening a non-existent path should fail gracefully
-    let result = api.open_path("/nonexistent/path/that/does/not/exist");
+    let result = api.open_path("/nonexistent/path/that/does/not/exist").await;
     // This may succeed or fail depending on the system,
     // but it should not panic
     let _ = result;
@@ -216,7 +216,7 @@ async fn test_open_url_with_invalid_url() {
     let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
 
     // Opening an invalid URL should fail gracefully
-    let result = api.open_url("not-a-valid-url");
+    let result = api.open_url("not-a-valid-url").await;
     // This may succeed or fail depending on the system,
     // but it should not panic
     let _ = result;

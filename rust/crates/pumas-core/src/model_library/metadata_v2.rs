@@ -546,8 +546,10 @@ mod tests {
 
     #[test]
     fn validation_rejects_out_of_range_confidence() {
-        let mut metadata = ModelMetadata::default();
-        metadata.task_classification_confidence = Some(1.2);
+        let metadata = ModelMetadata {
+            task_classification_confidence: Some(1.2),
+            ..Default::default()
+        };
 
         let err = validate_metadata_v2(&metadata).unwrap_err();
         match err {
@@ -685,13 +687,15 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let index = ModelIndex::new(temp.path().join("models.db")).unwrap();
 
-        let mut metadata = ModelMetadata::default();
-        metadata.schema_version = Some(1);
-        metadata.dependency_bindings = Some(vec![DependencyBindingRef {
-            profile_id: Some("torch-core".to_string()),
-            profile_version: Some(1),
+        let metadata = ModelMetadata {
+            schema_version: Some(1),
+            dependency_bindings: Some(vec![DependencyBindingRef {
+                profile_id: Some("torch-core".to_string()),
+                profile_version: Some(1),
+                ..Default::default()
+            }]),
             ..Default::default()
-        }]);
+        };
 
         let err = validate_metadata_v2_with_index(&metadata, &index).unwrap_err();
         match err {

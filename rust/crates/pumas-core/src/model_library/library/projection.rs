@@ -178,6 +178,9 @@ pub(super) fn payload_filesystem_is_newer(model_dir: &Path, indexed_updated_at: 
 }
 
 pub(super) fn project_display_fields_for_record(record: &mut ModelRecord) {
+    let cleaned_name = record.cleaned_name.clone();
+    let official_name = record.official_name.clone();
+
     if !record.metadata.is_object() {
         record.metadata = Value::Object(Default::default());
     }
@@ -192,7 +195,7 @@ pub(super) fn project_display_fields_for_record(record: &mut ModelRecord) {
     );
     obj.insert(
         QUANTIZATION_METADATA_KEY.to_string(),
-        derive_quantization_value(obj),
+        derive_quantization_value_with_display_names(obj, &cleaned_name, &official_name),
     );
 }
 
@@ -204,6 +207,18 @@ fn derive_primary_format_value(metadata: &serde_json::Map<String, Value>) -> Val
 
 fn derive_quantization_value(metadata: &serde_json::Map<String, Value>) -> Value {
     derive_quantization(metadata)
+        .map(Value::String)
+        .unwrap_or(Value::Null)
+}
+
+fn derive_quantization_value_with_display_names(
+    metadata: &serde_json::Map<String, Value>,
+    cleaned_name: &str,
+    official_name: &str,
+) -> Value {
+    derive_quantization(metadata)
+        .or_else(|| extract_quant_token(official_name))
+        .or_else(|| extract_quant_token(cleaned_name))
         .map(Value::String)
         .unwrap_or(Value::Null)
 }

@@ -511,13 +511,9 @@ mod tests {
         let metadata_manager = Arc::new(MetadataManager::new(temp_dir.path()));
         metadata_manager.ensure_directories().unwrap();
 
-        let state = VersionState::new(
-            &temp_dir.path().to_path_buf(),
-            AppId::ComfyUI,
-            metadata_manager,
-        )
-        .await
-        .unwrap();
+        let state = VersionState::new(temp_dir.path(), AppId::ComfyUI, metadata_manager)
+            .await
+            .unwrap();
 
         (state, temp_dir)
     }

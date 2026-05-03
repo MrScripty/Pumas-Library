@@ -149,10 +149,10 @@ impl HuggingFaceClient {
         let cache_file = self.get_cache_path(repo_id, "files");
         if let Some(cached) = read_repo_file_tree_cache(cache_file.clone()).await? {
             // Reject entries from an older cache format (e.g. pre-recursive)
-            if cached.cache_version >= REPO_FILE_TREE_VERSION {
-                if repo_file_tree_cache_is_fresh(&cache_file).await? {
-                    return Ok(cached);
-                }
+            if cached.cache_version >= REPO_FILE_TREE_VERSION
+                && repo_file_tree_cache_is_fresh(&cache_file).await?
+            {
+                return Ok(cached);
             }
         }
 

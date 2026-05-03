@@ -434,3 +434,63 @@ async fn test_resolve_model_package_facts_is_lazy_api_surface() {
         Some("generation_config.json")
     );
 }
+
+#[tokio::test]
+async fn test_resolve_pumas_model_ref_api_surface() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let model_id = "llm/test/ref-api";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#).unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": "Ref API",
+            "cleaned_name": "ref-api",
+            "files": [{"name": "model.safetensors"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let by_id = api.resolve_pumas_model_ref(model_id).await.unwrap();
+    assert_eq!(by_id.model_id, model_id);
+    assert!(by_id.migration_diagnostics.is_empty());
+
+    let by_file = api
+        .resolve_pumas_model_ref(
+            model_dir
+                .join("model.safetensors")
+                .to_string_lossy()
+                .as_ref(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(by_file.model_id, model_id);
+    assert!(by_file.migration_diagnostics.is_empty());
+
+    let unresolved = api
+        .resolve_pumas_model_ref("llm/test/missing")
+        .await
+        .unwrap();
+    assert_eq!(unresolved.model_id, "");
+    assert!(unresolved
+        .migration_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "unknown_model_id"));
+}

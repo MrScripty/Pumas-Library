@@ -27,6 +27,7 @@ import type {
   ModelDownloadResponse,
   ModelDownloadStatusResponse,
   ModelsResponse,
+  PumasModelRef,
   RecoverDownloadResponse,
   RelatedModelsResponse,
   ResolvedModelPackageFacts,
@@ -128,6 +129,11 @@ export interface DesktopBridgeModelAPI {
    * Resolve package facts for a model on demand.
    */
   resolve_model_package_facts(modelId: string): Promise<ResolvedModelPackageFacts>;
+
+  /**
+   * Resolve a canonical model id or legacy local path into a Pumas model ref.
+   */
+  resolve_pumas_model_ref(input: string): Promise<PumasModelRef>;
 
   /**
    * Refetch model metadata from HuggingFace

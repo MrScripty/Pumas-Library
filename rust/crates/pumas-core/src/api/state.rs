@@ -493,6 +493,15 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(facts)?)
             }
+            "resolve_pumas_model_ref" => {
+                let input = params["input"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "input is required".to_string(),
+                    })?;
+                let model_ref = self.model_library.resolve_pumas_model_ref(input).await?;
+                Ok(serde_json::to_value(model_ref)?)
+            }
             "audit_dependency_pin_compliance" => {
                 let report = self.model_library.audit_dependency_pin_compliance().await?;
                 Ok(serde_json::to_value(report)?)

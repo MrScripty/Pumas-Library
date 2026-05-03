@@ -542,6 +542,23 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve a canonical model id or legacy local path into a Pumas model ref.
+    pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_pumas_model_ref",
+                    serde_json::json!({ "input": input }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .model_library
+            .resolve_pumas_model_ref(input)
+            .await
+    }
+
     /// Audit dependency pin compliance across active model bindings.
     pub async fn audit_dependency_pin_compliance(
         &self,

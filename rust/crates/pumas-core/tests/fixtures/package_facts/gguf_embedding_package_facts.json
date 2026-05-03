@@ -1,0 +1,54 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "embedding/qwen3/tiny-embedding-gguf",
+    "selected_artifact_id": "q8_0",
+    "selected_artifact_path": "embedding/qwen3/tiny-embedding-gguf/tiny-embedding-Q8_0.gguf"
+  },
+  "artifact": {
+    "artifact_kind": "gguf",
+    "entry_path": "embedding/qwen3/tiny-embedding-gguf/tiny-embedding-Q8_0.gguf",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "tiny-embedding-Q8_0.gguf"
+    ]
+  },
+  "components": [
+    {
+      "kind": "weights",
+      "status": "present",
+      "relative_path": "tiny-embedding-Q8_0.gguf"
+    },
+    {
+      "kind": "quantization",
+      "status": "present",
+      "relative_path": "tiny-embedding-Q8_0.gguf",
+      "message": "Q8_0"
+    }
+  ],
+  "task": {
+    "pipeline_tag": "feature-extraction",
+    "task_type_primary": "embedding",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "embedding"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing"
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "llama.cpp"
+    ],
+    "raw": [
+      "llama.cpp"
+    ]
+  }
+}

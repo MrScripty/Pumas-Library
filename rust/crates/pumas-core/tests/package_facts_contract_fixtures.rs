@@ -104,6 +104,73 @@ fn hf_text_generation_fixture_matches_contract() {
 }
 
 #[test]
+fn gguf_text_generation_fixture_matches_contract() {
+    let (raw, parsed) = load_fixture("gguf_text_generation_package_facts.json");
+
+    assert_eq!(
+        parsed.package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
+    assert_eq!(parsed.model_ref.model_id, "llm/llama/tiny-gguf");
+    assert_eq!(parsed.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    assert!(
+        parsed.transformers.is_none(),
+        "GGUF fixture must not require HF/Transformers package evidence"
+    );
+    assert_eq!(
+        parsed.task.task_type_primary.as_deref(),
+        Some("text_generation")
+    );
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Quantization
+            && component.message.as_deref() == Some("Q4_K_M")
+    }));
+    assert!(parsed
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::LlamaCpp));
+
+    assert!(
+        raw.get("sqlite").is_none() && raw.get("metadata_json").is_none(),
+        "consumer fixtures must not expose Pumas SQLite/index internals"
+    );
+}
+
+#[test]
+fn gguf_embedding_fixture_matches_contract() {
+    let (raw, parsed) = load_fixture("gguf_embedding_package_facts.json");
+
+    assert_eq!(
+        parsed.package_facts_contract_version,
+        PACKAGE_FACTS_CONTRACT_VERSION
+    );
+    assert_eq!(
+        parsed.model_ref.model_id,
+        "embedding/qwen3/tiny-embedding-gguf"
+    );
+    assert_eq!(parsed.artifact.artifact_kind, PackageArtifactKind::Gguf);
+    assert_eq!(
+        parsed.task.pipeline_tag.as_deref(),
+        Some("feature-extraction")
+    );
+    assert_eq!(parsed.task.task_type_primary.as_deref(), Some("embedding"));
+    assert_eq!(parsed.task.output_modalities, vec!["embedding".to_string()]);
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Quantization
+            && component.message.as_deref() == Some("Q8_0")
+    }));
+    assert!(parsed
+        .backend_hints
+        .accepted
+        .contains(&BackendHintLabel::LlamaCpp));
+
+    assert!(
+        raw.get("sqlite").is_none() && raw.get("metadata_json").is_none(),
+        "consumer fixtures must not expose Pumas SQLite/index internals"
+    );
+}
+
+#[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
 }

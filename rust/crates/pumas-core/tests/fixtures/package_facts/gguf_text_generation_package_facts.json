@@ -1,0 +1,54 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "llm/llama/tiny-gguf",
+    "selected_artifact_id": "q4_k_m",
+    "selected_artifact_path": "llm/llama/tiny-gguf/tiny-Q4_K_M.gguf"
+  },
+  "artifact": {
+    "artifact_kind": "gguf",
+    "entry_path": "llm/llama/tiny-gguf/tiny-Q4_K_M.gguf",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "tiny-Q4_K_M.gguf"
+    ]
+  },
+  "components": [
+    {
+      "kind": "weights",
+      "status": "present",
+      "relative_path": "tiny-Q4_K_M.gguf"
+    },
+    {
+      "kind": "quantization",
+      "status": "present",
+      "relative_path": "tiny-Q4_K_M.gguf",
+      "message": "Q4_K_M"
+    }
+  ],
+  "task": {
+    "pipeline_tag": "text-generation",
+    "task_type_primary": "text_generation",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing"
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "llama.cpp"
+    ],
+    "raw": [
+      "llama.cpp"
+    ]
+  }
+}

@@ -211,6 +211,7 @@ export interface TransformersPackageEvidence {
   auto_map?: string[];
   processor_class?: string | null;
   generation_config_status: PackageFactStatus;
+  source_repo_id?: string | null;
   source_revision?: string | null;
   selected_files?: string[];
 }

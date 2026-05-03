@@ -47,6 +47,7 @@
       "AutoModelForCausalLM"
     ],
     "generation_config_status": "present",
+    "source_repo_id": "org/tiny-transformers",
     "source_revision": "abc123",
     "selected_files": [
       "config.json",

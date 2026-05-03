@@ -77,6 +77,13 @@ fn hf_text_generation_fixture_matches_contract() {
         parsed
             .transformers
             .as_ref()
+            .and_then(|evidence| evidence.source_repo_id.as_deref()),
+        Some("org/tiny-transformers")
+    );
+    assert_eq!(
+        parsed
+            .transformers
+            .as_ref()
             .and_then(|evidence| evidence.config_model_type.as_deref()),
         Some("llama")
     );

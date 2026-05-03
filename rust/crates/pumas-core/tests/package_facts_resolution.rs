@@ -2,8 +2,8 @@ use pumas_library::index::{
     DependencyProfileRecord, ModelDependencyBindingRecord, ModelPackageFactsCacheScope,
 };
 use pumas_library::models::{
-    BackendHintLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind, PackageFactStatus,
-    ProcessorComponentKind, ResolvedModelPackageFactsSummary,
+    BackendHintLabel, HuggingFaceEvidence, ModelFileInfo, ModelMetadata, PackageArtifactKind,
+    PackageFactStatus, ProcessorComponentKind, ResolvedModelPackageFactsSummary,
 };
 use pumas_library::ModelLibrary;
 use tempfile::TempDir;
@@ -106,6 +106,11 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         recommended_backend: Some("transformers".to_string()),
         runtime_engine_hints: Some(vec!["vllm".to_string(), "mlx".to_string()]),
         custom_code_sources: Some(vec!["modeling_tiny.py".to_string()]),
+        repo_id: Some("org/tiny-transformers".to_string()),
+        huggingface_evidence: Some(HuggingFaceEvidence {
+            repo_id: Some("org/fallback-transformers".to_string()),
+            ..Default::default()
+        }),
         ..Default::default()
     };
     library.save_metadata(&model_dir, &metadata).await.unwrap();
@@ -160,6 +165,13 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         .custom_code
         .dependency_manifests
         .contains(&"requirements.txt".to_string()));
+    assert_eq!(
+        facts
+            .transformers
+            .as_ref()
+            .and_then(|evidence| evidence.source_repo_id.as_deref()),
+        Some("org/tiny-transformers")
+    );
     assert_eq!(
         facts
             .transformers

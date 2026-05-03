@@ -5830,6 +5830,12 @@ async fn transformers_package_evidence(
         } else {
             PackageFactStatus::Missing
         },
+        source_repo_id: metadata.repo_id.clone().or_else(|| {
+            metadata
+                .huggingface_evidence
+                .as_ref()
+                .and_then(|evidence| evidence.repo_id.clone())
+        }),
         source_revision: None,
         selected_files: selected_files
             .iter()

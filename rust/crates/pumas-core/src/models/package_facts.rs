@@ -139,6 +139,8 @@ pub struct TransformersPackageEvidence {
     pub processor_class: Option<String>,
     pub generation_config_status: PackageFactStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_repo_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_files: Vec<String>,

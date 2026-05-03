@@ -509,17 +509,34 @@ async fn resolves_model_refs_through_canonicalized_legacy_paths() {
     assert!(traversed.migration_diagnostics.is_empty());
 
     let symlink_path = temp_dir.path().join("linked-model.safetensors");
-    #[cfg(unix)]
-    std::os::unix::fs::symlink(model_dir.join("model.safetensors"), &symlink_path).unwrap();
-    #[cfg(windows)]
-    std::os::windows::fs::symlink_file(model_dir.join("model.safetensors"), &symlink_path).unwrap();
+    let symlink_created = {
+        let target = model_dir.join("model.safetensors");
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&target, &symlink_path).unwrap();
+            true
+        }
+        #[cfg(windows)]
+        {
+            match std::os::windows::fs::symlink_file(&target, &symlink_path) {
+                Ok(()) => true,
+                Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => {
+                    eprintln!("skipping symlink resolution assertion: {err}");
+                    false
+                }
+                Err(err) => panic!("failed to create symlink for model ref test: {err}"),
+            }
+        }
+    };
 
-    let linked = library
-        .resolve_pumas_model_ref(symlink_path.to_string_lossy().as_ref())
-        .await
-        .unwrap();
-    assert_eq!(linked.model_id, model_id);
-    assert!(linked.migration_diagnostics.is_empty());
+    if symlink_created {
+        let linked = library
+            .resolve_pumas_model_ref(symlink_path.to_string_lossy().as_ref())
+            .await
+            .unwrap();
+        assert_eq!(linked.model_id, model_id);
+        assert!(linked.migration_diagnostics.is_empty());
+    }
 
     let unindexed_dir = library
         .library_root()

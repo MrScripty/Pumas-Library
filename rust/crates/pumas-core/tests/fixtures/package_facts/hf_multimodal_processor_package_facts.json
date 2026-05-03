@@ -1,0 +1,89 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "vlm/llava/tiny-multimodal",
+    "selected_artifact_path": "vlm/llava/tiny-multimodal"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "vlm/llava/tiny-multimodal",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "chat_template.jinja",
+      "config.json",
+      "image_processor_config.json",
+      "model.safetensors",
+      "processor_config.json",
+      "tokenizer.json"
+    ]
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json",
+      "class_name": "LlavaForConditionalGeneration"
+    },
+    {
+      "kind": "processor",
+      "status": "present",
+      "relative_path": "processor_config.json",
+      "class_name": "LlavaProcessor"
+    },
+    {
+      "kind": "image_processor",
+      "status": "present",
+      "relative_path": "image_processor_config.json",
+      "class_name": "CLIPImageProcessor"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "present",
+      "relative_path": "tokenizer.json"
+    },
+    {
+      "kind": "chat_template",
+      "status": "present",
+      "relative_path": "chat_template.jinja"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "llava",
+    "architectures": [
+      "LlavaForConditionalGeneration"
+    ],
+    "processor_class": "LlavaProcessor",
+    "generation_config_status": "missing",
+    "selected_files": [
+      "config.json"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "image-text-to-text",
+    "task_type_primary": "image_text_to_text",
+    "input_modalities": [
+      "image",
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing",
+    "source_path": "config.json"
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers"
+    ],
+    "raw": [
+      "transformers"
+    ]
+  }
+}

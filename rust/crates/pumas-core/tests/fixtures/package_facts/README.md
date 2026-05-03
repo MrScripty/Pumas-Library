@@ -35,5 +35,10 @@ selection policy.
   `auto_map`, custom generation code, and dependency manifest evidence.
 - `remote_search_mlx_vllm_hint.json`: Hugging Face search result carrying
   MLX/vLLM discovery hints without installed-model package facts.
+- `hf_rerank_package_facts.json`: HF-compatible rerank package with text
+  ranking task evidence.
+- `hf_multimodal_processor_package_facts.json`: HF-compatible multimodal
+  package with processor, image processor, tokenizer, and chat template
+  evidence.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.

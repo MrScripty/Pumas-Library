@@ -1,0 +1,72 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "reranker/qwen3/tiny-reranker",
+    "selected_artifact_path": "reranker/qwen3/tiny-reranker"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "reranker/qwen3/tiny-reranker",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "config.json",
+      "model.safetensors",
+      "tokenizer.json"
+    ]
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json",
+      "class_name": "Qwen3ForSequenceClassification"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "present",
+      "relative_path": "tokenizer.json"
+    },
+    {
+      "kind": "weights",
+      "status": "present",
+      "relative_path": "model.safetensors"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "qwen3",
+    "architectures": [
+      "Qwen3ForSequenceClassification"
+    ],
+    "generation_config_status": "missing",
+    "selected_files": [
+      "config.json"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "text-ranking",
+    "task_type_primary": "rerank",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "score"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing",
+    "source_path": "config.json"
+  },
+  "custom_code": {
+    "requires_custom_code": false
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers"
+    ],
+    "raw": [
+      "transformers"
+    ]
+  }
+}

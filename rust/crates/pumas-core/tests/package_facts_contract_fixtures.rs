@@ -286,6 +286,54 @@ fn remote_search_mlx_vllm_hint_fixture_matches_contract() {
 }
 
 #[test]
+fn hf_rerank_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("hf_rerank_package_facts.json");
+
+    assert_eq!(parsed.model_ref.model_id, "reranker/qwen3/tiny-reranker");
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert_eq!(parsed.task.pipeline_tag.as_deref(), Some("text-ranking"));
+    assert_eq!(parsed.task.task_type_primary.as_deref(), Some("rerank"));
+    assert_eq!(parsed.task.output_modalities, vec!["score".to_string()]);
+    assert!(parsed.transformers.as_ref().is_some_and(|evidence| evidence
+        .architectures
+        .contains(&"Qwen3ForSequenceClassification".to_string())));
+}
+
+#[test]
+fn hf_multimodal_processor_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("hf_multimodal_processor_package_facts.json");
+
+    assert_eq!(parsed.model_ref.model_id, "vlm/llava/tiny-multimodal");
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert_eq!(
+        parsed.task.pipeline_tag.as_deref(),
+        Some("image-text-to-text")
+    );
+    assert_eq!(
+        parsed.task.input_modalities,
+        vec!["image".to_string(), "text".to_string()]
+    );
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Processor
+            && component.class_name.as_deref() == Some("LlavaProcessor")
+    }));
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::ImageProcessor
+            && component.class_name.as_deref() == Some("CLIPImageProcessor")
+    }));
+    assert!(parsed.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::ChatTemplate
+            && component.relative_path.as_deref() == Some("chat_template.jinja")
+    }));
+}
+
+#[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
 }

@@ -14,6 +14,7 @@ test('backendBinaryName keeps the platform executable convention explicit', () =
 
 test('resolveBackendBinaryPath honors a launcher-provided override', () => {
   const overridePath = path.join('/repo', 'rust', 'target', 'debug', backendBinaryName('linux'));
+  const resolvedOverridePath = path.resolve(overridePath);
 
   assert.equal(
     resolveBackendBinaryPath({
@@ -24,7 +25,7 @@ test('resolveBackendBinaryPath honors a launcher-provided override', () => {
       resourcesPath: '/resources',
       sourceRoot: '/repo',
     }),
-    overridePath
+    resolvedOverridePath
   );
 });
 

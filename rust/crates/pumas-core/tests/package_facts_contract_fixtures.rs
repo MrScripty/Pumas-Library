@@ -227,6 +227,36 @@ fn missing_tokenizer_fixture_matches_contract() {
 }
 
 #[test]
+fn custom_code_required_fixture_matches_contract() {
+    let (_raw, parsed) = load_fixture("custom_code_required_package_facts.json");
+
+    assert_eq!(
+        parsed.artifact.artifact_kind,
+        PackageArtifactKind::HfCompatibleDirectory
+    );
+    assert!(parsed.custom_code.requires_custom_code);
+    assert!(parsed
+        .custom_code
+        .custom_code_sources
+        .contains(&"custom_generate/generate.py".to_string()));
+    assert!(parsed
+        .custom_code
+        .custom_code_sources
+        .contains(&"modeling_tiny.py".to_string()));
+    assert!(parsed
+        .custom_code
+        .auto_map_sources
+        .contains(&"modeling_tiny.TinyForCausalLM".to_string()));
+    assert!(parsed
+        .custom_code
+        .dependency_manifests
+        .contains(&"custom_generate/requirements.txt".to_string()));
+    assert!(parsed.transformers.as_ref().is_some_and(|evidence| evidence
+        .auto_map
+        .contains(&"AutoModelForCausalLM".to_string())));
+}
+
+#[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
 }

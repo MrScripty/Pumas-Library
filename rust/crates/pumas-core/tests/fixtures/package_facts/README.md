@@ -31,5 +31,7 @@ selection policy.
   generation defaults with parse diagnostics.
 - `missing_tokenizer_package_facts.json`: tokenizer configuration without a
   known tokenizer vocabulary companion.
+- `custom_code_required_package_facts.json`: trust-relevant package with
+  `auto_map`, custom generation code, and dependency manifest evidence.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.

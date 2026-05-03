@@ -1,0 +1,91 @@
+{
+  "package_facts_contract_version": 1,
+  "model_ref": {
+    "model_id": "llm/example/custom-code-required",
+    "selected_artifact_path": "llm/example/custom-code-required"
+  },
+  "artifact": {
+    "artifact_kind": "hf_compatible_directory",
+    "entry_path": "llm/example/custom-code-required",
+    "storage_kind": "library_owned",
+    "validation_state": "valid",
+    "selected_files": [
+      "config.json",
+      "custom_generate/generate.py",
+      "custom_generate/requirements.txt",
+      "model.safetensors",
+      "requirements.txt",
+      "tokenizer.json"
+    ]
+  },
+  "components": [
+    {
+      "kind": "config",
+      "status": "present",
+      "relative_path": "config.json",
+      "class_name": "TinyForCausalLM"
+    },
+    {
+      "kind": "tokenizer",
+      "status": "present",
+      "relative_path": "tokenizer.json"
+    },
+    {
+      "kind": "weights",
+      "status": "present",
+      "relative_path": "model.safetensors"
+    }
+  ],
+  "transformers": {
+    "config_status": "present",
+    "config_model_type": "tiny_custom",
+    "architectures": [
+      "TinyForCausalLM"
+    ],
+    "auto_map": [
+      "AutoConfig",
+      "AutoModelForCausalLM"
+    ],
+    "generation_config_status": "missing",
+    "selected_files": [
+      "config.json"
+    ]
+  },
+  "task": {
+    "pipeline_tag": "text-generation",
+    "task_type_primary": "text_generation",
+    "input_modalities": [
+      "text"
+    ],
+    "output_modalities": [
+      "text"
+    ]
+  },
+  "generation_defaults": {
+    "status": "missing",
+    "source_path": "config.json"
+  },
+  "custom_code": {
+    "requires_custom_code": true,
+    "custom_code_sources": [
+      "custom_generate/generate.py",
+      "modeling_tiny.py"
+    ],
+    "auto_map_sources": [
+      "configuration_tiny.TinyConfig",
+      "modeling_tiny.TinyForCausalLM"
+    ],
+    "dependency_manifests": [
+      "custom_generate/requirements.txt",
+      "requirements.txt"
+    ]
+  },
+  "backend_hints": {
+    "accepted": [
+      "transformers"
+    ],
+    "raw": [
+      "transformers"
+    ]
+  }
+}

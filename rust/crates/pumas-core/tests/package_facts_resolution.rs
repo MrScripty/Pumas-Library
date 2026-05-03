@@ -659,6 +659,17 @@ async fn extracts_tokenizer_vocabulary_files_and_missing_diagnostics() {
     )
     .await
     .unwrap();
+    tokio::fs::write(
+        model_dir.join("tokenizer.json"),
+        r#"{
+          "version": "1.0",
+          "model": {"type": "BPE"},
+          "normalizer": {"type": "Sequence"},
+          "pre_tokenizer": {"type": "ByteLevel"}
+        }"#,
+    )
+    .await
+    .unwrap();
     tokio::fs::write(model_dir.join("vocab.txt"), "[PAD]\n[UNK]\n")
         .await
         .unwrap();
@@ -682,6 +693,15 @@ async fn extracts_tokenizer_vocabulary_files_and_missing_diagnostics() {
         component.kind == ProcessorComponentKind::Tokenizer
             && component.status == PackageFactStatus::Present
             && component.relative_path.as_deref() == Some("vocab.txt")
+    }));
+    assert!(facts.components.iter().any(|component| {
+        component.kind == ProcessorComponentKind::Tokenizer
+            && component.relative_path.as_deref() == Some("tokenizer.json")
+            && component.message.as_deref().is_some_and(|message| {
+                message.contains("model=BPE")
+                    && message.contains("normalizer=Sequence")
+                    && message.contains("pre_tokenizer=ByteLevel")
+            })
     }));
 
     let missing_id = "llm/example/tokenizer-missing-vocab";

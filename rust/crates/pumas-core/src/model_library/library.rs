@@ -5378,12 +5378,19 @@ async fn package_component_facts(
         if tokio::fs::try_exists(model_dir.join(relative_path)).await? {
             let class_name =
                 component_class_name(model_dir.join(relative_path), candidate.class_keys).await?;
+            let message = if candidate.kind == ProcessorComponentKind::Tokenizer
+                && relative_path == "tokenizer.json"
+            {
+                tokenizer_json_diagnostic_message(model_dir.join(relative_path)).await?
+            } else {
+                None
+            };
             facts.push(ProcessorComponentFacts {
                 kind: candidate.kind,
                 status: PackageFactStatus::Present,
                 relative_path: Some(relative_path.to_string()),
                 class_name,
-                message: None,
+                message,
             });
         }
     }
@@ -5427,6 +5434,54 @@ async fn tokenizer_vocabulary_component_facts(
     }
 
     Ok(facts)
+}
+
+async fn tokenizer_json_diagnostic_message(path: PathBuf) -> Result<Option<String>> {
+    tokio::task::spawn_blocking(move || {
+        let Some(tokenizer) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        else {
+            return Ok(None);
+        };
+
+        let mut parts = Vec::new();
+        if let Some(version) = tokenizer.get("version").and_then(Value::as_str) {
+            parts.push(format!("version={version}"));
+        }
+        if let Some(model_type) = tokenizer
+            .get("model")
+            .and_then(Value::as_object)
+            .and_then(|model| model.get("type"))
+            .and_then(Value::as_str)
+        {
+            parts.push(format!("model={model_type}"));
+        }
+        if let Some(normalizer_type) = tokenizer
+            .get("normalizer")
+            .and_then(Value::as_object)
+            .and_then(|normalizer| normalizer.get("type"))
+            .and_then(Value::as_str)
+        {
+            parts.push(format!("normalizer={normalizer_type}"));
+        }
+        if let Some(pre_tokenizer_type) = tokenizer
+            .get("pre_tokenizer")
+            .and_then(Value::as_object)
+            .and_then(|pre_tokenizer| pre_tokenizer.get("type"))
+            .and_then(Value::as_str)
+        {
+            parts.push(format!("pre_tokenizer={pre_tokenizer_type}"));
+        }
+
+        Ok::<_, PumasError>(if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join("; "))
+        })
+    })
+    .await
+    .map_err(|err| PumasError::Other(format!("Failed to join tokenizer JSON parse: {}", err)))?
 }
 
 const TOKENIZER_VOCABULARY_FILENAMES: &[&str] = &[

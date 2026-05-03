@@ -514,6 +514,22 @@ async fn resolves_model_refs_through_canonicalized_legacy_paths() {
         .migration_diagnostics
         .iter()
         .any(|diagnostic| diagnostic.code == "legacy_path_not_indexed"));
+
+    let missing_inside_library = library
+        .library_root()
+        .join("llm")
+        .join("example")
+        .join("missing-allowed-root")
+        .join("model.gguf");
+    let missing_inside = library
+        .resolve_pumas_model_ref(missing_inside_library.to_string_lossy().as_ref())
+        .await
+        .unwrap();
+    assert_eq!(missing_inside.model_id, "");
+    assert!(missing_inside
+        .migration_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "legacy_path_unresolved"));
 }
 
 #[tokio::test]

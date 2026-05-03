@@ -1,0 +1,17 @@
+{
+  "repoId": "org/tiny-transformers-safetensors",
+  "name": "tiny-transformers-safetensors",
+  "developer": "org",
+  "kind": "text-generation",
+  "formats": [
+    "safetensors"
+  ],
+  "quants": [],
+  "downloadOptions": [],
+  "url": "https://huggingface.co/org/tiny-transformers-safetensors",
+  "compatibleEngines": [
+    "transformers",
+    "vllm",
+    "mlx"
+  ]
+}

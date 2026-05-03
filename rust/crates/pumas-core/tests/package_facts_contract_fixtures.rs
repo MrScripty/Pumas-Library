@@ -1,7 +1,7 @@
 use pumas_library::models::{
-    BackendHintLabel, ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
-    ModelLibraryUpdateEvent, PackageArtifactKind, PackageFactStatus, ProcessorComponentKind,
-    ResolvedModelPackageFacts, PACKAGE_FACTS_CONTRACT_VERSION,
+    BackendHintLabel, HuggingFaceModel, ModelFactFamily, ModelLibraryChangeKind,
+    ModelLibraryRefreshScope, ModelLibraryUpdateEvent, PackageArtifactKind, PackageFactStatus,
+    ProcessorComponentKind, ResolvedModelPackageFacts, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use std::fs;
@@ -30,6 +30,15 @@ fn load_update_event_fixture(name: &str) -> (Value, ModelLibraryUpdateEvent) {
     let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
     let parsed: ModelLibraryUpdateEvent =
         serde_json::from_str(&content).expect("fixture should match update event contract");
+    (raw, parsed)
+}
+
+fn load_hf_search_fixture(name: &str) -> (Value, HuggingFaceModel) {
+    let path = fixture_path(name);
+    let content = fs::read_to_string(&path).expect("fixture should be readable");
+    let raw: Value = serde_json::from_str(&content).expect("fixture should be valid json");
+    let parsed: HuggingFaceModel =
+        serde_json::from_str(&content).expect("fixture should match HF search contract");
     (raw, parsed)
 }
 
@@ -254,6 +263,26 @@ fn custom_code_required_fixture_matches_contract() {
     assert!(parsed.transformers.as_ref().is_some_and(|evidence| evidence
         .auto_map
         .contains(&"AutoModelForCausalLM".to_string())));
+}
+
+#[test]
+fn remote_search_mlx_vllm_hint_fixture_matches_contract() {
+    let (raw, parsed) = load_hf_search_fixture("remote_search_mlx_vllm_hint.json");
+
+    assert_eq!(parsed.repo_id, "org/tiny-transformers-safetensors");
+    assert_eq!(parsed.formats, vec!["safetensors".to_string()]);
+    assert_eq!(
+        parsed.compatible_engines,
+        vec![
+            "transformers".to_string(),
+            "vllm".to_string(),
+            "mlx".to_string()
+        ]
+    );
+    assert!(
+        raw.get("model_ref").is_none() && raw.get("artifact").is_none(),
+        "remote search hints must not masquerade as installed-model package facts"
+    );
 }
 
 #[test]

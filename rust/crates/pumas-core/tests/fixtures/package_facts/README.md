@@ -42,5 +42,8 @@ selection policy.
   evidence.
 - `stale_package_facts.json`: durable package-facts cache row with stale
   contract-version/source-fingerprint semantics and decodable detail payload.
+- `invalid_cached_package_facts.json`: durable package-facts cache row whose
+  detail payload is valid JSON but not a decodable `ResolvedModelPackageFacts`,
+  proving recovery paths can bypass malformed cached detail.
 - `model_library_package_facts_modified_event.json`: host cache-invalidation
   event for package-fact detail refresh.

@@ -366,6 +366,30 @@ fn stale_package_facts_fixture_matches_cache_contract() {
 }
 
 #[test]
+fn invalid_cached_package_facts_fixture_matches_recovery_contract() {
+    let (_raw, parsed) = load_cache_fixture("invalid_cached_package_facts.json");
+
+    assert_eq!(parsed.model_id, "llm/example/invalid-cache");
+    assert_eq!(parsed.cache_scope, ModelPackageFactsCacheScope::Detail);
+    assert_eq!(
+        parsed.package_facts_contract_version,
+        i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+    );
+    assert_eq!(parsed.source_fingerprint, "fresh-source-fingerprint");
+
+    let cached_value: Value =
+        serde_json::from_str(&parsed.facts_json).expect("facts_json should remain valid JSON");
+    assert_eq!(
+        cached_value.get("not").and_then(Value::as_str),
+        Some("resolved_model_package_facts")
+    );
+    assert!(
+        serde_json::from_str::<ResolvedModelPackageFacts>(&parsed.facts_json).is_err(),
+        "fixture must model malformed cached detail that recovery bypasses"
+    );
+}
+
+#[test]
 fn package_fact_status_defaults_to_uninspected() {
     assert_eq!(PackageFactStatus::default(), PackageFactStatus::Uninspected);
 }

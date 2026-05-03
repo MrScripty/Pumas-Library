@@ -1083,6 +1083,46 @@ async fn list_search_and_rebuild_skip_package_facts_detail_cache() {
 }
 
 #[tokio::test]
+async fn recovers_from_invalid_package_facts_detail_cache_payload() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let invalid_detail_payload =
+        serde_json::json!({"not": "resolved_model_package_facts"}).to_string();
+    let mut invalid_detail_row = detail_row.clone();
+    invalid_detail_row.facts_json = invalid_detail_payload.clone();
+    invalid_detail_row.updated_at = "2026-05-02T00:04:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&invalid_detail_row)
+        .unwrap());
+
+    let resolved = library.resolve_model_package_facts(model_id).await.unwrap();
+    let recovered_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        resolved.task.task_type_primary.as_deref(),
+        Some("text_generation")
+    );
+    assert_ne!(recovered_detail_row.facts_json, invalid_detail_payload);
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&recovered_detail_row.facts_json).unwrap(),
+        serde_json::to_value(resolved).unwrap()
+    );
+}
+
+#[tokio::test]
 async fn regenerates_stale_package_facts_detail_cache() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

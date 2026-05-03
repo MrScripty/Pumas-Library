@@ -1046,6 +1046,43 @@ async fn dependency_binding_changes_refresh_package_fact_cache_fingerprints() {
 }
 
 #[tokio::test]
+async fn list_search_and_rebuild_skip_package_facts_detail_cache() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    library.resolve_model_package_facts(model_id).await.unwrap();
+    let detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let invalid_detail_payload =
+        serde_json::json!({"not": "resolved_model_package_facts"}).to_string();
+    let mut invalid_detail_row = detail_row.clone();
+    invalid_detail_row.facts_json = invalid_detail_payload.clone();
+    invalid_detail_row.updated_at = "2026-05-02T00:03:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&invalid_detail_row)
+        .unwrap());
+
+    let listed = library.list_models().await.unwrap();
+    assert!(listed.iter().any(|model| model.id == model_id));
+
+    let searched = library.search_models("cache", 10, 0).await.unwrap();
+    assert!(searched.models.iter().any(|model| model.id == model_id));
+
+    assert_eq!(library.rebuild_index().await.unwrap(), 1);
+    let unchanged_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    assert_eq!(unchanged_detail_row.facts_json, invalid_detail_payload);
+}
+
+#[tokio::test]
 async fn regenerates_stale_package_facts_detail_cache() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "llm/example/cache-test";

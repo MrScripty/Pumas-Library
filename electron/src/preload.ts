@@ -366,6 +366,10 @@ const electronAPI = {
     apiCall('resolve_model_package_facts', { model_id: modelId }),
   list_model_library_updates_since: (cursor?: string | null, limit?: number) =>
     apiCall('list_model_library_updates_since', { cursor, limit }),
+  resolve_model_package_facts_summary: (modelId: string) =>
+    apiCall('resolve_model_package_facts_summary', { model_id: modelId }),
+  model_package_facts_summary_snapshot: (limit?: number, offset?: number) =>
+    apiCall('model_package_facts_summary_snapshot', { limit, offset }),
   resolve_pumas_model_ref: (input: string) =>
     apiCall('resolve_pumas_model_ref', { input }),
 

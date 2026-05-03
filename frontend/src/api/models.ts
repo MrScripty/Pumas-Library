@@ -12,6 +12,8 @@ import type {
   InferenceSettingsResponse,
   ModelExecutionDescriptor,
   ModelLibraryUpdateFeed,
+  ModelPackageFactsSummaryResult,
+  ModelPackageFactsSummarySnapshot,
   PumasModelRef,
   ResolvedModelPackageFacts,
   UpdateModelNotesResponse,
@@ -135,6 +137,21 @@ class ModelsAPI {
   ): Promise<ModelLibraryUpdateFeed> {
     const api = this.getAPI();
     return await api.list_model_library_updates_since(cursor, limit);
+  }
+
+  async resolveModelPackageFactsSummary(
+    modelId: string
+  ): Promise<ModelPackageFactsSummaryResult> {
+    const api = this.getAPI();
+    return await api.resolve_model_package_facts_summary(modelId);
+  }
+
+  async modelPackageFactsSummarySnapshot(
+    limit?: number,
+    offset?: number
+  ): Promise<ModelPackageFactsSummarySnapshot> {
+    const api = this.getAPI();
+    return await api.model_package_facts_summary_snapshot(limit, offset);
   }
 
   async resolvePumasModelRef(input: string): Promise<PumasModelRef> {

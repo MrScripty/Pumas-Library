@@ -9,7 +9,9 @@
 
 #![warn(unsafe_code)]
 
-use pumas_library::models::{ModelFactFamily, ModelLibraryChangeKind};
+use pumas_library::models::{
+    ModelFactFamily, ModelLibraryChangeKind, ModelPackageFactsSummaryStatus,
+};
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
@@ -481,7 +483,25 @@ async fn test_model_library_update_feed_api_surface() {
     assert!(!initial.stale_cursor);
     assert!(initial.events.is_empty());
 
-    api.resolve_model_package_facts(model_id).await.unwrap();
+    let snapshot = api
+        .model_package_facts_summary_snapshot(100, 0)
+        .await
+        .unwrap();
+    let item = snapshot
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("model should appear in summary snapshot");
+    assert_eq!(item.status, ModelPackageFactsSummaryStatus::Missing);
+
+    let summary = api
+        .resolve_model_package_facts_summary(model_id)
+        .await
+        .unwrap();
+    assert_eq!(summary.model_id, model_id);
+    assert_eq!(summary.status, ModelPackageFactsSummaryStatus::Regenerated);
+    assert!(summary.summary.is_some());
+
     let feed = api
         .list_model_library_updates_since(Some(&initial.cursor), 100)
         .await
@@ -492,6 +512,18 @@ async fn test_model_library_update_feed_api_surface() {
             && event.change_kind == ModelLibraryChangeKind::PackageFactsModified
             && event.fact_family == ModelFactFamily::PackageFacts
     }));
+
+    let snapshot = api
+        .model_package_facts_summary_snapshot(100, 0)
+        .await
+        .unwrap();
+    let item = snapshot
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("model should appear in summary snapshot");
+    assert_eq!(item.status, ModelPackageFactsSummaryStatus::Cached);
+    assert!(item.summary.is_some());
 }
 
 #[tokio::test]

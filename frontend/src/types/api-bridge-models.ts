@@ -23,10 +23,12 @@ import type {
   InferenceParamSchema,
   InferenceSettingsResponse,
   ListInterruptedDownloadsResponse,
-  ModelLibraryUpdateFeed,
   ListModelDownloadsResponse,
   ModelDownloadResponse,
   ModelDownloadStatusResponse,
+  ModelLibraryUpdateFeed,
+  ModelPackageFactsSummaryResult,
+  ModelPackageFactsSummarySnapshot,
   ModelsResponse,
   PumasModelRef,
   RecoverDownloadResponse,
@@ -138,6 +140,19 @@ export interface DesktopBridgeModelAPI {
     cursor?: string | null,
     limit?: number
   ): Promise<ModelLibraryUpdateFeed>;
+
+  /**
+   * Resolve a compact package-facts summary for a single model.
+   */
+  resolve_model_package_facts_summary(modelId: string): Promise<ModelPackageFactsSummaryResult>;
+
+  /**
+   * Return a bounded startup snapshot of cached package-facts summaries.
+   */
+  model_package_facts_summary_snapshot(
+    limit?: number,
+    offset?: number
+  ): Promise<ModelPackageFactsSummarySnapshot>;
 
   /**
    * Resolve a canonical model id or legacy local path into a Pumas model ref.

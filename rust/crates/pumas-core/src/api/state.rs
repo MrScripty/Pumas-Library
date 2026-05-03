@@ -506,6 +506,36 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(updates)?)
             }
+            "resolve_model_package_facts_summary" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let summary = self
+                    .model_library
+                    .resolve_model_package_facts_summary(model_id)
+                    .await?;
+                Ok(serde_json::to_value(summary)?)
+            }
+            "model_package_facts_summary_snapshot" => {
+                let limit = params
+                    .get("limit")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(500);
+                let offset = params
+                    .get("offset")
+                    .and_then(|value| value.as_u64())
+                    .map(|value| value as usize)
+                    .unwrap_or(0);
+                let snapshot = self
+                    .model_library
+                    .model_package_facts_summary_snapshot(limit, offset)
+                    .await?;
+                Ok(serde_json::to_value(snapshot)?)
+            }
             "resolve_pumas_model_ref" => {
                 let input = params["input"]
                     .as_str()

@@ -1,5 +1,10 @@
+use super::model_library_updates::model_library_update_cursor;
 use super::{ModelIndex, ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope};
 use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
+use crate::models::{
+    ModelPackageFactsSummarySnapshot, ModelPackageFactsSummarySnapshotItem,
+    ModelPackageFactsSummaryStatus, ResolvedModelPackageFactsSummary,
+};
 use crate::{PumasError, Result};
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -170,5 +175,68 @@ impl ModelIndex {
             "DELETE FROM model_package_facts_cache WHERE model_id = ?1",
             params![model_id],
         )?)
+    }
+
+    pub fn list_model_package_facts_summary_snapshot(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<ModelPackageFactsSummarySnapshot> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+        let limit = if limit == 0 { 500 } else { limit.min(1000) };
+
+        let mut stmt = conn.prepare(
+            "SELECT
+                models.id,
+                model_package_facts_cache.facts_json
+             FROM models
+             LEFT JOIN model_package_facts_cache
+               ON model_package_facts_cache.model_id = models.id
+              AND model_package_facts_cache.selected_artifact_id = ''
+              AND model_package_facts_cache.cache_scope = 'summary'
+             ORDER BY models.id ASC
+             LIMIT ?1 OFFSET ?2",
+        )?;
+        let items = stmt
+            .query_map(params![limit as i64, offset as i64], |row| {
+                let model_id: String = row.get(0)?;
+                let facts_json: Option<String> = row.get(1)?;
+                Ok(summary_snapshot_item_from_json(model_id, facts_json))
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let cursor = model_library_update_cursor(
+            Self::current_model_library_update_event_id_with_conn(&conn)?,
+        );
+
+        Ok(ModelPackageFactsSummarySnapshot { cursor, items })
+    }
+}
+
+fn summary_snapshot_item_from_json(
+    model_id: String,
+    facts_json: Option<String>,
+) -> ModelPackageFactsSummarySnapshotItem {
+    let Some(facts_json) = facts_json else {
+        return ModelPackageFactsSummarySnapshotItem {
+            model_id,
+            status: ModelPackageFactsSummaryStatus::Missing,
+            summary: None,
+        };
+    };
+
+    match serde_json::from_str::<ResolvedModelPackageFactsSummary>(&facts_json) {
+        Ok(summary) => ModelPackageFactsSummarySnapshotItem {
+            model_id,
+            status: ModelPackageFactsSummaryStatus::Cached,
+            summary: Some(summary),
+        },
+        Err(_) => ModelPackageFactsSummarySnapshotItem {
+            model_id,
+            status: ModelPackageFactsSummaryStatus::Invalid,
+            summary: None,
+        },
     }
 }

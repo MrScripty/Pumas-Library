@@ -244,6 +244,12 @@ async fn dispatch_method(
         "list_model_library_updates_since" => {
             models::list_model_library_updates_since(state, params).await
         }
+        "resolve_model_package_facts_summary" => {
+            models::resolve_model_package_facts_summary(state, params).await
+        }
+        "model_package_facts_summary_snapshot" => {
+            models::model_package_facts_summary_snapshot(state, params).await
+        }
         "refetch_model_metadata_from_hf" => {
             models::refetch_model_metadata_from_hf(state, params).await
         }

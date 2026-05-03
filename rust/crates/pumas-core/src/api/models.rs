@@ -563,6 +563,47 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve a compact package-facts summary for a single model.
+    pub async fn resolve_model_package_facts_summary(
+        &self,
+        model_id: &str,
+    ) -> Result<models::ModelPackageFactsSummaryResult> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_model_package_facts_summary",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .model_library
+            .resolve_model_package_facts_summary(model_id)
+            .await
+    }
+
+    /// Return a bounded startup snapshot of cached package-facts summaries.
+    pub async fn model_package_facts_summary_snapshot(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<models::ModelPackageFactsSummarySnapshot> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "model_package_facts_summary_snapshot",
+                    serde_json::json!({ "limit": limit, "offset": offset }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .model_library
+            .model_package_facts_summary_snapshot(limit, offset)
+            .await
+    }
+
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
         if self.try_client().is_some() {

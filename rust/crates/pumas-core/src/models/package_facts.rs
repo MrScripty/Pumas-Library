@@ -297,6 +297,46 @@ pub struct ModelLibraryUpdateFeed {
     pub snapshot_required: bool,
 }
 
+/// Consumer-visible freshness/source state for a package-facts summary row.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelPackageFactsSummaryStatus {
+    Cached,
+    Missing,
+    Invalid,
+    Fresh,
+    DetailDerived,
+    Regenerated,
+}
+
+/// Single model package-facts summary lookup result.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelPackageFactsSummaryResult {
+    pub model_id: String,
+    pub status: ModelPackageFactsSummaryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ResolvedModelPackageFactsSummary>,
+}
+
+/// Startup/list snapshot item for host cache population.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelPackageFactsSummarySnapshotItem {
+    pub model_id: String,
+    pub status: ModelPackageFactsSummaryStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<ResolvedModelPackageFactsSummary>,
+}
+
+/// Bounded startup snapshot of cached package-facts summaries plus update cursor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelPackageFactsSummarySnapshot {
+    pub cursor: String,
+    pub items: Vec<ModelPackageFactsSummarySnapshotItem>,
+}
+
 /// Versioned inference-facing model package facts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

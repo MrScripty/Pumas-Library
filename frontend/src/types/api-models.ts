@@ -299,6 +299,49 @@ export interface ModelLibraryUpdateFeed {
   snapshot_required: boolean;
 }
 
+export type ModelPackageFactsSummaryStatus =
+  | 'cached'
+  | 'missing'
+  | 'invalid'
+  | 'fresh'
+  | 'detail_derived'
+  | 'regenerated';
+
+export interface ResolvedModelPackageFactsSummary {
+  package_facts_contract_version: number;
+  model_ref: PumasModelRef;
+  artifact_kind: PackageArtifactKind;
+  entry_path: string;
+  storage_kind: StorageKind;
+  validation_state: AssetValidationState;
+  task: TaskEvidence;
+  backend_hints: BackendHintFacts;
+  requires_custom_code: boolean;
+  config_status: PackageFactStatus;
+  tokenizer_status: PackageFactStatus;
+  processor_status: PackageFactStatus;
+  generation_config_status: PackageFactStatus;
+  generation_defaults_status: PackageFactStatus;
+  diagnostic_codes?: string[];
+}
+
+export interface ModelPackageFactsSummaryResult {
+  model_id: string;
+  status: ModelPackageFactsSummaryStatus;
+  summary?: ResolvedModelPackageFactsSummary | null;
+}
+
+export interface ModelPackageFactsSummarySnapshotItem {
+  model_id: string;
+  status: ModelPackageFactsSummaryStatus;
+  summary?: ResolvedModelPackageFactsSummary | null;
+}
+
+export interface ModelPackageFactsSummarySnapshot {
+  cursor: string;
+  items: ModelPackageFactsSummarySnapshotItem[];
+}
+
 export interface SearchHFModelsResponse extends BaseResponse {
   models: HuggingFaceModel[];
 }

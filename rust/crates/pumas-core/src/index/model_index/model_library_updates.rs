@@ -246,7 +246,9 @@ impl ModelIndex {
         })
     }
 
-    fn current_model_library_update_event_id_with_conn(conn: &Connection) -> Result<i64> {
+    pub(super) fn current_model_library_update_event_id_with_conn(
+        conn: &Connection,
+    ) -> Result<i64> {
         Ok(conn.query_row(
             "SELECT COALESCE(MAX(event_id), 0) FROM model_library_update_events",
             [],
@@ -287,7 +289,7 @@ impl From<ModelLibraryUpdateRecord> for ModelLibraryUpdateEvent {
     }
 }
 
-fn model_library_update_cursor(event_id: i64) -> String {
+pub(super) fn model_library_update_cursor(event_id: i64) -> String {
     format!("{MODEL_LIBRARY_UPDATE_CURSOR_PREFIX}{event_id}")
 }
 

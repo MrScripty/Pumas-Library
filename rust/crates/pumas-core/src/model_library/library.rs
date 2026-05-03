@@ -36,10 +36,12 @@ use crate::model_library::{
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
     GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic,
-    ModelRefMigrationDiagnostic, PackageArtifactKind, PackageClassReference, PackageFactStatus,
-    ProcessorComponentFacts, ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts,
-    ResolvedModelPackageFacts, ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence,
-    TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
+    ModelPackageFactsSummaryResult, ModelPackageFactsSummarySnapshot,
+    ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic, PackageArtifactKind,
+    PackageClassReference, PackageFactStatus, ProcessorComponentFacts, ProcessorComponentKind,
+    PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
+    ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, TransformersPackageEvidence,
+    PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -2310,6 +2312,103 @@ impl ModelLibrary {
                 updated_at: now,
             })?;
         Ok(())
+    }
+
+    /// Resolve a compact package-facts summary for a single model.
+    ///
+    /// Fresh summary cache rows are returned directly. Missing or stale summary
+    /// rows are repaired from a fresh detail row when possible, otherwise the
+    /// full detail resolver regenerates the facts for this targeted model.
+    pub async fn resolve_model_package_facts_summary(
+        &self,
+        model_id: &str,
+    ) -> Result<ModelPackageFactsSummaryResult> {
+        let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
+        let model_dir = self.library_root.join(model_id);
+        let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
+            .await?
+            .ok_or_else(|| PumasError::ModelNotFound {
+                model_id: model_id.to_string(),
+            })?;
+        let selected_files = package_selected_files(&model_dir, &metadata).await?;
+        let dependency_bindings = self
+            .index
+            .list_active_model_dependency_bindings(model_id, None)?;
+        let source_fingerprint = package_facts_source_fingerprint(
+            &model_dir,
+            &descriptor,
+            &metadata,
+            &selected_files,
+            &dependency_bindings,
+        )
+        .await?;
+
+        if let Some(cached) = self.index.get_model_package_facts_cache(
+            model_id,
+            None,
+            ModelPackageFactsCacheScope::Summary,
+        )? {
+            if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+                && cached.source_fingerprint == source_fingerprint
+            {
+                if let Ok(summary) =
+                    serde_json::from_str::<ResolvedModelPackageFactsSummary>(&cached.facts_json)
+                {
+                    return Ok(ModelPackageFactsSummaryResult {
+                        model_id: model_id.to_string(),
+                        status: ModelPackageFactsSummaryStatus::Fresh,
+                        summary: Some(summary),
+                    });
+                }
+            }
+        }
+
+        if let Some(cached) = self.index.get_model_package_facts_cache(
+            model_id,
+            None,
+            ModelPackageFactsCacheScope::Detail,
+        )? {
+            if cached.package_facts_contract_version == i64::from(PACKAGE_FACTS_CONTRACT_VERSION)
+                && cached.source_fingerprint == source_fingerprint
+            {
+                if let Ok(facts) =
+                    serde_json::from_str::<ResolvedModelPackageFacts>(&cached.facts_json)
+                {
+                    self.upsert_model_package_facts_summary_cache(
+                        model_id,
+                        metadata.updated_date.clone(),
+                        &source_fingerprint,
+                        &facts,
+                    )?;
+                    return Ok(ModelPackageFactsSummaryResult {
+                        model_id: model_id.to_string(),
+                        status: ModelPackageFactsSummaryStatus::DetailDerived,
+                        summary: Some(ResolvedModelPackageFactsSummary::from(&facts)),
+                    });
+                }
+            }
+        }
+
+        let facts = self.resolve_model_package_facts(model_id).await?;
+        Ok(ModelPackageFactsSummaryResult {
+            model_id: model_id.to_string(),
+            status: ModelPackageFactsSummaryStatus::Regenerated,
+            summary: Some(ResolvedModelPackageFactsSummary::from(&facts)),
+        })
+    }
+
+    /// Return a bounded startup snapshot of cached package-facts summaries.
+    ///
+    /// This method does not regenerate missing summaries or deserialize detail
+    /// blobs. Missing or invalid cached summaries are surfaced explicitly so
+    /// consumers can decide whether to request targeted summary/detail refresh.
+    pub async fn model_package_facts_summary_snapshot(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<ModelPackageFactsSummarySnapshot> {
+        self.index
+            .list_model_package_facts_summary_snapshot(limit, offset)
     }
 
     /// List model-library update events after a producer cursor.

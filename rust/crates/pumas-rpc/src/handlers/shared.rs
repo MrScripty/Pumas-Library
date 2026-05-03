@@ -470,8 +470,13 @@ mod tests {
             validate_local_write_target_path(target.to_string_lossy().to_string(), "file_path")
                 .await
                 .unwrap();
+        let expected = tokio::fs::canonicalize(temp_dir.path())
+            .await
+            .unwrap()
+            .join("outputs")
+            .join("result.txt");
 
-        assert_eq!(validated, target);
+        assert_eq!(validated, expected);
     }
 
     #[tokio::test]

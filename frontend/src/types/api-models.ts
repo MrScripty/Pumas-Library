@@ -191,6 +191,7 @@ export interface ResolvedArtifactFacts {
   validation_state: AssetValidationState;
   validation_errors?: AssetValidationError[];
   companion_artifacts?: string[];
+  sibling_files?: string[];
   selected_files?: string[];
 }
 

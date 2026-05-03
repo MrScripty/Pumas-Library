@@ -109,6 +109,11 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         repo_id: Some("org/tiny-transformers".to_string()),
         huggingface_evidence: Some(HuggingFaceEvidence {
             repo_id: Some("org/fallback-transformers".to_string()),
+            sibling_filenames: Some(vec![
+                "README.md".to_string(),
+                "config.json".to_string(),
+                "model.safetensors".to_string(),
+            ]),
             ..Default::default()
         }),
         ..Default::default()
@@ -166,6 +171,10 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
         .artifact
         .selected_files
         .contains(&"config.json".to_string()));
+    assert!(facts
+        .artifact
+        .sibling_files
+        .contains(&"README.md".to_string()));
     assert!(facts
         .custom_code
         .dependency_manifests

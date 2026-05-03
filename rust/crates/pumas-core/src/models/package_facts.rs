@@ -223,6 +223,8 @@ pub struct ResolvedArtifactFacts {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub companion_artifacts: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sibling_files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub selected_files: Vec<String>,
 }
 

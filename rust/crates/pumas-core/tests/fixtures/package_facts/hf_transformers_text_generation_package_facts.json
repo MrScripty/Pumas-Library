@@ -16,6 +16,13 @@
       "generation_config.json",
       "model.safetensors",
       "tokenizer.json"
+    ],
+    "sibling_files": [
+      "README.md",
+      "config.json",
+      "generation_config.json",
+      "model.safetensors",
+      "tokenizer.json"
     ]
   },
   "components": [

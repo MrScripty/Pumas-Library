@@ -119,6 +119,10 @@ fn hf_text_generation_fixture_matches_contract() {
         .get("artifact")
         .and_then(Value::as_object)
         .expect("artifact object should exist");
+    assert!(parsed
+        .artifact
+        .sibling_files
+        .contains(&"README.md".to_string()));
     assert!(
         artifact.get("validation_errors").is_none(),
         "empty optional validation errors should be omitted"

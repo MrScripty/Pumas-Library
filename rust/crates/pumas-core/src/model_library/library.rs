@@ -2219,6 +2219,11 @@ impl ModelLibrary {
                 validation_state: descriptor.validation_state,
                 validation_errors: metadata.validation_errors.clone().unwrap_or_default(),
                 companion_artifacts: companion_artifacts(&selected_files),
+                sibling_files: metadata
+                    .huggingface_evidence
+                    .as_ref()
+                    .and_then(|evidence| evidence.sibling_filenames.clone())
+                    .unwrap_or_default(),
                 selected_files: selected_files.clone(),
             },
             components: component_facts,

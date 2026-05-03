@@ -36,10 +36,10 @@ use crate::model_library::{
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
     GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic,
-    ModelRefMigrationDiagnostic, PackageArtifactKind, PackageFactStatus, ProcessorComponentFacts,
-    ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
-    ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, TransformersPackageEvidence,
-    PACKAGE_FACTS_CONTRACT_VERSION,
+    ModelRefMigrationDiagnostic, PackageArtifactKind, PackageClassReference, PackageFactStatus,
+    ProcessorComponentFacts, ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts,
+    ResolvedModelPackageFacts, ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence,
+    TransformersPackageEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -2193,6 +2193,7 @@ impl ModelLibrary {
         let component_facts = package_component_facts(&model_dir, &selected_files).await?;
         let transformers =
             transformers_package_evidence(&model_dir, &metadata, &selected_files).await?;
+        let class_references = package_class_references(&component_facts, transformers.as_ref());
         let generation_defaults = generation_default_facts(&model_dir).await?;
         let auto_map_sources = auto_map_sources_from_config(&model_dir).await?;
         let custom_generate_sources = custom_generate_sources(&model_dir).await?;
@@ -2241,6 +2242,7 @@ impl ModelLibrary {
                     custom_generate_sources,
                 ),
                 auto_map_sources,
+                class_references,
                 dependency_manifests: merge_string_lists(
                     selected_files
                         .iter()
@@ -5739,6 +5741,77 @@ async fn chat_template_directory_facts(model_dir: &Path) -> Result<Vec<Processor
     })
     .await
     .map_err(|err| PumasError::Other(format!("Failed to join chat template scan: {}", err)))?
+}
+
+fn package_class_references(
+    components: &[ProcessorComponentFacts],
+    transformers: Option<&TransformersPackageEvidence>,
+) -> Vec<PackageClassReference> {
+    let mut references = Vec::new();
+    let mut seen = BTreeSet::new();
+
+    for component in components {
+        let Some(class_name) = component.class_name.as_ref() else {
+            continue;
+        };
+        push_package_class_reference(
+            &mut references,
+            &mut seen,
+            component.kind,
+            class_name.clone(),
+            component.relative_path.clone(),
+        );
+    }
+
+    if let Some(transformers) = transformers {
+        for architecture in &transformers.architectures {
+            push_package_class_reference(
+                &mut references,
+                &mut seen,
+                ProcessorComponentKind::Config,
+                architecture.clone(),
+                Some("config.json".to_string()),
+            );
+        }
+        if let Some(processor_class) = transformers.processor_class.as_ref() {
+            push_package_class_reference(
+                &mut references,
+                &mut seen,
+                ProcessorComponentKind::Processor,
+                processor_class.clone(),
+                Some("config.json".to_string()),
+            );
+        }
+    }
+
+    references.sort_by(|left, right| {
+        left.source_path
+            .cmp(&right.source_path)
+            .then_with(|| format!("{:?}", left.kind).cmp(&format!("{:?}", right.kind)))
+            .then_with(|| left.class_name.cmp(&right.class_name))
+    });
+    references
+}
+
+fn push_package_class_reference(
+    references: &mut Vec<PackageClassReference>,
+    seen: &mut BTreeSet<(String, String, String)>,
+    kind: ProcessorComponentKind,
+    class_name: String,
+    source_path: Option<String>,
+) {
+    let key = (
+        format!("{kind:?}"),
+        source_path.clone().unwrap_or_default(),
+        class_name.clone(),
+    );
+    if seen.insert(key) {
+        references.push(PackageClassReference {
+            kind,
+            class_name,
+            source_path,
+        });
+    }
 }
 
 async fn transformers_package_evidence(

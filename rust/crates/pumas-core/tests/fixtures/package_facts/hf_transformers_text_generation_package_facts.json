@@ -82,6 +82,13 @@
       "AutoConfig",
       "AutoModelForCausalLM"
     ],
+    "class_references": [
+      {
+        "kind": "config",
+        "class_name": "LlamaForCausalLM",
+        "source_path": "config.json"
+      }
+    ],
     "dependency_manifests": [
       "requirements.txt"
     ]

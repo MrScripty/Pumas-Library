@@ -157,6 +157,11 @@ async fn resolves_hf_transformers_package_facts_from_metadata_and_files() {
             "modeling_tiny.TinyForCausalLM".to_string()
         ]
     );
+    assert!(facts.custom_code.class_references.iter().any(|reference| {
+        reference.kind == ProcessorComponentKind::Config
+            && reference.class_name == "LlamaForCausalLM"
+            && reference.source_path.as_deref() == Some("config.json")
+    }));
     assert!(facts
         .artifact
         .selected_files

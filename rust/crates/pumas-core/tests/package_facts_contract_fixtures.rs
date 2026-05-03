@@ -97,6 +97,11 @@ fn hf_text_generation_fixture_matches_contract() {
         Some(0.7)
     );
     assert!(parsed.custom_code.requires_custom_code);
+    assert!(parsed.custom_code.class_references.iter().any(|reference| {
+        reference.kind == ProcessorComponentKind::Config
+            && reference.class_name == "LlamaForCausalLM"
+            && reference.source_path.as_deref() == Some("config.json")
+    }));
     assert!(parsed
         .backend_hints
         .accepted

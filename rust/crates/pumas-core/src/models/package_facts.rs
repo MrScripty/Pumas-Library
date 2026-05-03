@@ -183,7 +183,19 @@ pub struct CustomCodeFacts {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auto_map_sources: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub class_references: Vec<PackageClassReference>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dependency_manifests: Vec<String>,
+}
+
+/// Class reference discovered from package metadata without importing code.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct PackageClassReference {
+    pub kind: ProcessorComponentKind,
+    pub class_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_path: Option<String>,
 }
 
 /// Backend hints as advisory facts, not runtime decisions.

@@ -234,7 +234,14 @@ export interface CustomCodeFacts {
   requires_custom_code: boolean;
   custom_code_sources?: string[];
   auto_map_sources?: string[];
+  class_references?: PackageClassReference[];
   dependency_manifests?: string[];
+}
+
+export interface PackageClassReference {
+  kind: ProcessorComponentKind;
+  class_name: string;
+  source_path?: string | null;
 }
 
 export interface BackendHintFacts {

@@ -1,4 +1,6 @@
-use pumas_library::index::ModelPackageFactsCacheScope;
+use pumas_library::index::{
+    DependencyProfileRecord, ModelDependencyBindingRecord, ModelPackageFactsCacheScope,
+};
 use pumas_library::models::{
     BackendHintLabel, ModelFileInfo, ModelMetadata, PackageArtifactKind, PackageFactStatus,
     ProcessorComponentKind, ResolvedModelPackageFactsSummary,
@@ -10,6 +12,18 @@ async fn setup_library() -> (TempDir, ModelLibrary) {
     let temp_dir = TempDir::new().unwrap();
     let library = ModelLibrary::new(temp_dir.path()).await.unwrap();
     (temp_dir, library)
+}
+
+fn pinned_profile_spec(package: &str, version: &str) -> String {
+    serde_json::json!({
+        "python_packages": [
+            {
+                "name": package,
+                "version": version
+            }
+        ]
+    })
+    .to_string()
 }
 
 async fn create_cache_test_model(library: &ModelLibrary, model_id: &str) {
@@ -937,6 +951,98 @@ async fn persists_compact_package_facts_summary_cache() {
     assert!(summary_row.facts_json.len() < detail_row.facts_json.len());
     assert!(!summary_row.facts_json.contains("\"components\""));
     assert!(!summary_row.facts_json.contains("\"generation_defaults\""));
+}
+
+#[tokio::test]
+async fn dependency_binding_changes_refresh_package_fact_cache_fingerprints() {
+    let (_temp_dir, library) = setup_library().await;
+    let model_id = "llm/example/cache-test";
+    create_cache_test_model(&library, model_id).await;
+
+    let first = library.resolve_model_package_facts(model_id).await.unwrap();
+    let first_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let first_summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        first_summary_row.source_fingerprint,
+        first_detail_row.source_fingerprint
+    );
+
+    let mut stale_facts = first.clone();
+    stale_facts.task.task_type_primary = Some("stale_cached_task".to_string());
+    let mut stale_row = first_detail_row.clone();
+    stale_row.facts_json = serde_json::to_string(&stale_facts).unwrap();
+    stale_row.updated_at = "2026-05-02T00:01:00Z".to_string();
+    assert!(library
+        .index()
+        .upsert_model_package_facts_cache(&stale_row)
+        .unwrap());
+
+    assert!(library
+        .index()
+        .upsert_dependency_profile(&DependencyProfileRecord {
+            profile_id: "torch-cpu".to_string(),
+            profile_version: 1,
+            profile_hash: None,
+            environment_kind: "python".to_string(),
+            spec_json: pinned_profile_spec("torch", "==2.5.1"),
+            created_at: "2026-05-02T00:02:00Z".to_string(),
+        })
+        .unwrap());
+    assert!(library
+        .index()
+        .upsert_model_dependency_binding(&ModelDependencyBindingRecord {
+            binding_id: "cache-test-binding".to_string(),
+            model_id: model_id.to_string(),
+            profile_id: "torch-cpu".to_string(),
+            profile_version: 1,
+            binding_kind: "required_core".to_string(),
+            backend_key: Some("transformers".to_string()),
+            platform_selector: None,
+            status: "active".to_string(),
+            priority: 100,
+            attached_by: Some("test".to_string()),
+            attached_at: "2026-05-02T00:02:00Z".to_string(),
+            profile_hash: None,
+            environment_kind: None,
+            spec_json: None,
+        })
+        .unwrap());
+
+    let resolved = library.resolve_model_package_facts(model_id).await.unwrap();
+    let refreshed_detail_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Detail)
+        .unwrap()
+        .unwrap();
+    let refreshed_summary_row = library
+        .index()
+        .get_model_package_facts_cache(model_id, None, ModelPackageFactsCacheScope::Summary)
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(
+        resolved.task.task_type_primary.as_deref(),
+        Some("text_generation")
+    );
+    assert_ne!(
+        refreshed_detail_row.source_fingerprint,
+        first_detail_row.source_fingerprint
+    );
+    assert_eq!(
+        refreshed_summary_row.source_fingerprint,
+        refreshed_detail_row.source_fingerprint
+    );
+    assert!(!refreshed_detail_row
+        .facts_json
+        .contains("stale_cached_task"));
 }
 
 #[tokio::test]

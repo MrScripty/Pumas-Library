@@ -2145,9 +2145,17 @@ impl ModelLibrary {
             })?;
 
         let selected_files = package_selected_files(&model_dir, &metadata).await?;
-        let source_fingerprint =
-            package_facts_source_fingerprint(&model_dir, &descriptor, &metadata, &selected_files)
-                .await?;
+        let dependency_bindings = self
+            .index
+            .list_active_model_dependency_bindings(model_id, None)?;
+        let source_fingerprint = package_facts_source_fingerprint(
+            &model_dir,
+            &descriptor,
+            &metadata,
+            &selected_files,
+            &dependency_bindings,
+        )
+        .await?;
         let can_persist_package_facts = self.index.get(model_id)?.is_some();
         if can_persist_package_facts {
             if let Some(cached) = self.index.get_model_package_facts_cache(
@@ -5111,10 +5119,12 @@ async fn package_facts_source_fingerprint(
     descriptor: &ModelExecutionDescriptor,
     metadata: &ModelMetadata,
     selected_files: &[String],
+    dependency_bindings: &[ModelDependencyBindingRecord],
 ) -> Result<String> {
     let model_dir = model_dir.to_path_buf();
     let descriptor_json = serde_json::to_string(descriptor)?;
     let metadata_json = serde_json::to_string(metadata)?;
+    let dependency_bindings_json = serde_json::to_string(dependency_bindings)?;
     let selected_files = selected_files.iter().cloned().collect::<BTreeSet<_>>();
 
     tokio::task::spawn_blocking(move || {
@@ -5139,6 +5149,11 @@ async fn package_facts_source_fingerprint(
         );
         update_package_facts_hash_part(&mut hasher, "descriptor", &descriptor_json);
         update_package_facts_hash_part(&mut hasher, "metadata", &metadata_json);
+        update_package_facts_hash_part(
+            &mut hasher,
+            "dependency_bindings",
+            &dependency_bindings_json,
+        );
 
         for relative_path in fingerprint_files {
             update_package_facts_hash_part(&mut hasher, "file", &relative_path);

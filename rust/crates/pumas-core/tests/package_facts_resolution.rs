@@ -432,6 +432,77 @@ async fn resolves_canonical_model_refs_and_reports_unresolved_legacy_paths() {
 }
 
 #[tokio::test]
+async fn resolves_model_refs_through_canonicalized_legacy_paths() {
+    let temp_dir = TempDir::new().unwrap();
+    let library = ModelLibrary::new(temp_dir.path().join("library"))
+        .await
+        .unwrap();
+    let model_id = "llm/example/canonical-paths";
+    let model_dir = library.build_model_path("llm", "example", "canonical-paths");
+    tokio::fs::create_dir_all(&model_dir).await.unwrap();
+    tokio::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#)
+        .await
+        .unwrap();
+    tokio::fs::write(model_dir.join("model.safetensors"), "test")
+        .await
+        .unwrap();
+    let metadata = ModelMetadata {
+        model_id: Some(model_id.to_string()),
+        model_type: Some("llm".to_string()),
+        family: Some("example".to_string()),
+        cleaned_name: Some("canonical-paths".to_string()),
+        official_name: Some("Canonical Paths".to_string()),
+        ..Default::default()
+    };
+    library.save_metadata(&model_dir, &metadata).await.unwrap();
+    library.rebuild_index().await.unwrap();
+
+    let traversed_path = model_dir
+        .join("..")
+        .join("canonical-paths")
+        .join("model.safetensors");
+    let traversed = library
+        .resolve_pumas_model_ref(traversed_path.to_string_lossy().as_ref())
+        .await
+        .unwrap();
+    assert_eq!(traversed.model_id, model_id);
+    assert!(traversed.migration_diagnostics.is_empty());
+
+    let symlink_path = temp_dir.path().join("linked-model.safetensors");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(model_dir.join("model.safetensors"), &symlink_path).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(model_dir.join("model.safetensors"), &symlink_path).unwrap();
+
+    let linked = library
+        .resolve_pumas_model_ref(symlink_path.to_string_lossy().as_ref())
+        .await
+        .unwrap();
+    assert_eq!(linked.model_id, model_id);
+    assert!(linked.migration_diagnostics.is_empty());
+
+    let unindexed_dir = library
+        .library_root()
+        .join("llm")
+        .join("example")
+        .join("unindexed");
+    tokio::fs::create_dir_all(&unindexed_dir).await.unwrap();
+    tokio::fs::write(unindexed_dir.join("model.gguf"), "gguf")
+        .await
+        .unwrap();
+
+    let unindexed = library
+        .resolve_pumas_model_ref(unindexed_dir.join("model.gguf").to_string_lossy().as_ref())
+        .await
+        .unwrap();
+    assert_eq!(unindexed.model_id, "");
+    assert!(unindexed
+        .migration_diagnostics
+        .iter()
+        .any(|diagnostic| diagnostic.code == "legacy_path_not_indexed"));
+}
+
+#[tokio::test]
 async fn extracts_processor_component_class_names_and_chat_templates() {
     let (_temp_dir, library) = setup_library().await;
     let model_id = "vlm/example/component-evidence";

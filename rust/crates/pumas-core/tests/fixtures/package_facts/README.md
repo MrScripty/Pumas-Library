@@ -14,6 +14,32 @@ selection policy.
 - Use stable snake_case field names and stable enum labels.
 - Omit optional fields when absent so defaults remain part of the contract.
 - Represent backend hints as advisory facts only.
+- Treat these fixtures as the producer truth for host consumers. Consumers may
+  copy or generate snapshots from them for tests, but any copied fixture must
+  preserve field names and enum labels unless it is intentionally testing a
+  consumer-owned adapter.
+- Do not expose SQLite table names, cache row metadata, `models.metadata_json`,
+  local frontend bridge state, scheduler state, runtime registry state, or
+  diagnostics-ledger fields in package-facts fixtures.
+- `ResolvedModelPackageFactsSummary` payloads are derived from the full
+  package-facts shape. Summary tests should verify compatibility with the same
+  enum labels, model refs, artifact facts, task evidence, backend hints,
+  component status semantics, custom-code state, and diagnostic-code semantics.
+
+## Consumer Handoff
+
+Pantograph and other host consumers should use the fixtures in this directory
+as the canonical producer-contract reference. A consumer test fixture may be:
+
+- a generated copy of one of these files,
+- a vendored test-data snapshot with a recorded source commit, or
+- a consumer-owned projection fixture that explicitly documents the adapter it
+  is testing.
+
+Pumas does not own host runtime selection, technical-fit ranking, runtime
+candidate derivation, scheduler policy, queue state, warm-process state, or
+diagnostics-ledger mapping. Those concerns should be tested in the consuming
+repository from Pumas package facts, summaries, and update events.
 
 ## Fixture Index
 

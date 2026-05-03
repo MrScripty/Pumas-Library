@@ -1629,7 +1629,15 @@ mod tests {
                 .await
                 .expect("missing child path should validate against existing parent");
 
-        assert_eq!(validated, temp_dir.path().join("models").join("incoming"));
+        assert_eq!(
+            validated,
+            temp_dir
+                .path()
+                .canonicalize()
+                .expect("canonical temp dir")
+                .join("models")
+                .join("incoming")
+        );
     }
 
     #[tokio::test]

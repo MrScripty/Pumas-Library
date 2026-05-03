@@ -29,6 +29,16 @@ except ModuleNotFoundError:
     )
     sys.modules["torch"] = torch_module
 
+try:
+    import psutil  # noqa: F401
+except ModuleNotFoundError:
+    psutil_module = types.ModuleType("psutil")
+    psutil_module.virtual_memory = lambda: types.SimpleNamespace(
+        total=16 * 1024 * 1024,
+        available=8 * 1024 * 1024,
+    )
+    sys.modules["psutil"] = psutil_module
+
 
 from model_manager import LoadedModel, ModelManager, SlotState  # noqa: E402
 

@@ -3,8 +3,10 @@
 mod dependency_profiles;
 mod governance;
 mod metadata_overlays;
+mod model_library_updates;
 mod package_facts_cache;
 
+use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
 use crate::{PumasError, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -64,6 +66,20 @@ pub struct ModelPackageFactsCacheRecord {
     pub facts_json: String,
     pub cached_at: String,
     pub updated_at: String,
+}
+
+/// Durable model-library update row stored in cursor order.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelLibraryUpdateRecord {
+    pub event_id: i64,
+    pub model_id: String,
+    pub change_kind: ModelLibraryChangeKind,
+    pub fact_family: ModelFactFamily,
+    pub refresh_scope: ModelLibraryRefreshScope,
+    pub selected_artifact_id: Option<String>,
+    pub producer_revision: Option<String>,
+    pub created_at: String,
 }
 
 /// Search result from the model index.
@@ -294,6 +310,7 @@ impl ModelIndex {
 
         Self::ensure_metadata_v2_schema(conn)?;
         Self::ensure_package_facts_cache_schema(conn)?;
+        Self::ensure_model_library_updates_schema(conn)?;
         Self::seed_metadata_v2_rows(conn)?;
 
         Ok(())
@@ -331,6 +348,14 @@ impl ModelIndex {
         let hashes_json = serde_json::to_string(&record.hashes)?;
         let metadata_json = serde_json::to_string_pretty(&record.metadata)?;
 
+        let existing = conn
+            .query_row(
+                "SELECT 1 FROM models WHERE id = ?1",
+                params![record.id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
         let changed = conn.execute(
             "INSERT INTO models (id, path, cleaned_name, official_name, model_type,
                                  tags_json, hashes_json, metadata_json, updated_at)
@@ -367,6 +392,20 @@ impl ModelIndex {
 
         if changed {
             debug!("Upserted model: {}", record.id);
+            let change_kind = if existing {
+                ModelLibraryChangeKind::MetadataModified
+            } else {
+                ModelLibraryChangeKind::ModelAdded
+            };
+            Self::append_model_library_update_event_with_conn(
+                &conn,
+                &record.id,
+                change_kind,
+                ModelFactFamily::ModelRecord,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                Some(record.updated_at.clone()),
+            )?;
         }
         Ok(changed)
     }
@@ -402,6 +441,15 @@ impl ModelIndex {
 
         if rows_affected > 0 {
             debug!("Deleted model: {}", id);
+            Self::append_model_library_update_event_with_conn(
+                &conn,
+                id,
+                ModelLibraryChangeKind::ModelRemoved,
+                ModelFactFamily::ModelRecord,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                None,
+            )?;
         }
 
         Ok(rows_affected > 0)
@@ -868,6 +916,93 @@ mod tests {
         assert!(deleted);
 
         assert!(index.get("delete-me").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_model_library_update_feed_tracks_model_record_changes() {
+        let (index, _temp) = create_test_index();
+        let initial_cursor = index.current_model_library_update_cursor().unwrap();
+
+        let mut record = create_test_record("feed-model", "Feed Model", "llm");
+        assert!(index.upsert(&record).unwrap());
+        assert!(!index.upsert(&record).unwrap());
+        record.official_name = "Feed Model Updated".to_string();
+        record.updated_at = "2024-01-02T00:00:00Z".to_string();
+        assert!(index.upsert(&record).unwrap());
+        assert!(index.delete("feed-model").unwrap());
+
+        let feed = index
+            .list_model_library_updates_since(Some(&initial_cursor), 100)
+            .unwrap();
+        assert!(!feed.stale_cursor);
+        assert!(!feed.snapshot_required);
+        assert_eq!(feed.events.len(), 3);
+        assert_eq!(
+            feed.events[0].change_kind,
+            ModelLibraryChangeKind::ModelAdded
+        );
+        assert_eq!(
+            feed.events[1].change_kind,
+            ModelLibraryChangeKind::MetadataModified
+        );
+        assert_eq!(
+            feed.events[2].change_kind,
+            ModelLibraryChangeKind::ModelRemoved
+        );
+        assert!(feed
+            .events
+            .iter()
+            .all(|event| event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail));
+    }
+
+    #[test]
+    fn test_model_library_update_feed_tracks_package_detail_changes_only() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("facts-model", "Facts Model", "llm"))
+            .unwrap();
+        let cursor_after_model_add = index.current_model_library_update_cursor().unwrap();
+        let summary = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Summary,
+            "fingerprint-v1",
+            serde_json::json!({"summary": true}).to_string(),
+        );
+        assert!(index.upsert_model_package_facts_cache(&summary).unwrap());
+        let detail = create_package_facts_cache_record(
+            "facts-model",
+            ModelPackageFactsCacheScope::Detail,
+            "fingerprint-v1",
+            serde_json::json!({"detail": true}).to_string(),
+        );
+        assert!(index.upsert_model_package_facts_cache(&detail).unwrap());
+
+        let feed = index
+            .list_model_library_updates_since(Some(&cursor_after_model_add), 100)
+            .unwrap();
+        assert_eq!(feed.events.len(), 1);
+        assert_eq!(
+            feed.events[0].change_kind,
+            ModelLibraryChangeKind::PackageFactsModified
+        );
+        assert_eq!(feed.events[0].fact_family, ModelFactFamily::PackageFacts);
+        assert_eq!(
+            feed.events[0].refresh_scope,
+            ModelLibraryRefreshScope::SummaryAndDetail
+        );
+    }
+
+    #[test]
+    fn test_model_library_update_feed_reports_invalid_cursor_as_stale() {
+        let (index, _temp) = create_test_index();
+
+        let feed = index
+            .list_model_library_updates_since(Some("not-a-valid-cursor"), 100)
+            .unwrap();
+        assert!(feed.stale_cursor);
+        assert!(feed.snapshot_required);
+        assert!(feed.events.is_empty());
     }
 
     #[test]

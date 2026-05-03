@@ -286,6 +286,17 @@ pub struct ModelLibraryUpdateEvent {
     pub producer_revision: Option<String>,
 }
 
+/// Ordered page of model-library updates after a consumer cursor.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelLibraryUpdateFeed {
+    pub cursor: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<ModelLibraryUpdateEvent>,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+}
+
 /// Versioned inference-facing model package facts.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]

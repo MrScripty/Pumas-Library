@@ -3,6 +3,7 @@ use super::{
     ModelIndex,
 };
 use crate::model_library::dependency_pins::parse_and_canonicalize_profile_spec;
+use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
 use crate::{PumasError, Result};
 use rusqlite::{params, OptionalExtension};
 
@@ -333,6 +334,18 @@ impl ModelIndex {
                     new_snapshot,
                     reason,
                 ],
+            )?;
+        }
+
+        if changed {
+            Self::append_model_library_update_event_with_conn(
+                &tx,
+                &record.model_id,
+                ModelLibraryChangeKind::DependencyBindingModified,
+                ModelFactFamily::DependencyBindings,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                Some(record.attached_at.clone()),
             )?;
         }
 

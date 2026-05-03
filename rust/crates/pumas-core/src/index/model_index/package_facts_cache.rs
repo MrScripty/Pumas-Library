@@ -1,4 +1,5 @@
 use super::{ModelIndex, ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope};
+use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
 use crate::{PumasError, Result};
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -89,6 +90,22 @@ impl ModelIndex {
                 record.updated_at,
             ],
         )? > 0;
+
+        if changed && record.cache_scope == ModelPackageFactsCacheScope::Detail {
+            Self::append_model_library_update_event_with_conn(
+                &conn,
+                &record.model_id,
+                ModelLibraryChangeKind::PackageFactsModified,
+                ModelFactFamily::PackageFacts,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                if record.selected_artifact_id.is_empty() {
+                    None
+                } else {
+                    Some(record.selected_artifact_id.clone())
+                },
+                record.producer_revision.clone(),
+            )?;
+        }
 
         Ok(changed)
     }

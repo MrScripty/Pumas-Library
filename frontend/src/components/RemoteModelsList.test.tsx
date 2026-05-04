@@ -87,4 +87,51 @@ describe('RemoteModelsList', () => {
 
     expect(screen.getByText(/Q4_K_M \(2\.00 GB\)/)).toBeInTheDocument();
   });
+
+  it('labels active same-repo artifact downloads', () => {
+    render(
+      <RemoteModelsList
+        {...baseProps}
+        models={[
+          createModel({
+            quants: ['Q4_K_M', 'Q5_K_M'],
+            downloadOptions: [
+              {
+                quant: 'Q4_K_M',
+                selectedArtifactId: 'test--model__q4_k_m',
+                sizeBytes: 2 * 1024 ** 3,
+                fileGroup: null,
+              },
+              {
+                quant: 'Q5_K_M',
+                selectedArtifactId: 'test--model__q5_k_m',
+                sizeBytes: 3 * 1024 ** 3,
+                fileGroup: null,
+              },
+            ],
+          }),
+        ]}
+        downloadStatusByRepo={{
+          'test--model__q4_k_m': {
+            downloadId: 'download-q4',
+            repoId: 'test/model',
+            selectedArtifactId: 'test--model__q4_k_m',
+            status: 'downloading',
+            progress: 0.4,
+          },
+          'test--model__q5_k_m': {
+            downloadId: 'download-q5',
+            repoId: 'test/model',
+            selectedArtifactId: 'test--model__q5_k_m',
+            status: 'queued',
+            progress: 0,
+          },
+        }}
+      />
+    );
+
+    expect(screen.getByText('Active:')).toBeInTheDocument();
+    expect(screen.getByTitle('Active artifact Q4_K_M')).toBeInTheDocument();
+    expect(screen.getByTitle('Active artifact Q5_K_M')).toBeInTheDocument();
+  });
 });

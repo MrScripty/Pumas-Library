@@ -10,6 +10,10 @@ import { Search } from 'lucide-react';
 import type { RemoteModelInfo } from '../types/apps';
 import type { DownloadStatus } from '../hooks/modelDownloadState';
 import { RemoteModelListItem } from './RemoteModelListItem';
+import {
+  getRemoteDownloadArtifactLabel,
+  getRemoteDownloadOptions,
+} from './RemoteModelListItemState';
 import { EmptyState } from './ui';
 
 interface RemoteModelsListProps {
@@ -36,13 +40,20 @@ function findDownloadForRepo(
   downloadStatusByRepo: Record<string, DownloadStatus>,
   repoId: string
 ): [string, DownloadStatus] | null {
-  if (downloadStatusByRepo[repoId]) {
-    return [repoId, downloadStatusByRepo[repoId]];
-  }
+  return findDownloadsForRepo(downloadStatusByRepo, repoId)[0] ?? null;
+}
 
-  return Object.entries(downloadStatusByRepo).find(
+function findDownloadsForRepo(
+  downloadStatusByRepo: Record<string, DownloadStatus>,
+  repoId: string
+): Array<[string, DownloadStatus]> {
+  const matches = Object.entries(downloadStatusByRepo).filter(
     ([key, status]) => (status.repoId ?? key) === repoId
-  ) ?? null;
+  );
+  if (downloadStatusByRepo[repoId] && !matches.some(([key]) => key === repoId)) {
+    matches.unshift([repoId, downloadStatusByRepo[repoId]]);
+  }
+  return matches;
 }
 
 export function RemoteModelsList({
@@ -100,12 +111,17 @@ export function RemoteModelsList({
   return (
     <>
       {models.map((model) => {
+        const repoDownloads = findDownloadsForRepo(downloadStatusByRepo, model.repoId);
         const repoDownload = findDownloadForRepo(downloadStatusByRepo, model.repoId);
         const downloadKey = repoDownload?.[0] ?? model.repoId;
         const downloadStatus = repoDownload?.[1];
         const modelError = downloadErrors[downloadKey] ?? downloadErrors[model.repoId];
         const isHydratingDetails = hydratingRepoIds.has(model.repoId);
         const repoSelected = selectedGroups[model.repoId] ?? new Set<string>();
+        const downloadOptions = getRemoteDownloadOptions(model);
+        const activeArtifactLabels = repoDownloads
+          .map(([, status]) => getRemoteDownloadArtifactLabel(status, downloadOptions))
+          .filter((label): label is string => Boolean(label));
 
         return (
           <RemoteModelListItem
@@ -113,6 +129,7 @@ export function RemoteModelsList({
             model={model}
             downloadKey={downloadKey}
             downloadStatus={downloadStatus}
+            activeArtifactLabels={[...new Set(activeArtifactLabels)]}
             modelError={modelError}
             isHydratingDetails={isHydratingDetails}
             isMenuOpen={openQuantMenuRepoId === model.repoId}

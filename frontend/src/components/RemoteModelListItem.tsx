@@ -17,6 +17,7 @@ interface RemoteModelListItemProps {
   model: RemoteModelInfo;
   downloadKey: string;
   downloadStatus?: DownloadStatus;
+  activeArtifactLabels?: string[];
   modelError?: string;
   isHydratingDetails: boolean;
   isMenuOpen: boolean;
@@ -39,6 +40,7 @@ export function RemoteModelListItem({
   model,
   downloadKey,
   downloadStatus,
+  activeArtifactLabels = [],
   modelError,
   isHydratingDetails,
   isMenuOpen,
@@ -70,6 +72,7 @@ export function RemoteModelListItem({
     <ListItem>
       <div className="flex items-start justify-between gap-2 p-2">
         <RemoteModelSummary
+          activeArtifactLabels={activeArtifactLabels}
           isHydratingDetails={isHydratingDetails}
           model={model}
           modelError={modelError}

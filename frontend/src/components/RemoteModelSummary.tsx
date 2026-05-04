@@ -19,6 +19,7 @@ import { ModelKindIcon } from './ModelKindIcon';
 import { MetadataItem } from './ui';
 
 interface RemoteModelSummaryProps {
+  activeArtifactLabels?: string[];
   isHydratingDetails: boolean;
   model: RemoteModelInfo;
   modelError?: string | undefined;
@@ -69,6 +70,7 @@ function getEngineStyle(engine: string): string {
 }
 
 export function RemoteModelSummary({
+  activeArtifactLabels = [],
   isHydratingDetails,
   model,
   modelError,
@@ -146,6 +148,21 @@ export function RemoteModelSummary({
               title={`Compatible with ${engine}`}
             >
               {engine}
+            </span>
+          ))}
+        </div>
+      )}
+      {activeArtifactLabels.length > 0 && (
+        <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-[hsl(var(--text-muted))]">
+          <Download className="h-3 w-3" />
+          <span>Active:</span>
+          {activeArtifactLabels.map((label) => (
+            <span
+              key={label}
+              className="rounded bg-[hsl(var(--launcher-bg-secondary)/0.6)] px-1.5 py-0.5 text-[hsl(var(--text-secondary))]"
+              title={`Active artifact ${label}`}
+            >
+              {label}
             </span>
           ))}
         </div>

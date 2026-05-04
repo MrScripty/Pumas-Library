@@ -445,7 +445,7 @@ family without breaking existing metadata readers.
       uniqueness key for active progress.
 - [x] Update active-download guards to block only the same selected artifact or
       same destination path.
-- [ ] Update UI labels to distinguish artifact selections when one repository
+- [x] Update UI labels to distinguish artifact selections when one repository
       has multiple downloadable variants.
 
 **Verification:**
@@ -458,7 +458,7 @@ family without breaking existing metadata readers.
 - Manual GUI check or screenshot during implementation if existing frontend
   standards require it for the touched flow.
 
-**Status:** In progress
+**Status:** Complete on 2026-05-04
 
 ### Milestone 4: Migration Dry-Run Planning
 
@@ -660,6 +660,10 @@ Update during implementation:
   references through the same transactional path used by ordinary moves, and
   leaves unrelated payload files behind without metadata instead of deleting
   them.
+- 2026-05-04: Completed the frontend artifact-label slice. Remote model rows
+  now display active selected-artifact labels for same-repository downloads, so
+  simultaneous variants such as Q4 and Q5 are visible instead of collapsing into
+  one repo-level status indicator.
 
 ## Commit Cadence Notes
 
@@ -796,6 +800,8 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_splits_complete_artifact_directory`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library.rs`
+- 2026-05-04: `npm run -w frontend test:run -- src/components/RemoteModelsList.test.tsx`
+- 2026-05-04: `npm run -w frontend check:types`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`

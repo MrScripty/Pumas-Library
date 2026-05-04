@@ -76,6 +76,30 @@ export function getRemoteQuantLabels(
   return downloadOptions.map((option) => option.quant);
 }
 
+export function getRemoteDownloadArtifactLabel(
+  downloadStatus: DownloadStatus | undefined,
+  downloadOptions: RemoteDownloadOption[]
+): string | null {
+  if (!downloadStatus) {
+    return null;
+  }
+
+  const artifactId = downloadStatus.selectedArtifactId ?? downloadStatus.artifactId ?? null;
+  if (!artifactId) {
+    return null;
+  }
+
+  const matchingOption = downloadOptions.find(
+    (option) => option.selectedArtifactId === artifactId || option.artifactId === artifactId
+  );
+  if (matchingOption) {
+    return matchingOption.fileGroup?.label ?? matchingOption.quant;
+  }
+
+  const suffix = artifactId.split('__').pop() ?? artifactId.split('::').pop() ?? artifactId;
+  return suffix || artifactId;
+}
+
 export function collectSelectedRemoteFilenames(
   downloadOptions: RemoteDownloadOption[],
   selectedGroups: Set<string>

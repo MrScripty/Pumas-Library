@@ -551,6 +551,7 @@ pub async fn import_model_in_place(
         family,
         model_type,
         repo_id,
+        download_request: None,
         known_sha256,
         compute_hashes,
         expected_files,

@@ -1,4 +1,5 @@
 import type { DesktopBridgeAPI } from './api-bridge';
+import type { ModelLibraryUpdateNotification } from './api-package-facts';
 
 // ============================================================================
 // Electron-specific API extensions
@@ -13,6 +14,10 @@ export interface ElectronWindowAPI {
   getTheme(): Promise<'dark' | 'light'>;
   /** Resolve a sandboxed dropped file to a filesystem path. */
   getPathForFile(file: File): string;
+  /** Subscribe to backend-owned model-library update notifications. */
+  onModelLibraryUpdate(
+    callback: (notification: ModelLibraryUpdateNotification) => void
+  ): () => void;
 }
 
 export type ElectronAPI = DesktopBridgeAPI & ElectronWindowAPI;

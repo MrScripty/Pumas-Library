@@ -27,6 +27,7 @@ const WINDOW_WIDTH = 800;
 const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
+const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
 
 // Python sidecar bridge
 let pythonBridge: PythonBridge | null = null;
@@ -283,6 +284,21 @@ function registerIPCHandlers(): void {
   log.info('IPC handlers registered');
 }
 
+function startModelLibraryUpdateForwarder(): void {
+  if (!pythonBridge) {
+    return;
+  }
+
+  pythonBridge.startModelLibraryUpdateStream((payload) => {
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    targetWindow.webContents.send(MODEL_LIBRARY_UPDATE_CHANNEL, payload);
+  });
+}
+
 /**
  * Initialize the Rust backend sidecar process
  */
@@ -321,6 +337,7 @@ async function initializeBackend(): Promise<void> {
     });
 
     await pythonBridge.start();
+    startModelLibraryUpdateForwarder();
     log.info('Backend bridge initialized');
   })();
 

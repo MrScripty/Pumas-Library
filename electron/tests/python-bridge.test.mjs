@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PythonBridge } from '../dist/python-bridge.js';
+import { PythonBridge, parseModelLibraryUpdateSseChunk } from '../dist/python-bridge.js';
 
 class FakeTimerController {
   timers = [];
@@ -101,4 +101,104 @@ test('restart timer uses backoff and clears before scheduling a replacement', as
   assert.equal(restartStarts, 1);
   assert.equal(timers.pendingCount(), 0);
   assert.equal(bridge.restartTimer, null);
+});
+
+test('parseModelLibraryUpdateSseChunk parses split model-library update events', () => {
+  let parsed = parseModelLibraryUpdateSseChunk(
+    '',
+    'event: model-library-update\ndata: {"cursor":"model-library-updates:1"'
+  );
+
+  assert.deepEqual(parsed.payloads, []);
+  assert.notEqual(parsed.buffer, '');
+
+  parsed = parseModelLibraryUpdateSseChunk(
+    parsed.buffer,
+    ',"events":[],"stale_cursor":false,"snapshot_required":false}\n\n'
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'model-library-updates:1',
+      events: [],
+      stale_cursor: false,
+      snapshot_required: false,
+    },
+  ]);
+});
+
+test('parseModelLibraryUpdateSseChunk ignores unrelated and malformed events', () => {
+  const parsed = parseModelLibraryUpdateSseChunk(
+    '',
+    [
+      'event: message',
+      'data: {"cursor":"ignored"}',
+      '',
+      'event: model-library-update',
+      'data: not-json',
+      '',
+      'event: model-library-update',
+      'data: {"cursor":"model-library-updates:2","stale_cursor":false,"snapshot_required":true}',
+      '',
+      '',
+    ].join('\n')
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'model-library-updates:2',
+      stale_cursor: false,
+      snapshot_required: true,
+    },
+  ]);
+});
+
+test('stop clears model-library update stream lifecycle', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let destroyed = false;
+  const reconnectTimer = { id: 99 };
+
+  bridge.modelLibraryUpdateListener = () => {};
+  bridge.modelLibraryUpdateBuffer = 'partial';
+  bridge.modelLibraryUpdateRequest = {
+    destroy() {
+      destroyed = true;
+    },
+  };
+  bridge.modelLibraryUpdateReconnectTimer = reconnectTimer;
+  timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
+
+  await bridge.stop();
+
+  assert.equal(destroyed, true);
+  assert.equal(bridge.modelLibraryUpdateListener, null);
+  assert.equal(bridge.modelLibraryUpdateRequest, null);
+  assert.equal(bridge.modelLibraryUpdateBuffer, '');
+  assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('model-library update stream reconnect uses bridge timer ownership', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let opened = 0;
+
+  bridge.process = {};
+  bridge.modelLibraryUpdateListener = () => {};
+  bridge.openModelLibraryUpdateStream = () => {
+    opened += 1;
+  };
+
+  bridge.scheduleModelLibraryUpdateReconnect();
+
+  assert.equal(timers.pendingCount(), 1);
+  assert.equal(timers.nextDelay(), 1000);
+
+  await timers.runNext();
+
+  assert.equal(opened, 1);
+  assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
 });

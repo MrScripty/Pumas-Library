@@ -9,7 +9,7 @@ that hosts the frontend and routes RPC calls to backend services.
 | ----------- | ----------- |
 | `main.ts` | Main process startup, window lifecycle, and IPC wiring. |
 | `preload.ts` | Secure renderer bridge exposing the canonical desktop API. |
-| `python-bridge.ts` | Backend process bridge, lifecycle helpers, and deterministic timer ownership. |
+| `python-bridge.ts` | Backend process bridge, lifecycle helpers, model-library update stream client, and deterministic timer ownership. |
 
 ## Problem
 The desktop shell needs a single place to own window lifecycle, backend process
@@ -24,12 +24,16 @@ OS APIs directly.
   platform-specific paths rather than leaking into renderer features.
 - Backend lifecycle timers are owned by `python-bridge.ts` and must be
   injectable for deterministic tests instead of relying on wall-clock sleeps.
+- The model-library update stream is owned by Electron main, not renderer code.
+  Renderer consumers receive only validated preload notifications.
 
 ## Decision
 - Keep window lifecycle and backend process ownership in `main.ts`.
 - Keep renderer API exposure constrained to `preload.ts`.
 - Keep backend health-check and restart backoff scheduling in `python-bridge.ts`
   behind an injectable timer controller.
+- Keep the backend model-library SSE connection in `python-bridge.ts` and
+  forward validated notifications through the preload bridge.
 
 ## Alternatives Rejected
 - Expose Node/Electron primitives directly to the renderer: rejected because it
@@ -42,6 +46,8 @@ OS APIs directly.
 - `window.electronAPI` remains the canonical bridge contract.
 - Backend health-check and restart timers are cleared during bridge stop before
   process shutdown checks continue.
+- Model-library update subscriptions are additive, cancellable, and never give
+  renderer code direct access to backend ports or Node stream primitives.
 
 ## Revisit Triggers
 - A non-Electron desktop shell becomes a first-class runtime.
@@ -75,7 +81,8 @@ contextBridge.exposeInMainWorld('electronAPI', apiMethods);
 - `preload.ts` produces the renderer-visible global bridge shape consumed by the
   frontend.
 - `python-bridge.ts` produces the backend lifecycle scheduling contract consumed
-  by `main.ts` and verified by package-local tests.
+  by `main.ts`, including restartable model-library update stream ownership,
+  and is verified by package-local tests.
 - `main.ts` produces IPC channels and window lifecycle behavior, but not
   persisted machine-consumed artifacts.
 - Revisit trigger: bridge schema/codegen or persisted Electron metadata becomes

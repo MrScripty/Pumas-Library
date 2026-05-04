@@ -306,18 +306,18 @@ feed to Electron.
 through a validated preload API.
 
 **Tasks:**
-- [ ] Add `PythonBridge` stream subscription lifecycle methods.
-- [ ] Add Electron main IPC fan-out for model-library notifications.
-- [ ] Add preload `onModelLibraryUpdate` subscribe/unsubscribe API.
-- [ ] Validate payloads before invoking renderer callbacks.
-- [ ] Reconnect or fail visibly if the backend sidecar restarts.
+- [x] Add `PythonBridge` stream subscription lifecycle methods.
+- [x] Add Electron main IPC fan-out for model-library notifications.
+- [x] Add preload `onModelLibraryUpdate` subscribe/unsubscribe API.
+- [x] Validate payloads before invoking renderer callbacks.
+- [x] Reconnect or fail visibly if the backend sidecar restarts.
 
 **Verification:**
 - Electron tests cover subscription, unsubscribe cleanup, invalid payload
   rejection, and backend restart cleanup.
 - `npm run -w electron validate`.
 
-**Status:** Not started.
+**Status:** Complete.
 
 ### Milestone 5: Frontend Refresh Integration
 
@@ -392,6 +392,10 @@ Update during implementation:
 - 2026-05-04: `pumas-rpc` now exposes a backend-owned SSE stream at
   `/events/model-library-updates` that tails the durable update feed and emits
   `model-library-update` notifications.
+- 2026-05-04: Electron main now owns a restartable backend
+  model-library-update SSE client through `PythonBridge`, forwards validated
+  notifications to renderer windows through preload, and exposes
+  `window.electronAPI.onModelLibraryUpdate`.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -463,6 +467,9 @@ Update during implementation:
 - Backend notification DTO and frontend validator implemented and tested.
 - Backend SSE delivery implemented in `pumas-rpc` and covered by integration
   test.
+- Electron subscription bridge implemented with restartable stream ownership,
+  preload validation, renderer subscribe/unsubscribe API, and package-local
+  tests.
 
 ### Deviations
 
@@ -492,6 +499,9 @@ Update during implementation:
 - `npm run -w frontend test:run -- api-package-facts.test.ts`
 - `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc test_model_library_update_event_stream_emits_after_reconcile`
+- `npm run -w electron validate`
+- `npm run -w electron test`
+- `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.
 

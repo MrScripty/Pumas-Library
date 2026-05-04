@@ -51,6 +51,49 @@ interface RPCResponse {
   error?: RPCError | string;
 }
 
+export type ModelLibraryUpdateListener = (payload: unknown) => void;
+
+export interface ParsedSseChunk {
+  buffer: string;
+  payloads: unknown[];
+}
+
+export function parseModelLibraryUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  const combined = previousBuffer + chunk;
+  const blocks = combined.split(/\r?\n\r?\n/);
+  const buffer = blocks.pop() ?? '';
+  const payloads: unknown[] = [];
+
+  for (const block of blocks) {
+    let eventName = 'message';
+    const dataLines: string[] = [];
+
+    for (const line of block.split(/\r?\n/)) {
+      if (line.startsWith('event:')) {
+        eventName = line.slice('event:'.length).trim();
+      } else if (line.startsWith('data:')) {
+        const rawData = line.slice('data:'.length);
+        dataLines.push(rawData.startsWith(' ') ? rawData.slice(1) : rawData);
+      }
+    }
+
+    if (eventName !== 'model-library-update' || dataLines.length === 0) {
+      continue;
+    }
+
+    try {
+      payloads.push(JSON.parse(dataLines.join('\n')));
+    } catch (error) {
+      log.warn('Ignoring invalid model-library SSE payload', error);
+    }
+  }
+
+  return { buffer, payloads };
+}
+
 export class PythonBridge {
   private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
   private timerController: PythonBridgeTimerController;
@@ -60,6 +103,10 @@ export class PythonBridge {
   private isShuttingDown = false;
   private healthCheckTimer: BridgeTimer | null = null;
   private restartTimer: BridgeTimer | null = null;
+  private modelLibraryUpdateRequest: http.ClientRequest | null = null;
+  private modelLibraryUpdateBuffer = '';
+  private modelLibraryUpdateListener: ModelLibraryUpdateListener | null = null;
+  private modelLibraryUpdateReconnectTimer: BridgeTimer | null = null;
 
   constructor(options: PythonBridgeOptions) {
     const { timerController, ...runtimeOptions } = options;
@@ -171,6 +218,8 @@ export class PythonBridge {
       log.info(`${backendLabel} process exited: code=${code}, signal=${signal}`);
       this.process = null;
       this.clearHealthCheckTimer();
+      this.clearModelLibraryUpdateReconnectTimer();
+      this.closeModelLibraryUpdateStream();
 
       // Auto-restart if enabled and not shutting down
       if (
@@ -195,6 +244,10 @@ export class PythonBridge {
 
     // Reset restart counter on successful start
     this.restartCount = 0;
+
+    if (this.modelLibraryUpdateListener) {
+      this.openModelLibraryUpdateStream();
+    }
 
     log.info(`${backendLabel} backend bridge started successfully`);
   }
@@ -263,6 +316,7 @@ export class PythonBridge {
     // Stop health check interval
     this.clearHealthCheckTimer();
     this.clearRestartTimer();
+    this.stopModelLibraryUpdateStream();
 
     if (!this.process) {
       return;
@@ -308,6 +362,99 @@ export class PythonBridge {
     this.process = null;
     this.restartCount = 0;
     log.info(`${backendLabel} backend bridge stopped`);
+  }
+
+  startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
+    this.modelLibraryUpdateListener = listener;
+    if (!this.process) {
+      throw new Error('Backend bridge not running');
+    }
+    this.openModelLibraryUpdateStream();
+  }
+
+  stopModelLibraryUpdateStream(): void {
+    this.modelLibraryUpdateListener = null;
+    this.closeModelLibraryUpdateStream();
+    this.clearModelLibraryUpdateReconnectTimer();
+  }
+
+  private openModelLibraryUpdateStream(): void {
+    if (!this.process || !this.modelLibraryUpdateListener) {
+      return;
+    }
+
+    this.closeModelLibraryUpdateStream();
+    this.clearModelLibraryUpdateReconnectTimer();
+    this.modelLibraryUpdateBuffer = '';
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: this.port,
+      path: '/events/model-library-updates',
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        const parsed = parseModelLibraryUpdateSseChunk(this.modelLibraryUpdateBuffer, chunk);
+        this.modelLibraryUpdateBuffer = parsed.buffer;
+        for (const payload of parsed.payloads) {
+          this.modelLibraryUpdateListener?.(payload);
+        }
+      });
+      res.on('end', () => {
+        this.modelLibraryUpdateRequest = null;
+        this.modelLibraryUpdateBuffer = '';
+        if (!this.isShuttingDown) {
+          log.warn('Model-library update stream ended');
+          this.scheduleModelLibraryUpdateReconnect();
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      this.modelLibraryUpdateRequest = null;
+      this.modelLibraryUpdateBuffer = '';
+      if (!this.isShuttingDown) {
+        log.warn('Model-library update stream failed:', error);
+        this.scheduleModelLibraryUpdateReconnect();
+      }
+    });
+
+    this.modelLibraryUpdateRequest = req;
+  }
+
+  private closeModelLibraryUpdateStream(): void {
+    if (this.modelLibraryUpdateRequest) {
+      this.modelLibraryUpdateRequest.destroy();
+      this.modelLibraryUpdateRequest = null;
+    }
+    this.modelLibraryUpdateBuffer = '';
+  }
+
+  private scheduleModelLibraryUpdateReconnect(): void {
+    if (
+      this.isShuttingDown ||
+      !this.process ||
+      !this.modelLibraryUpdateListener ||
+      this.modelLibraryUpdateReconnectTimer
+    ) {
+      return;
+    }
+
+    this.modelLibraryUpdateReconnectTimer = this.timerController.setTimeout(() => {
+      this.modelLibraryUpdateReconnectTimer = null;
+      this.openModelLibraryUpdateStream();
+    }, 1000);
+  }
+
+  private clearModelLibraryUpdateReconnectTimer(): void {
+    if (this.modelLibraryUpdateReconnectTimer) {
+      this.timerController.clearTimeout(this.modelLibraryUpdateReconnectTimer);
+      this.modelLibraryUpdateReconnectTimer = null;
+    }
   }
 
   private clearHealthCheckTimer(): void {

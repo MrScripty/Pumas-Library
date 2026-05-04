@@ -5,7 +5,7 @@
  * Implements the canonical desktop bridge contract for the renderer process.
  */
 
-import { contextBridge, ipcRenderer, webUtils } from 'electron';
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron';
 
 /**
  * Generic RPC call wrapper
@@ -38,6 +38,74 @@ type VersionShortcutState = {
 type VersionShortcutResponse = BaseRpcResponse & {
   state?: VersionShortcutState;
 };
+
+type ModelLibraryUpdateNotificationPayload = {
+  cursor: string;
+  events?: unknown[];
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+};
+
+const MODEL_LIBRARY_CHANGE_KINDS = new Set([
+  'model_added',
+  'model_removed',
+  'metadata_modified',
+  'package_facts_modified',
+  'stale_facts_invalidated',
+  'dependency_binding_modified',
+]);
+
+const MODEL_FACT_FAMILIES = new Set([
+  'model_record',
+  'metadata',
+  'package_facts',
+  'dependency_bindings',
+  'validation',
+  'search_index',
+]);
+
+const MODEL_LIBRARY_REFRESH_SCOPES = new Set(['summary', 'detail', 'summary_and_detail']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === undefined || value === null || typeof value === 'string';
+}
+
+function isModelLibraryUpdateEventPayload(value: unknown): boolean {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['model_id'] === 'string' &&
+    MODEL_LIBRARY_CHANGE_KINDS.has(String(value['change_kind'])) &&
+    MODEL_FACT_FAMILIES.has(String(value['fact_family'])) &&
+    MODEL_LIBRARY_REFRESH_SCOPES.has(String(value['refresh_scope'])) &&
+    isNullableString(value['selected_artifact_id']) &&
+    isNullableString(value['producer_revision'])
+  );
+}
+
+function isModelLibraryUpdateNotificationPayload(
+  value: unknown
+): value is ModelLibraryUpdateNotificationPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const events = value['events'];
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['stale_cursor'] === 'boolean' &&
+    typeof value['snapshot_required'] === 'boolean' &&
+    (events === undefined ||
+      (Array.isArray(events) && events.every(isModelLibraryUpdateEventPayload)))
+  );
+}
 
 async function installActiveVersionDependencies(): Promise<BaseRpcResponse> {
   const activeVersion = await apiCall<ActiveVersionResponse>('get_active_version', {
@@ -593,6 +661,20 @@ const electronAPI = {
   minimizeWindow: () => ipcRenderer.invoke('window:minimize'),
   maximizeWindow: () => ipcRenderer.invoke('window:maximize'),
   getTheme: () => ipcRenderer.invoke('theme:get'),
+  onModelLibraryUpdate: (
+    callback: (notification: ModelLibraryUpdateNotificationPayload) => void
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isModelLibraryUpdateNotificationPayload(payload)) {
+        callback(payload);
+      }
+    };
+
+    ipcRenderer.on('model-library:update', listener);
+    return () => {
+      ipcRenderer.removeListener('model-library:update', listener);
+    };
+  },
 
   // ========================================
   // File Utilities (for drag-and-drop)

@@ -11566,6 +11566,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_delete_model_advances_update_feed() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/delete-feed";
+        let model_dir = library.build_model_path("llm", "llama", "delete-feed");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some(model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("delete-feed".to_string()),
+            cleaned_name: Some("delete-feed".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        let cursor = library
+            .list_model_library_updates_since(None, 100)
+            .await
+            .unwrap()
+            .cursor;
+
+        library.delete_model(model_id, false).await.unwrap();
+
+        let feed = library
+            .list_model_library_updates_since(Some(&cursor), 100)
+            .await
+            .unwrap();
+        assert_eq!(feed.events.len(), 1);
+        assert_eq!(feed.events[0].model_id, model_id);
+        assert_eq!(
+            feed.events[0].change_kind,
+            ModelLibraryChangeKind::ModelRemoved
+        );
+        assert_eq!(feed.events[0].fact_family, ModelFactFamily::ModelRecord);
+        assert_eq!(
+            feed.events[0].refresh_scope,
+            ModelLibraryRefreshScope::SummaryAndDetail
+        );
+    }
+
+    #[tokio::test]
     async fn test_total_size_sums_model_files() {
         let (_tmp, library) = setup_library().await;
         let first_dir = library.build_model_path("llm", "llama", "size-one");

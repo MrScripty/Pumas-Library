@@ -311,6 +311,10 @@ pub(crate) async fn update_download_marker(
         "family".to_string(),
         Value::String(target_family.to_string()),
     );
+    marker_obj.insert(
+        "architecture_family".to_string(),
+        Value::String(target_family.to_string()),
+    );
     fs::write(&marker_path, serde_json::to_string_pretty(&marker_json)?)
         .await
         .map_err(|err| PumasError::io_with_path(err, &marker_path))?;
@@ -560,7 +564,7 @@ pub(crate) fn recompute_execution_report_counts(
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_migration_report_path;
+    use super::{normalize_migration_report_path, update_download_marker};
     use tempfile::TempDir;
 
     #[test]
@@ -594,5 +598,48 @@ mod tests {
             crate::error::PumasError::InvalidParams { message }
                 if message.contains("within migration reports directory")
         ));
+    }
+
+    #[tokio::test]
+    async fn update_download_marker_adds_architecture_family_and_preserves_artifact() {
+        let temp_dir = TempDir::new().expect("temp dir");
+        let model_dir = temp_dir.path().join("model");
+        std::fs::create_dir_all(&model_dir).expect("model dir");
+        std::fs::write(
+            model_dir.join(".pumas_download"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "repo_id": "Owner/Qwen-GGUF",
+                "family": "qwen35",
+                "model_type": "llm",
+                "selected_artifact": {
+                    "repo_id": "Owner/Qwen-GGUF",
+                    "revision": "main",
+                    "subfolder": null,
+                    "selection_kind": "quant",
+                    "selected_filenames": ["model-q4.gguf"],
+                    "selected_quant": "q4_k_m",
+                    "artifact_digest": "abc123",
+                    "artifact_id": "owner--qwen-gguf__q4_k_m"
+                }
+            }))
+            .expect("marker json"),
+        )
+        .expect("write marker");
+
+        update_download_marker(&model_dir, "vlm", "qwen3_6")
+            .await
+            .expect("marker update");
+
+        let marker: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(model_dir.join(".pumas_download")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(marker["model_type"], "vlm");
+        assert_eq!(marker["family"], "qwen3_6");
+        assert_eq!(marker["architecture_family"], "qwen3_6");
+        assert_eq!(
+            marker["selected_artifact"]["artifact_id"],
+            "owner--qwen-gguf__q4_k_m"
+        );
     }
 }

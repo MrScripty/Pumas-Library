@@ -404,7 +404,7 @@ family without breaking existing metadata readers.
       `selected_artifact_id`, `selected_artifact_files`,
       `selected_artifact_quant`, and `upstream_revision`.
 - [x] Preserve legacy `family` as a compatibility projection during migration.
-- [ ] Update `.pumas_download` writes and reads to include selected-artifact
+- [x] Update `.pumas_download` writes and reads to include selected-artifact
       identity.
 - [x] Update importer and reclassify paths so file-level evidence cannot
       incorrectly overwrite an explicit architecture family.
@@ -422,7 +422,7 @@ family without breaking existing metadata readers.
   during the compatibility period.
 - Review confirms compatibility behavior for older metadata files.
 
-**Status:** In progress
+**Status:** Complete on 2026-05-04
 
 ### Milestone 3: Frontend Download State
 
@@ -587,6 +587,10 @@ Update during implementation:
   instead of reconstructing paths only from model ids, and moved metadata carries
   selected-artifact id/files plus `architecture_family` through the target-id
   rewrite. Split-directory actions are still report-only.
+- 2026-05-04: Completed the persisted marker compatibility slice. New download
+  markers already include `selected_artifact`; marker reads now feed migration
+  planning, and partial-move marker updates write `architecture_family` while
+  preserving the selected-artifact payload.
 
 ## Commit Cadence Notes
 
@@ -687,6 +691,7 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_artifact_identity_target`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_existing_checkpoint`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library update_download_marker_adds_architecture_family_and_preserves_artifact`
 
 ### Traceability Links
 

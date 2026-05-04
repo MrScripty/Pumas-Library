@@ -400,6 +400,22 @@ impl ModelIndex {
         Ok(history)
     }
 
+    /// Count dependency binding history rows for migration/reference inventory.
+    pub fn count_dependency_binding_history(&self, model_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM dependency_binding_history WHERE model_id = ?1",
+            params![model_id],
+            |row| row.get(0),
+        )?;
+
+        Ok(count as usize)
+    }
+
     /// List active dependency bindings for a model with optional backend filtering.
     pub fn list_active_model_dependency_bindings(
         &self,

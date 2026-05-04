@@ -84,45 +84,57 @@ impl ModelLibrary {
             ..Default::default()
         };
 
+        let conversion_source_ref_counts = self.collect_conversion_source_ref_counts()?;
+
         for model_id in model_ids {
-            let row = match self.build_migration_dry_run_item(&model_id) {
-                Ok(item) => item,
-                Err(err) => {
-                    report.error_count += 1;
-                    MigrationDryRunItem {
-                        model_id: model_id.clone(),
-                        target_model_id: None,
-                        current_path: String::new(),
-                        target_path: None,
-                        action: "error".to_string(),
-                        action_kind: Some("error".to_string()),
-                        current_model_type: None,
-                        resolved_model_type: None,
-                        resolver_source: None,
-                        resolver_confidence: None,
-                        resolver_review_reasons: vec![],
-                        current_family: None,
-                        resolved_family: None,
-                        selected_artifact_id: None,
-                        selected_artifact_files: vec![],
-                        selected_artifact_quant: None,
-                        upstream_revision: None,
-                        block_reason: Some(err.to_string()),
-                        metadata_needs_review: false,
-                        review_reasons: vec![],
-                        license_status: None,
-                        declared_dependency_binding_count: 0,
-                        active_dependency_binding_count: 0,
-                        findings: vec![],
-                        error: Some(err.to_string()),
+            let row =
+                match self.build_migration_dry_run_item(&model_id, &conversion_source_ref_counts) {
+                    Ok(item) => item,
+                    Err(err) => {
+                        report.error_count += 1;
+                        MigrationDryRunItem {
+                            model_id: model_id.clone(),
+                            target_model_id: None,
+                            current_path: String::new(),
+                            target_path: None,
+                            action: "error".to_string(),
+                            action_kind: Some("error".to_string()),
+                            current_model_type: None,
+                            resolved_model_type: None,
+                            resolver_source: None,
+                            resolver_confidence: None,
+                            resolver_review_reasons: vec![],
+                            current_family: None,
+                            resolved_family: None,
+                            selected_artifact_id: None,
+                            selected_artifact_files: vec![],
+                            selected_artifact_quant: None,
+                            upstream_revision: None,
+                            block_reason: Some(err.to_string()),
+                            metadata_needs_review: false,
+                            review_reasons: vec![],
+                            license_status: None,
+                            declared_dependency_binding_count: 0,
+                            active_dependency_binding_count: 0,
+                            dependency_binding_history_count: 0,
+                            package_facts_cache_row_count: 0,
+                            package_facts_without_selected_artifact_count: 0,
+                            conversion_source_ref_count: 0,
+                            link_exclusion_count: 0,
+                            findings: vec![],
+                            error: Some(err.to_string()),
+                        }
                     }
-                }
-            };
+                };
 
             match row.action.as_str() {
                 "move" => report.move_candidates += 1,
                 "blocked_collision" => report.collision_count += 1,
                 "keep" => report.keep_candidates += 1,
+                "blocked_reference_remap" => {
+                    report.move_candidates += 1;
+                    report.blocked_reference_count += 1;
+                }
                 "blocked_partial_download" => {
                     report.move_candidates += 1;
                     report.blocked_partial_count += 1;
@@ -246,7 +258,25 @@ impl ModelLibrary {
         write_migration_execution_reports(&self.library_root, report)
     }
 
-    fn build_migration_dry_run_item(&self, model_id: &str) -> Result<MigrationDryRunItem> {
+    fn collect_conversion_source_ref_counts(&self) -> Result<HashMap<String, usize>> {
+        let mut counts = HashMap::new();
+        for model_dir in self.model_dirs() {
+            let Some(metadata) = self.load_metadata(&model_dir)? else {
+                continue;
+            };
+            let Some(conversion_source) = metadata.conversion_source else {
+                continue;
+            };
+            *counts.entry(conversion_source.source_model_id).or_insert(0) += 1;
+        }
+        Ok(counts)
+    }
+
+    fn build_migration_dry_run_item(
+        &self,
+        model_id: &str,
+        conversion_source_ref_counts: &HashMap<String, usize>,
+    ) -> Result<MigrationDryRunItem> {
         let record = self
             .index
             .get(model_id)?
@@ -279,6 +309,11 @@ impl ModelLibrary {
                 license_status: None,
                 declared_dependency_binding_count: 0,
                 active_dependency_binding_count: 0,
+                dependency_binding_history_count: 0,
+                package_facts_cache_row_count: 0,
+                package_facts_without_selected_artifact_count: 0,
+                conversion_source_ref_count: 0,
+                link_exclusion_count: 0,
                 findings: vec!["index_row_missing_source_path".to_string()],
                 error: Some("model path does not exist on disk".to_string()),
             });
@@ -425,28 +460,6 @@ impl ModelLibrary {
         let needs_split = artifact_findings
             .iter()
             .any(|finding| finding == "mixed_gguf_artifact_files");
-        let block_reason = if target_dir.exists() && target_dir != model_dir {
-            Some("target_path_exists".to_string())
-        } else if !has_metadata && is_partial_download {
-            Some("partial_download_without_metadata".to_string())
-        } else if needs_split {
-            Some("directory_contains_multiple_artifacts".to_string())
-        } else {
-            None
-        };
-        let action = if needs_split {
-            "split_artifact_directory"
-        } else if target_dir == model_dir {
-            "keep"
-        } else if !has_metadata && is_partial_download {
-            "blocked_partial_download"
-        } else if target_dir.exists() {
-            "blocked_collision"
-        } else {
-            "move"
-        };
-        let action_kind = planned_action_kind(action, &block_reason, target_dir == model_dir);
-
         let metadata_needs_review = metadata
             .as_ref()
             .and_then(|value| value.metadata_needs_review)
@@ -479,6 +492,47 @@ impl ModelLibrary {
             .index()
             .list_active_model_dependency_bindings(model_id, None)?
             .len();
+        let dependency_binding_history_count =
+            self.index().count_dependency_binding_history(model_id)?;
+        let package_facts_cache_row_count = self
+            .index()
+            .count_model_package_facts_cache_rows(model_id)?;
+        let package_facts_without_selected_artifact_count = self
+            .index()
+            .count_model_package_facts_cache_rows_without_selected_artifact(model_id)?;
+        let conversion_source_ref_count = conversion_source_ref_counts
+            .get(model_id)
+            .copied()
+            .unwrap_or(0);
+        let link_exclusion_count = self.index().count_model_link_exclusions(model_id)?;
+
+        let reference_remap_required =
+            active_dependency_binding_count > 0 || conversion_source_ref_count > 0;
+        let block_reason = if target_dir.exists() && target_dir != model_dir {
+            Some("target_path_exists".to_string())
+        } else if !has_metadata && is_partial_download {
+            Some("partial_download_without_metadata".to_string())
+        } else if needs_split {
+            Some("directory_contains_multiple_artifacts".to_string())
+        } else if target_dir != model_dir && reference_remap_required {
+            Some("model_id_references_require_remap".to_string())
+        } else {
+            None
+        };
+        let action = if needs_split {
+            "split_artifact_directory"
+        } else if target_dir == model_dir {
+            "keep"
+        } else if !has_metadata && is_partial_download {
+            "blocked_partial_download"
+        } else if target_dir.exists() {
+            "blocked_collision"
+        } else if reference_remap_required {
+            "blocked_reference_remap"
+        } else {
+            "move"
+        };
+        let action_kind = planned_action_kind(action, &block_reason, target_dir == model_dir);
 
         let mut findings = Vec::new();
         findings.extend(artifact_findings);
@@ -521,6 +575,27 @@ impl ModelLibrary {
         if declared_dependency_binding_count == 0 && active_dependency_binding_count > 0 {
             findings.push("active_dependency_bindings_without_declared_refs".to_string());
         }
+        if active_dependency_binding_count > 0 {
+            findings.push("active_dependency_bindings_require_model_id_remap".to_string());
+        }
+        if dependency_binding_history_count > 0 {
+            findings.push("dependency_binding_history_requires_model_id_remap".to_string());
+        }
+        if package_facts_cache_row_count > 0 {
+            findings.push("package_facts_cache_will_be_invalidated".to_string());
+        }
+        if package_facts_without_selected_artifact_count > 0 {
+            findings.push("package_facts_cache_missing_selected_artifact_scope".to_string());
+        }
+        if conversion_source_ref_count > 0 {
+            findings.push("conversion_source_refs_require_model_id_remap".to_string());
+        }
+        if link_exclusion_count > 0 {
+            findings.push("link_exclusions_require_model_id_remap".to_string());
+        }
+        if action == "blocked_reference_remap" {
+            findings.push("migration_move_blocked_until_reference_remap".to_string());
+        }
         if action == "blocked_partial_download" {
             findings.push("partial_download_blocked_migration_move".to_string());
         }
@@ -549,6 +624,11 @@ impl ModelLibrary {
             license_status: effective_license_status,
             declared_dependency_binding_count,
             active_dependency_binding_count,
+            dependency_binding_history_count,
+            package_facts_cache_row_count,
+            package_facts_without_selected_artifact_count,
+            conversion_source_ref_count,
+            link_exclusion_count,
             findings,
             error: None,
         })
@@ -959,6 +1039,7 @@ fn planned_action_kind(action: &str, block_reason: &Option<String>, same_path: b
         "split_artifact_directory" => "split_artifact_directory".to_string(),
         "blocked_collision" => "blocked_collision".to_string(),
         "blocked_partial_download" => "skipped_active_download".to_string(),
+        "blocked_reference_remap" => "blocked_reference_remap".to_string(),
         "keep" if block_reason.is_none() && same_path => "rewrite_metadata_only".to_string(),
         "keep" => "keep".to_string(),
         other => other.to_string(),
@@ -1062,6 +1143,8 @@ pub struct MigrationDryRunReport {
     pub keep_candidates: usize,
     pub collision_count: usize,
     pub blocked_partial_count: usize,
+    #[serde(default)]
+    pub blocked_reference_count: usize,
     pub error_count: usize,
     pub models_with_findings: usize,
     pub machine_readable_report_path: Option<String>,
@@ -1103,6 +1186,16 @@ pub struct MigrationDryRunItem {
     pub license_status: Option<String>,
     pub declared_dependency_binding_count: usize,
     pub active_dependency_binding_count: usize,
+    #[serde(default)]
+    pub dependency_binding_history_count: usize,
+    #[serde(default)]
+    pub package_facts_cache_row_count: usize,
+    #[serde(default)]
+    pub package_facts_without_selected_artifact_count: usize,
+    #[serde(default)]
+    pub conversion_source_ref_count: usize,
+    #[serde(default)]
+    pub link_exclusion_count: usize,
     pub findings: Vec<String>,
     pub error: Option<String>,
 }

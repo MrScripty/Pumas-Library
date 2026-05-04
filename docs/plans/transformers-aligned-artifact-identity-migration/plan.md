@@ -211,6 +211,13 @@ Checked against the current codebase on 2026-05-03.
 
 - `shared-resources/models/models.db`
 - `shared-resources/models/library.db`
+- `model_package_facts_cache` rows in SQLite, which are regenerable but are
+  currently cascaded by model-row deletes.
+- `model_dependency_bindings` and `dependency_binding_history` rows in SQLite,
+  which are authoritative dependency records and must not be lost by migration
+  delete/reindex behavior.
+- `model_link_exclusions` rows in SQLite, which are not foreign-keyed and can
+  become stale if a model id changes without explicit remapping.
 - Hugging Face `downloads.json` persistence store
 - Per-model `metadata.json`
 - Per-download `.pumas_download`
@@ -469,8 +476,14 @@ before any filesystem mutation.
       `blocked_collision`, and `skipped_active_download`.
 - [x] Include old id, new id, selected artifact files, source path, target path,
       and block reason in report artifacts.
-- [ ] Report dependency-binding, package-fact, conversion, and runtime
-      descriptor references that need model-id remapping.
+- [x] Report dependency-binding, package-fact, conversion, and link-exclusion
+      references that need model-id remapping or cache invalidation.
+- [x] Check runtime execution descriptor behavior during reference inventory.
+      Current descriptors are resolved on demand from the model id and package
+      facts instead of persisted as durable rows, so no separate descriptor
+      remap store was found in this slice.
+- [x] Block ordinary move actions when authoritative model-id references exist
+      and the migration remap implementation is not yet available.
 
 **Verification:**
 - Migration dry-run fixture for the reported Q4/Q5 mixed directory shape.
@@ -600,6 +613,19 @@ Update during implementation:
 - 2026-05-04: Added append-only migration dry-run `action_kind` values for the
   new migration action vocabulary while preserving legacy `action` strings for
   existing callers and checkpoint execution compatibility.
+- 2026-05-04: Implemented the migration reference-inventory guardrail. Dry-run
+  rows now report active dependency bindings, dependency-binding history,
+  package-facts cache rows, package-facts rows missing selected-artifact scope,
+  conversion-source references, and link exclusions. Ordinary directory moves
+  are blocked as `blocked_reference_remap` when active dependency bindings or
+  conversion provenance would otherwise be orphaned by the current
+  delete/reindex execution path.
+- 2026-05-04: Implementation issue recorded for Milestone 5:
+  `ModelIndex::delete()` cascades package-facts and dependency-binding rows,
+  while migration execution currently deletes the old model id and reindexes
+  the target id. A later execution slice must replace that behavior with a
+  transactional model-id remap for authoritative references before blocked
+  rows can move automatically.
 
 ## Commit Cadence Notes
 
@@ -684,6 +710,10 @@ integrate one worker wave at a time.
 - Decide whether artifact path slugs must preserve the exact
   `selected_artifact_id` separators or whether normalized path-safe slugs remain
   the intended storage contract.
+- Implement a transactional model-id remap for dependency bindings, binding
+  history, conversion-source metadata, link exclusions, and package-facts cache
+  invalidation/regeneration so `blocked_reference_remap` rows can be moved by
+  checkpointed execution.
 
 ### Verification Summary
 
@@ -707,6 +737,11 @@ integrate one worker wave at a time.
 - 2026-05-04: `git diff --check -- docs/contracts/native-bindings-surface.md rust/crates/pumas-core/src/model_library/hf/README.md frontend/src/hooks/README.md docs/plans/transformers-aligned-artifact-identity-migration/plan.md`
 - 2026-05-04: Markdown linter not run; no `markdownlint`,
   `markdownlint-cli2`, or `remark` command was available in this workspace.
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_blocks_move_with_model_id_references`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_report_detects_move_and_findings`
+- 2026-05-04: `npm run -w frontend check:types`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md frontend/src/types/api-mapping.ts rust/crates/pumas-core/src/index/model_index/package_facts_cache.rs rust/crates/pumas-core/src/index/model_index/dependency_profiles.rs rust/crates/pumas-core/src/index/model_index/governance.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
 
 ### Traceability Links
 

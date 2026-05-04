@@ -127,6 +127,11 @@ export interface MigrationDryRunItem {
   license_status?: string | null;
   declared_dependency_binding_count: number;
   active_dependency_binding_count: number;
+  dependency_binding_history_count?: number;
+  package_facts_cache_row_count?: number;
+  package_facts_without_selected_artifact_count?: number;
+  conversion_source_ref_count?: number;
+  link_exclusion_count?: number;
   findings: string[];
   error?: string | null;
 }
@@ -141,6 +146,7 @@ export interface MigrationDryRunReport {
   keep_candidates: number;
   collision_count: number;
   blocked_partial_count: number;
+  blocked_reference_count?: number;
   error_count: number;
   models_with_findings: number;
   machine_readable_report_path?: string | null;

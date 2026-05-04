@@ -640,6 +640,22 @@ impl ModelIndex {
         Ok(ids)
     }
 
+    /// Count link exclusion rows for a model across all apps.
+    pub fn count_model_link_exclusions(&self, model_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM model_link_exclusions WHERE model_id = ?1",
+            params![model_id],
+            |row| row.get(0),
+        )?;
+
+        Ok(count as usize)
+    }
+
     /// Resolve an active task-signature mapping row.
     pub fn get_active_task_signature_mapping(
         &self,

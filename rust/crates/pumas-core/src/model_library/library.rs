@@ -4413,6 +4413,10 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
         "- Blocked Partial Downloads: `{}`\n",
         report.blocked_partial_count
     ));
+    output.push_str(&format!(
+        "- Blocked Reference Remaps: `{}`\n",
+        report.blocked_reference_count
+    ));
     output.push_str(&format!("- Errors: `{}`\n", report.error_count));
     output.push_str(&format!(
         "- Models With Findings: `{}`\n",
@@ -4427,9 +4431,9 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     output.push('\n');
     output.push_str("## Items\n\n");
     output.push_str(
-        "| Model ID | Target Model ID | Action | Action Kind | Artifact ID | Block Reason | Findings | Error |\n",
+        "| Model ID | Target Model ID | Action | Action Kind | Artifact ID | Block Reason | Reference Counts | Findings | Error |\n",
     );
-    output.push_str("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
+    output.push_str("| --- | --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for item in &report.items {
         let findings = if item.findings.is_empty() {
             String::new()
@@ -4441,14 +4445,23 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
         let action_kind = item.action_kind.as_deref().unwrap_or("");
         let artifact_id = item.selected_artifact_id.as_deref().unwrap_or("");
         let block_reason = item.block_reason.as_deref().unwrap_or("");
+        let reference_counts = format!(
+            "active_bindings={},binding_history={},package_facts={},conversion_sources={},link_exclusions={}",
+            item.active_dependency_binding_count,
+            item.dependency_binding_history_count,
+            item.package_facts_cache_row_count,
+            item.conversion_source_ref_count,
+            item.link_exclusion_count
+        );
         output.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
             item.model_id,
             target,
             item.action,
             action_kind,
             artifact_id,
             block_reason,
+            reference_counts,
             findings,
             error
         ));
@@ -8710,6 +8723,150 @@ mod tests {
         );
         assert!(item.findings.contains(&"metadata_needs_review".to_string()));
         assert!(item.findings.contains(&"license_unresolved".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_blocks_move_with_model_id_references() {
+        let (_, library) = setup_library().await;
+        let model_id = "llm/llama/bound-move";
+        let model_dir = library.build_model_path("llm", "llama", "bound-move");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("bound-move".to_string()),
+            dependency_bindings: Some(vec![crate::models::DependencyBindingRef {
+                binding_id: Some("bound-move-binding".to_string()),
+                profile_id: Some("bound-move-profile".to_string()),
+                profile_version: Some(1),
+                binding_kind: Some("required_core".to_string()),
+                backend_key: Some("pytorch".to_string()),
+                platform_selector: None,
+            }]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let now = chrono::Utc::now().to_rfc3339();
+        library
+            .index()
+            .upsert_dependency_profile(&crate::index::DependencyProfileRecord {
+                profile_id: "bound-move-profile".to_string(),
+                profile_version: 1,
+                profile_hash: Some("bound-move-profile-hash".to_string()),
+                environment_kind: "python-venv".to_string(),
+                spec_json: serde_json::json!({
+                    "python_packages": [
+                        {"name": "torch", "version": "==2.5.1"}
+                    ]
+                })
+                .to_string(),
+                created_at: now.clone(),
+            })
+            .unwrap();
+        library
+            .index()
+            .upsert_model_dependency_binding(&crate::index::ModelDependencyBindingRecord {
+                binding_id: "bound-move-binding".to_string(),
+                model_id: model_id.to_string(),
+                profile_id: "bound-move-profile".to_string(),
+                profile_version: 1,
+                binding_kind: "required_core".to_string(),
+                backend_key: Some("pytorch".to_string()),
+                platform_selector: None,
+                status: "active".to_string(),
+                priority: 100,
+                attached_by: Some("test".to_string()),
+                attached_at: now.clone(),
+                profile_hash: None,
+                environment_kind: None,
+                spec_json: None,
+            })
+            .unwrap();
+        library
+            .index()
+            .set_link_exclusion(model_id, "test-app", true)
+            .unwrap();
+        library
+            .index()
+            .upsert_model_package_facts_cache(&ModelPackageFactsCacheRecord {
+                model_id: model_id.to_string(),
+                selected_artifact_id: String::new(),
+                cache_scope: ModelPackageFactsCacheScope::Summary,
+                package_facts_contract_version: 1,
+                producer_revision: None,
+                source_fingerprint: "source-fingerprint".to_string(),
+                facts_json: serde_json::json!({
+                    "model_id": model_id,
+                    "status": "resolved"
+                })
+                .to_string(),
+                cached_at: now.clone(),
+                updated_at: now.clone(),
+            })
+            .unwrap();
+
+        let converted_dir = library.build_model_path("diffusion", "llama", "bound-move-converted");
+        std::fs::create_dir_all(&converted_dir).unwrap();
+        write_min_safetensors(&converted_dir.join("model.safetensors"));
+        let converted_metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some("diffusion/llama/bound-move-converted".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("diffusion".to_string()),
+            cleaned_name: Some("bound-move-converted".to_string()),
+            conversion_source: Some(crate::conversion::ConversionSource {
+                source_model_id: model_id.to_string(),
+                source_format: "safetensors".to_string(),
+                source_quant: None,
+                target_format: "safetensors".to_string(),
+                target_quant: None,
+                was_dequantized: false,
+                conversion_date: now,
+            }),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&converted_dir, &converted_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&converted_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        assert_eq!(report.blocked_reference_count, 1);
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == model_id)
+            .unwrap();
+
+        assert_eq!(row.action, "blocked_reference_remap");
+        assert_eq!(row.action_kind.as_deref(), Some("blocked_reference_remap"));
+        assert_eq!(
+            row.block_reason.as_deref(),
+            Some("model_id_references_require_remap")
+        );
+        assert_eq!(row.declared_dependency_binding_count, 1);
+        assert_eq!(row.active_dependency_binding_count, 1);
+        assert_eq!(row.dependency_binding_history_count, 1);
+        assert_eq!(row.package_facts_cache_row_count, 1);
+        assert_eq!(row.package_facts_without_selected_artifact_count, 1);
+        assert_eq!(row.conversion_source_ref_count, 1);
+        assert_eq!(row.link_exclusion_count, 1);
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "migration_move_blocked_until_reference_remap"));
     }
 
     #[tokio::test]

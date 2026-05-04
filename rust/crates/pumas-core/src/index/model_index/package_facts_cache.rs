@@ -177,6 +177,41 @@ impl ModelIndex {
         )?)
     }
 
+    pub fn count_model_package_facts_cache_rows(&self, model_id: &str) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM model_package_facts_cache WHERE model_id = ?1",
+            params![model_id],
+            |row| row.get(0),
+        )?;
+
+        Ok(count as usize)
+    }
+
+    pub fn count_model_package_facts_cache_rows_without_selected_artifact(
+        &self,
+        model_id: &str,
+    ) -> Result<usize> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*)
+             FROM model_package_facts_cache
+             WHERE model_id = ?1 AND selected_artifact_id = ''",
+            params![model_id],
+            |row| row.get(0),
+        )?;
+
+        Ok(count as usize)
+    }
+
     pub fn list_model_package_facts_summary_snapshot(
         &self,
         limit: usize,

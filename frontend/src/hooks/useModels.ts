@@ -14,6 +14,7 @@ import type { ModelRecord } from '../types/api';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import { groupModelRecords } from '../utils/libraryModels';
+import { useModelLibraryUpdateSubscription } from './useModelLibraryUpdateSubscription';
 
 const logger = getLogger('useModels');
 
@@ -40,8 +41,14 @@ export function useModels() {
   const [searchQueryTime, setSearchQueryTime] = useState<number | null>(null);
   const [hasNewResults, setHasNewResults] = useState(false);
   const searchSequenceRef = useRef(0);
+  const fetchSequenceRef = useRef(0);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchCacheRef = useRef<Map<string, CacheEntry>>(new Map());
+  const activeSearchRef = useRef<{
+    query: string;
+    modelType?: string | null;
+    tags?: string[] | null;
+  } | null>(null);
 
   const fetchModels = useCallback(async () => {
     // Check API availability before fetching
@@ -50,8 +57,19 @@ export function useModels() {
       return;
     }
 
+    const currentSequence = ++fetchSequenceRef.current;
+
     try {
       const result = await modelsAPI.getModels();
+      if (currentSequence !== fetchSequenceRef.current || activeSearchRef.current) {
+        logger.debug('Discarding stale model list response', {
+          currentSequence,
+          latestSequence: fetchSequenceRef.current,
+          activeSearch: Boolean(activeSearchRef.current),
+        });
+        return;
+      }
+
       if (result.success) {
         setModelGroups(groupModelRecords(Object.values(result.models)));
       }
@@ -143,12 +161,15 @@ export function useModels() {
 
       // Empty query - reset to full list
       if (!query.trim()) {
+        activeSearchRef.current = null;
         setIsSearching(false);
         setIsRevalidating(false);
         setSearchQueryTime(null);
         void fetchModels();
         return;
       }
+
+      activeSearchRef.current = { query, modelType, tags };
 
       // Check cache for immediate response (SWR pattern)
       const cacheKey = getCacheKey(query, modelType, tags);
@@ -228,6 +249,20 @@ export function useModels() {
       }, SEARCH_DEBOUNCE_MS);
     },
     [fetchModels, getCacheKey, transformFTSResults]
+  );
+
+  useModelLibraryUpdateSubscription(
+    useCallback(() => {
+      searchCacheRef.current.clear();
+
+      const activeSearch = activeSearchRef.current;
+      if (activeSearch?.query.trim()) {
+        searchModelsFTS(activeSearch.query, activeSearch.modelType, activeSearch.tags);
+        return;
+      }
+
+      void fetchModels();
+    }, [fetchModels, searchModelsFTS])
   );
 
   // Cleanup search timeout on unmount

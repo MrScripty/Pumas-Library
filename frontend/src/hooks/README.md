@@ -6,8 +6,9 @@ Custom React hooks for backend polling, process status, version/model workflows,
 ## Contents
 | File/Folder | Description |
 | ----------- | ----------- |
-| `useModels.ts` | Model list fetching, shared-storage rescans, and stale-while-revalidate FTS search state. |
-| `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, cached FTS revalidation, stale search suppression, and new-results notifications. |
+| `useModels.ts` | Model list fetching, backend-pushed model-library refreshes, shared-storage rescans, and stale-while-revalidate FTS search state. |
+| `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, backend-pushed refreshes, cached FTS revalidation, stale response suppression, and new-results notifications. |
+| `useModelLibraryUpdateSubscription.ts` | Electron preload subscription adapter for debounced backend-owned model-library update notifications. |
 | `useDownloadCompletionRefresh.ts` | Delayed model-list refresh scheduling when tracked downloads complete or leave active state. |
 | `useDownloadCompletionRefresh.test.ts` | Hook coverage for completion refreshes, disappeared-download refreshes, initial completed no-op behavior, and timer cleanup on unmount. |
 | `useExistingLibraryChooser.ts` | Existing-library chooser pending state and duplicate-invocation guard. |
@@ -80,6 +81,9 @@ Custom React hooks for backend polling, process status, version/model workflows,
 ## Design Decisions
 - Hooks encapsulate async side effects and state transitions outside UI components.
 - Domain hooks consume typed API wrappers and return UI-friendly state.
+- Backend-pushed model-library notifications refresh canonical model data
+  through `useModels`; integrity labels remain derived from backend projections,
+  not directly mutated in display components.
 - Polling remains hook-owned until the backend exposes a durable event stream.
   Polling hooks must own overlap prevention, cleanup on unmount, and API-unavailable
   fallback behavior in the hook instead of pushing timers into components.

@@ -5,12 +5,14 @@ import type { ModelRecord } from '../types/api';
 
 const {
   getModelsMock,
+  getElectronAPIMock,
   groupModelRecordsMock,
   isApiAvailableMock,
   scanSharedStorageMock,
   searchModelsFTSMock,
 } = vi.hoisted(() => ({
   getModelsMock: vi.fn(),
+  getElectronAPIMock: vi.fn(),
   groupModelRecordsMock: vi.fn(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   scanSharedStorageMock: vi.fn(),
@@ -18,6 +20,7 @@ const {
 }));
 
 vi.mock('../api/adapter', () => ({
+  getElectronAPI: getElectronAPIMock,
   isAPIAvailable: isApiAvailableMock,
 }));
 
@@ -84,6 +87,7 @@ describe('useModels', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    getElectronAPIMock.mockReturnValue(null);
     isApiAvailableMock.mockReturnValue(true);
     getModelsMock.mockResolvedValue({
       success: true,
@@ -310,5 +314,210 @@ describe('useModels', () => {
     });
 
     expect(result.current.modelGroups).toEqual(grouped(['reset']));
+  });
+
+  it('refreshes grouped models after a debounced model-library update notification', async () => {
+    let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
+    const unsubscribe = vi.fn();
+
+    getElectronAPIMock.mockReturnValue({
+      onModelLibraryUpdate: vi.fn((callback) => {
+        notifyModelLibraryUpdate = callback;
+        return unsubscribe;
+      }),
+    });
+    getModelsMock
+      .mockResolvedValueOnce({
+        success: true,
+        models: {
+          alpha: makeRecord('alpha'),
+        },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        models: {
+          beta: makeRecord('beta'),
+        },
+      });
+
+    const { result } = renderHook(() => useModels());
+
+    await flushMicrotasks();
+
+    expect(result.current.modelGroups).toEqual(grouped(['alpha']));
+    expect(notifyModelLibraryUpdate).not.toBeNull();
+
+    act(() => {
+      notifyModelLibraryUpdate?.({
+        cursor: 'model-library-updates:2',
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+      vi.advanceTimersByTime(249);
+    });
+
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+    });
+
+    expect(getModelsMock).toHaveBeenCalledTimes(2);
+    expect(result.current.modelGroups).toEqual(grouped(['beta']));
+  });
+
+  it('ignores invalid model-library update notifications', async () => {
+    let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
+
+    getElectronAPIMock.mockReturnValue({
+      onModelLibraryUpdate: vi.fn((callback) => {
+        notifyModelLibraryUpdate = callback;
+        return vi.fn();
+      }),
+    });
+
+    renderHook(() => useModels());
+
+    await flushMicrotasks();
+
+    act(() => {
+      notifyModelLibraryUpdate?.({
+        cursor: 'model-library-updates:2',
+        stale_cursor: false,
+      });
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('cleans up model-library update subscriptions and pending debounce timers on unmount', async () => {
+    let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
+    const unsubscribe = vi.fn();
+
+    getElectronAPIMock.mockReturnValue({
+      onModelLibraryUpdate: vi.fn((callback) => {
+        notifyModelLibraryUpdate = callback;
+        return unsubscribe;
+      }),
+    });
+
+    const { unmount } = renderHook(() => useModels());
+
+    await flushMicrotasks();
+
+    act(() => {
+      notifyModelLibraryUpdate?.({
+        cursor: 'model-library-updates:2',
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+    });
+
+    unmount();
+
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('revalidates the active FTS search after model-library update notifications', async () => {
+    let notifyModelLibraryUpdate: ((notification: unknown) => void) | null = null;
+
+    getElectronAPIMock.mockReturnValue({
+      onModelLibraryUpdate: vi.fn((callback) => {
+        notifyModelLibraryUpdate = callback;
+        return vi.fn();
+      }),
+    });
+    searchModelsFTSMock
+      .mockResolvedValueOnce({
+        success: true,
+        models: [makeRecord('first-search')],
+        query_time_ms: 10,
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        models: [makeRecord('refreshed-search')],
+        query_time_ms: 11,
+      });
+
+    const { result } = renderHook(() => useModels());
+
+    await flushMicrotasks();
+
+    act(() => {
+      result.current.searchModelsFTS('qwen', 'checkpoint', ['tag-a']);
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    expect(result.current.modelGroups).toEqual(grouped(['first-search']));
+
+    act(() => {
+      notifyModelLibraryUpdate?.({
+        cursor: 'model-library-updates:2',
+        stale_cursor: false,
+        snapshot_required: false,
+      });
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(250);
+      await Promise.resolve();
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    expect(searchModelsFTSMock).toHaveBeenCalledTimes(2);
+    expect(searchModelsFTSMock).toHaveBeenLastCalledWith('qwen', 100, 0, 'checkpoint', ['tag-a']);
+    expect(getModelsMock).toHaveBeenCalledTimes(1);
+    expect(result.current.modelGroups).toEqual(grouped(['refreshed-search']));
+  });
+
+  it('discards stale model list responses when search becomes active', async () => {
+    const initialFetch = createDeferred<{
+      success: boolean;
+      models: Record<string, ModelRecord>;
+    }>();
+
+    getModelsMock.mockReturnValueOnce(initialFetch.promise);
+    searchModelsFTSMock.mockResolvedValueOnce({
+      success: true,
+      models: [makeRecord('search-result')],
+      query_time_ms: 10,
+    });
+
+    const { result } = renderHook(() => useModels());
+
+    act(() => {
+      result.current.searchModelsFTS('active-query');
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+      await Promise.resolve();
+    });
+
+    expect(result.current.modelGroups).toEqual(grouped(['search-result']));
+
+    await act(async () => {
+      initialFetch.resolve({
+        success: true,
+        models: {
+          stale: makeRecord('stale'),
+        },
+      });
+      await Promise.resolve();
+    });
+
+    expect(result.current.modelGroups).toEqual(grouped(['search-result']));
   });
 });

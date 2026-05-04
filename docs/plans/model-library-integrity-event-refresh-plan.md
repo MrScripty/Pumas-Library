@@ -325,19 +325,19 @@ through a validated preload API.
 backend notification arrives.
 
 **Tasks:**
-- [ ] Add a focused frontend subscription hook that consumes the preload
+- [x] Add a focused frontend subscription hook that consumes the preload
   subscription API.
-- [ ] Wire the hook into `useModels` or `App`, the existing model-state owner.
-- [ ] Debounce refreshes and add stale fetch guards.
-- [ ] Preserve or explicitly revalidate active FTS search state.
-- [ ] Avoid direct warning/tag mutation.
+- [x] Wire the hook into `useModels` or `App`, the existing model-state owner.
+- [x] Debounce refreshes and add stale fetch guards.
+- [x] Preserve or explicitly revalidate active FTS search state.
+- [x] Avoid direct warning/tag mutation.
 
 **Verification:**
 - Frontend hook tests cover notification receipt, debounce, stale response
   discard, active-search behavior, and cleanup on unmount.
 - Typecheck passes.
 
-**Status:** Not started.
+**Status:** Complete.
 
 ### Milestone 6: Integrity Warning Acceptance
 
@@ -396,6 +396,10 @@ Update during implementation:
   model-library-update SSE client through `PythonBridge`, forwards validated
   notifications to renderer windows through preload, and exposes
   `window.electronAPI.onModelLibraryUpdate`.
+- 2026-05-04: `useModels` now consumes the preload model-library update
+  subscription through a focused debounced hook, clears stale FTS cache on
+  notifications, revalidates active FTS queries, and guards list fetches from
+  overwriting newer search state.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -470,6 +474,9 @@ Update during implementation:
 - Electron subscription bridge implemented with restartable stream ownership,
   preload validation, renderer subscribe/unsubscribe API, and package-local
   tests.
+- Frontend subscription integration implemented in `useModels` with debounce,
+  stale list-response suppression, active FTS revalidation, and no direct
+  mutation of integrity labels or warning state.
 
 ### Deviations
 
@@ -501,6 +508,8 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc test_model_library_update_event_stream_emits_after_reconcile`
 - `npm run -w electron validate`
 - `npm run -w electron test`
+- `npm run -w frontend check:types`
+- `npm run -w frontend test:run -- useModels.test.ts`
 - `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.

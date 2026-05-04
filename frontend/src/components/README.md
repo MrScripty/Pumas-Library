@@ -10,6 +10,7 @@ bridge.
 | File/Folder | Description |
 | ----------- | ----------- |
 | `ModelManager.tsx` | Main model management screen and interactions. |
+| `ModelManagerIntegrityRefresh.test.tsx` | Acceptance coverage for backend-pushed model refresh clearing integrity warning UI through fresh backend-derived data. |
 | `ModelManagerRemoteDownload.ts` | Remote Hugging Face download starter for payload shaping, backend result handling, error state, and auth escalation. |
 | `ModelManagerRemoteDownload.test.ts` | Unit coverage for successful remote download starts, backend failures, and auth-required download errors. |
 | `ModelManagerUtils.ts` | Pure model-manager helpers for download overlays, filtering, and remote-kind mapping. |
@@ -121,6 +122,8 @@ second source of truth for business state.
   they accumulate multiple responsibilities.
 - Migration and import workflows must reflect real backend state and not use
   optimistic updates for persisted library data.
+- Integrity warning labels in the model manager must clear only when refreshed
+  backend model data no longer reports the issue metadata.
 
 ## Decision
 - Keep feature-level composition in high-level components; primitives stay in

@@ -345,12 +345,12 @@ backend notification arrives.
 not through direct UI mutation.
 
 **Tasks:**
-- [ ] Build a fixture or mocked API sequence where initial `list_models`
+- [x] Build a fixture or mocked API sequence where initial `list_models`
   returns duplicate integrity metadata.
-- [ ] Simulate successful backend migration/reconciliation and backend-pushed
+- [x] Simulate successful backend migration/reconciliation and backend-pushed
   update notification.
-- [ ] Return fresh `list_models` data without integrity metadata.
-- [ ] Verify the `ISSUE` badge and library integrity header disappear.
+- [x] Return fresh `list_models` data without integrity metadata.
+- [x] Verify the `ISSUE` badge and library integrity header disappear.
 
 **Verification:**
 - Frontend acceptance test covers warning present, backend notification
@@ -358,7 +358,7 @@ not through direct UI mutation.
 - Backend tests cover the corresponding producer event.
 - Targeted Rust, Electron, and frontend tests pass.
 
-**Status:** Not started.
+**Status:** Complete.
 
 ## Execution Notes
 
@@ -400,6 +400,10 @@ Update during implementation:
   subscription through a focused debounced hook, clears stale FTS cache on
   notifications, revalidates active FTS queries, and guards list fetches from
   overwriting newer search state.
+- 2026-05-04: Added a frontend acceptance test that renders the model manager
+  from `useModels`, starts with backend duplicate-integrity metadata, receives a
+  model-library update notification, refreshes from clean backend model data,
+  and verifies the integrity header plus `ISSUE` badge disappear.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -477,6 +481,8 @@ Update during implementation:
 - Frontend subscription integration implemented in `useModels` with debounce,
   stale list-response suppression, active FTS revalidation, and no direct
   mutation of integrity labels or warning state.
+- Integrity warning acceptance coverage implemented against rendered
+  `ModelManager`/`LocalModelsList` UI using backend-derived model fixtures.
 
 ### Deviations
 
@@ -510,6 +516,8 @@ Update during implementation:
 - `npm run -w electron test`
 - `npm run -w frontend check:types`
 - `npm run -w frontend test:run -- useModels.test.ts`
+- `npm run -w frontend check:types`
+- `npm run -w frontend test:run -- ModelManagerIntegrityRefresh.test.tsx`
 - `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.

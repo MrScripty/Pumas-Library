@@ -675,6 +675,11 @@ Update during implementation:
   split, unrelated payload files are intentionally left behind without metadata
   rather than deleted. A future cleanup/import flow can re-identify those
   orphaned payloads if the user wants them listed.
+- 2026-05-04: Resolved the deployed-database FTS5 compatibility follow-up.
+  Index setup now treats stale or incomplete trigger sets as a versioned unit:
+  it drops the FTS5 synchronization triggers, recreates the current
+  `architecture_family`-aware trigger definitions, and repopulates the search
+  table from `models` without requiring a full table rebuild.
 
 ## Commit Cadence Notes
 
@@ -751,8 +756,6 @@ integrate one worker wave at a time.
 
 ### Follow-Ups
 
-- Add a migration/rebuild step for existing FTS5 triggers so deployed
-  databases pick up the `architecture_family` projection.
 - Decide whether artifact path slugs must preserve the exact
   `selected_artifact_id` separators or whether normalized path-safe slugs remain
   the intended storage contract.
@@ -808,6 +811,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library.rs`
 - 2026-05-04: `npm run -w frontend test:run -- src/components/RemoteModelsList.test.tsx`
 - 2026-05-04: `npm run -w frontend check:types`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_fts5_refreshes_stale_family_projection_triggers`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_fts5_prefers_architecture_family_projection`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/index/fts5.rs`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`

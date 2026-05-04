@@ -1,7 +1,7 @@
 //! FTS5 virtual table setup and management.
 
 use crate::Result;
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 use tracing::{debug, info};
 
 /// Configuration for FTS5 table.
@@ -54,14 +54,46 @@ impl<'a> FTS5Manager<'a> {
         Ok(count > 0)
     }
 
+    /// Check whether existing triggers contain the current projection logic.
+    pub fn triggers_current(&self, conn: &Connection) -> Result<bool> {
+        let trigger_names = [
+            format!("{}_ai", self.config.table_name),
+            format!("{}_au", self.config.table_name),
+            format!("{}_ad", self.config.table_name),
+        ];
+
+        for trigger_name in trigger_names {
+            let sql: Option<String> = conn
+                .query_row(
+                    "SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?1",
+                    [&trigger_name],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            let Some(sql) = sql else {
+                return Ok(false);
+            };
+            if trigger_name.ends_with("_ai") || trigger_name.ends_with("_au") {
+                if !sql.contains("$.architecture_family") {
+                    return Ok(false);
+                }
+            }
+        }
+
+        Ok(true)
+    }
+
     /// Ensure FTS5 is fully set up.
     pub fn ensure_setup(&self, conn: &Connection) -> Result<()> {
         if !self.table_exists(conn)? {
             self.create_table(conn)?;
+        }
+
+        if !self.triggers_current(conn)? {
+            self.drop_triggers(conn)?;
+            self.create_triggers(conn)?;
             self.populate_from_models(conn)?;
-        } else if !self.triggers_exist(conn)? {
-            // Table exists but triggers missing - rebuild
-            self.populate_from_models(conn)?;
+            return Ok(());
         }
 
         self.create_triggers(conn)?;
@@ -153,6 +185,23 @@ impl<'a> FTS5Manager<'a> {
         Ok(())
     }
 
+    /// Drop FTS5 synchronization triggers.
+    pub fn drop_triggers(&self, conn: &Connection) -> Result<()> {
+        conn.execute(
+            &format!("DROP TRIGGER IF EXISTS {}_ai", self.config.table_name),
+            [],
+        )?;
+        conn.execute(
+            &format!("DROP TRIGGER IF EXISTS {}_au", self.config.table_name),
+            [],
+        )?;
+        conn.execute(
+            &format!("DROP TRIGGER IF EXISTS {}_ad", self.config.table_name),
+            [],
+        )?;
+        Ok(())
+    }
+
     /// Populate FTS5 from existing models table.
     pub fn populate_from_models(&self, conn: &Connection) -> Result<()> {
         let table = &self.config.table_name;
@@ -189,19 +238,7 @@ impl<'a> FTS5Manager<'a> {
         let drop_sql = format!("DROP TABLE IF EXISTS {}", self.config.table_name);
         conn.execute(&drop_sql, [])?;
 
-        // Drop triggers
-        conn.execute(
-            &format!("DROP TRIGGER IF EXISTS {}_ai", self.config.table_name),
-            [],
-        )?;
-        conn.execute(
-            &format!("DROP TRIGGER IF EXISTS {}_au", self.config.table_name),
-            [],
-        )?;
-        conn.execute(
-            &format!("DROP TRIGGER IF EXISTS {}_ad", self.config.table_name),
-            [],
-        )?;
+        self.drop_triggers(conn)?;
 
         // Recreate
         self.create_table(conn)?;
@@ -369,6 +406,88 @@ mod tests {
             )
             .unwrap();
         assert_eq!(family, "qwen3_6");
+    }
+
+    #[test]
+    fn test_fts5_refreshes_stale_family_projection_triggers() {
+        let (conn, _temp) = create_test_db();
+        let config = FTS5Config::default();
+        let manager = FTS5Manager::new(&config);
+
+        manager.create_table(&conn).unwrap();
+        conn.execute_batch(
+            "CREATE TRIGGER model_search_ai AFTER INSERT ON models BEGIN
+                INSERT INTO model_search (
+                    id, official_name, cleaned_name, model_type,
+                    tags, family, description
+                ) VALUES (
+                    NEW.id,
+                    NEW.official_name,
+                    NEW.cleaned_name,
+                    NEW.model_type,
+                    (SELECT GROUP_CONCAT(value, ' ') FROM json_each(NEW.tags_json)),
+                    json_extract(NEW.metadata_json, '$.family'),
+                    json_extract(NEW.metadata_json, '$.description')
+                );
+            END;
+            CREATE TRIGGER model_search_au AFTER UPDATE ON models BEGIN
+                DELETE FROM model_search WHERE id = OLD.id;
+                INSERT INTO model_search (
+                    id, official_name, cleaned_name, model_type,
+                    tags, family, description
+                ) VALUES (
+                    NEW.id,
+                    NEW.official_name,
+                    NEW.cleaned_name,
+                    NEW.model_type,
+                    (SELECT GROUP_CONCAT(value, ' ') FROM json_each(NEW.tags_json)),
+                    json_extract(NEW.metadata_json, '$.family'),
+                    json_extract(NEW.metadata_json, '$.description')
+                );
+            END;
+            CREATE TRIGGER model_search_ad AFTER DELETE ON models BEGIN
+                DELETE FROM model_search WHERE id = OLD.id;
+            END;",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO models VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                "test-id",
+                "path/to/model",
+                "test_model",
+                "Test Model",
+                "checkpoint",
+                "[]",
+                "{}",
+                r#"{"family": "publisher", "architecture_family": "qwen3_6"}"#,
+                "2024-01-01T00:00:00Z",
+            ],
+        )
+        .unwrap();
+
+        let stale_family: String = conn
+            .query_row(
+                "SELECT family FROM model_search WHERE id = ?",
+                ["test-id"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stale_family, "publisher");
+        assert!(!manager.triggers_current(&conn).unwrap());
+
+        manager.ensure_setup(&conn).unwrap();
+
+        let refreshed_family: String = conn
+            .query_row(
+                "SELECT family FROM model_search WHERE id = ?",
+                ["test-id"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(refreshed_family, "qwen3_6");
+        assert!(manager.triggers_current(&conn).unwrap());
     }
 
     #[test]

@@ -204,7 +204,7 @@ pub(super) async fn start_hf_download(
     let selected_artifact =
         model_library::SelectedArtifactIdentity::from_download_request(&resolved_request, None);
     resolved_request.model_type = Some(model_type.clone());
-    let dest_dir = primary.model_library.build_model_path(
+    let dest_dir = primary.model_library.build_artifact_model_path(
         &model_type,
         &architecture_family,
         &selected_artifact.artifact_id,

@@ -438,18 +438,32 @@ impl ModelLibrary {
             })
             .unwrap_or_else(|| current_family.clone());
         let resolved_family = normalize_architecture_family(&resolved_family);
-        let target_cleaned_name = selected_artifact_id
-            .clone()
-            .unwrap_or_else(|| cleaned_name.clone());
-
-        let target_dir =
-            self.build_model_path(&resolved_type, &resolved_family, &target_cleaned_name);
-        let target_model_id = format!(
-            "{}/{}/{}",
-            normalize_name(&resolved_type),
-            normalize_name(&resolved_family),
-            normalize_name(&target_cleaned_name)
-        );
+        let (target_dir, target_model_id) =
+            if let Some(selected_artifact_id) = selected_artifact_id.as_deref() {
+                (
+                    self.build_artifact_model_path(
+                        &resolved_type,
+                        &resolved_family,
+                        selected_artifact_id,
+                    ),
+                    self.build_artifact_model_id(
+                        &resolved_type,
+                        &resolved_family,
+                        selected_artifact_id,
+                    ),
+                )
+            } else {
+                let target_cleaned_name = cleaned_name.clone();
+                (
+                    self.build_model_path(&resolved_type, &resolved_family, &target_cleaned_name),
+                    format!(
+                        "{}/{}/{}",
+                        normalize_name(&resolved_type),
+                        normalize_name(&resolved_family),
+                        normalize_name(&target_cleaned_name)
+                    ),
+                )
+            };
         let expected_files = metadata
             .as_ref()
             .and_then(|value| value.expected_files.clone())

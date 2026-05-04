@@ -148,6 +148,30 @@ pub fn normalize_architecture_family(value: &str) -> String {
     normalize_compact_version_token(&normalized)
 }
 
+/// Normalize a selected-artifact id for path/model-id use while preserving
+/// artifact identity separators.
+pub fn normalize_artifact_path_slug(value: &str) -> String {
+    let normalized = value
+        .split("__")
+        .map(|artifact_part| {
+            artifact_part
+                .split("--")
+                .map(normalize_name)
+                .collect::<Vec<_>>()
+                .join("--")
+        })
+        .collect::<Vec<_>>()
+        .join("__")
+        .trim_matches(|c| c == '-' || c == '_')
+        .to_string();
+
+    if normalized.is_empty() {
+        normalize_name(value)
+    } else {
+        normalized
+    }
+}
+
 fn requested_filenames(request: &DownloadRequest) -> Vec<String> {
     if let Some(filenames) = request.filenames.as_ref() {
         filenames.clone()
@@ -296,6 +320,18 @@ mod tests {
             model_card_json: None,
             license_status: None,
         }
+    }
+
+    #[test]
+    fn test_normalize_artifact_path_slug_preserves_identity_separators() {
+        assert_eq!(
+            normalize_artifact_path_slug("Owner--Qwen3.6-27B-GGUF__Q4_K_M"),
+            "owner--qwen3_6-27b-gguf__q4_k_m"
+        );
+        assert_eq!(
+            normalize_artifact_path_slug("Owner/Repo:Name__model-00001-of-00002.safetensors"),
+            "ownerreponame__model-00001-of-00002_safetensors"
+        );
     }
 
     #[test]

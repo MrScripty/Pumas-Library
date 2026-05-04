@@ -29,10 +29,10 @@ use crate::model_library::types::{
     ModelType, SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_architecture_family, normalize_recommended_backend, normalize_review_reasons,
-    normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution, SelectedArtifactIdentity,
-    TaskNormalizationStatus,
+    normalize_architecture_family, normalize_artifact_path_slug, normalize_recommended_backend,
+    normalize_review_reasons, normalize_task_signature, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index, LinkRegistry,
+    ModelTypeResolution, SelectedArtifactIdentity, TaskNormalizationStatus,
 };
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
@@ -259,6 +259,36 @@ impl ModelLibrary {
             .join(&type_normalized)
             .join(&family_normalized)
             .join(&name_normalized)
+    }
+
+    /// Build the canonical path for a selected repository artifact.
+    ///
+    /// Structure: library_root/{model_type}/{family}/{artifact_slug}/
+    pub fn build_artifact_model_path(
+        &self,
+        model_type: &str,
+        family: &str,
+        artifact_id: &str,
+    ) -> PathBuf {
+        self.library_root
+            .join(normalize_name(model_type))
+            .join(normalize_name(family))
+            .join(normalize_artifact_path_slug(artifact_id))
+    }
+
+    /// Build the canonical model id for a selected repository artifact.
+    pub fn build_artifact_model_id(
+        &self,
+        model_type: &str,
+        family: &str,
+        artifact_id: &str,
+    ) -> String {
+        format!(
+            "{}/{}/{}",
+            normalize_name(model_type),
+            normalize_name(family),
+            normalize_artifact_path_slug(artifact_id)
+        )
     }
 
     /// Iterate over all model directories in the library.
@@ -9475,7 +9505,7 @@ mod tests {
         assert_eq!(row.resolved_family.as_deref(), Some("qwen3_6"));
         assert_eq!(
             row.target_model_id.as_deref(),
-            Some("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q4_k_m")
+            Some("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q4_k_m")
         );
         assert_eq!(
             row.selected_artifact_id.as_deref(),
@@ -9491,7 +9521,7 @@ mod tests {
     async fn test_generate_migration_dry_run_reports_mixed_artifact_directory() {
         let (_, library) = setup_library().await;
         let model_dir =
-            library.build_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
+            library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
         std::fs::write(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part"), b"partial").unwrap();
@@ -9515,7 +9545,7 @@ mod tests {
         let row = report
             .items
             .iter()
-            .find(|item| item.model_id == "vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+            .find(|item| item.model_id == "vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
             .unwrap();
 
         assert_eq!(row.action, "split_artifact_directory");
@@ -9538,7 +9568,7 @@ mod tests {
     async fn test_execute_migration_with_checkpoint_skips_partial_split_directories() {
         let (_, library) = setup_library().await;
         let model_dir =
-            library.build_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
+            library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
         std::fs::write(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part"), b"partial").unwrap();
@@ -9613,7 +9643,7 @@ mod tests {
             .any(|row| row.action == "split_directory"));
 
         let target_dir =
-            library.build_model_path("vlm", "qwen3_6", "owner_qwen3_6-27b-gguf_q5_k_m");
+            library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
         assert!(target_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
         assert!(target_dir.join(METADATA_FILENAME).is_file());
         assert!(!source_dir.join(METADATA_FILENAME).exists());
@@ -9623,7 +9653,7 @@ mod tests {
         let target_metadata = library.load_metadata(&target_dir).unwrap().unwrap();
         assert_eq!(
             target_metadata.model_id.as_deref(),
-            Some("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+            Some("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
         );
         assert_eq!(
             target_metadata.selected_artifact_files.as_deref(),
@@ -9636,7 +9666,7 @@ mod tests {
             .is_none());
         assert!(library
             .index()
-            .get("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+            .get("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
             .unwrap()
             .is_some());
     }
@@ -9665,14 +9695,14 @@ mod tests {
         library.index_model_dir(&source_dir).await.unwrap();
 
         let target_dir =
-            library.build_model_path("vlm", "qwen3_6", "owner_qwen3_6-27b-gguf_q5_k_m");
+            library.build_artifact_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
         let checkpoint_path = temp_dir.path().join(MIGRATION_CHECKPOINT_FILENAME);
         let checkpoint = MigrationCheckpointState {
             created_at: chrono::Utc::now().to_rfc3339(),
             updated_at: chrono::Utc::now().to_rfc3339(),
             pending_moves: vec![MigrationPlannedMove {
                 model_id: "vlm/qwen35/resume-split".to_string(),
-                target_model_id: "vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m".to_string(),
+                target_model_id: "vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m".to_string(),
                 current_path: source_dir.display().to_string(),
                 target_path: target_dir.display().to_string(),
                 selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),

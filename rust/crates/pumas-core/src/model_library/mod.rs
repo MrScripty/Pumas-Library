@@ -46,7 +46,8 @@ mod watcher;
 
 pub use artifact_identity::{
     apply_download_artifact_metadata, infer_architecture_family_for_download,
-    normalize_architecture_family, ArtifactSelectionKind, SelectedArtifactIdentity,
+    normalize_architecture_family, normalize_artifact_path_slug, ArtifactSelectionKind,
+    SelectedArtifactIdentity,
 };
 pub use dependencies::{
     DependencyPinAuditBindingIssue, DependencyPinAuditProfileIssue, DependencyPinAuditReport,

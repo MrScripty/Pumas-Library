@@ -597,12 +597,11 @@ Update during implementation:
   slug when present, flags legacy compact family tokens, detects missing
   selected-artifact identity, and reports mixed GGUF/complete-plus-partial
   artifact directories as `split_artifact_directory` without executing splits.
-- 2026-05-04: Migration planning issue recorded: directory names still pass
-  through existing `normalize_name` path normalization, so the exact
-  `selected_artifact_id` (`owner--repo__q4_k_m`) is preserved in metadata and
-  reports but its path slug is normalized (`owner_repo_q4_k_m`). This remains
-  collision-resistant for the current identity shape but should be reviewed
-  before any future code assumes byte-identical path slug and artifact id.
+- 2026-05-04: Resolved the selected-artifact path-slug decision. New
+  repository-artifact paths preserve the canonical `publisher--repo__selector`
+  separators after sanitizing each segment, so metadata/report
+  `selected_artifact_id` and storage slug use the same identity shape. Legacy
+  normalized paths remain readable through existing index and migration flows.
 - 2026-05-04: Implemented the checkpointed ordinary-move execution guardrail.
   Execution now honors the checkpoint row's `current_path` and `target_path`
   instead of reconstructing paths only from model ids, and moved metadata carries
@@ -756,9 +755,6 @@ integrate one worker wave at a time.
 
 ### Follow-Ups
 
-- Decide whether artifact path slugs must preserve the exact
-  `selected_artifact_id` separators or whether normalized path-safe slugs remain
-  the intended storage contract.
 - Add a cleanup/import flow for non-selected payload files intentionally left
   behind after safe split-directory execution.
 
@@ -815,6 +811,12 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_fts5_prefers_architecture_family_projection`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/index/fts5.rs`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_normalize_artifact_path_slug_preserves_identity_separators`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_artifact_identity_target`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_splits_complete_artifact_directory`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_split_directory`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/api/state_hf.rs rust/crates/pumas-core/src/model_library/artifact_identity.rs rust/crates/pumas-core/src/model_library/library.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/mod.rs`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`

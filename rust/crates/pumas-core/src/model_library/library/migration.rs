@@ -1293,12 +1293,13 @@ impl ModelLibrary {
                             model_id, err
                         ));
                     }
-                    let is_partial_download = metadata
+                    let is_explicit_partial_download = metadata
                         .match_source
                         .as_deref()
-                        .is_some_and(|source| source == "download_partial")
-                        || has_pending_download_artifacts(&model_dir);
-                    if !is_partial_download {
+                        .is_some_and(|source| source == "download_partial");
+                    let has_pending_parts = has_pending_download_artifacts(&model_dir);
+                    let is_partial_download = is_explicit_partial_download || has_pending_parts;
+                    if !is_explicit_partial_download {
                         let selected_artifact_files =
                             metadata.selected_artifact_files.clone().unwrap_or_default();
                         let expected_files = metadata.expected_files.clone().unwrap_or_default();

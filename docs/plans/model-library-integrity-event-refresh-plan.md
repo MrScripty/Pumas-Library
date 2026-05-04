@@ -404,6 +404,11 @@ Update during implementation:
   from `useModels`, starts with backend duplicate-integrity metadata, receives a
   model-library update notification, refreshes from clean backend model data,
   and verifies the integrity header plus `ISSUE` badge disappear.
+- 2026-05-04: Resolved the partial-split migration validation follow-up by
+  distinguishing explicit `download_partial` metadata rows from complete
+  metadata-backed artifact directories that also contain pending `.part`
+  payloads. True partial rows remain exempt from artifact validation, while
+  mixed complete directories now report integrity findings.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -483,6 +488,9 @@ Update during implementation:
   mutation of integrity labels or warning state.
 - Integrity warning acceptance coverage implemented against rendered
   `ModelManager`/`LocalModelsList` UI using backend-derived model fixtures.
+- Partial split-directory migration validation now preserves the intended
+  `skipped_split_partial_download` execution result while still surfacing mixed
+  artifact integrity findings.
 
 ### Deviations
 
@@ -492,12 +500,7 @@ Update during implementation:
 
 ### Follow-Ups
 
-- Remove any draft frontend poller edits before implementation resumes.
-- Resolve or update the partial-split migration validation expectation:
-  `test_execute_migration_with_checkpoint_skips_partial_split_directories`
-  currently fails on `report.error_count >= 1`.
-- Update module READMEs when stream delivery and subscription contracts are
-  implemented.
+- None remaining for this plan.
 
 ### Verification Summary
 
@@ -520,7 +523,8 @@ Update during implementation:
 - `npm run -w frontend test:run -- ModelManagerIntegrityRefresh.test.tsx`
 - `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
-  failed; recorded as a follow-up migration-validation issue.
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_ignores_partial_download_rows`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 
 ### Traceability Links
 

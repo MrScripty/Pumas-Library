@@ -356,7 +356,7 @@ implementation adds logic to oversized files.
 - File-boundary review confirms the first code slice has a focused write set
   and does not grow oversized modules unnecessarily.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 1: Identity Contract Vertical Slice
 
@@ -364,22 +364,22 @@ implementation adds logic to oversized files.
 download destination planning.
 
 **Tasks:**
-- [ ] Add a focused domain module for selected-artifact identity and artifact
+- [x] Add a focused domain module for selected-artifact identity and artifact
       slug generation.
-- [ ] Add generalized architecture-family normalization that preserves version
+- [x] Add generalized architecture-family normalization that preserves version
       separators as underscores.
-- [ ] Add legacy compact-token normalization for unambiguous historical forms
+- [x] Add legacy compact-token normalization for unambiguous historical forms
       such as `qwen35`, guarded by tests so it does not rewrite arbitrary
       publisher names.
-- [ ] Teach Hugging Face download resolution to produce selected-artifact
+- [x] Teach Hugging Face download resolution to produce selected-artifact
       identity from repo id, revision, subfolder, selected filenames, and
       quantization evidence.
-- [ ] Update destination path construction to use
+- [x] Update destination path construction to use
       `{library_category}/{architecture_family}/{artifact_slug}`.
-- [ ] Add the selected-artifact id to `ModelDownloadResponse` and
+- [x] Add the selected-artifact id to `ModelDownloadResponse` and
       `ModelDownloadProgress` as an append-only field while preserving
       `repo_id`/`repoId`.
-- [ ] Add unit tests for artifact identity stability, sorted filename input,
+- [x] Add unit tests for artifact identity stability, sorted filename input,
       quantized GGUF selections, full-repo selections, and collision-resistant
       publisher/repo slugs.
 
@@ -391,7 +391,7 @@ download destination planning.
   the download start/status/list boundary.
 - Code review confirms no model-specific branches for the reported Qwen repo.
 
-**Status:** Not started
+**Status:** Complete on 2026-05-04
 
 ### Milestone 2: Persisted Metadata And Index Projection
 
@@ -539,6 +539,14 @@ Update during implementation:
 
 - 2026-05-03: Plan created from the Q4/Q5 overlap investigation,
   Transformers convention review, and existing migration-system review.
+- 2026-05-04: Implemented the first backend identity vertical slice. Added a
+  focused selected-artifact identity module, artifact-aware HF destination
+  planning, append-only download progress/start response fields, native binding
+  progress field updates, and frontend API type fields.
+- 2026-05-04: Explorer findings recorded that package-facts/model-ref code
+  already has a `selected_artifact_id` placeholder but currently returns empty
+  identity in several paths. This remains a Milestone 4/5 migration and
+  reference-remapping risk.
 
 ## Commit Cadence Notes
 
@@ -613,11 +621,16 @@ integrate one worker wave at a time.
 
 ### Verification Summary
 
-- Not run for plan creation.
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library artifact_identity`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc test_download_start_response_includes_selected_artifact_aliases`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas_rustler`
+- 2026-05-04: `npm run -w frontend check:types`
 
 ### Traceability Links
 
-- Module README updated: N/A at plan creation.
+- Module README updated:
+  `rust/crates/pumas-core/src/model_library/hf/README.md`
 - ADR added/updated: N/A at plan creation.
 - PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A at plan
   creation.

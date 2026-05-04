@@ -222,6 +222,7 @@ pub struct ElixirBaseResponse {
 pub struct ElixirDownloadProgress {
     pub download_id: String,
     pub repo_id: Option<String>,
+    pub selected_artifact_id: Option<String>,
     pub status: ElixirDownloadStatus,
     pub progress: Option<f64>,
     pub downloaded_bytes: Option<u64>,

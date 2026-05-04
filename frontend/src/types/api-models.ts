@@ -143,6 +143,8 @@ export interface GetHFDownloadDetailsResponse extends BaseResponse {
 
 export interface ModelDownloadResponse extends BaseResponse {
   download_id?: string;
+  selectedArtifactId?: string | null;
+  artifactId?: string | null;
   total_bytes?: number;
   model_path?: string;
 }
@@ -150,6 +152,8 @@ export interface ModelDownloadResponse extends BaseResponse {
 export interface ModelDownloadStatusResponse extends BaseResponse {
   downloadId?: string;
   repoId?: string;
+  selectedArtifactId?: string | null;
+  artifactId?: string | null;
   modelName?: string;
   modelType?: string;
   status?: string;

@@ -72,10 +72,7 @@ pub async fn download_model_from_hf(
     let request = parse_download_request("download_model_from_hf", params)?;
 
     match state.api.start_hf_download(&request).await {
-        Ok(download_id) => Ok(json!({
-            "success": true,
-            "download_id": download_id
-        })),
+        Ok(download_id) => Ok(download_start_response(state, download_id).await),
         Err(e) => Ok(json!({
             "success": false,
             "error": e.to_string()
@@ -90,15 +87,34 @@ pub async fn start_model_download_from_hf(
     let request = parse_download_request("start_model_download_from_hf", params)?;
 
     match state.api.start_hf_download(&request).await {
-        Ok(download_id) => Ok(json!({
-            "success": true,
-            "download_id": download_id
-        })),
+        Ok(download_id) => Ok(download_start_response(state, download_id).await),
         Err(e) => Ok(json!({
             "success": false,
             "error": e.to_string()
         })),
     }
+}
+
+async fn download_start_response(state: &AppState, download_id: String) -> Value {
+    let selected_artifact_id = state
+        .api
+        .get_hf_download_progress(&download_id)
+        .await
+        .and_then(|progress| progress.selected_artifact_id);
+
+    format_download_start_response(download_id, selected_artifact_id)
+}
+
+fn format_download_start_response(
+    download_id: String,
+    selected_artifact_id: Option<String>,
+) -> Value {
+    json!({
+        "success": true,
+        "download_id": download_id,
+        "selectedArtifactId": selected_artifact_id.clone(),
+        "artifactId": selected_artifact_id,
+    })
 }
 
 pub async fn get_model_download_status(
@@ -279,5 +295,18 @@ mod tests {
             error,
             pumas_library::PumasError::InvalidParams { .. }
         ));
+    }
+
+    #[test]
+    fn test_download_start_response_includes_selected_artifact_aliases() {
+        let response = format_download_start_response(
+            "dl-1".to_string(),
+            Some("owner--model__q4_k_m".to_string()),
+        );
+
+        assert_eq!(response["success"], true);
+        assert_eq!(response["download_id"], "dl-1");
+        assert_eq!(response["selectedArtifactId"], "owner--model__q4_k_m");
+        assert_eq!(response["artifactId"], "owner--model__q4_k_m");
     }
 }

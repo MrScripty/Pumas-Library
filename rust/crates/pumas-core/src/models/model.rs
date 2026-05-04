@@ -690,6 +690,8 @@ pub struct ModelDownloadProgress {
     #[serde(default)]
     pub repo_id: Option<String>,
     #[serde(default)]
+    pub selected_artifact_id: Option<String>,
+    #[serde(default)]
     pub model_name: Option<String>,
     #[serde(default)]
     pub model_type: Option<String>,

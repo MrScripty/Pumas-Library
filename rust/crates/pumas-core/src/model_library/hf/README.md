@@ -16,6 +16,9 @@ Hugging Face-specific integrations for model discovery, download orchestration, 
 - Typed DTOs are used to avoid ad-hoc JSON parsing across the codebase.
 - HF metadata is normalized into a persisted evidence payload before download placement so later
   import/reclassification can reuse the same source facts.
+- Download placement separates upstream repository identity from selected-artifact identity. The
+  repository remains provenance, while the selected artifact key distinguishes variants such as
+  different GGUF quantizations from the same repo.
 - Download orchestration emits evidence at two stages: auxiliary-files-complete for partial
   metadata persistence and final completion for full in-place import.
 - Background download tasks are tracked by download ID so explicit cancellation, resume, and client

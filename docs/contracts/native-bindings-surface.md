@@ -21,7 +21,7 @@ This contract classifies the current UniFFI export surface by support tier and d
 | `delete_model` | Preview | `pumas-core` via adapter | Destructive operation; keep compatibility notes when changing semantics. |
 | `rebuild_model_index`, `reclassify_model`, `reclassify_all_models` | Preview | `pumas-core` via adapter | Long-running catalog maintenance operations. |
 | `get_inference_settings`, `update_inference_settings` | Preview | `pumas-core` via adapter | Schema shape may grow as backend support expands. |
-| `search_hf_models`, `start_hf_download`, `get_hf_download_progress`, `cancel_hf_download` | Preview | `pumas-core` via adapter | Validates required download request strings in the adapter. |
+| `search_hf_models`, `start_hf_download`, `get_hf_download_progress`, `cancel_hf_download` | Preview | `pumas-core` via adapter | Validates required download request strings in the adapter. Download progress includes optional `selected_artifact_id` so host consumers can distinguish variants from one repo while retaining `repo_id` for compatibility. |
 | `list_interrupted_downloads`, `recover_download`, `lookup_hf_metadata_for_file`, `get_hf_repo_files` | Preview | `pumas-core` via adapter | Recovery and metadata helpers; path-bearing methods must keep adapter validation. |
 | `is_online`, `get_disk_space`, `get_status`, `get_system_resources` | Stable | `pumas-core` via adapter | Read-only status and diagnostics. |
 | `is_torch_running`, `torch_stop` | Preview | `pumas-core` via adapter | Runtime management surface. |

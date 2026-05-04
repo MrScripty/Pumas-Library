@@ -196,11 +196,18 @@ pub(super) async fn start_hf_download(
 
     resolved_request.pipeline_tag = resolved_pipeline_tag;
     let model_type = resolved_model_type.unwrap_or_else(|| "unknown".to_string());
+    let architecture_family = model_library::infer_architecture_family_for_download(
+        &resolved_request,
+        huggingface_evidence.as_ref(),
+    );
+    resolved_request.family = architecture_family.clone();
+    let selected_artifact =
+        model_library::SelectedArtifactIdentity::from_download_request(&resolved_request, None);
     resolved_request.model_type = Some(model_type.clone());
     let dest_dir = primary.model_library.build_model_path(
         &model_type,
-        &resolved_request.family,
-        &model_library::normalize_name(&resolved_request.official_name),
+        &architecture_family,
+        &selected_artifact.artifact_id,
     );
     if model_type == "unknown" {
         warn!(

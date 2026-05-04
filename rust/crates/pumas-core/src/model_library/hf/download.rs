@@ -12,6 +12,7 @@ use crate::error::{PumasError, Result};
 use crate::model_library::download_store::{DownloadPersistence, PersistedDownload};
 use crate::model_library::sharding;
 use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownloadProgress};
+use crate::model_library::SelectedArtifactIdentity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -161,6 +162,11 @@ fn retry_exhausted_message(
         elapsed.as_secs_f64(),
         last_error
     )
+}
+
+fn selected_artifact_id_for_request(request: Option<&DownloadRequest>) -> Option<String> {
+    request
+        .map(|request| SelectedArtifactIdentity::from_download_request(request, None).artifact_id)
 }
 
 impl HuggingFaceClient {
@@ -490,6 +496,7 @@ impl HuggingFaceClient {
         };
         let first_filename = files[0].filename.clone();
         let final_filenames: Vec<String> = files.iter().map(|f| f.filename.clone()).collect();
+        let selected_artifact = SelectedArtifactIdentity::from_download_request(request, None);
         let mut huggingface_evidence = remote_evidence;
         if let Some(ref mut evidence) = huggingface_evidence {
             Self::enrich_huggingface_evidence_for_download(
@@ -583,6 +590,7 @@ impl HuggingFaceClient {
                 "pipeline_tag": request.pipeline_tag,
                 "bundle_format": request.bundle_format,
                 "pipeline_class": request.pipeline_class,
+                "selected_artifact": selected_artifact,
                 "huggingface_evidence": huggingface_evidence,
             }))
             .unwrap_or_default(),
@@ -1275,6 +1283,9 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
+                selected_artifact_id: selected_artifact_id_for_request(
+                    state.download_request.as_ref(),
+                ),
                 model_name: state
                     .download_request
                     .as_ref()
@@ -1328,6 +1339,9 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
+                selected_artifact_id: selected_artifact_id_for_request(
+                    state.download_request.as_ref(),
+                ),
                 model_name: state
                     .download_request
                     .as_ref()

@@ -21,6 +21,7 @@
 //!     └── ModelIndex (FTS5) - Full-text search
 //! ```
 
+mod artifact_identity;
 mod dependencies;
 pub(crate) mod dependency_pins;
 mod directory_import;
@@ -43,6 +44,10 @@ mod task_signature;
 mod types;
 mod watcher;
 
+pub use artifact_identity::{
+    infer_architecture_family_for_download, normalize_architecture_family, ArtifactSelectionKind,
+    SelectedArtifactIdentity,
+};
 pub use dependencies::{
     DependencyPinAuditBindingIssue, DependencyPinAuditProfileIssue, DependencyPinAuditReport,
     DependencyValidationError, DependencyValidationErrorScope, DependencyValidationState,

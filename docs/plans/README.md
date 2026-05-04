@@ -12,6 +12,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | `directory-import-disambiguation-implementation-plan.md` | Plan for GUI/backend directory import classification so bundle roots and multi-model containers are imported safely and distinctly. |
 | `hf-classification-and-library-repair-remediation-plan.md` | Plan for standards remediation, saved HF/local-library evidence, and non-model-specific fixes for model classification and organization drift. |
 | `transformers-aligned-artifact-identity-migration/plan.md` | Plan for separating Hugging Face repository identity from selected artifacts, normalizing architecture-family paths, and migrating existing model files safely. |
+| `model-library-integrity-event-refresh-plan.md` | Plan for clearing model-library integrity warnings through backend-owned update events and frontend refresh, not migration-specific UI mutation. |
 | `cross-platform-desktop-launcher-facade-plan.md` | Plan for moving desktop launcher behavior behind a shared cross-platform core with thin Unix and Windows wrappers plus README contract updates. |
 | `npm-audit-and-desktop-bridge-terminology-remediation-plan.md` | Plan for clearing workspace npm audit findings and renaming the Electron desktop bridge away from legacy PyWebView-first terminology without breaking compatibility. |
 | `workspace-tooling-dependency-ownership-refactor-plan.md` | Plan for removing the root `jsdom` pin by making frontend test tooling resolve from its owning workspace without relying on incidental npm hoisting. |

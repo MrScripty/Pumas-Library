@@ -519,7 +519,7 @@ with resumable checkpoints.
 - [ ] Remap model-id references for split-directory migration actions once
       split execution exists.
 - [x] Add post-migration validation for mixed artifact directories.
-- [ ] Add post-migration validation for duplicate selected-artifact ids,
+- [x] Add post-migration validation for duplicate selected-artifact ids,
       missing expected files, and stale compact family paths.
 
 **Verification:**
@@ -644,6 +644,9 @@ Update during implementation:
   validation slice. Validation now reuses migration artifact-directory findings
   and reports mixed GGUF/complete-plus-partial artifact directories after
   checkpoint execution instead of only surfacing them in dry-run.
+- 2026-05-04: Completed the post-migration identity/layout validation slice.
+  Validation now reports duplicate selected-artifact ids, missing expected
+  artifact files, and stale compact family path segments such as `qwen35`.
 
 ## Commit Cadence Notes
 
@@ -730,8 +733,8 @@ integrate one worker wave at a time.
   the intended storage contract.
 - Extend the transactional model-id remap to split-directory actions after
   split execution exists.
-- Add post-migration checks for duplicate selected-artifact ids, missing
-  expected files, and stale compact family paths.
+- Add split-directory execution and apply the same remap/validation guarantees
+  to split actions.
 
 ### Verification Summary
 
@@ -766,6 +769,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/index/model_index.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_moves_and_clears_checkpoint`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
 

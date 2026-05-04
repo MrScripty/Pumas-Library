@@ -1017,6 +1017,7 @@ impl ModelLibrary {
             ));
         }
 
+        let mut selected_artifact_owners: HashMap<String, Vec<String>> = HashMap::new();
         for model_dir in self.model_dirs() {
             let model_id = self
                 .get_model_id(&model_dir)
@@ -1044,6 +1045,26 @@ impl ModelLibrary {
                             artifact_findings.join(",")
                         ));
                     }
+                    if let Some(selected_artifact_id) = metadata
+                        .selected_artifact_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                    {
+                        selected_artifact_owners
+                            .entry(selected_artifact_id.to_string())
+                            .or_default()
+                            .push(model_id.clone());
+                    }
+                    let path_family = model_id.split('/').nth(1).unwrap_or_default();
+                    if !path_family.is_empty()
+                        && normalize_architecture_family(path_family) != normalize_name(path_family)
+                    {
+                        errors.push(format!(
+                            "stale compact family path detected for {}: family_segment={}",
+                            model_id, path_family
+                        ));
+                    }
                 }
                 Ok(None) => {
                     errors.push(format!("metadata missing for {}", model_id));
@@ -1051,6 +1072,17 @@ impl ModelLibrary {
                 Err(err) => {
                     errors.push(format!("failed to load metadata for {}: {}", model_id, err));
                 }
+            }
+        }
+        for (selected_artifact_id, mut owners) in selected_artifact_owners {
+            owners.sort();
+            owners.dedup();
+            if owners.len() > 1 {
+                errors.push(format!(
+                    "duplicate selected artifact id detected: selected_artifact_id={} model_ids=[{}]",
+                    selected_artifact_id,
+                    owners.join(", ")
+                ));
             }
         }
 
@@ -1129,6 +1161,12 @@ fn artifact_directory_findings(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
+
+    for expected_file in expected_files {
+        if !model_dir.join(expected_file).is_file() {
+            findings.push("expected_artifact_file_missing".to_string());
+        }
+    }
 
     for entry in WalkDir::new(model_dir)
         .min_depth(1)

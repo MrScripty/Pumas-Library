@@ -9766,6 +9766,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_validate_post_migration_integrity_flags_identity_layout_drift() {
+        let (_, library) = setup_library().await;
+
+        let legacy_dir = library.build_model_path("vlm", "qwen35", "legacy-layout");
+        std::fs::create_dir_all(&legacy_dir).unwrap();
+        write_min_safetensors(&legacy_dir.join("Qwen3.5-7B-Q4_K_M.gguf"));
+        let legacy_metadata = ModelMetadata {
+            model_id: Some("vlm/qwen35/legacy-layout".to_string()),
+            family: Some("qwen35".to_string()),
+            architecture_family: Some("qwen3_5".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("legacy-layout".to_string()),
+            selected_artifact_id: Some("owner--qwen3_5-7b-gguf__q4_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.5-7B-Q4_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.5-7B-Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&legacy_dir, &legacy_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&legacy_dir).await.unwrap();
+
+        let duplicate_dir = library.build_model_path("vlm", "qwen3_5", "duplicate-artifact");
+        std::fs::create_dir_all(&duplicate_dir).unwrap();
+        let duplicate_metadata = ModelMetadata {
+            model_id: Some("vlm/qwen3_5/duplicate-artifact".to_string()),
+            family: Some("qwen3_5".to_string()),
+            architecture_family: Some("qwen3_5".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("duplicate-artifact".to_string()),
+            selected_artifact_id: Some("owner--qwen3_5-7b-gguf__q4_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.5-7B-Q4_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.5-7B-Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&duplicate_dir, &duplicate_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&duplicate_dir).await.unwrap();
+
+        let integrity = library.validate_post_migration_integrity().unwrap();
+        assert!(integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("duplicate selected artifact id detected")));
+        assert!(integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("expected_artifact_file_missing")));
+        assert!(integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("stale compact family path detected")));
+    }
+
+    #[tokio::test]
     async fn test_list_and_search_project_active_dependency_bindings_from_sqlite() {
         let (_temp_dir, library) = setup_library().await;
         let model_id = "llm/llama/projection-check";

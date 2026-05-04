@@ -2180,6 +2180,7 @@ dependencies = [
  "axum",
  "clap",
  "dirs",
+ "futures",
  "pumas-app-manager",
  "pumas-library",
  "reqwest",

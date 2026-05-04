@@ -17,6 +17,12 @@ The CLI host binding policy defaults to loopback-only addresses. Binding to a no
 
 The server caps total in-flight HTTP requests at 64 to keep local renderer or automation bursts from turning into unbounded concurrent handler work.
 
+The server exposes `GET /events/model-library-updates` as a server-sent event
+stream for backend-owned model-library invalidation notifications. The stream
+tails the durable `model_library_update_events` feed and emits
+`model-library-update` events; consumers must still use the RPC recovery API
+when they need a snapshot or miss events while disconnected.
+
 `start_server` returns an owned `ServerHandle`; callers must keep it alive for the server lifetime and call `shutdown()` during controlled teardown.
 
 ## Consumer Contract

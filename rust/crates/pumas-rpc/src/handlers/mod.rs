@@ -15,11 +15,26 @@ mod versions;
 
 use crate::server::AppState;
 use crate::wrapper::wrap_response;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
+    Json,
+};
+use futures::stream::{self, Stream};
+use pumas_library::models::ModelLibraryUpdateNotification;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{debug, error, warn};
+
+const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
+const MODEL_LIBRARY_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
@@ -98,6 +113,19 @@ pub async fn handle_health() -> impl IntoResponse {
     Json(json!({"status": "ok"}))
 }
 
+/// Server-sent model-library update notification stream.
+pub async fn handle_model_library_update_events(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream_state = ModelLibraryUpdateStreamState {
+        state,
+        cursor: None,
+    };
+    let stream = stream::unfold(stream_state, next_model_library_update_event);
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
 /// Main JSON-RPC handler.
 pub async fn handle_rpc(
     State(state): State<Arc<AppState>>,
@@ -144,6 +172,53 @@ pub async fn handle_rpc(
                 Json(JsonRpcResponse::error(id, code, e.to_string())),
             )
         }
+    }
+}
+
+struct ModelLibraryUpdateStreamState {
+    state: Arc<AppState>,
+    cursor: Option<String>,
+}
+
+async fn next_model_library_update_event(
+    mut state: ModelLibraryUpdateStreamState,
+) -> Option<(Result<Event, Infallible>, ModelLibraryUpdateStreamState)> {
+    loop {
+        tokio::time::sleep(MODEL_LIBRARY_UPDATE_STREAM_POLL).await;
+
+        match state
+            .state
+            .api
+            .list_model_library_updates_since(
+                state.cursor.as_deref(),
+                MODEL_LIBRARY_UPDATE_STREAM_LIMIT,
+            )
+            .await
+        {
+            Ok(feed) => {
+                state.cursor = Some(feed.cursor.clone());
+
+                if feed.events.is_empty() && !feed.stale_cursor && !feed.snapshot_required {
+                    continue;
+                }
+
+                let notification = ModelLibraryUpdateNotification::from(feed);
+                let event = model_library_update_sse_event(&notification);
+                return Some((Ok(event), state));
+            }
+            Err(error) => {
+                warn!("model-library update stream polling failed: {}", error);
+            }
+        }
+    }
+}
+
+fn model_library_update_sse_event(notification: &ModelLibraryUpdateNotification) -> Event {
+    match serde_json::to_string(notification) {
+        Ok(payload) => Event::default().event("model-library-update").data(payload),
+        Err(error) => Event::default()
+            .event("model-library-error")
+            .data(json!({ "error": error.to_string() }).to_string()),
     }
 }
 

@@ -286,19 +286,19 @@ durable feed advancement without exposing UI decisions.
 feed to Electron.
 
 **Tasks:**
-- [ ] Add an SSE or equivalent one-way stream route in `pumas-rpc`.
-- [ ] Implement a backend-owned outbox tailer or notifier that reads the update
+- [x] Add an SSE or equivalent one-way stream route in `pumas-rpc`.
+- [x] Implement a backend-owned outbox tailer or notifier that reads the update
   feed and emits notifications when the cursor advances.
-- [ ] Prevent overlapping feed reads and coalesce bursts.
-- [ ] Ensure stream/task cancellation on client disconnect and server shutdown.
-- [ ] Keep this code in RPC/application layers, not core/domain crates.
+- [x] Prevent overlapping feed reads and coalesce bursts.
+- [x] Ensure stream/task cancellation on client disconnect and server shutdown.
+- [x] Keep this code in RPC/application layers, not core/domain crates.
 
 **Verification:**
 - `pumas-rpc` tests prove a feed advancement produces a stream notification.
 - Shutdown/disconnect tests prove no unowned task remains.
 - `cargo test` for touched Rust crates.
 
-**Status:** Not started.
+**Status:** Complete.
 
 ### Milestone 4: Electron Subscription Bridge
 
@@ -389,6 +389,9 @@ Update during implementation:
 - 2026-05-04: Added append-only Rust and TypeScript
   `ModelLibraryUpdateNotification` contracts with runtime validation for the
   future Electron/preload subscription boundary.
+- 2026-05-04: `pumas-rpc` now exposes a backend-owned SSE stream at
+  `/events/model-library-updates` that tails the durable update feed and emits
+  `model-library-update` notifications.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -458,6 +461,8 @@ Update during implementation:
 - Metadata refresh update-feed behavior covered by targeted flow test.
 - Reconciliation update-feed behavior covered by targeted API flow test.
 - Backend notification DTO and frontend validator implemented and tested.
+- Backend SSE delivery implemented in `pumas-rpc` and covered by integration
+  test.
 
 ### Deviations
 
@@ -486,6 +491,7 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update_notification`
 - `npm run -w frontend test:run -- api-package-facts.test.ts`
 - `npm run -w frontend check:types`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc test_model_library_update_event_stream_emits_after_reconcile`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.
 

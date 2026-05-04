@@ -1,6 +1,6 @@
 //! HTTP server implementation using Axum.
 
-use crate::handlers::{handle_health, handle_rpc};
+use crate::handlers::{handle_health, handle_model_library_update_events, handle_rpc};
 use crate::shortcut::ShortcutManager;
 use axum::{
     http::{header, HeaderValue, Method},
@@ -118,6 +118,10 @@ pub async fn start_server(
     // Build the router
     let app = Router::new()
         .route("/health", get(handle_health))
+        .route(
+            "/events/model-library-updates",
+            get(handle_model_library_update_events),
+        )
         .route("/rpc", post(handle_rpc))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))
         .layer(cors)

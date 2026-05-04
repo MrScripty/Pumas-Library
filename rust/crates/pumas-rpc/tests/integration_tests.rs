@@ -3,7 +3,9 @@
 //! These tests verify that the RPC server correctly handles all API methods
 //! and returns responses that match the expected TypeScript types.
 
+use futures::StreamExt;
 use serde_json::{json, Value};
+use std::fmt::Display;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Duration;
@@ -66,6 +68,39 @@ async fn check_health(port: u16) -> bool {
         }
     }
     false
+}
+
+async fn read_stream_until_contains<S, B, E>(
+    stream: &mut S,
+    pattern: &str,
+    timeout: Duration,
+) -> Result<String, String>
+where
+    S: futures::Stream<Item = Result<B, E>> + Unpin,
+    B: AsRef<[u8]>,
+    E: Display,
+{
+    let deadline = tokio::time::Instant::now() + timeout;
+    let mut body = String::new();
+
+    while tokio::time::Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        match tokio::time::timeout(remaining, stream.next()).await {
+            Ok(Some(Ok(chunk))) => {
+                body.push_str(&String::from_utf8_lossy(chunk.as_ref()));
+                if body.contains(pattern) {
+                    return Ok(body);
+                }
+            }
+            Ok(Some(Err(error))) => return Err(error.to_string()),
+            Ok(None) => return Err("event stream ended before expected payload".to_string()),
+            Err(_) => break,
+        }
+    }
+
+    Err(format!(
+        "timed out waiting for '{pattern}' in event stream body: {body}"
+    ))
 }
 
 /// Wait for server to be ready.
@@ -515,6 +550,74 @@ mod tests {
         assert_eq!(pruned.get("success").and_then(|v| v.as_bool()), Some(true));
         assert!(pruned.get("removed").and_then(|v| v.as_u64()).is_some());
         assert_eq!(pruned.get("kept").and_then(|v| v.as_u64()), Some(0));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_model_library_update_event_stream_emits_after_reconcile() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "http://127.0.0.1:{}/events/model-library-updates",
+                port
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert!(response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let mut stream = response.bytes_stream();
+
+        // Allow the stream to establish its durable cursor before mutating the
+        // library, otherwise an initial snapshot cursor could legitimately skip
+        // the test event.
+        tokio::time::sleep(Duration::from_millis(1200)).await;
+
+        let model_id = "llm/llama/sse-reconcile-feed";
+        let model_dir = env.path().join("shared-resources/models").join(model_id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
+        )
+        .unwrap();
+        std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+        std::fs::write(
+            model_dir.join("metadata.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "model_id": model_id,
+                "family": "llama",
+                "model_type": "llm",
+                "official_name": "SSE Reconcile Feed",
+                "cleaned_name": "sse-reconcile-feed",
+                "files": [{"name": "model.safetensors"}],
+                "runtime_engine_hints": ["transformers"]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(listed
+            .get("models")
+            .and_then(|value| value.as_object())
+            .is_some_and(|models| models.contains_key(model_id)));
+
+        let body = read_stream_until_contains(&mut stream, model_id, Duration::from_secs(10)).await;
+        let body = body.unwrap();
+        assert!(body.contains("event: model-library-update"));
+        assert!(body.contains("\"change_kind\":\"model_added\""));
 
         server.stop().await;
     }

@@ -516,14 +516,14 @@ with resumable checkpoints.
 downstream consumers.
 
 **Tasks:**
-- [ ] Update model-library README documentation for repository identity versus
+- [x] Update model-library README documentation for repository identity versus
       selected-artifact identity.
-- [ ] Update API or frontend README documentation for download progress keys.
-- [ ] Update `docs/contracts/native-bindings-surface.md` for added download
+- [x] Update API or frontend README documentation for download progress keys.
+- [x] Update `docs/contracts/native-bindings-surface.md` for added download
       request/progress fields.
-- [ ] Add migration notes describing legacy `qwen35` to `qwen3_5` and
+- [x] Add migration notes describing legacy `qwen35` to `qwen3_5` and
       punctuation-preserving version normalization.
-- [ ] Document when legacy compatibility fields can be retired.
+- [x] Document when legacy compatibility fields can be retired.
 
 **Verification:**
 - Documentation review against `DOCUMENTATION-STANDARDS.md`.
@@ -531,7 +531,7 @@ downstream consumers.
 - Native binding contract review confirms preview/stable support-tier notes are
   still accurate.
 
-**Status:** Not started
+**Status:** Complete on 2026-05-04
 
 ## Execution Notes
 
@@ -587,6 +587,12 @@ Update during implementation:
   instead of reconstructing paths only from model ids, and moved metadata carries
   selected-artifact id/files plus `architecture_family` through the target-id
   rewrite. Split-directory actions are still report-only.
+- 2026-05-04: Completed the documentation contract cleanup slice. Updated the
+  HF model-library README with repository-provenance versus selected-artifact
+  identity semantics, frontend hook docs with artifact-keyed download progress
+  rules, and the native bindings contract with append-only request/progress
+  compatibility notes. Legacy family migration notes now call out `qwen35` to
+  `qwen3_5` and punctuation-preserving tokens such as `qwen3_6`.
 - 2026-05-04: Completed the persisted marker compatibility slice. New download
   markers already include `selected_artifact`; marker reads now feed migration
   planning, and partial-move marker updates write `architecture_family` while
@@ -658,6 +664,7 @@ integrate one worker wave at a time.
 - Milestone 3 frontend download-state keying slice is partially complete.
 - Milestone 4 migration dry-run artifact report slice is partially complete.
 - Milestone 5 checkpointed ordinary-move execution slice is partially complete.
+- Milestone 6 documentation and compatibility cleanup slice.
 
 ### Deviations
 
@@ -692,6 +699,9 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_existing_checkpoint`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library update_download_marker_adds_architecture_family_and_preserves_artifact`
+- 2026-05-04: `git diff --check -- docs/contracts/native-bindings-surface.md rust/crates/pumas-core/src/model_library/hf/README.md frontend/src/hooks/README.md docs/plans/transformers-aligned-artifact-identity-migration/plan.md`
+- 2026-05-04: Markdown linter not run; no `markdownlint`,
+  `markdownlint-cli2`, or `remark` command was available in this workspace.
 
 ### Traceability Links
 

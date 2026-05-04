@@ -98,6 +98,23 @@ event stream for status, installs, downloads, and cache updates, these polling
 owners should move behind one subscription adapter and the per-hook intervals
 should be removed.
 
+## Download Progress Keys
+- Download state maps are keyed by selected artifact, not by repository, when
+  the backend provides that identity. The key preference is
+  `selectedArtifactId`, then `artifactId`, then legacy `repoId`.
+- `repoId` remains display and provenance data. It must not be treated as a
+  unique active-download key because one Hugging Face repository can expose
+  multiple artifact selections.
+- `artifactId` is a compatibility alias for selected-artifact identity in JSON
+  responses. Hooks should preserve it for older callers but prefer
+  `selectedArtifactId` in new code.
+- Repo-keyed names such as `downloadStatusByRepo` are compatibility naming
+  debt. New hook code should use artifact-key semantics even when an older prop
+  or return field still carries the repo wording.
+- Same-repository downloads may coexist when their selected-artifact keys or
+  destination paths differ. Duplicate-start guards should block only the same
+  selected artifact or the same destination path.
+
 ## Dependencies
 **Internal:** `api/`, `types/`, `utils/`, and component state needs.
 **External:** React hooks.

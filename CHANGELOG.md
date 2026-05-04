@@ -11,6 +11,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - No changes yet.
 
+## [0.5.0] - 2026-05-03
+
+### Added
+
+- Package-facts APIs for summary snapshots, lazy package-facts resolution, model-reference resolution, update events, and persisted update-feed cursors
+- Rich package evidence for import and execution review, including tokenizer diagnostics, special tokens, generation defaults, custom code requirements, auto-map and processor metadata, adapter/quantization/shard facts, sibling files, class references, source-repository evidence, and missing declared shards
+- Hugging Face search and model-library compatibility hints for MLX, vLLM, unsupported backends, and unresolved/canonicalized Pumas model references
+- Electron/RPC contract validation, plugin endpoint bridging, request schemas, empty-parameter handling, and preload drift tests
+- Standards adoption, release-artifact, native-bindings, desktop-RPC, workspace ownership, and audit documentation, plus release-version, dependency-ownership, commit-message, README coverage, and file-size checks
+
+### Changed
+
+- Refactored Rust runtime paths to move blocking filesystem and metadata work off async request paths, isolate path validation at API/RPC/UniFFI ingress, own background task handles, and cap RPC in-flight concurrency
+- Split the frontend app shell, import workflow, model rows, version controls, mapping previews, metadata modals, install dialogs, download state, and API type contracts into smaller tested modules
+- Split UniFFI bindings into focused API and FFI type modules while tightening native binding input validation
+- Updated launcher and release flows to run from current build outputs without requiring toolchain dependencies in packaged release launches
+- Updated README and workspace documentation for the current build, launcher, Rust, frontend, Electron, scripts, torch-server, and native-binding workflows
+
+### Fixed
+
+- Hardened desktop IPC, RPC CORS, Torch sidecar access, LAN listener policy, path canonicalization, writable target probes, native import paths, migration/recovery targets, and direct file/open operations
+- Restored frontend reliability for library download progress rings, inactive download indicators, cleaned metadata fallbacks, link-health rendering, app icon assets, model preview limits, failed shortcut rollback, and native accessible controls
+- Corrected package-facts cache invalidation, metadata projection cleanup, library size calculation, proxy link exclusions, and unresolved library-path handling
+- Fixed launcher dev-run backend artifact selection, release checksum digest exclusions, ComfyUI temp directory handling, Windows symlink test permissions, Rust/frontend CI failures, and write-target path canonicalization coverage
+
 ## [0.4.0] - 2026-04-13
 
 ### Added

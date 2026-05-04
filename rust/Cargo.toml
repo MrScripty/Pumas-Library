@@ -6,7 +6,7 @@ members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", 
 default-members = ["crates/pumas-core", "crates/pumas-app-manager", "crates/pumas-rpc", "crates/pumas-uniffi"]
 
 [workspace.package]
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Jeremy"]
 license = "MIT"

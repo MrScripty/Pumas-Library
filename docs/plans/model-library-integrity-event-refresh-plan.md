@@ -253,15 +253,13 @@ durable update feed.
   exists but the SQLite row is missing.
 - [x] Add a test for delete cursor advancement.
 - [x] Add a test for metadata refetch cursor advancement.
-- [ ] Add a test for reconciliation cursor advancement.
+- [x] Add a test for reconciliation cursor advancement.
 
 **Verification:**
 - Targeted Rust tests for update-feed producer paths.
 - Existing migration/reconciliation/import tests still pass.
 
-**Status:** In progress; audit completed, migration update-feed tests, delete
-and metadata-refresh update-feed tests, `ModelIndex::clear` event coverage, and
-`import_in_place` missing-row repair implemented.
+**Status:** Complete.
 
 ### Milestone 2: Backend Notification Contract
 
@@ -386,6 +384,8 @@ Update during implementation:
   emits `ModelRemoved`.
 - 2026-05-04: `update_metadata_from_hf` now has an update-feed regression test
   covering the metadata-refetch producer boundary.
+- 2026-05-04: Public `list_models` on-demand reconciliation now has an
+  update-feed regression test.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -453,6 +453,7 @@ Update during implementation:
   flow tests.
 - Delete update-feed behavior covered by targeted flow test.
 - Metadata refresh update-feed behavior covered by targeted flow test.
+- Reconciliation update-feed behavior covered by targeted API flow test.
 
 ### Deviations
 
@@ -477,6 +478,7 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library no_op_does_not_emit_update_events`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_delete_model_advances_update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_update_metadata_from_hf_advances_update_feed`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_reconciliation_advances_update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.
 

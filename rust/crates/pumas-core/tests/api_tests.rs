@@ -10,7 +10,8 @@
 #![warn(unsafe_code)]
 
 use pumas_library::models::{
-    ModelFactFamily, ModelLibraryChangeKind, ModelPackageFactsSummaryStatus,
+    ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
+    ModelPackageFactsSummaryStatus,
 };
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
@@ -524,6 +525,64 @@ async fn test_model_library_update_feed_api_surface() {
         .expect("model should appear in summary snapshot");
     assert_eq!(item.status, ModelPackageFactsSummaryStatus::Cached);
     assert!(item.summary.is_some());
+}
+
+#[tokio::test]
+async fn test_list_models_reconciliation_advances_update_feed() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let initial = api
+        .list_model_library_updates_since(None, 100)
+        .await
+        .unwrap();
+
+    let model_id = "llm/llama/reconcile-feed";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(
+        model_dir.join("config.json"),
+        r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
+    )
+    .unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "llama",
+            "model_type": "llm",
+            "official_name": "Reconcile Feed",
+            "cleaned_name": "reconcile-feed",
+            "files": [{"name": "model.safetensors"}],
+            "runtime_engine_hints": ["transformers"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let models = api.list_models().await.unwrap();
+    assert!(models.iter().any(|model| model.id == model_id));
+
+    let feed = api
+        .list_model_library_updates_since(Some(&initial.cursor), 100)
+        .await
+        .unwrap();
+    assert!(feed.events.iter().any(|event| {
+        event.model_id == model_id
+            && event.change_kind == ModelLibraryChangeKind::ModelAdded
+            && event.fact_family == ModelFactFamily::ModelRecord
+            && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+    }));
 }
 
 #[tokio::test]

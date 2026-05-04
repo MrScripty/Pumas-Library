@@ -4157,6 +4157,7 @@ fn apply_target_identity_to_metadata(metadata: &mut ModelMetadata, target_model_
 
     metadata.model_type = Some(parts[0].to_string());
     metadata.family = Some(parts[1].to_string());
+    metadata.architecture_family = Some(parts[1].to_string());
     if let Some(cleaned_name) = parts.last() {
         metadata.cleaned_name = Some((*cleaned_name).to_string());
     }
@@ -9079,8 +9080,8 @@ mod tests {
                     .build_model_path("diffusion", "llama", "resume-move")
                     .display()
                     .to_string(),
-                selected_artifact_id: None,
-                selected_artifact_files: vec![],
+                selected_artifact_id: Some("resume-move-artifact".to_string()),
+                selected_artifact_files: vec!["model.safetensors".to_string()],
                 action_kind: Some("move".to_string()),
             }],
             completed_results: vec![],
@@ -9096,6 +9097,17 @@ mod tests {
         assert_eq!(report.index_model_count, 1);
         assert!(report.referential_integrity_ok);
         assert!(report.referential_integrity_errors.is_empty());
+        let target_dir = library.build_model_path("diffusion", "llama", "resume-move");
+        let moved_metadata = library.load_metadata(&target_dir).unwrap().unwrap();
+        assert_eq!(moved_metadata.architecture_family.as_deref(), Some("llama"));
+        assert_eq!(
+            moved_metadata.selected_artifact_id.as_deref(),
+            Some("resume-move-artifact")
+        );
+        assert_eq!(
+            moved_metadata.selected_artifact_files.as_deref(),
+            Some(&["model.safetensors".to_string()][..])
+        );
         assert!(report.machine_readable_report_path.is_some());
         assert!(report.human_readable_report_path.is_some());
         assert!(!checkpoint_path.exists());

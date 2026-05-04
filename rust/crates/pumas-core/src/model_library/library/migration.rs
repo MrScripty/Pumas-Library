@@ -682,8 +682,16 @@ impl ModelLibrary {
         &self,
         planned: &MigrationPlannedMove,
     ) -> MigrationExecutionItem {
-        let source_dir = self.library_root.join(&planned.model_id);
-        let target_dir = self.library_root.join(&planned.target_model_id);
+        let source_dir = planned_path_or_model_id(
+            &self.library_root,
+            planned.current_path.as_str(),
+            planned.model_id.as_str(),
+        );
+        let target_dir = planned_path_or_model_id(
+            &self.library_root,
+            planned.target_path.as_str(),
+            planned.target_model_id.as_str(),
+        );
 
         if !path_exists(&source_dir).await.unwrap_or(false) {
             if path_exists(&target_dir).await.unwrap_or(false) {
@@ -736,6 +744,12 @@ impl ModelLibrary {
 
         metadata.model_id = Some(planned.target_model_id.clone());
         apply_target_identity_to_metadata(&mut metadata, &planned.target_model_id);
+        if let Some(selected_artifact_id) = planned.selected_artifact_id.clone() {
+            metadata.selected_artifact_id = Some(selected_artifact_id);
+        }
+        if !planned.selected_artifact_files.is_empty() {
+            metadata.selected_artifact_files = Some(planned.selected_artifact_files.clone());
+        }
         metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
 
         if let Err(err) = validate_metadata_v2_with_index(&metadata, self.index()) {
@@ -915,6 +929,20 @@ impl ModelLibrary {
             index_stale_model_count,
             errors,
         })
+    }
+}
+
+fn planned_path_or_model_id(library_root: &Path, planned_path: &str, model_id: &str) -> PathBuf {
+    let planned_path = planned_path.trim();
+    if planned_path.is_empty() {
+        return library_root.join(model_id);
+    }
+
+    let path = PathBuf::from(planned_path);
+    if path.is_absolute() {
+        path
+    } else {
+        library_root.join(path)
     }
 }
 

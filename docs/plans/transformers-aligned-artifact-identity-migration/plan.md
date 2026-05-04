@@ -508,7 +508,7 @@ with resumable checkpoints.
 - Dry-run before execution and validation after execution agree on resolved
   item counts.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 6: Documentation And Compatibility Cleanup
 
@@ -582,6 +582,11 @@ Update during implementation:
   reports but its path slug is normalized (`owner_repo_q4_k_m`). This remains
   collision-resistant for the current identity shape but should be reviewed
   before any future code assumes byte-identical path slug and artifact id.
+- 2026-05-04: Implemented the checkpointed ordinary-move execution guardrail.
+  Execution now honors the checkpoint row's `current_path` and `target_path`
+  instead of reconstructing paths only from model ids, and moved metadata carries
+  selected-artifact id/files plus `architecture_family` through the target-id
+  rewrite. Split-directory actions are still report-only.
 
 ## Commit Cadence Notes
 
@@ -648,6 +653,7 @@ integrate one worker wave at a time.
 - Milestone 2 persisted metadata/index projection slice is partially complete.
 - Milestone 3 frontend download-state keying slice is partially complete.
 - Milestone 4 migration dry-run artifact report slice is partially complete.
+- Milestone 5 checkpointed ordinary-move execution slice is partially complete.
 
 ### Deviations
 
@@ -680,6 +686,7 @@ integrate one worker wave at a time.
 - 2026-05-04: `npm run -w frontend check:types`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_artifact_identity_target`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_existing_checkpoint`
 
 ### Traceability Links
 

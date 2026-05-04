@@ -455,6 +455,7 @@ fn infer_in_place_spec(model_dir: PathBuf, model_id: &str) -> InPlaceImportSpec 
         family,
         model_type,
         repo_id: None,
+        download_request: None,
         known_sha256: None,
         compute_hashes: false,
         expected_files: None,

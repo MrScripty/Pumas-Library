@@ -415,6 +415,27 @@ pub struct ModelMetadata {
     /// HuggingFace repository ID (e.g. "TheBloke/Llama-2-7B-GGUF").
     #[serde(default)]
     pub repo_id: Option<String>,
+    /// Upstream publisher or organization segment from the repository ID.
+    #[serde(default)]
+    pub publisher: Option<String>,
+    /// Transformers-style architecture/config family used for library layout.
+    #[serde(default)]
+    pub architecture_family: Option<String>,
+    /// HuggingFace config `model_type` when available.
+    #[serde(default)]
+    pub config_model_type: Option<String>,
+    /// Stable selected artifact identity within the upstream repository.
+    #[serde(default)]
+    pub selected_artifact_id: Option<String>,
+    /// Requested artifact files that define the selected artifact.
+    #[serde(default)]
+    pub selected_artifact_files: Option<Vec<String>>,
+    /// Requested quantization selector, normalized for artifact identity.
+    #[serde(default)]
+    pub selected_artifact_quant: Option<String>,
+    /// Upstream revision used for the selected artifact.
+    #[serde(default)]
+    pub upstream_revision: Option<String>,
     /// Files that should exist for this model to be complete.
     /// Populated from the download file list; enables incomplete detection.
     #[serde(default)]

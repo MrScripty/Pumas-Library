@@ -8,7 +8,7 @@
 
 use crate::model_library::naming::normalize_name;
 use crate::model_library::types::DownloadRequest;
-use crate::models::HuggingFaceEvidence;
+use crate::models::{HuggingFaceEvidence, ModelMetadata};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -92,6 +92,25 @@ impl SelectedArtifactIdentity {
     }
 }
 
+/// Project selected-artifact download identity into persisted model metadata.
+pub fn apply_download_artifact_metadata(
+    metadata: &mut ModelMetadata,
+    request: &DownloadRequest,
+    evidence: Option<&HuggingFaceEvidence>,
+) {
+    let selected_filenames = evidence.and_then(|value| value.selected_filenames.clone());
+    let selected_artifact =
+        SelectedArtifactIdentity::from_download_request(request, selected_filenames);
+
+    metadata.publisher = publisher_from_repo_id(&request.repo_id);
+    metadata.architecture_family = Some(infer_architecture_family_for_download(request, evidence));
+    metadata.config_model_type = evidence.and_then(|value| value.config_model_type.clone());
+    metadata.selected_artifact_id = Some(selected_artifact.artifact_id);
+    metadata.selected_artifact_files = non_empty(selected_artifact.selected_filenames);
+    metadata.selected_artifact_quant = selected_artifact.selected_quant;
+    metadata.upstream_revision = Some(selected_artifact.revision);
+}
+
 /// Infer the architecture-family token to use for artifact paths.
 pub fn infer_architecture_family_for_download(
     request: &DownloadRequest,
@@ -114,6 +133,10 @@ pub fn infer_architecture_family_for_download(
         if let Some(family) = extract_versioned_family(candidate) {
             return family;
         }
+    }
+
+    if let Some(config_model_type) = evidence.and_then(|value| value.config_model_type.as_deref()) {
+        return normalize_architecture_family(config_model_type);
     }
 
     normalize_architecture_family(&request.family)
@@ -204,6 +227,22 @@ fn artifact_digest(
 fn repo_slug(repo_id: &str) -> String {
     let (owner, name) = repo_id.split_once('/').unwrap_or(("huggingface", repo_id));
     format!("{}--{}", normalize_name(owner), normalize_name(name))
+}
+
+fn publisher_from_repo_id(repo_id: &str) -> Option<String> {
+    repo_id
+        .split_once('/')
+        .map(|(publisher, _)| publisher.trim())
+        .filter(|publisher| !publisher.is_empty())
+        .map(str::to_string)
+}
+
+fn non_empty(values: Vec<String>) -> Option<Vec<String>> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
 }
 
 fn is_gguf(filename: &str) -> bool {
@@ -311,5 +350,48 @@ mod tests {
         let family = infer_architecture_family_for_download(&req, None);
 
         assert_eq!(family, "qwen3_6");
+    }
+
+    #[test]
+    fn architecture_family_uses_config_model_type_when_no_versioned_signal_exists() {
+        let req = request("QuantFactory/Qwen3-Reranker-4B-GGUF");
+        let evidence = HuggingFaceEvidence {
+            config_model_type: Some("qwen3".to_string()),
+            ..Default::default()
+        };
+
+        let family = infer_architecture_family_for_download(&req, Some(&evidence));
+
+        assert_eq!(family, "qwen3");
+    }
+
+    #[test]
+    fn download_artifact_metadata_keeps_repo_and_artifact_identity_separate() {
+        let mut req = request("QuantFactory/Qwen3.6-27B-Heretic-GGUF");
+        req.family = "qwen3_6".to_string();
+        req.filename = Some("Qwen3.6-27B-Heretic-Q4_K_M.gguf".to_string());
+        req.quant = Some("Q4_K_M".to_string());
+        let evidence = HuggingFaceEvidence {
+            config_model_type: Some("qwen3".to_string()),
+            ..Default::default()
+        };
+        let mut metadata = ModelMetadata::default();
+
+        apply_download_artifact_metadata(&mut metadata, &req, Some(&evidence));
+
+        assert_eq!(metadata.repo_id, None);
+        assert_eq!(metadata.publisher.as_deref(), Some("QuantFactory"));
+        assert_eq!(metadata.architecture_family.as_deref(), Some("qwen3_6"));
+        assert_eq!(metadata.config_model_type.as_deref(), Some("qwen3"));
+        assert_eq!(metadata.selected_artifact_quant.as_deref(), Some("q4_k_m"));
+        assert_eq!(
+            metadata.selected_artifact_files.as_deref(),
+            Some(&["Qwen3.6-27B-Heretic-Q4_K_M.gguf".to_string()][..])
+        );
+        assert_eq!(metadata.upstream_revision.as_deref(), Some("main"));
+        assert!(metadata
+            .selected_artifact_id
+            .as_deref()
+            .is_some_and(|id| id.contains("__q4_k_m")));
     }
 }

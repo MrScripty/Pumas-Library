@@ -48,6 +48,7 @@ impl ModelImporter {
                 family: inferred.family,
                 model_type: inferred.model_type,
                 repo_id: None,
+                download_request: None,
                 known_sha256: None,
                 compute_hashes,
                 expected_files: None,

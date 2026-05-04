@@ -399,18 +399,18 @@ download destination planning.
 family without breaking existing metadata readers.
 
 **Tasks:**
-- [ ] Add metadata fields for `publisher`, `architecture_family`,
+- [x] Add metadata fields for `publisher`, `architecture_family`,
       `config_model_type` or equivalent upstream model type,
       `selected_artifact_id`, `selected_artifact_files`,
       `selected_artifact_quant`, and `upstream_revision`.
-- [ ] Preserve legacy `family` as a compatibility projection during migration.
+- [x] Preserve legacy `family` as a compatibility projection during migration.
 - [ ] Update `.pumas_download` writes and reads to include selected-artifact
       identity.
-- [ ] Update importer and reclassify paths so file-level evidence cannot
+- [x] Update importer and reclassify paths so file-level evidence cannot
       incorrectly overwrite an explicit architecture family.
-- [ ] Update SQLite projection and reconciliation logic if the index needs to
+- [x] Update SQLite projection and reconciliation logic if the index needs to
       query by selected artifact id.
-- [ ] Audit FTS5, family stats, inference defaults, conversion provenance, and
+- [x] Audit FTS5, family stats, inference defaults, conversion provenance, and
       package fact hashing before changing any reader from `family` to
       `architecture_family`.
 
@@ -422,7 +422,7 @@ family without breaking existing metadata readers.
   during the compatibility period.
 - Review confirms compatibility behavior for older metadata files.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 3: Frontend Download State
 
@@ -547,6 +547,18 @@ Update during implementation:
   already has a `selected_artifact_id` placeholder but currently returns empty
   identity in several paths. This remains a Milestone 4/5 migration and
   reference-remapping risk.
+- 2026-05-04: Implemented the persisted metadata projection slice. New
+  download metadata now records publisher, architecture family,
+  config-model-type, selected-artifact id/files/quant, and upstream revision.
+  Download finalization preserves the resolved download family instead of
+  allowing file-level format evidence to rewrite it, while legacy `family`
+  remains present for compatibility. FTS5 now prefers `architecture_family`
+  when present and falls back to `family`.
+- 2026-05-04: Implementation issue recorded for Milestone 4/5: existing FTS5
+  triggers are created with `IF NOT EXISTS`, so already-initialized databases
+  may need a migration/rebuild step before search-family projection uses
+  `architecture_family`. New databases and explicit rebuilds use the new
+  projection.
 
 ## Commit Cadence Notes
 
@@ -609,7 +621,8 @@ integrate one worker wave at a time.
 
 ### Completed
 
-- Not started.
+- Milestone 1 backend identity contract slice.
+- Milestone 2 persisted metadata/index projection slice is partially complete.
 
 ### Deviations
 
@@ -617,7 +630,10 @@ integrate one worker wave at a time.
 
 ### Follow-Ups
 
-- None recorded yet.
+- Add a migration/rebuild step for existing FTS5 triggers so deployed
+  databases pick up the `architecture_family` projection.
+- Complete `.pumas_download` selected-artifact recovery reads before migration
+  execution moves or splits partial downloads.
 
 ### Verification Summary
 
@@ -626,6 +642,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas_rustler`
 - 2026-05-04: `npm run -w frontend check:types`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library artifact_identity`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_upsert_download_metadata_stub_persists_hf_evidence`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_fts5_prefers_architecture_family_projection`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 
 ### Traceability Links
 

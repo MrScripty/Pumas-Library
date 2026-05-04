@@ -105,7 +105,10 @@ impl<'a> FTS5Manager<'a> {
                     NEW.cleaned_name,
                     NEW.model_type,
                     (SELECT GROUP_CONCAT(value, ' ') FROM json_each(NEW.tags_json)),
-                    json_extract(NEW.metadata_json, '$.family'),
+                    COALESCE(
+                        json_extract(NEW.metadata_json, '$.architecture_family'),
+                        json_extract(NEW.metadata_json, '$.family')
+                    ),
                     json_extract(NEW.metadata_json, '$.description')
                 );
             END",
@@ -126,7 +129,10 @@ impl<'a> FTS5Manager<'a> {
                     NEW.cleaned_name,
                     NEW.model_type,
                     (SELECT GROUP_CONCAT(value, ' ') FROM json_each(NEW.tags_json)),
-                    json_extract(NEW.metadata_json, '$.family'),
+                    COALESCE(
+                        json_extract(NEW.metadata_json, '$.architecture_family'),
+                        json_extract(NEW.metadata_json, '$.family')
+                    ),
                     json_extract(NEW.metadata_json, '$.description')
                 );
             END",
@@ -163,7 +169,10 @@ impl<'a> FTS5Manager<'a> {
                  cleaned_name,
                  model_type,
                  (SELECT GROUP_CONCAT(value, ' ') FROM json_each(tags_json)),
-                 json_extract(metadata_json, '$.family'),
+                 COALESCE(
+                     json_extract(metadata_json, '$.architecture_family'),
+                     json_extract(metadata_json, '$.family')
+                 ),
                  json_extract(metadata_json, '$.description')
              FROM models",
             table
@@ -326,6 +335,40 @@ mod tests {
             .unwrap();
         assert_eq!(name, "Test Model");
         assert!(tags.unwrap_or_default().contains("tag1"));
+    }
+
+    #[test]
+    fn test_fts5_prefers_architecture_family_projection() {
+        let (conn, _temp) = create_test_db();
+        let config = FTS5Config::default();
+        let manager = FTS5Manager::new(&config);
+
+        manager.ensure_setup(&conn).unwrap();
+
+        conn.execute(
+            "INSERT INTO models VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                "test-id",
+                "path/to/model",
+                "test_model",
+                "Test Model",
+                "checkpoint",
+                "[]",
+                "{}",
+                r#"{"family": "publisher", "architecture_family": "qwen3_6"}"#,
+                "2024-01-01T00:00:00Z",
+            ],
+        )
+        .unwrap();
+
+        let family: String = conn
+            .query_row(
+                "SELECT family FROM model_search WHERE id = ?",
+                ["test-id"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(family, "qwen3_6");
     }
 
     #[test]

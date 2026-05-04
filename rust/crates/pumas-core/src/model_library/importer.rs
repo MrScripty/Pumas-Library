@@ -20,9 +20,9 @@ use crate::model_library::types::{
     SecurityTier,
 };
 use crate::model_library::{
-    normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
-    validate_metadata_v2_with_index, AuxFilesCompleteInfo, DownloadCompletionInfo,
-    TaskNormalizationStatus,
+    apply_download_artifact_metadata, normalize_task_signature, push_review_reason,
+    resolve_model_type_with_rules, validate_metadata_v2_with_index, AuxFilesCompleteInfo,
+    DownloadCompletionInfo, TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -454,6 +454,7 @@ impl ModelImporter {
             family: family.to_string(),
             model_type: Some(model_type.to_string()),
             repo_id: spec.repo_id.clone(),
+            download_request: None,
             known_sha256: None,
             compute_hashes: false,
             expected_files: Some(expected_files),
@@ -559,6 +560,7 @@ impl ModelImporter {
             family: info.download_request.family.clone(),
             model_type: info.download_request.model_type.clone(),
             repo_id: Some(info.download_request.repo_id.clone()),
+            download_request: Some(info.download_request.clone()),
             known_sha256: info.known_sha256.clone(),
             compute_hashes: false,
             expected_files: Some(info.filenames.clone()),
@@ -601,6 +603,11 @@ impl ModelImporter {
         metadata.expected_files = Some(info.filenames.clone());
         metadata.pipeline_tag = info.download_request.pipeline_tag.clone();
         metadata.huggingface_evidence = info.huggingface_evidence.clone();
+        apply_download_artifact_metadata(
+            &mut metadata,
+            &info.download_request,
+            info.huggingface_evidence.as_ref(),
+        );
         metadata.release_date = info.download_request.release_date.clone();
         metadata.download_url = info.download_request.download_url.clone();
         metadata.model_card =
@@ -1460,9 +1467,19 @@ impl ModelImporter {
 
         // Persist download provenance and HF metadata
         metadata.repo_id = spec.repo_id.clone();
+        if spec.download_request.is_some() {
+            metadata.family = Some(spec.family.clone());
+        }
         metadata.expected_files = spec.expected_files.clone();
         metadata.pipeline_tag = spec.pipeline_tag.clone();
         metadata.huggingface_evidence = spec.huggingface_evidence.clone();
+        if let Some(download_request) = spec.download_request.as_ref() {
+            apply_download_artifact_metadata(
+                &mut metadata,
+                download_request,
+                spec.huggingface_evidence.as_ref(),
+            );
+        }
         metadata.release_date = spec.release_date.clone();
         metadata.download_url = spec.download_url.clone();
         metadata.model_card = parse_model_card_json(spec.model_card_json.as_deref());
@@ -1717,6 +1734,9 @@ pub struct InPlaceImportSpec {
     pub model_type: Option<String>,
     /// HuggingFace repo ID (present for downloads, absent for orphans).
     pub repo_id: Option<String>,
+    /// Original resolved download request when this import finalizes a download.
+    #[serde(default)]
+    pub download_request: Option<crate::model_library::DownloadRequest>,
     /// Known SHA256 hash (e.g. from HF LFS metadata) to avoid recomputation.
     pub known_sha256: Option<String>,
     /// Whether to compute hashes if not provided (can be slow for large files).
@@ -2109,6 +2129,19 @@ mod tests {
                 .map(|values| values.len()),
             Some(1)
         );
+        assert_eq!(metadata.publisher.as_deref(), Some("QuantFactory"));
+        assert_eq!(metadata.architecture_family.as_deref(), Some("qwen3"));
+        assert_eq!(metadata.config_model_type.as_deref(), Some("qwen3"));
+        assert_eq!(metadata.selected_artifact_quant.as_deref(), Some("q4_k_m"));
+        assert_eq!(
+            metadata.selected_artifact_files.as_deref(),
+            Some(&["qwen3-reranker-4b-q4_k_m.gguf".to_string()][..])
+        );
+        assert!(metadata
+            .selected_artifact_id
+            .as_deref()
+            .is_some_and(|id| id.contains("__q4_k_m")));
+        assert_eq!(metadata.upstream_revision.as_deref(), Some("main"));
     }
 
     #[tokio::test]
@@ -2136,6 +2169,7 @@ mod tests {
             family: "kittenml".to_string(),
             model_type: Some("unknown".to_string()),
             repo_id: Some("KittenML/kitten-tts-mini-0.8".to_string()),
+            download_request: None,
             known_sha256: None,
             compute_hashes: false,
             expected_files: Some(vec![
@@ -2287,6 +2321,7 @@ mod tests {
             family: "stable-diffusion".to_string(),
             model_type: Some("diffusion".to_string()),
             repo_id: Some("hf-internal-testing/tiny-sd-turbo".to_string()),
+            download_request: None,
             known_sha256: None,
             compute_hashes: false,
             expected_files: Some(vec![
@@ -2342,6 +2377,7 @@ mod tests {
             family: "idea-research".to_string(),
             model_type: Some("vision".to_string()),
             repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            download_request: None,
             known_sha256: None,
             compute_hashes: false,
             expected_files: Some(vec!["detector.onnx".to_string()]),
@@ -2395,6 +2431,7 @@ mod tests {
             family: "idea-research".to_string(),
             model_type: Some("vision".to_string()),
             repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            download_request: None,
             known_sha256: None,
             compute_hashes: false,
             expected_files: Some(vec!["detector.onnx".to_string()]),

@@ -9878,31 +9878,44 @@ mod tests {
         library.save_metadata(&model_dir, &metadata).await.unwrap();
         library.index_model_dir(&model_dir).await.unwrap();
 
-        let partial_dir = library.build_model_path("llm", "test", "partial-model");
+        let partial_dir = library.build_model_path("llm", "qwen35", "partial-model");
         std::fs::create_dir_all(&partial_dir).unwrap();
         std::fs::write(partial_dir.join("weights.gguf.part"), b"partial").unwrap();
         let partial_metadata = ModelMetadata {
-            model_id: Some("llm/test/partial-model".to_string()),
-            family: Some("test".to_string()),
+            model_id: Some("llm/qwen35/partial-model".to_string()),
+            family: Some("qwen35".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("partial-model".to_string()),
             match_source: Some("download_partial".to_string()),
+            expected_files: Some(vec!["weights.gguf".to_string()]),
             ..Default::default()
         };
+        library
+            .save_metadata(&partial_dir, &partial_metadata)
+            .await
+            .unwrap();
         library
             .upsert_index_from_metadata(&partial_dir, &partial_metadata)
             .unwrap();
 
         let integrity = library.validate_post_migration_integrity().unwrap();
-        assert_eq!(integrity.metadata_dir_count, 1);
+        assert_eq!(integrity.metadata_dir_count, 2);
         assert_eq!(integrity.index_model_count, 2);
-        assert_eq!(integrity.index_metadata_model_count, 1);
+        assert_eq!(integrity.index_metadata_model_count, 2);
         assert_eq!(integrity.index_partial_download_count, 1);
         assert_eq!(integrity.index_stale_model_count, 0);
         assert!(!integrity
             .errors
             .iter()
             .any(|error| error.contains("metadata mismatch")));
+        assert!(!integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("expected_artifact_file_missing")));
+        assert!(!integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("stale compact family path detected")));
     }
 
     #[tokio::test]
@@ -9954,7 +9967,7 @@ mod tests {
         let model_dir = library.build_model_path("vlm", "qwen3_6", "mixed-integrity");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
-        std::fs::write(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part"), b"partial").unwrap();
+        write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q4_K_M.gguf"));
 
         let metadata = ModelMetadata {
             model_id: Some("vlm/qwen3_6/mixed-integrity".to_string()),
@@ -9974,6 +9987,35 @@ mod tests {
         assert!(integrity.errors.iter().any(|error| error
             .contains("artifact directory validation failed")
             && error.contains("mixed_gguf_artifact_files")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_post_migration_integrity_allows_full_repo_gguf_sets() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("reranker", "qwen3", "full-repo-gguf-set");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Qwen3-Reranker-4B.Q4_K_M.gguf"));
+        write_min_safetensors(&model_dir.join("Qwen3-Reranker-4B.Q5_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("reranker/qwen3/full-repo-gguf-set".to_string()),
+            family: Some("qwen3".to_string()),
+            model_type: Some("reranker".to_string()),
+            cleaned_name: Some("full-repo-gguf-set".to_string()),
+            expected_files: Some(vec![
+                "Qwen3-Reranker-4B.Q4_K_M.gguf".to_string(),
+                "Qwen3-Reranker-4B.Q5_K_M.gguf".to_string(),
+            ]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let integrity = library.validate_post_migration_integrity().unwrap();
+        assert!(!integrity
+            .errors
+            .iter()
+            .any(|error| error.contains("mixed_gguf_artifact_files")));
     }
 
     #[tokio::test]

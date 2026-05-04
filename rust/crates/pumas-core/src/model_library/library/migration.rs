@@ -1231,31 +1231,30 @@ impl ModelLibrary {
         let mut index_stale_model_count = 0usize;
         let mut stale_ids = Vec::new();
         let index_model_ids = self.index.get_all_ids()?;
+        let index_model_count = index_model_ids.len();
 
         for model_id in index_model_ids {
             if let Some(record) = self.index.get(&model_id)? {
-                if record
+                let is_partial_download = record
                     .metadata
                     .get("match_source")
                     .and_then(Value::as_str)
-                    .is_some_and(|source| source == "download_partial")
-                {
+                    .is_some_and(|source| source == "download_partial");
+                let metadata_path = self.library_root.join(&model_id).join(METADATA_FILENAME);
+
+                if is_partial_download {
                     index_partial_download_count += 1;
-                    continue;
                 }
 
-                let metadata_path = self.library_root.join(&model_id).join(METADATA_FILENAME);
                 if metadata_path.is_file() {
                     index_metadata_model_count += 1;
-                } else {
+                } else if !is_partial_download {
                     index_stale_model_count += 1;
                     stale_ids.push(model_id);
                 }
             }
         }
 
-        let index_model_count =
-            index_metadata_model_count + index_partial_download_count + index_stale_model_count;
         if index_metadata_model_count != metadata_dir_count {
             errors.push(format!(
                 "index/model directory metadata mismatch: index_metadata_count={} metadata_dirs={} (partial_index_rows={} stale_index_rows={})",
@@ -1294,20 +1293,27 @@ impl ModelLibrary {
                             model_id, err
                         ));
                     }
-                    let selected_artifact_files =
-                        metadata.selected_artifact_files.clone().unwrap_or_default();
-                    let expected_files = metadata.expected_files.clone().unwrap_or_default();
-                    let artifact_findings = artifact_directory_findings(
-                        &model_dir,
-                        &selected_artifact_files,
-                        &expected_files,
-                    );
-                    if !artifact_findings.is_empty() {
-                        errors.push(format!(
-                            "artifact directory validation failed for {}: findings=[{}]",
-                            model_id,
-                            artifact_findings.join(",")
-                        ));
+                    let is_partial_download = metadata
+                        .match_source
+                        .as_deref()
+                        .is_some_and(|source| source == "download_partial")
+                        || has_pending_download_artifacts(&model_dir);
+                    if !is_partial_download {
+                        let selected_artifact_files =
+                            metadata.selected_artifact_files.clone().unwrap_or_default();
+                        let expected_files = metadata.expected_files.clone().unwrap_or_default();
+                        let artifact_findings = artifact_directory_findings(
+                            &model_dir,
+                            &selected_artifact_files,
+                            &expected_files,
+                        );
+                        if !artifact_findings.is_empty() {
+                            errors.push(format!(
+                                "artifact directory validation failed for {}: findings=[{}]",
+                                model_id,
+                                artifact_findings.join(",")
+                            ));
+                        }
                     }
                     if let Some(selected_artifact_id) = metadata
                         .selected_artifact_id
@@ -1321,7 +1327,8 @@ impl ModelLibrary {
                             .push(model_id.clone());
                     }
                     let path_family = model_id.split('/').nth(1).unwrap_or_default();
-                    if !path_family.is_empty()
+                    if !is_partial_download
+                        && !path_family.is_empty()
                         && normalize_architecture_family(path_family) != normalize_name(path_family)
                     {
                         errors.push(format!(
@@ -1487,7 +1494,7 @@ fn artifact_directory_findings(
         }
     }
 
-    if gguf_payloads.len() > 1 {
+    if !selected_artifact_files.is_empty() && gguf_payloads.len() > 1 {
         findings.push("mixed_gguf_artifact_files".to_string());
     }
     if !selected_artifact_files.is_empty() && gguf_payloads.len() > selected_artifact_files.len() {

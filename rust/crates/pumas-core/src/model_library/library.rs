@@ -9642,6 +9642,64 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_resumes_split_directory() {
+        let (temp_dir, library) = setup_library().await;
+        let source_dir = library.build_model_path("vlm", "qwen35", "resume-split");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q4_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/qwen35/resume-split".to_string()),
+            family: Some("qwen35".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("resume-split".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let target_dir =
+            library.build_model_path("vlm", "qwen3_6", "owner_qwen3_6-27b-gguf_q5_k_m");
+        let checkpoint_path = temp_dir.path().join(MIGRATION_CHECKPOINT_FILENAME);
+        let checkpoint = MigrationCheckpointState {
+            created_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: chrono::Utc::now().to_rfc3339(),
+            pending_moves: vec![MigrationPlannedMove {
+                model_id: "vlm/qwen35/resume-split".to_string(),
+                target_model_id: "vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m".to_string(),
+                current_path: source_dir.display().to_string(),
+                target_path: target_dir.display().to_string(),
+                selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+                selected_artifact_files: vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()],
+                action_kind: Some("split_artifact_directory".to_string()),
+            }],
+            completed_results: vec![],
+        };
+        save_migration_checkpoint(&checkpoint_path, &checkpoint).unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert!(report.resumed_from_checkpoint);
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(
+            report.error_count, 0,
+            "{:?}",
+            report.referential_integrity_errors
+        );
+        assert!(report.referential_integrity_ok);
+        assert!(!checkpoint_path.exists());
+        assert!(target_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
+        assert!(source_dir.join("Qwen3.6-27B-Q4_K_M.gguf").is_file());
+        assert!(!source_dir.join(METADATA_FILENAME).exists());
+    }
+
+    #[tokio::test]
     async fn test_generate_migration_dry_run_keeps_metadata_backed_image_turbo_diffusion() {
         let (_, library) = setup_library().await;
         let model_dir =

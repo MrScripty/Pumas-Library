@@ -508,9 +508,16 @@ with resumable checkpoints.
       target artifact.
 - [ ] Block or skip active partial downloads unless the action can safely
       relocate the partial and sidecar together.
-- [ ] Remap model-id references in dependency bindings, package facts,
-      conversion provenance, and execution descriptors where the current
-      codebase stores them by model id.
+- [x] Remap model-id references in dependency bindings, dependency-binding
+      history, conversion provenance, and link exclusions for ordinary
+      directory moves.
+- [x] Invalidate package-facts cache rows during model-id remap so stale
+      `model_ref` JSON is regenerated instead of preserved under the new id.
+- [x] Confirm execution descriptors do not have a separate durable remap store
+      in the current codebase; they are resolved on demand from the moved model
+      id and regenerated package facts.
+- [ ] Remap model-id references for split-directory migration actions once
+      split execution exists.
 - [ ] Add post-migration validation for duplicate selected-artifact ids,
       missing expected files, stale compact family paths, and mixed artifact
       directories.
@@ -626,6 +633,13 @@ Update during implementation:
   the target id. A later execution slice must replace that behavior with a
   transactional model-id remap for authoritative references before blocked
   rows can move automatically.
+- 2026-05-04: Implemented the ordinary-move model-id remap slice. Migration
+  execution now replaces the old SQLite model id with the target id in one
+  transaction, remaps dependency bindings, dependency-binding history, metadata
+  overlays/history, and link exclusions, invalidates package-facts cache rows,
+  and rewrites `conversion_source.source_model_id` in dependent metadata files.
+  Dry-run rows continue to report the reference counts, but active bindings and
+  conversion provenance no longer block ordinary move candidates.
 
 ## Commit Cadence Notes
 
@@ -710,10 +724,8 @@ integrate one worker wave at a time.
 - Decide whether artifact path slugs must preserve the exact
   `selected_artifact_id` separators or whether normalized path-safe slugs remain
   the intended storage contract.
-- Implement a transactional model-id remap for dependency bindings, binding
-  history, conversion-source metadata, link exclusions, and package-facts cache
-  invalidation/regeneration so `blocked_reference_remap` rows can be moved by
-  checkpointed execution.
+- Extend the transactional model-id remap to split-directory actions after
+  split execution exists.
 
 ### Verification Summary
 
@@ -742,6 +754,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `npm run -w frontend check:types`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md frontend/src/types/api-mapping.ts rust/crates/pumas-core/src/index/model_index/package_facts_cache.rs rust/crates/pumas-core/src/index/model_index/dependency_profiles.rs rust/crates/pumas-core/src/index/model_index/governance.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_migration_remaps_model_id_references_for_ordinary_move`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_moves_and_clears_checkpoint`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/index/model_index.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
 
 ### Traceability Links
 

@@ -8726,9 +8726,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_generate_migration_dry_run_blocks_move_with_model_id_references() {
+    async fn test_migration_remaps_model_id_references_for_ordinary_move() {
         let (_, library) = setup_library().await;
         let model_id = "llm/llama/bound-move";
+        let target_model_id = "diffusion/llama/bound-move";
         let model_dir = library.build_model_path("llm", "llama", "bound-move");
         std::fs::create_dir_all(&model_dir).unwrap();
         write_min_safetensors(&model_dir.join("model.safetensors"));
@@ -8744,6 +8745,13 @@ mod tests {
             family: Some("llama".to_string()),
             model_type: Some("llm".to_string()),
             cleaned_name: Some("bound-move".to_string()),
+            task_type_primary: Some("text-generation".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["text".to_string()]),
+            task_classification_source: Some("test-fixture".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test-fixture".to_string()),
+            model_type_resolution_confidence: Some(1.0),
             dependency_bindings: Some(vec![crate::models::DependencyBindingRef {
                 binding_id: Some("bound-move-binding".to_string()),
                 profile_id: Some("bound-move-profile".to_string()),
@@ -8825,6 +8833,13 @@ mod tests {
             family: Some("llama".to_string()),
             model_type: Some("diffusion".to_string()),
             cleaned_name: Some("bound-move-converted".to_string()),
+            task_type_primary: Some("image-generation".to_string()),
+            input_modalities: Some(vec!["text".to_string()]),
+            output_modalities: Some(vec!["image".to_string()]),
+            task_classification_source: Some("test-fixture".to_string()),
+            task_classification_confidence: Some(1.0),
+            model_type_resolution_source: Some("test-fixture".to_string()),
+            model_type_resolution_confidence: Some(1.0),
             conversion_source: Some(crate::conversion::ConversionSource {
                 source_model_id: model_id.to_string(),
                 source_format: "safetensors".to_string(),
@@ -8843,19 +8858,17 @@ mod tests {
         library.index_model_dir(&converted_dir).await.unwrap();
 
         let report = library.generate_migration_dry_run_report().unwrap();
-        assert_eq!(report.blocked_reference_count, 1);
+        assert_eq!(report.blocked_reference_count, 0);
         let row = report
             .items
             .iter()
             .find(|item| item.model_id == model_id)
             .unwrap();
 
-        assert_eq!(row.action, "blocked_reference_remap");
-        assert_eq!(row.action_kind.as_deref(), Some("blocked_reference_remap"));
-        assert_eq!(
-            row.block_reason.as_deref(),
-            Some("model_id_references_require_remap")
-        );
+        assert_eq!(row.action, "move");
+        assert_eq!(row.action_kind.as_deref(), Some("move_directory"));
+        assert_eq!(row.block_reason.as_deref(), None);
+        assert_eq!(row.target_model_id.as_deref(), Some(target_model_id));
         assert_eq!(row.declared_dependency_binding_count, 1);
         assert_eq!(row.active_dependency_binding_count, 1);
         assert_eq!(row.dependency_binding_history_count, 1);
@@ -8866,7 +8879,56 @@ mod tests {
         assert!(row
             .findings
             .iter()
-            .any(|finding| finding == "migration_move_blocked_until_reference_remap"));
+            .any(|finding| finding == "active_dependency_bindings_require_model_id_remap"));
+
+        let execution = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(execution.planned_move_count, 1);
+        assert_eq!(execution.completed_move_count, 1, "{:?}", execution.results);
+        assert_eq!(
+            execution.error_count, 0,
+            "{:?} {:?}",
+            execution.results, execution.referential_integrity_errors
+        );
+        assert!(
+            execution.referential_integrity_ok,
+            "{:?}",
+            execution.referential_integrity_errors
+        );
+
+        let binding = library
+            .index()
+            .get_model_dependency_binding("bound-move-binding")
+            .unwrap()
+            .unwrap();
+        assert_eq!(binding.model_id, target_model_id);
+        assert_eq!(
+            library
+                .index()
+                .list_dependency_binding_history(target_model_id)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            library
+                .index()
+                .count_model_package_facts_cache_rows(target_model_id)
+                .unwrap(),
+            0
+        );
+        assert!(library
+            .index()
+            .is_link_excluded(target_model_id, "test-app")
+            .unwrap());
+
+        let converted_metadata = library.load_metadata(&converted_dir).unwrap().unwrap();
+        assert_eq!(
+            converted_metadata
+                .conversion_source
+                .as_ref()
+                .map(|source| source.source_model_id.as_str()),
+            Some(target_model_id)
+        );
     }
 
     #[tokio::test]

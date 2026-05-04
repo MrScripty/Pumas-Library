@@ -212,6 +212,19 @@ pub struct ForeignKeyViolation {
     pub fk_index: i64,
 }
 
+/// Summary of model-id references remapped while replacing an index model id.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelIdRemapSummary {
+    pub metadata_baseline_rows_copied: usize,
+    pub metadata_overlay_rows_remapped: usize,
+    pub metadata_history_rows_remapped: usize,
+    pub dependency_binding_rows_remapped: usize,
+    pub dependency_binding_history_rows_remapped: usize,
+    pub package_facts_cache_rows_invalidated: usize,
+    pub link_exclusion_rows_remapped: usize,
+}
+
 /// SQLite model index with FTS5 support.
 #[derive(Clone)]
 pub struct ModelIndex {
@@ -408,6 +421,173 @@ impl ModelIndex {
             )?;
         }
         Ok(changed)
+    }
+
+    /// Replace `old_id` with `record.id` while preserving durable references.
+    ///
+    /// Package-facts cache rows are deliberately invalidated because their JSON
+    /// payload embeds model references and is cheaper to regenerate than rewrite.
+    pub fn replace_model_id_preserving_references(
+        &self,
+        old_id: &str,
+        record: &ModelRecord,
+    ) -> Result<ModelIdRemapSummary> {
+        if old_id == record.id {
+            self.upsert(record)?;
+            return Ok(ModelIdRemapSummary::default());
+        }
+
+        let mut conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+        let tx = conn.transaction()?;
+
+        let old_exists = tx
+            .query_row(
+                "SELECT 1 FROM models WHERE id = ?1",
+                params![old_id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if !old_exists {
+            return Err(PumasError::ModelNotFound {
+                model_id: old_id.to_string(),
+            });
+        }
+
+        let target_exists = tx
+            .query_row(
+                "SELECT 1 FROM models WHERE id = ?1",
+                params![record.id],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some();
+        if target_exists {
+            return Err(PumasError::Validation {
+                field: "model_id".to_string(),
+                message: format!("target model id already exists: {}", record.id),
+            });
+        }
+
+        let tags_json = serde_json::to_string(&record.tags)?;
+        let hashes_json = serde_json::to_string(&record.hashes)?;
+        let metadata_json = serde_json::to_string_pretty(&record.metadata)?;
+
+        tx.execute(
+            "INSERT INTO models (id, path, cleaned_name, official_name, model_type,
+                                 tags_json, hashes_json, metadata_json, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                record.id,
+                record.path,
+                record.cleaned_name,
+                record.official_name,
+                record.model_type,
+                tags_json,
+                hashes_json,
+                metadata_json,
+                record.updated_at,
+            ],
+        )?;
+
+        let metadata_baseline_rows_copied = tx.execute(
+            "INSERT OR IGNORE INTO model_metadata_baselines (
+                model_id, schema_version, baseline_json, created_at, created_by
+             )
+             SELECT ?1, schema_version, baseline_json, created_at, created_by
+             FROM model_metadata_baselines
+             WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let metadata_overlay_rows_remapped = tx.execute(
+            "UPDATE model_metadata_overlays SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let metadata_history_rows_remapped = tx.execute(
+            "UPDATE model_metadata_history SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let dependency_binding_rows_remapped = tx.execute(
+            "UPDATE model_dependency_bindings SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let dependency_binding_history_rows_remapped = tx.execute(
+            "UPDATE dependency_binding_history SET model_id = ?1 WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let package_facts_cache_rows_invalidated = tx.execute(
+            "DELETE FROM model_package_facts_cache WHERE model_id = ?1",
+            params![old_id],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO model_link_exclusions (model_id, app_id, excluded_at)
+             SELECT ?1, app_id, excluded_at
+             FROM model_link_exclusions
+             WHERE model_id = ?2",
+            params![record.id, old_id],
+        )?;
+        let link_exclusion_rows_deleted = tx.execute(
+            "DELETE FROM model_link_exclusions WHERE model_id = ?1",
+            params![old_id],
+        )?;
+
+        tx.execute("DELETE FROM models WHERE id = ?1", params![old_id])?;
+
+        Self::append_model_library_update_event_with_conn(
+            &tx,
+            old_id,
+            ModelLibraryChangeKind::ModelRemoved,
+            ModelFactFamily::ModelRecord,
+            ModelLibraryRefreshScope::SummaryAndDetail,
+            None,
+            None,
+        )?;
+        Self::append_model_library_update_event_with_conn(
+            &tx,
+            &record.id,
+            ModelLibraryChangeKind::ModelAdded,
+            ModelFactFamily::ModelRecord,
+            ModelLibraryRefreshScope::SummaryAndDetail,
+            None,
+            Some(record.updated_at.clone()),
+        )?;
+        if dependency_binding_rows_remapped > 0 || dependency_binding_history_rows_remapped > 0 {
+            Self::append_model_library_update_event_with_conn(
+                &tx,
+                &record.id,
+                ModelLibraryChangeKind::DependencyBindingModified,
+                ModelFactFamily::DependencyBindings,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                Some(record.updated_at.clone()),
+            )?;
+        }
+        if package_facts_cache_rows_invalidated > 0 {
+            Self::append_model_library_update_event_with_conn(
+                &tx,
+                &record.id,
+                ModelLibraryChangeKind::PackageFactsModified,
+                ModelFactFamily::PackageFacts,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                Some(record.updated_at.clone()),
+            )?;
+        }
+
+        tx.commit()?;
+
+        Ok(ModelIdRemapSummary {
+            metadata_baseline_rows_copied,
+            metadata_overlay_rows_remapped,
+            metadata_history_rows_remapped,
+            dependency_binding_rows_remapped,
+            dependency_binding_history_rows_remapped,
+            package_facts_cache_rows_invalidated,
+            link_exclusion_rows_remapped: link_exclusion_rows_deleted,
+        })
     }
 
     /// Get a model by ID.

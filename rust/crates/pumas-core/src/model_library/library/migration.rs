@@ -506,16 +506,12 @@ impl ModelLibrary {
             .unwrap_or(0);
         let link_exclusion_count = self.index().count_model_link_exclusions(model_id)?;
 
-        let reference_remap_required =
-            active_dependency_binding_count > 0 || conversion_source_ref_count > 0;
         let block_reason = if target_dir.exists() && target_dir != model_dir {
             Some("target_path_exists".to_string())
         } else if !has_metadata && is_partial_download {
             Some("partial_download_without_metadata".to_string())
         } else if needs_split {
             Some("directory_contains_multiple_artifacts".to_string())
-        } else if target_dir != model_dir && reference_remap_required {
-            Some("model_id_references_require_remap".to_string())
         } else {
             None
         };
@@ -527,8 +523,6 @@ impl ModelLibrary {
             "blocked_partial_download"
         } else if target_dir.exists() {
             "blocked_collision"
-        } else if reference_remap_required {
-            "blocked_reference_remap"
         } else {
             "move"
         };
@@ -592,9 +586,6 @@ impl ModelLibrary {
         }
         if link_exclusion_count > 0 {
             findings.push("link_exclusions_require_model_id_remap".to_string());
-        }
-        if action == "blocked_reference_remap" {
-            findings.push("migration_move_blocked_until_reference_remap".to_string());
         }
         if action == "blocked_partial_download" {
             findings.push("partial_download_blocked_migration_move".to_string());
@@ -889,14 +880,32 @@ impl ModelLibrary {
             };
         }
 
-        let _ = self.index.delete(&planned.model_id);
-        if let Err(err) = self.index_model_dir(&target_dir).await {
+        let record = metadata_to_record(&planned.target_model_id, &target_dir, &metadata);
+        if let Err(err) = self
+            .index
+            .replace_model_id_preserving_references(&planned.model_id, &record)
+        {
             return MigrationExecutionItem {
                 model_id: planned.model_id.clone(),
                 target_model_id: planned.target_model_id.clone(),
                 action: "error".to_string(),
                 error: Some(format!(
-                    "Moved directory but failed to re-index model: {}",
+                    "Moved directory but failed to remap model index references: {}",
+                    err
+                )),
+            };
+        }
+
+        if let Err(err) = self
+            .rewrite_conversion_source_refs(&planned.model_id, &planned.target_model_id)
+            .await
+        {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Moved directory but failed to remap conversion source references: {}",
                     err
                 )),
             };
@@ -910,6 +919,28 @@ impl ModelLibrary {
             action: "moved".to_string(),
             error: None,
         }
+    }
+
+    async fn rewrite_conversion_source_refs(&self, old_id: &str, new_id: &str) -> Result<usize> {
+        let mut updated = 0;
+        for model_dir in self.model_dirs() {
+            let Some(mut metadata) = self.load_metadata(&model_dir)? else {
+                continue;
+            };
+            let Some(conversion_source) = metadata.conversion_source.as_mut() else {
+                continue;
+            };
+            if conversion_source.source_model_id != old_id {
+                continue;
+            }
+
+            conversion_source.source_model_id = new_id.to_string();
+            metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            self.save_metadata(&model_dir, &metadata).await?;
+            self.index_model_dir(&model_dir).await?;
+            updated += 1;
+        }
+        Ok(updated)
     }
 
     pub(super) fn validate_post_migration_integrity(

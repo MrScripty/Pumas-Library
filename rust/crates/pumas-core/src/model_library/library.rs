@@ -6527,6 +6527,7 @@ pub struct LibraryStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
     use std::io::Write;
     use tempfile::TempDir;
 
@@ -9315,6 +9316,59 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_advances_update_feed_for_move() {
+        let (_, library) = setup_library().await;
+        let source_model_id = "llm/llama/feed-move";
+        let target_model_id = "diffusion/llama/feed-move";
+        let source_dir = library.build_model_path("llm", "llama", "feed-move");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("model.safetensors"));
+        std::fs::write(
+            source_dir.join("config.json"),
+            r#"{"architectures":["UNet2DConditionModel"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some(source_model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("feed-move".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let baseline = library
+            .list_model_library_updates_since(None, 100)
+            .await
+            .unwrap()
+            .cursor;
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.error_count, 0, "{:?}", report.results);
+
+        let feed = library
+            .list_model_library_updates_since(Some(&baseline), 100)
+            .await
+            .unwrap();
+        assert_eq!(feed.events.len(), 2, "{:?}", feed.events);
+        assert!(feed.events.iter().any(|event| {
+            event.model_id == source_model_id
+                && event.change_kind == ModelLibraryChangeKind::ModelRemoved
+                && event.fact_family == ModelFactFamily::ModelRecord
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
+        assert!(feed.events.iter().any(|event| {
+            event.model_id == target_model_id
+                && event.change_kind == ModelLibraryChangeKind::ModelAdded
+                && event.fact_family == ModelFactFamily::ModelRecord
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
+    }
+
+    #[tokio::test]
     async fn test_execute_migration_with_checkpoint_resumes_existing_checkpoint() {
         let (temp_dir, library) = setup_library().await;
         let source_dir = library.build_model_path("llm", "llama", "resume-move");
@@ -9685,6 +9739,101 @@ mod tests {
             .get("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m")
             .unwrap()
             .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_advances_update_feed_for_split() {
+        let (_, library) = setup_library().await;
+        let source_model_id = "vlm/qwen35/feed-split";
+        let target_model_id = "vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m";
+        let source_dir = library.build_model_path("vlm", "qwen35", "feed-split");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q4_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some(source_model_id.to_string()),
+            family: Some("qwen35".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("feed-split".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let baseline = library
+            .list_model_library_updates_since(None, 100)
+            .await
+            .unwrap()
+            .cursor;
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.error_count, 0, "{:?}", report.results);
+
+        let feed = library
+            .list_model_library_updates_since(Some(&baseline), 100)
+            .await
+            .unwrap();
+        assert_eq!(feed.events.len(), 2, "{:?}", feed.events);
+        assert!(feed.events.iter().any(|event| {
+            event.model_id == source_model_id
+                && event.change_kind == ModelLibraryChangeKind::ModelRemoved
+                && event.fact_family == ModelFactFamily::ModelRecord
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
+        assert!(feed.events.iter().any(|event| {
+            event.model_id == target_model_id
+                && event.change_kind == ModelLibraryChangeKind::ModelAdded
+                && event.fact_family == ModelFactFamily::ModelRecord
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
+    }
+
+    #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_no_op_does_not_emit_update_events() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("llm", "llama", "feed-no-op");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+        std::fs::write(
+            model_dir.join("config.json"),
+            r#"{"architectures":["LlamaForCausalLM"]}"#,
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("llm/llama/feed-no-op".to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            cleaned_name: Some("feed-no-op".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let baseline = library
+            .list_model_library_updates_since(None, 100)
+            .await
+            .unwrap()
+            .cursor;
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.planned_move_count, 0);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.error_count, 0, "{:?}", report.results);
+
+        let feed = library
+            .list_model_library_updates_since(Some(&baseline), 100)
+            .await
+            .unwrap();
+        assert!(feed.events.is_empty(), "{:?}", feed.events);
+        assert_eq!(feed.cursor, baseline);
     }
 
     #[tokio::test]

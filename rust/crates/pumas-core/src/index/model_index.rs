@@ -996,11 +996,30 @@ impl ModelIndex {
             source: None,
         })?;
 
+        let removed_ids = {
+            let mut stmt = conn.prepare("SELECT id FROM models ORDER BY id ASC")?;
+            let rows = stmt
+                .query_map([], |row| row.get::<_, String>(0))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            rows
+        };
+
         // Delete from FTS5 table first, then models table.
         // This avoids "Execute returned results" error from FTS5 triggers since the
         // AFTER DELETE trigger will find nothing to delete from the FTS5 table.
         let fts_table = &self.fts5_config.table_name;
         conn.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
+        for model_id in removed_ids {
+            Self::append_model_library_update_event_with_conn(
+                &conn,
+                &model_id,
+                ModelLibraryChangeKind::ModelRemoved,
+                ModelFactFamily::ModelRecord,
+                ModelLibraryRefreshScope::SummaryAndDetail,
+                None,
+                None,
+            )?;
+        }
         debug!("Cleared model index");
         Ok(())
     }
@@ -1393,6 +1412,38 @@ mod tests {
         index.clear().unwrap();
 
         assert_eq!(index.count().unwrap(), 0);
+    }
+
+    #[test]
+    fn test_clear_appends_model_library_update_events() {
+        let (index, _temp) = create_test_index();
+
+        index
+            .upsert(&create_test_record("m1", "Model 1", "type"))
+            .unwrap();
+        index
+            .upsert(&create_test_record("m2", "Model 2", "type"))
+            .unwrap();
+        let cursor = index.current_model_library_update_cursor().unwrap();
+
+        index.clear().unwrap();
+
+        let feed = index
+            .list_model_library_updates_since(Some(&cursor), 100)
+            .unwrap();
+        assert_eq!(feed.events.len(), 2);
+        assert!(feed.events.iter().all(|event| {
+            event.change_kind == ModelLibraryChangeKind::ModelRemoved
+                && event.fact_family == ModelFactFamily::ModelRecord
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
+        assert_eq!(
+            feed.events
+                .iter()
+                .map(|event| event.model_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["m1", "m2"]
+        );
     }
 
     #[test]

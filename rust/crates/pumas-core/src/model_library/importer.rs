@@ -1265,7 +1265,7 @@ impl ModelImporter {
 
         // Guard: skip if metadata already exists (idempotent)
         if path_exists(&metadata_path).await? {
-            let model_id = self.library.get_model_id(model_dir);
+            let model_id = self.index_existing_metadata_if_missing(model_dir).await?;
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
                 success: true,
@@ -1579,7 +1579,7 @@ impl ModelImporter {
         // Concurrent import paths (download completion callback + reconciliation)
         // can race after the initial idempotency guard. Skip redundant rewrites.
         if path_exists(&metadata_path).await? {
-            let model_id = self.library.get_model_id(model_dir);
+            let model_id = self.index_existing_metadata_if_missing(model_dir).await?;
             return Ok(ModelImportResult {
                 path: model_dir.display().to_string(),
                 success: true,
@@ -1622,6 +1622,16 @@ impl ModelImporter {
             error: None,
             security_tier: Some(security_tier),
         })
+    }
+
+    async fn index_existing_metadata_if_missing(&self, model_dir: &Path) -> Result<Option<String>> {
+        let model_id = self.library.get_model_id(model_dir);
+        if let Some(id) = model_id.as_deref() {
+            if self.library.index().get(id)?.is_none() {
+                self.library.index_model_dir(model_dir).await?;
+            }
+        }
+        Ok(model_id)
     }
 
     /// Enumerate model files already present in a directory (no copy).
@@ -2453,6 +2463,69 @@ mod tests {
         );
         assert_eq!(persisted.match_source.as_deref(), Some("existing"));
         assert_eq!(persisted.pipeline_tag, None);
+    }
+
+    #[tokio::test]
+    async fn test_import_in_place_indexes_existing_metadata_when_sqlite_row_missing() {
+        let (_temp_dir, library) = setup().await;
+        let importer = ModelImporter::new(library.clone());
+
+        let model_dir = library.build_model_path("vision", "idea-research", "grounding-dino-base");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("detector.onnx"), b"not-a-real-model").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: library.get_model_id(&model_dir),
+            model_type: Some("vision".to_string()),
+            official_name: Some("existing-metadata".to_string()),
+            match_source: Some("existing".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+
+        let model_id = library.get_model_id(&model_dir).unwrap();
+        assert!(library.index().get(&model_id).unwrap().is_none());
+        let initial_cursor = library
+            .index()
+            .current_model_library_update_cursor()
+            .unwrap();
+
+        let spec = InPlaceImportSpec {
+            model_dir: model_dir.clone(),
+            official_name: "grounding-dino-base".to_string(),
+            family: "idea-research".to_string(),
+            model_type: Some("vision".to_string()),
+            repo_id: Some("IDEA-Research/grounding-dino-base".to_string()),
+            download_request: None,
+            known_sha256: None,
+            compute_hashes: false,
+            expected_files: Some(vec!["detector.onnx".to_string()]),
+            pipeline_tag: Some("zero-shot-object-detection".to_string()),
+            huggingface_evidence: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        let result = importer.import_in_place(&spec).await.unwrap();
+        assert!(result.success);
+        assert_eq!(result.model_id.as_deref(), Some(model_id.as_str()));
+
+        let indexed = library.index().get(&model_id).unwrap().unwrap();
+        assert_eq!(indexed.id, model_id);
+        assert_eq!(indexed.official_name, "existing-metadata");
+
+        let feed = library
+            .list_model_library_updates_since(Some(&initial_cursor), 10)
+            .await
+            .unwrap();
+        assert_eq!(feed.events.len(), 1);
+        assert_eq!(
+            feed.events[0].change_kind,
+            crate::models::ModelLibraryChangeKind::ModelAdded
+        );
+        assert_eq!(feed.events[0].model_id, indexed.id);
     }
 
     #[tokio::test]

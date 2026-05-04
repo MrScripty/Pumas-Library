@@ -245,11 +245,11 @@ Checked against the current codebase on 2026-05-04.
 durable update feed.
 
 **Tasks:**
-- [ ] Add flow-level tests proving migration move/split advances
+- [x] Add flow-level tests proving migration move/split advances
   `list_model_library_updates_since`.
-- [ ] Add a no-op migration test proving no unnecessary event is emitted.
-- [ ] Fix or explicitly block `deep_scan_rebuild` removal-only update gaps.
-- [ ] Fix or explicitly document `import_in_place` behavior when metadata
+- [x] Add a no-op migration test proving no unnecessary event is emitted.
+- [x] Fix or explicitly block `deep_scan_rebuild` removal-only update gaps.
+- [x] Fix or explicitly document `import_in_place` behavior when metadata
   exists but the SQLite row is missing.
 - [ ] Add tests for delete, metadata refetch, and reconciliation cursor
   advancement.
@@ -258,7 +258,9 @@ durable update feed.
 - Targeted Rust tests for update-feed producer paths.
 - Existing migration/reconciliation/import tests still pass.
 
-**Status:** In progress; audit completed, implementation not started.
+**Status:** In progress; audit completed, migration update-feed tests,
+`ModelIndex::clear` event coverage, and `import_in_place` missing-row repair
+implemented.
 
 ### Milestone 2: Backend Notification Contract
 
@@ -373,6 +375,18 @@ Update during implementation:
 - 2026-05-04: Audit found most producer paths already append events through
   `ModelIndex`, but `deep_scan_rebuild` and `import_in_place` have gap cases
   that need producer hardening or explicit contracts.
+- 2026-05-04: `ModelIndex::clear` now emits `ModelRemoved` update-feed events
+  for removed rows, covering `deep_scan_rebuild` removal-only state changes.
+- 2026-05-04: `import_in_place` now repairs an existing metadata-backed model
+  directory that is missing from SQLite by indexing it through `index_model_dir`.
+- 2026-05-04: Migration move, split, and no-op flows now have update-feed
+  regression tests.
+- 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
+  exposed an existing failure in
+  `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
+  current execution reports the partial split as skipped but no longer produces
+  the expected integrity error count. This should be resolved in a separate
+  migration-validation slice.
 
 ## Commit Cadence Notes
 
@@ -426,6 +440,12 @@ Update during implementation:
 - Initial plan document committed in `a02cd40`.
 - Read-only audits completed for producer coverage, frontend synchronization,
   and transport availability.
+- `ModelIndex::clear` removal events implemented and covered by targeted unit
+  test.
+- `import_in_place` missing SQLite row repair implemented and covered by
+  targeted unit test.
+- Migration move, split, and no-op update-feed behavior covered by targeted
+  flow tests.
 
 ### Deviations
 
@@ -436,12 +456,20 @@ Update during implementation:
 ### Follow-Ups
 
 - Remove any draft frontend poller edits before implementation resumes.
+- Resolve or update the partial-split migration validation expectation:
+  `test_execute_migration_with_checkpoint_skips_partial_split_directories`
+  currently fails on `report.error_count >= 1`.
 - Update module READMEs when stream delivery and subscription contracts are
   implemented.
 
 ### Verification Summary
 
-- Documentation-only plan update; implementation tests not run.
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_clear_appends_model_library_update_events`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_import_in_place_indexes_existing_metadata_when_sqlite_row_missing`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library update_feed`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library no_op_does_not_emit_update_events`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
+  failed; recorded as a follow-up migration-validation issue.
 
 ### Traceability Links
 

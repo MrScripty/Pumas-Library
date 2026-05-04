@@ -1239,7 +1239,12 @@ impl ModelLibrary {
                     .metadata
                     .get("match_source")
                     .and_then(Value::as_str)
-                    .is_some_and(|source| source == "download_partial");
+                    .is_some_and(|source| source == "download_partial")
+                    || record
+                        .metadata
+                        .get("download_incomplete")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
                 let metadata_path = self.library_root.join(&model_id).join(METADATA_FILENAME);
 
                 if is_partial_download {
@@ -1459,9 +1464,12 @@ fn artifact_directory_findings(
         .iter()
         .map(String::as_str)
         .collect::<HashSet<_>>();
+    let has_expected_partial_download = expected_files
+        .iter()
+        .any(|expected_file| model_dir.join(format!("{expected_file}.part")).is_file());
 
     for expected_file in expected_files {
-        if !model_dir.join(expected_file).is_file() {
+        if !has_expected_partial_download && !model_dir.join(expected_file).is_file() {
             findings.push("expected_artifact_file_missing".to_string());
         }
     }

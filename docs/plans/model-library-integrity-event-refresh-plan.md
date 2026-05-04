@@ -409,6 +409,12 @@ Update during implementation:
   metadata-backed artifact directories that also contain pending `.part`
   payloads. True partial rows remain exempt from artifact validation, while
   mixed complete directories now report integrity findings.
+- 2026-05-04: A real migration report showed four remaining
+  `expected_artifact_file_missing` findings for interrupted downloads with
+  expected payload files present as `.part`. Validation now treats expected-file
+  gaps as partial-download state when the expected artifact has a matching
+  `.part`, while still flagging unrelated `.part` files outside the expected
+  artifact.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -491,6 +497,9 @@ Update during implementation:
 - Partial split-directory migration validation now preserves the intended
   `skipped_split_partial_download` execution result while still surfacing mixed
   artifact integrity findings.
+- Interrupted expected-artifact downloads are now counted through projected
+  partial-download state instead of failing post-migration integrity validation
+  only because expected files are still incomplete.
 
 ### Deviations
 
@@ -525,6 +534,7 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_ignores_partial_download_rows`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_ignores_expected_files_for_incomplete_artifacts`
 
 ### Traceability Links
 

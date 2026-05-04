@@ -10068,6 +10068,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_validate_post_migration_integrity_ignores_expected_files_for_incomplete_artifacts(
+    ) {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("audio", "openmoss-team", "partial-sharded");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model-00001-of-00004.safetensors"));
+        std::fs::write(
+            model_dir.join("model-00002-of-00004.safetensors.part"),
+            b"partial",
+        )
+        .unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("audio/openmoss-team/partial-sharded".to_string()),
+            family: Some("openmoss-team".to_string()),
+            model_type: Some("audio".to_string()),
+            cleaned_name: Some("partial-sharded".to_string()),
+            match_source: Some("hf".to_string()),
+            expected_files: Some(vec![
+                "model-00001-of-00004.safetensors".to_string(),
+                "model-00002-of-00004.safetensors".to_string(),
+                "model-00003-of-00004.safetensors".to_string(),
+                "model-00004-of-00004.safetensors".to_string(),
+            ]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let integrity = library.validate_post_migration_integrity().unwrap();
+        assert_eq!(integrity.index_partial_download_count, 1);
+        assert!(integrity.errors.is_empty(), "{:?}", integrity.errors);
+    }
+
+    #[tokio::test]
     async fn test_validate_post_migration_integrity_flags_stale_index_rows() {
         let (_, library) = setup_library().await;
         let model_dir = library.build_model_path("llm", "test", "good-model");

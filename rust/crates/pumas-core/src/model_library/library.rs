@@ -29,9 +29,10 @@ use crate::model_library::types::{
     ModelType, SubmitModelReviewResult,
 };
 use crate::model_library::{
-    normalize_recommended_backend, normalize_review_reasons, normalize_task_signature,
-    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
-    LinkRegistry, ModelTypeResolution, TaskNormalizationStatus,
+    normalize_architecture_family, normalize_recommended_backend, normalize_review_reasons,
+    normalize_task_signature, push_review_reason, resolve_model_type_with_rules,
+    validate_metadata_v2_with_index, LinkRegistry, ModelTypeResolution, SelectedArtifactIdentity,
+    TaskNormalizationStatus,
 };
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
@@ -3396,6 +3397,10 @@ struct DownloadMarkerHints {
     model_type: Option<String>,
     pipeline_tag: Option<String>,
     huggingface_evidence: Option<HuggingFaceEvidence>,
+    selected_artifact_id: Option<String>,
+    selected_artifact_files: Option<Vec<String>>,
+    selected_artifact_quant: Option<String>,
+    upstream_revision: Option<String>,
 }
 
 fn apply_merge_patch_value(target: &mut Value, patch: &Value) {
@@ -4420,8 +4425,10 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     }
     output.push('\n');
     output.push_str("## Items\n\n");
-    output.push_str("| Model ID | Target Model ID | Action | Findings | Error |\n");
-    output.push_str("| --- | --- | --- | --- | --- |\n");
+    output.push_str(
+        "| Model ID | Target Model ID | Action | Artifact ID | Block Reason | Findings | Error |\n",
+    );
+    output.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
     for item in &report.items {
         let findings = if item.findings.is_empty() {
             String::new()
@@ -4430,9 +4437,11 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
         };
         let error = item.error.as_deref().unwrap_or("");
         let target = item.target_model_id.as_deref().unwrap_or("");
+        let artifact_id = item.selected_artifact_id.as_deref().unwrap_or("");
+        let block_reason = item.block_reason.as_deref().unwrap_or("");
         output.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` |\n",
-            item.model_id, target, item.action, findings, error
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            item.model_id, target, item.action, artifact_id, block_reason, findings, error
         ));
     }
 
@@ -4678,8 +4687,29 @@ fn load_download_marker_hints(model_dir: &Path) -> Option<DownloadMarkerHints> {
         .get("huggingface_evidence")
         .cloned()
         .and_then(|value| serde_json::from_value::<HuggingFaceEvidence>(value).ok());
+    let selected_artifact = object
+        .get("selected_artifact")
+        .cloned()
+        .and_then(|value| serde_json::from_value::<SelectedArtifactIdentity>(value).ok());
+    let selected_artifact_id = selected_artifact
+        .as_ref()
+        .map(|artifact| artifact.artifact_id.clone());
+    let selected_artifact_files = selected_artifact
+        .as_ref()
+        .map(|artifact| artifact.selected_filenames.clone())
+        .filter(|files| !files.is_empty());
+    let selected_artifact_quant = selected_artifact
+        .as_ref()
+        .and_then(|artifact| artifact.selected_quant.clone());
+    let upstream_revision = selected_artifact
+        .as_ref()
+        .map(|artifact| artifact.revision.clone());
 
-    if model_type.is_none() && pipeline_tag.is_none() && huggingface_evidence.is_none() {
+    if model_type.is_none()
+        && pipeline_tag.is_none()
+        && huggingface_evidence.is_none()
+        && selected_artifact_id.is_none()
+    {
         return None;
     }
 
@@ -4687,6 +4717,10 @@ fn load_download_marker_hints(model_dir: &Path) -> Option<DownloadMarkerHints> {
         model_type,
         pipeline_tag,
         huggingface_evidence,
+        selected_artifact_id,
+        selected_artifact_files,
+        selected_artifact_quant,
+        upstream_revision,
     })
 }
 
@@ -9045,6 +9079,9 @@ mod tests {
                     .build_model_path("diffusion", "llama", "resume-move")
                     .display()
                     .to_string(),
+                selected_artifact_id: None,
+                selected_artifact_files: vec![],
+                action_kind: Some("move".to_string()),
             }],
             completed_results: vec![],
         };
@@ -9161,6 +9198,99 @@ mod tests {
             row.resolver_source.as_deref(),
             Some("model-type-reranker-disambiguation-guard")
         );
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_reports_artifact_identity_target() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vlm", "qwen35", "legacy-qwen-artifact");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q4_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/qwen35/legacy-qwen-artifact".to_string()),
+            family: Some("qwen35".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("legacy-qwen-artifact".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q4_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q4_K_M.gguf".to_string()]),
+            selected_artifact_quant: Some("q4_k_m".to_string()),
+            upstream_revision: Some("main".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vlm/qwen35/legacy-qwen-artifact")
+            .unwrap();
+
+        assert_eq!(row.action, "move");
+        assert_eq!(row.current_family.as_deref(), Some("qwen35"));
+        assert_eq!(row.resolved_family.as_deref(), Some("qwen3_6"));
+        assert_eq!(
+            row.target_model_id.as_deref(),
+            Some("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q4_k_m")
+        );
+        assert_eq!(
+            row.selected_artifact_id.as_deref(),
+            Some("owner--qwen3_6-27b-gguf__q4_k_m")
+        );
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "legacy_compact_family_token"));
+    }
+
+    #[tokio::test]
+    async fn test_generate_migration_dry_run_reports_mixed_artifact_directory() {
+        let (_, library) = setup_library().await;
+        let model_dir =
+            library.build_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
+        std::fs::write(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part"), b"partial").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            family: Some("qwen3_6".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.generate_migration_dry_run_report().unwrap();
+        let row = report
+            .items
+            .iter()
+            .find(|item| item.model_id == "vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+            .unwrap();
+
+        assert_eq!(row.action, "split_artifact_directory");
+        assert_eq!(
+            row.block_reason.as_deref(),
+            Some("directory_contains_multiple_artifacts")
+        );
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "mixed_gguf_artifact_files"));
+        assert!(row
+            .findings
+            .iter()
+            .any(|finding| finding == "partial_file_outside_expected_artifact"));
     }
 
     #[tokio::test]

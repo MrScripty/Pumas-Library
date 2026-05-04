@@ -459,15 +459,15 @@ family without breaking existing metadata readers.
 before any filesystem mutation.
 
 **Tasks:**
-- [ ] Extend dry-run analysis to report legacy compact family tokens such as
+- [x] Extend dry-run analysis to report legacy compact family tokens such as
       `qwen35`.
-- [ ] Detect metadata records missing selected-artifact identity.
-- [ ] Detect directories containing files from multiple selected artifacts.
-- [ ] Detect completed artifact plus partial artifact mixtures.
+- [x] Detect metadata records missing selected-artifact identity.
+- [x] Detect directories containing files from multiple selected artifacts.
+- [x] Detect completed artifact plus partial artifact mixtures.
 - [ ] Add planned action kinds for `move_directory`,
       `split_artifact_directory`, `rewrite_metadata_only`,
       `blocked_collision`, and `skipped_active_download`.
-- [ ] Include old id, new id, selected artifact files, source path, target path,
+- [x] Include old id, new id, selected artifact files, source path, target path,
       and block reason in report artifacts.
 - [ ] Report dependency-binding, package-fact, conversion, and runtime
       descriptor references that need model-id remapping.
@@ -479,7 +479,7 @@ before any filesystem mutation.
 - Dry-run fixture verifies existing repo-id duplicate findings are not treated
   as fatal when selected-artifact ids differ.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 5: Checkpointed Migration Execution
 
@@ -569,6 +569,19 @@ Update during implementation:
   state but only renders one active artifact status on that repo row at a time.
   A later UI slice should surface per-artifact status/labels in the quant menu
   or an equivalent artifact-level affordance.
+- 2026-05-04: Implemented the migration dry-run artifact report slice. Dry-run
+  rows now expose current/resolved family, selected-artifact id/files/quant,
+  upstream revision, and block reason. Planning prefers persisted
+  `architecture_family`, uses selected-artifact identity as the target artifact
+  slug when present, flags legacy compact family tokens, detects missing
+  selected-artifact identity, and reports mixed GGUF/complete-plus-partial
+  artifact directories as `split_artifact_directory` without executing splits.
+- 2026-05-04: Migration planning issue recorded: directory names still pass
+  through existing `normalize_name` path normalization, so the exact
+  `selected_artifact_id` (`owner--repo__q4_k_m`) is preserved in metadata and
+  reports but its path slug is normalized (`owner_repo_q4_k_m`). This remains
+  collision-resistant for the current identity shape but should be reviewed
+  before any future code assumes byte-identical path slug and artifact id.
 
 ## Commit Cadence Notes
 
@@ -634,6 +647,7 @@ integrate one worker wave at a time.
 - Milestone 1 backend identity contract slice.
 - Milestone 2 persisted metadata/index projection slice is partially complete.
 - Milestone 3 frontend download-state keying slice is partially complete.
+- Milestone 4 migration dry-run artifact report slice is partially complete.
 
 ### Deviations
 
@@ -647,6 +661,9 @@ integrate one worker wave at a time.
   execution moves or splits partial downloads.
 - Add artifact-level labels/status in the remote model row or quant menu so
   simultaneous same-repo artifact downloads are visibly distinguished.
+- Decide whether artifact path slugs must preserve the exact
+  `selected_artifact_id` separators or whether normalized path-safe slugs remain
+  the intended storage contract.
 
 ### Verification Summary
 
@@ -661,6 +678,8 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `npm run -w frontend test:run -- src/hooks/useModelDownloads.test.ts src/hooks/useDownloadCompletionRefresh.test.ts src/components/ModelManagerRemoteDownload.test.ts src/hooks/useModelLibraryActions.test.ts src/components/ModelManagerUtils.test.ts src/components/RemoteModelsList.test.tsx src/components/RemoteModelListItem.test.tsx src/components/LocalModelDownloadActions.test.tsx src/components/LocalModelRowState.test.ts`
 - 2026-05-04: `npm run -w frontend check:types`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_artifact_identity_target`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
 
 ### Traceability Links
 

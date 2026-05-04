@@ -100,6 +100,13 @@ impl ModelLibrary {
                         resolver_source: None,
                         resolver_confidence: None,
                         resolver_review_reasons: vec![],
+                        current_family: None,
+                        resolved_family: None,
+                        selected_artifact_id: None,
+                        selected_artifact_files: vec![],
+                        selected_artifact_quant: None,
+                        upstream_revision: None,
+                        block_reason: Some(err.to_string()),
                         metadata_needs_review: false,
                         review_reasons: vec![],
                         license_status: None,
@@ -258,6 +265,13 @@ impl ModelLibrary {
                 resolver_source: None,
                 resolver_confidence: None,
                 resolver_review_reasons: vec![],
+                current_family: None,
+                resolved_family: None,
+                selected_artifact_id: None,
+                selected_artifact_files: vec![],
+                selected_artifact_quant: None,
+                upstream_revision: None,
+                block_reason: Some("model path does not exist on disk".to_string()),
                 metadata_needs_review: false,
                 review_reasons: vec![],
                 license_status: None,
@@ -270,11 +284,13 @@ impl ModelLibrary {
 
         let metadata = self.load_metadata(&model_dir)?;
         let metadata_json = &record.metadata;
+        let marker_hints = load_download_marker_hints(&model_dir);
         let current_type = Some(record.model_type.clone());
+        let current_path_family = model_id.split('/').nth(1).map(str::to_string);
         let current_family = metadata
             .as_ref()
             .and_then(|value| value.family.clone())
-            .or_else(|| model_id.split('/').nth(1).map(str::to_string))
+            .or_else(|| current_path_family.clone())
             .unwrap_or_else(|| "unknown".to_string());
         let cleaned_name = metadata
             .as_ref()
@@ -335,20 +351,90 @@ impl ModelLibrary {
         };
         let resolved_type = resolved.model_type.as_str().to_string();
 
-        let resolved_family = file_type_info
+        let selected_artifact_id = metadata
             .as_ref()
-            .and_then(|ti| ti.family.as_ref())
-            .map(|f| f.as_str().to_string())
-            .unwrap_or(current_family);
+            .and_then(|value| value.selected_artifact_id.clone())
+            .or_else(|| string_field(metadata_json, "selected_artifact_id"))
+            .or_else(|| {
+                marker_hints
+                    .as_ref()
+                    .and_then(|marker| marker.selected_artifact_id.clone())
+            });
+        let selected_artifact_files = metadata
+            .as_ref()
+            .and_then(|value| value.selected_artifact_files.clone())
+            .or_else(|| string_array_field(metadata_json, "selected_artifact_files"))
+            .or_else(|| {
+                marker_hints
+                    .as_ref()
+                    .and_then(|marker| marker.selected_artifact_files.clone())
+            })
+            .unwrap_or_default();
+        let selected_artifact_quant = metadata
+            .as_ref()
+            .and_then(|value| value.selected_artifact_quant.clone())
+            .or_else(|| string_field(metadata_json, "selected_artifact_quant"))
+            .or_else(|| {
+                marker_hints
+                    .as_ref()
+                    .and_then(|marker| marker.selected_artifact_quant.clone())
+            });
+        let upstream_revision = metadata
+            .as_ref()
+            .and_then(|value| value.upstream_revision.clone())
+            .or_else(|| string_field(metadata_json, "upstream_revision"))
+            .or_else(|| {
+                marker_hints
+                    .as_ref()
+                    .and_then(|marker| marker.upstream_revision.clone())
+            });
+        let explicit_architecture_family = metadata
+            .as_ref()
+            .and_then(|value| value.architecture_family.clone())
+            .or_else(|| string_field(metadata_json, "architecture_family"));
+        let resolved_family = explicit_architecture_family
+            .or_else(|| {
+                file_type_info
+                    .as_ref()
+                    .and_then(|ti| ti.family.as_ref())
+                    .map(|f| f.as_str().to_string())
+            })
+            .unwrap_or_else(|| current_family.clone());
+        let resolved_family = normalize_architecture_family(&resolved_family);
+        let target_cleaned_name = selected_artifact_id
+            .clone()
+            .unwrap_or_else(|| cleaned_name.clone());
 
-        let target_dir = self.build_model_path(&resolved_type, &resolved_family, &cleaned_name);
+        let target_dir =
+            self.build_model_path(&resolved_type, &resolved_family, &target_cleaned_name);
         let target_model_id = format!(
             "{}/{}/{}",
             normalize_name(&resolved_type),
             normalize_name(&resolved_family),
-            normalize_name(&cleaned_name)
+            normalize_name(&target_cleaned_name)
         );
-        let action = if target_dir == model_dir {
+        let expected_files = metadata
+            .as_ref()
+            .and_then(|value| value.expected_files.clone())
+            .or_else(|| string_array_field(metadata_json, "expected_files"))
+            .unwrap_or_default();
+        let artifact_findings =
+            artifact_directory_findings(&model_dir, &selected_artifact_files, &expected_files);
+        let needs_split = artifact_findings
+            .iter()
+            .any(|finding| finding == "mixed_gguf_artifact_files");
+        let block_reason = if target_dir.exists() && target_dir != model_dir {
+            Some("target_path_exists".to_string())
+        } else if !has_metadata && is_partial_download {
+            Some("partial_download_without_metadata".to_string())
+        } else if needs_split {
+            Some("directory_contains_multiple_artifacts".to_string())
+        } else {
+            None
+        };
+        let action = if needs_split {
+            "split_artifact_directory"
+        } else if target_dir == model_dir {
             "keep"
         } else if !has_metadata && is_partial_download {
             "blocked_partial_download"
@@ -392,6 +478,22 @@ impl ModelLibrary {
             .len();
 
         let mut findings = Vec::new();
+        findings.extend(artifact_findings);
+        if selected_artifact_id.is_none()
+            && (metadata
+                .as_ref()
+                .and_then(|value| value.repo_id.as_deref())
+                .or_else(|| metadata_json.get("repo_id").and_then(Value::as_str))
+                .is_some()
+                || marker_hints.is_some())
+        {
+            findings.push("selected_artifact_identity_missing".to_string());
+        }
+        if let Some(path_family) = current_path_family.as_deref() {
+            if normalize_architecture_family(path_family) != normalize_name(path_family) {
+                findings.push("legacy_compact_family_token".to_string());
+            }
+        }
         if metadata_needs_review {
             findings.push("metadata_needs_review".to_string());
         }
@@ -431,6 +533,13 @@ impl ModelLibrary {
             resolver_source: Some(resolved.source),
             resolver_confidence: Some(resolved.confidence),
             resolver_review_reasons: resolved.review_reasons,
+            current_family: Some(current_family),
+            resolved_family: Some(resolved_family),
+            selected_artifact_id,
+            selected_artifact_files,
+            selected_artifact_quant,
+            upstream_revision,
+            block_reason,
             metadata_needs_review,
             review_reasons,
             license_status: effective_license_status,
@@ -470,6 +579,9 @@ impl ModelLibrary {
                         target_model_id: item.target_model_id.clone()?,
                         current_path: item.current_path.clone(),
                         target_path: item.target_path.clone()?,
+                        selected_artifact_id: item.selected_artifact_id.clone(),
+                        selected_artifact_files: item.selected_artifact_files.clone(),
+                        action_kind: Some(item.action.clone()),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -806,6 +918,84 @@ impl ModelLibrary {
     }
 }
 
+fn string_field(metadata: &Value, key: &str) -> Option<String> {
+    metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn string_array_field(metadata: &Value, key: &str) -> Option<Vec<String>> {
+    let values = metadata
+        .get(key)?
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values)
+    }
+}
+
+fn artifact_directory_findings(
+    model_dir: &Path,
+    selected_artifact_files: &[String],
+    expected_files: &[String],
+) -> Vec<String> {
+    let mut findings = Vec::new();
+    let mut gguf_payloads = BTreeSet::new();
+    let expected = expected_files
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    for entry in WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let Ok(relative) = entry.path().strip_prefix(model_dir) else {
+            continue;
+        };
+        let relative = relative.to_string_lossy().replace('\\', "/");
+        let file_name = entry.file_name().to_string_lossy();
+        let normalized_payload = file_name.strip_suffix(".part").unwrap_or(&file_name);
+
+        if normalized_payload
+            .rsplit_once('.')
+            .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("gguf"))
+        {
+            gguf_payloads.insert(normalize_name(normalized_payload));
+        }
+
+        if relative.ends_with(".part") {
+            let completed_relative = relative.trim_end_matches(".part");
+            if !expected.is_empty() && !expected.contains(completed_relative) {
+                findings.push("partial_file_outside_expected_artifact".to_string());
+            }
+        }
+    }
+
+    if gguf_payloads.len() > 1 {
+        findings.push("mixed_gguf_artifact_files".to_string());
+    }
+    if !selected_artifact_files.is_empty() && gguf_payloads.len() > selected_artifact_files.len() {
+        findings.push("selected_artifact_files_do_not_cover_payloads".to_string());
+    }
+    findings.sort();
+    findings.dedup();
+    findings
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct PostMigrationIntegritySummary {
     pub(super) metadata_dir_count: usize,
@@ -845,6 +1035,20 @@ pub struct MigrationDryRunItem {
     pub resolver_source: Option<String>,
     pub resolver_confidence: Option<f64>,
     pub resolver_review_reasons: Vec<String>,
+    #[serde(default)]
+    pub current_family: Option<String>,
+    #[serde(default)]
+    pub resolved_family: Option<String>,
+    #[serde(default)]
+    pub selected_artifact_id: Option<String>,
+    #[serde(default)]
+    pub selected_artifact_files: Vec<String>,
+    #[serde(default)]
+    pub selected_artifact_quant: Option<String>,
+    #[serde(default)]
+    pub upstream_revision: Option<String>,
+    #[serde(default)]
+    pub block_reason: Option<String>,
     pub metadata_needs_review: bool,
     pub review_reasons: Vec<String>,
     pub license_status: Option<String>,
@@ -861,6 +1065,12 @@ pub struct MigrationPlannedMove {
     pub target_model_id: String,
     pub current_path: String,
     pub target_path: String,
+    #[serde(default)]
+    pub selected_artifact_id: Option<String>,
+    #[serde(default)]
+    pub selected_artifact_files: Vec<String>,
+    #[serde(default)]
+    pub action_kind: Option<String>,
 }
 
 /// Per-model migration execution result.

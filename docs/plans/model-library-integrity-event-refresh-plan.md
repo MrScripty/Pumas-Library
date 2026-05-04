@@ -252,7 +252,7 @@ durable update feed.
 - [x] Fix or explicitly document `import_in_place` behavior when metadata
   exists but the SQLite row is missing.
 - [x] Add a test for delete cursor advancement.
-- [ ] Add a test for metadata refetch cursor advancement.
+- [x] Add a test for metadata refetch cursor advancement.
 - [ ] Add a test for reconciliation cursor advancement.
 
 **Verification:**
@@ -260,8 +260,8 @@ durable update feed.
 - Existing migration/reconciliation/import tests still pass.
 
 **Status:** In progress; audit completed, migration update-feed tests, delete
-update-feed test, `ModelIndex::clear` event coverage, and `import_in_place`
-missing-row repair implemented.
+and metadata-refresh update-feed tests, `ModelIndex::clear` event coverage, and
+`import_in_place` missing-row repair implemented.
 
 ### Milestone 2: Backend Notification Contract
 
@@ -384,6 +384,8 @@ Update during implementation:
   regression tests.
 - 2026-05-04: `delete_model` now has an update-feed regression test proving it
   emits `ModelRemoved`.
+- 2026-05-04: `update_metadata_from_hf` now has an update-feed regression test
+  covering the metadata-refetch producer boundary.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -450,6 +452,7 @@ Update during implementation:
 - Migration move, split, and no-op update-feed behavior covered by targeted
   flow tests.
 - Delete update-feed behavior covered by targeted flow test.
+- Metadata refresh update-feed behavior covered by targeted flow test.
 
 ### Deviations
 
@@ -473,6 +476,7 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library no_op_does_not_emit_update_events`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_delete_model_advances_update_feed`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_update_metadata_from_hf_advances_update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.
 

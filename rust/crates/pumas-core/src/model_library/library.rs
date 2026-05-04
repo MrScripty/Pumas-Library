@@ -11609,6 +11609,77 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_update_metadata_from_hf_advances_update_feed() {
+        let (_tmp, library) = setup_library().await;
+        let model_id = "llm/llama/hf-refresh-feed";
+        let model_dir = library.build_model_path("llm", "llama", "hf-refresh-feed");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("model.safetensors"));
+
+        let metadata = ModelMetadata {
+            model_id: Some(model_id.to_string()),
+            family: Some("llama".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("before-refresh".to_string()),
+            cleaned_name: Some("hf-refresh-feed".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+        let cursor = library
+            .list_model_library_updates_since(None, 100)
+            .await
+            .unwrap()
+            .cursor;
+
+        let hf_metadata = crate::model_library::types::HfMetadataResult {
+            repo_id: "owner/hf-refresh-feed".to_string(),
+            official_name: Some("after-refresh".to_string()),
+            family: None,
+            model_type: None,
+            subtype: None,
+            variant: None,
+            precision: None,
+            tags: vec!["refreshed".to_string()],
+            base_model: None,
+            download_url: None,
+            release_date: None,
+            model_card_json: None,
+            license_status: Some("mit".to_string()),
+            description: None,
+            match_confidence: 1.0,
+            match_method: "repo_id".to_string(),
+            requires_confirmation: false,
+            hash_mismatch: false,
+            matched_filename: None,
+            pending_full_verification: false,
+            fast_hash: None,
+            expected_sha256: None,
+        };
+
+        library
+            .update_metadata_from_hf(model_id, &hf_metadata, true)
+            .await
+            .unwrap();
+
+        let feed = library
+            .list_model_library_updates_since(Some(&cursor), 100)
+            .await
+            .unwrap();
+        assert_eq!(feed.events.len(), 1);
+        assert_eq!(feed.events[0].model_id, model_id);
+        assert_eq!(
+            feed.events[0].change_kind,
+            ModelLibraryChangeKind::MetadataModified
+        );
+        assert_eq!(feed.events[0].fact_family, ModelFactFamily::ModelRecord);
+        assert_eq!(
+            feed.events[0].refresh_scope,
+            ModelLibraryRefreshScope::SummaryAndDetail
+        );
+    }
+
+    #[tokio::test]
     async fn test_total_size_sums_model_files() {
         let (_tmp, library) = setup_library().await;
         let first_dir = library.build_model_path("llm", "llama", "size-one");

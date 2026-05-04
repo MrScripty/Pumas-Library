@@ -17,16 +17,17 @@ interface RemoteModelActionProps {
   isHydratingDetails: boolean;
   isMenuOpen: boolean;
   model: RemoteModelInfo;
+  downloadKey: string;
   progressDegrees: number;
   selectedGroups: Set<string>;
   selectedTotalBytes: number;
-  onCancelDownload: (repoId: string) => Promise<void>;
+  onCancelDownload: (downloadKey: string) => Promise<void>;
   onClearSelection: () => void;
   onCloseMenu: () => void;
   onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onOpenUrl: (url: string) => void;
-  onPauseDownload: (repoId: string) => Promise<void>;
-  onResumeDownload: (repoId: string) => Promise<void>;
+  onPauseDownload: (downloadKey: string) => Promise<void>;
+  onResumeDownload: (downloadKey: string) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
   onToggleGroup: (label: string) => void;
   onToggleMenu: () => void;
@@ -58,6 +59,7 @@ function handlePrimaryDownloadClick({
   hasExactDetails,
   isMenuOpen,
   model,
+  downloadKey,
   onCancelDownload,
   onCloseMenu,
   onHydrateModelDetails,
@@ -70,6 +72,7 @@ function handlePrimaryDownloadClick({
   | 'hasExactDetails'
   | 'isMenuOpen'
   | 'model'
+  | 'downloadKey'
   | 'onCancelDownload'
   | 'onCloseMenu'
   | 'onHydrateModelDetails'
@@ -78,11 +81,11 @@ function handlePrimaryDownloadClick({
 >): void {
   if (flags.isDownloading) {
     onCloseMenu();
-    void onCancelDownload(model.repoId);
+    void onCancelDownload(downloadKey);
     return;
   }
   if (flags.isPaused || flags.isErrored) {
-    void onCancelDownload(model.repoId);
+    void onCancelDownload(downloadKey);
     return;
   }
   if (!hasExactDetails && onHydrateModelDetails) {
@@ -142,6 +145,7 @@ export function RemoteModelListItemActions({
   isHydratingDetails,
   isMenuOpen,
   model,
+  downloadKey,
   progressDegrees,
   selectedGroups,
   selectedTotalBytes,
@@ -165,7 +169,7 @@ export function RemoteModelListItemActions({
         <IconButton
           icon={<span className="text-[10px] font-bold">| |</span>}
           tooltip="Pause download"
-          onClick={() => void onPauseDownload(model.repoId)}
+          onClick={() => void onPauseDownload(downloadKey)}
           size="sm"
         />
       )}
@@ -173,7 +177,7 @@ export function RemoteModelListItemActions({
         <IconButton
           icon={<Download />}
           tooltip={flags.isPaused ? 'Resume download' : 'Retry download'}
-          onClick={() => void onResumeDownload(model.repoId)}
+          onClick={() => void onResumeDownload(downloadKey)}
           size="sm"
         />
       )}
@@ -188,6 +192,7 @@ export function RemoteModelListItemActions({
             hasExactDetails,
             isMenuOpen,
             model,
+            downloadKey,
             onCancelDownload,
             onCloseMenu,
             onHydrateModelDetails,

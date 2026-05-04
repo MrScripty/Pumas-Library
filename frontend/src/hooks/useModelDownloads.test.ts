@@ -58,6 +58,7 @@ describe('useModelDownloads', () => {
       downloads: [
         {
           repoId: 'repo-paused',
+          selectedArtifactId: 'repo-paused::Q4',
           downloadId: 'dl-paused',
           status: 'paused',
           progress: 42,
@@ -85,10 +86,13 @@ describe('useModelDownloads', () => {
     await flushMicrotasks();
 
     expect(listModelDownloadsMock).toHaveBeenCalledTimes(1);
-    expect(result.current.downloadStatusByRepo['repo-paused']).toEqual({
+    expect(result.current.downloadStatusByRepo['repo-paused::Q4']).toEqual({
       downloadId: 'dl-paused',
       status: 'paused',
       progress: 42,
+      repoId: 'repo-paused',
+      selectedArtifactId: 'repo-paused::Q4',
+      artifactId: undefined,
       downloadedBytes: undefined,
       totalBytes: undefined,
       speed: undefined,
@@ -104,6 +108,9 @@ describe('useModelDownloads', () => {
       downloadId: 'dl-error',
       status: 'error',
       progress: 90,
+      repoId: 'repo-error',
+      selectedArtifactId: undefined,
+      artifactId: undefined,
       downloadedBytes: undefined,
       totalBytes: undefined,
       speed: undefined,
@@ -132,6 +139,7 @@ describe('useModelDownloads', () => {
         downloads: [
           {
             repoId: 'repo-a',
+            artifactId: 'repo-a::Q4',
             downloadId: 'dl-1',
             status: 'downloading',
             progress: 55,
@@ -158,6 +166,9 @@ describe('useModelDownloads', () => {
       downloadId: 'dl-1',
       status: 'queued',
       progress: 0,
+      repoId: 'repo-a',
+      selectedArtifactId: undefined,
+      artifactId: undefined,
       modelName: 'Model A',
       modelType: 'checkpoint',
     });
@@ -168,11 +179,13 @@ describe('useModelDownloads', () => {
     });
 
     expect(listModelDownloadsMock).toHaveBeenCalledTimes(2);
-    expect(result.current.downloadStatusByRepo['repo-a']).toEqual(
+    expect(result.current.downloadStatusByRepo['repo-a::Q4']).toEqual(
       expect.objectContaining({
         downloadId: 'dl-1',
         status: 'downloading',
         progress: 55,
+        repoId: 'repo-a',
+        artifactId: 'repo-a::Q4',
         downloadedBytes: 550,
         totalBytes: 1000,
         speed: 32,
@@ -180,6 +193,69 @@ describe('useModelDownloads', () => {
       })
     );
     expect(result.current.hasActiveDownloads).toBe(true);
+  });
+
+  it('tracks same-repo artifact downloads independently and blocks duplicate same-artifact starts', async () => {
+    const { result } = renderHook(() => useModelDownloads());
+
+    await flushMicrotasks();
+
+    act(() => {
+      result.current.startDownload('org/model::Q4', 'dl-q4', {
+        repoId: 'org/model',
+        artifactId: 'org/model::Q4',
+        modelName: 'Model Q4',
+      });
+      result.current.startDownload('org/model::Q8', 'dl-q8', {
+        repoId: 'org/model',
+        selectedArtifactId: 'org/model::Q8',
+        modelName: 'Model Q8',
+      });
+    });
+
+    expect(result.current.downloadStatusByRepo['org/model::Q4']).toEqual({
+      downloadId: 'dl-q4',
+      status: 'queued',
+      progress: 0,
+      repoId: 'org/model',
+      selectedArtifactId: undefined,
+      artifactId: 'org/model::Q4',
+      modelName: 'Model Q4',
+      modelType: undefined,
+    });
+    expect(result.current.downloadStatusByRepo['org/model::Q8']).toEqual({
+      downloadId: 'dl-q8',
+      status: 'queued',
+      progress: 0,
+      repoId: 'org/model',
+      selectedArtifactId: 'org/model::Q8',
+      artifactId: undefined,
+      modelName: 'Model Q8',
+      modelType: undefined,
+    });
+
+    act(() => {
+      result.current.startDownload('org/model::Q4', 'dl-q4-duplicate', {
+        repoId: 'org/model',
+        artifactId: 'org/model::Q4',
+        modelName: 'Duplicate Q4',
+      });
+    });
+
+    expect(result.current.downloadStatusByRepo['org/model::Q4']).toEqual({
+      downloadId: 'dl-q4',
+      status: 'queued',
+      progress: 0,
+      repoId: 'org/model',
+      selectedArtifactId: undefined,
+      artifactId: 'org/model::Q4',
+      modelName: 'Model Q4',
+      modelType: undefined,
+    });
+    expect(Object.keys(result.current.downloadStatusByRepo).sort()).toEqual([
+      'org/model::Q4',
+      'org/model::Q8',
+    ]);
   });
 
   it('clears stale errors, protects active downloads from duplicate starts, and routes pause/cancel actions', async () => {
@@ -201,6 +277,9 @@ describe('useModelDownloads', () => {
       downloadId: 'dl-1',
       status: 'queued',
       progress: 0,
+      repoId: 'repo-a',
+      selectedArtifactId: undefined,
+      artifactId: undefined,
       modelName: 'Model A',
       modelType: undefined,
     });
@@ -215,6 +294,9 @@ describe('useModelDownloads', () => {
       downloadId: 'dl-1',
       status: 'queued',
       progress: 0,
+      repoId: 'repo-a',
+      selectedArtifactId: undefined,
+      artifactId: undefined,
       modelName: 'Model A',
       modelType: undefined,
     });

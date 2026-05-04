@@ -37,7 +37,10 @@ export interface ModelInfo {
   isDownloading?: boolean;
   downloadProgress?: number;
   downloadStatus?: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'error';
+  downloadKey?: string;
   downloadRepoId?: string;
+  downloadSelectedArtifactId?: string | null;
+  downloadArtifactId?: string | null;
   downloadTotalBytes?: number;
   wasDequantized?: boolean;
   convertedFrom?: string;
@@ -64,6 +67,8 @@ export interface RemoteModelInfo {
   quants: string[];
   downloadOptions?: Array<{
     quant: string;
+    selectedArtifactId?: string | null;
+    artifactId?: string | null;
     sizeBytes?: number | null;
     fileGroup?: {
       filenames: string[];

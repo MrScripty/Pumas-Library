@@ -10,8 +10,10 @@ import { api, isAPIAvailable } from '../api/adapter';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import {
+  getDownloadArtifactKey,
   selectDownloadsByRepo,
   type DownloadStatus,
+  type DownloadArtifactIdentity,
 } from './modelDownloadState';
 
 const logger = getLogger('useModelDownloads');
@@ -88,45 +90,54 @@ export function useModelDownloads() {
   }, []); // Empty deps -- interval is stable for component lifetime
 
   const startDownload = useCallback((
-    repoId: string,
+    downloadKey: string,
     downloadId: string,
-    details?: { modelName?: string; modelType?: string }
+    details?: { modelName?: string; modelType?: string } & DownloadArtifactIdentity
   ) => {
+    const artifactKey = getDownloadArtifactKey({
+      selectedArtifactId: details?.selectedArtifactId,
+      artifactId: details?.artifactId,
+      repoId: details?.repoId ?? downloadKey,
+    }) ?? downloadKey;
+
     setDownloadStatusByRepo((prev) => {
-      const existing = prev[repoId];
+      const existing = prev[artifactKey];
       if (existing && isActiveStatus(existing.status)) {
         return prev;
       }
       return {
         ...prev,
-        [repoId]: {
+        [artifactKey]: {
           downloadId,
           status: 'queued',
           progress: 0,
+          repoId: details?.repoId ?? downloadKey,
+          selectedArtifactId: details?.selectedArtifactId,
+          artifactId: details?.artifactId,
           modelName: details?.modelName,
           modelType: details?.modelType,
         },
       };
     });
     setDownloadErrors((prev) => {
-      if (!prev[repoId]) return prev;
+      if (!prev[artifactKey]) return prev;
       const next = { ...prev };
-      delete next[repoId];
+      delete next[artifactKey];
       return next;
     });
   }, []);
 
-  const cancelDownload = useCallback(async (repoId: string) => {
-    const status = downloadStatusRef.current[repoId];
+  const cancelDownload = useCallback(async (downloadKey: string) => {
+    const status = downloadStatusRef.current[downloadKey];
     if (!status || !isAPIAvailable()) return;
 
     setDownloadStatusByRepo((prev) => ({
       ...prev,
-      [repoId]: {
-        ...prev[repoId],
-        downloadId: prev[repoId]?.downloadId || status.downloadId,
+      [downloadKey]: {
+        ...prev[downloadKey],
+        downloadId: prev[downloadKey]?.downloadId || status.downloadId,
         status: 'cancelling' as const,
-        progress: prev[repoId]?.progress || 0,
+        progress: prev[downloadKey]?.progress || 0,
       },
     }));
 
@@ -134,23 +145,23 @@ export function useModelDownloads() {
       await api.cancel_model_download(status.downloadId);
     } catch (error) {
       if (error instanceof APIError) {
-        logger.error('API error cancelling download', { error: error.message, endpoint: error.endpoint, repoId });
+        logger.error('API error cancelling download', { error: error.message, endpoint: error.endpoint, downloadKey, repoId: status.repoId });
       } else if (error instanceof Error) {
-        logger.error('Unexpected error cancelling download', { error: error.message, repoId });
+        logger.error('Unexpected error cancelling download', { error: error.message, downloadKey, repoId: status.repoId });
       } else {
-        logger.error('Unknown error cancelling download', { error, repoId });
+        logger.error('Unknown error cancelling download', { error, downloadKey, repoId: status.repoId });
       }
     }
   }, []);
 
-  const pauseDownload = useCallback(async (repoId: string) => {
-    const status = downloadStatusRef.current[repoId];
+  const pauseDownload = useCallback(async (downloadKey: string) => {
+    const status = downloadStatusRef.current[downloadKey];
     if (!status || !isAPIAvailable()) return;
 
     setDownloadStatusByRepo((prev) => {
-      const existing = prev[repoId];
+      const existing = prev[downloadKey];
       if (!existing) return prev;
-      return { ...prev, [repoId]: { ...existing, status: 'pausing' as const } };
+      return { ...prev, [downloadKey]: { ...existing, status: 'pausing' as const } };
     });
 
     try {
@@ -158,24 +169,25 @@ export function useModelDownloads() {
     } catch (error) {
       logger.error('Failed to pause download', {
         error: error instanceof Error ? error.message : error,
-        repoId,
+        downloadKey,
+        repoId: status.repoId,
       });
     }
   }, []);
 
-  const resumeDownload = useCallback(async (repoId: string) => {
-    const status = downloadStatusRef.current[repoId];
+  const resumeDownload = useCallback(async (downloadKey: string) => {
+    const status = downloadStatusRef.current[downloadKey];
     if (!status || !isAPIAvailable()) return;
 
     setDownloadStatusByRepo((prev) => {
-      const existing = prev[repoId];
+      const existing = prev[downloadKey];
       if (!existing) return prev;
-      return { ...prev, [repoId]: { ...existing, status: 'queued' as const, speed: undefined, etaSeconds: undefined } };
+      return { ...prev, [downloadKey]: { ...existing, status: 'queued' as const, speed: undefined, etaSeconds: undefined } };
     });
     setDownloadErrors((prev) => {
-      if (!prev[repoId]) return prev;
+      if (!prev[downloadKey]) return prev;
       const next = { ...prev };
-      delete next[repoId];
+      delete next[downloadKey];
       return next;
     });
 
@@ -187,14 +199,15 @@ export function useModelDownloads() {
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Failed to resume download.';
       setDownloadStatusByRepo((prev) => {
-        const existing = prev[repoId];
+        const existing = prev[downloadKey];
         if (!existing) return prev;
-        return { ...prev, [repoId]: { ...existing, status: 'error' as const } };
+        return { ...prev, [downloadKey]: { ...existing, status: 'error' as const } };
       });
-      setDownloadErrors((prev) => ({ ...prev, [repoId]: message }));
+      setDownloadErrors((prev) => ({ ...prev, [downloadKey]: message }));
       logger.error('Failed to resume download', {
         error: message,
-        repoId,
+        downloadKey,
+        repoId: status.repoId,
       });
     }
   }, []);

@@ -28,6 +28,7 @@ function createModel(overrides: Partial<RemoteModelInfo> = {}): RemoteModelInfo 
 
 function renderItem(overrides: Partial<React.ComponentProps<typeof RemoteModelListItem>> = {}) {
   const props: React.ComponentProps<typeof RemoteModelListItem> = {
+    downloadKey: 'org/remote-model',
     isHydratingDetails: false,
     isMenuOpen: false,
     model: createModel(),
@@ -77,9 +78,12 @@ describe('RemoteModelListItem', () => {
 
   it('cancels active downloads from the primary download button', () => {
     const props = renderItem({
+      downloadKey: 'org/remote-model::Q4_K_M',
       downloadStatus: {
         downloadId: 'download-1',
         progress: 0.4,
+        repoId: 'org/remote-model',
+        artifactId: 'org/remote-model::Q4_K_M',
         status: 'downloading',
       },
     });
@@ -87,6 +91,6 @@ describe('RemoteModelListItem', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Cancel download' }));
 
     expect(props.onCloseMenu).toHaveBeenCalledTimes(1);
-    expect(props.onCancelDownload).toHaveBeenCalledWith('org/remote-model');
+    expect(props.onCancelDownload).toHaveBeenCalledWith('org/remote-model::Q4_K_M');
   });
 });

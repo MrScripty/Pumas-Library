@@ -2,6 +2,7 @@ import { api, isAPIAvailable } from '../api/adapter';
 import { APIError, NetworkError } from '../errors';
 import type { RemoteModelInfo } from '../types/apps';
 import { getLogger } from '../utils/logger';
+import { getDownloadArtifactKey, type DownloadArtifactIdentity } from '../hooks/modelDownloadState';
 import {
   isAuthRequiredError,
   resolveDownloadModelType,
@@ -14,9 +15,9 @@ type SetDownloadErrors = (
 ) => void;
 
 type StartDownload = (
-  repoId: string,
+  downloadKey: string,
   downloadId: string,
-  details?: { modelName?: string; modelType?: string }
+  details?: { modelName?: string; modelType?: string } & DownloadArtifactIdentity
 ) => void;
 
 interface RemoteDownloadApi {
@@ -71,11 +72,11 @@ function createRemoteDownloadRequest(
   };
 }
 
-function clearRepoDownloadError(repoId: string, setDownloadErrors: SetDownloadErrors): void {
+function clearDownloadError(downloadKey: string, setDownloadErrors: SetDownloadErrors): void {
   setDownloadErrors((prev) => {
-    if (!prev[repoId]) return prev;
+    if (!prev[downloadKey]) return prev;
     const next = { ...prev };
-    delete next[repoId];
+    delete next[downloadKey];
     return next;
   });
 }
@@ -148,7 +149,7 @@ export async function startRemoteModelDownload({
     filenames: request.filenames?.length,
   });
 
-  clearRepoDownloadError(request.repoId, setDownloadErrors);
+  clearDownloadError(request.repoId, setDownloadErrors);
 
   try {
     if (!isApiAvailable()) return;
@@ -172,8 +173,19 @@ export async function startRemoteModelDownload({
     loggerInstance.info('Remote download started successfully', {
       repoId: request.repoId,
       downloadId: result.download_id,
+      selectedArtifactId: result.selectedArtifactId,
+      artifactId: result.artifactId,
     });
-    startDownload(request.repoId, result.download_id, {
+    const downloadKey = getDownloadArtifactKey({
+      repoId: request.repoId,
+      selectedArtifactId: result.selectedArtifactId,
+      artifactId: result.artifactId,
+    }) ?? request.repoId;
+    clearDownloadError(downloadKey, setDownloadErrors);
+    startDownload(downloadKey, result.download_id, {
+      repoId: request.repoId,
+      selectedArtifactId: result.selectedArtifactId,
+      artifactId: result.artifactId,
       modelName: request.officialName,
       modelType: request.modelType,
     });

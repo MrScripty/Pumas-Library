@@ -63,7 +63,7 @@ function getDownloadCapabilities({
 }): DownloadCapabilities {
   const isQueued = model.downloadStatus === 'queued';
   const isPaused = model.downloadStatus === 'paused';
-  const hasDownloadRepo = Boolean(model.downloadRepoId);
+  const hasDownloadKey = Boolean(model.downloadKey ?? model.downloadRepoId);
   const hasRetainedProgressRing = !isDownloading && Boolean(model.isPartialDownload);
 
   return {
@@ -71,12 +71,12 @@ function getDownloadCapabilities({
       isDownloading &&
       (model.downloadStatus === 'downloading' || model.downloadStatus === 'queued') &&
       canPauseDownload &&
-      hasDownloadRepo,
+      hasDownloadKey,
     canResume:
       isDownloading &&
       (isPaused || model.downloadStatus === 'error') &&
       canResumeDownload &&
-      hasDownloadRepo,
+      hasDownloadKey,
     hasRetainedProgressRing,
     isActiveDownload: ['queued', 'downloading', 'pausing', 'cancelling'].includes(model.downloadStatus ?? ''),
     isPaused,

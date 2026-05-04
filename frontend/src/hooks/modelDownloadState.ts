@@ -2,6 +2,9 @@ export interface DownloadStatus {
   downloadId: string;
   status: 'queued' | 'downloading' | 'pausing' | 'paused' | 'cancelling' | 'completed' | 'cancelled' | 'error';
   progress: number;
+  repoId?: string;
+  selectedArtifactId?: string | null;
+  artifactId?: string | null;
   downloadedBytes?: number;
   totalBytes?: number;
   speed?: number;
@@ -33,6 +36,8 @@ interface RepoDownloadSelection {
 
 interface ModelDownloadStatusPayload {
   repoId?: string;
+  selectedArtifactId?: string | null;
+  artifactId?: string | null;
   downloadId?: string;
   status?: string;
   progress?: number;
@@ -50,7 +55,17 @@ interface ModelDownloadStatusPayload {
 }
 
 interface RepoDownloadCandidate extends RepoDownloadSelection {
-  repoId: string;
+  key: string;
+}
+
+export interface DownloadArtifactIdentity {
+  repoId?: string | null;
+  selectedArtifactId?: string | null;
+  artifactId?: string | null;
+}
+
+export function getDownloadArtifactKey(identity: DownloadArtifactIdentity): string | null {
+  return identity.selectedArtifactId ?? identity.artifactId ?? identity.repoId ?? null;
 }
 
 function isTrackedStatus(status: string): status is DownloadStatus['status'] {
@@ -82,18 +97,21 @@ function shouldReplaceSelection(current: DownloadStatus, candidate: DownloadStat
 function toRepoDownloadCandidate(
   download: ModelDownloadStatusPayload
 ): RepoDownloadCandidate | null {
-  const repoId = download.repoId;
+  const key = getDownloadArtifactKey(download);
   const status = download.status;
-  if (!repoId || !status || !isTrackedStatus(status) || !download.downloadId) {
+  if (!key || !status || !isTrackedStatus(status) || !download.downloadId) {
     return null;
   }
 
   return {
-    repoId,
+    key,
     status: {
       downloadId: download.downloadId,
       status,
       progress: typeof download.progress === 'number' ? download.progress : 0,
+      repoId: download.repoId,
+      selectedArtifactId: download.selectedArtifactId,
+      artifactId: download.artifactId,
       downloadedBytes: optionalNumber(download.downloadedBytes),
       totalBytes: optionalNumber(download.totalBytes),
       speed: optionalNumber(download.speed),
@@ -121,9 +139,9 @@ export function selectDownloadsByRepo(downloads: ModelDownloadStatusPayload[]): 
       continue;
     }
 
-    const current = selected[candidate.repoId]?.status;
+    const current = selected[candidate.key]?.status;
     if (!current || shouldReplaceSelection(current, candidate.status)) {
-      selected[candidate.repoId] = {
+      selected[candidate.key] = {
         status: candidate.status,
         error: candidate.error,
       };
@@ -132,10 +150,10 @@ export function selectDownloadsByRepo(downloads: ModelDownloadStatusPayload[]): 
 
   const statuses: Record<string, DownloadStatus> = {};
   const errors: Record<string, string> = {};
-  for (const [repoId, selectedDownload] of Object.entries(selected)) {
-    statuses[repoId] = selectedDownload.status;
+  for (const [key, selectedDownload] of Object.entries(selected)) {
+    statuses[key] = selectedDownload.status;
     if (selectedDownload.status.status === 'error' && selectedDownload.error) {
-      errors[repoId] = selectedDownload.error;
+      errors[key] = selectedDownload.error;
     }
   }
 

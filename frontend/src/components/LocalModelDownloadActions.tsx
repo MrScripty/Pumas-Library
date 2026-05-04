@@ -7,9 +7,9 @@ import type { LocalModelRowState } from './LocalModelRowState';
 interface LocalModelDownloadActionsProps {
   model: ModelInfo;
   rowState: LocalModelRowState;
-  onCancelDownload?: (repoId: string) => void;
-  onPauseDownload?: (repoId: string) => void;
-  onResumeDownload?: (repoId: string) => void;
+  onCancelDownload?: (downloadKey: string) => void;
+  onPauseDownload?: (downloadKey: string) => void;
+  onResumeDownload?: (downloadKey: string) => void;
 }
 
 function getDownloadActionTitle(model: ModelInfo, rowState: LocalModelRowState): string | undefined {
@@ -31,16 +31,16 @@ function handleDownloadAction({
   onPauseDownload,
   onResumeDownload,
 }: LocalModelDownloadActionsProps): void {
-  const repoId = model.downloadRepoId;
-  if (!repoId) {
+  const downloadKey = model.downloadKey ?? model.downloadRepoId;
+  if (!downloadKey) {
     return;
   }
   if (rowState.canPause && onPauseDownload) {
-    onPauseDownload(repoId);
+    onPauseDownload(downloadKey);
     return;
   }
   if (rowState.canResume && onResumeDownload) {
-    onResumeDownload(repoId);
+    onResumeDownload(downloadKey);
   }
 }
 
@@ -84,9 +84,9 @@ export function LocalModelDownloadActions({
         )}
         <DownloadActionIcon canPause={rowState.canPause} />
       </button>
-      {onCancelDownload && model.downloadRepoId && (
+      {onCancelDownload && (model.downloadKey ?? model.downloadRepoId) && (
         <HoldToDeleteButton
-          onDelete={() => onCancelDownload(model.downloadRepoId as string)}
+          onDelete={() => onCancelDownload((model.downloadKey ?? model.downloadRepoId) as string)}
           tooltip="Hold to remove download"
         />
       )}

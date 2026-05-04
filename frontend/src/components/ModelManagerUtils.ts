@@ -14,10 +14,11 @@ export function buildDownloadingModels(
     .filter(([, status]) =>
       ['queued', 'downloading', 'cancelling', 'pausing', 'paused', 'error'].includes(status.status)
     )
-    .map(([repoId, status]) => {
+    .map(([downloadKey, status]) => {
+      const repoId = status.repoId || downloadKey;
       const name = status.modelName || repoId.split('/').pop() || repoId;
       return {
-        id: `download:${repoId}`,
+        id: `download:${downloadKey}`,
         name,
         category: status.modelType || 'llm',
         path: repoId,
@@ -25,7 +26,10 @@ export function buildDownloadingModels(
         isDownloading: true,
         downloadProgress: status.progress,
         downloadStatus: status.status as ModelInfo['downloadStatus'],
+        downloadKey,
         downloadRepoId: repoId,
+        downloadSelectedArtifactId: status.selectedArtifactId,
+        downloadArtifactId: status.artifactId,
         downloadTotalBytes: status.totalBytes,
       } as ModelInfo;
     });

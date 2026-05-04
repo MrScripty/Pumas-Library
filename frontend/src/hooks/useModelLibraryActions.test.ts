@@ -267,6 +267,7 @@ describe('useModelLibraryActions', () => {
     });
 
     expect(startDownload).toHaveBeenCalledWith('org/model', 'dl-123', {
+      repoId: 'org/model',
       modelName: 'Org Model',
       modelType: 'llm',
     });
@@ -304,10 +305,11 @@ describe('useModelLibraryActions', () => {
       cancelDownload,
       onModelsImported,
       downloadStatusByRepo: {
-        'org/model': {
+        'org/model::Q4': {
           downloadId: 'dl-123',
           status: 'downloading',
           progress: 55,
+          repoId: 'org/model',
         },
         'other/repo': {
           downloadId: 'dl-999',
@@ -321,7 +323,7 @@ describe('useModelLibraryActions', () => {
       await result.current.handleDeleteModel('llm/org/model');
     });
 
-    expect(cancelDownload).toHaveBeenCalledWith('org/model');
+    expect(cancelDownload).toHaveBeenCalledWith('org/model::Q4');
     expect(deleteModelMock).toHaveBeenCalledWith('llm/org/model');
     expect(onModelsImported).toHaveBeenCalledTimes(1);
   });

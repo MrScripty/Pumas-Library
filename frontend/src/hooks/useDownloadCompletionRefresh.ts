@@ -23,32 +23,32 @@ export function useDownloadCompletionRefresh({
     const previousStatuses = previousDownloadStatusRef.current;
     let shouldRefresh = false;
 
-    for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
+    for (const [downloadKey, status] of Object.entries(downloadStatusByRepo)) {
       if (
         status.status === 'completed'
-        && previousStatuses[repoId]
-        && previousStatuses[repoId] !== 'completed'
+        && previousStatuses[downloadKey]
+        && previousStatuses[downloadKey] !== 'completed'
       ) {
         shouldRefresh = true;
-        logger.info('Download completed, will refresh model list', { repoId });
+        logger.info('Download completed, will refresh model list', { downloadKey, repoId: status.repoId });
       }
     }
 
-    for (const [repoId, previousStatus] of Object.entries(previousStatuses)) {
+    for (const [downloadKey, previousStatus] of Object.entries(previousStatuses)) {
       if (
-        !downloadStatusByRepo[repoId]
+        !downloadStatusByRepo[downloadKey]
         && REFRESH_ON_DISAPPEAR_STATUSES.has(previousStatus)
       ) {
         shouldRefresh = true;
         logger.info('Download left tracked state, will refresh model list', {
-          repoId,
+          downloadKey,
           previousStatus,
         });
       }
     }
 
     previousDownloadStatusRef.current = Object.fromEntries(
-      Object.entries(downloadStatusByRepo).map(([repoId, status]) => [repoId, status.status])
+      Object.entries(downloadStatusByRepo).map(([downloadKey, status]) => [downloadKey, status.status])
     );
 
     if (shouldRefresh) {

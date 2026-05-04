@@ -58,6 +58,8 @@ export interface HuggingFaceModel {
   quants: string[];
   downloadOptions?: Array<{
     quant: string;
+    selectedArtifactId?: string | null;
+    artifactId?: string | null;
     sizeBytes?: number | null;
   }>;
   url: string;

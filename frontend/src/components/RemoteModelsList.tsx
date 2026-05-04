@@ -22,14 +22,27 @@ interface RemoteModelsListProps {
   hydratingRepoIds: Set<string>;
   onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
-  onCancelDownload: (repoId: string) => Promise<void>;
-  onPauseDownload: (repoId: string) => Promise<void>;
-  onResumeDownload: (repoId: string) => Promise<void>;
+  onCancelDownload: (downloadKey: string) => Promise<void>;
+  onPauseDownload: (downloadKey: string) => Promise<void>;
+  onResumeDownload: (downloadKey: string) => Promise<void>;
   onOpenUrl: (url: string) => void;
   onSearchDeveloper?: (developer: string) => void;
   onClearFilters?: () => void;
   selectedKind: string;
   onHfAuthClick?: () => void;
+}
+
+function findDownloadForRepo(
+  downloadStatusByRepo: Record<string, DownloadStatus>,
+  repoId: string
+): [string, DownloadStatus] | null {
+  if (downloadStatusByRepo[repoId]) {
+    return [repoId, downloadStatusByRepo[repoId]];
+  }
+
+  return Object.entries(downloadStatusByRepo).find(
+    ([key, status]) => (status.repoId ?? key) === repoId
+  ) ?? null;
 }
 
 export function RemoteModelsList({
@@ -87,8 +100,10 @@ export function RemoteModelsList({
   return (
     <>
       {models.map((model) => {
-        const downloadStatus = downloadStatusByRepo[model.repoId];
-        const modelError = downloadErrors[model.repoId];
+        const repoDownload = findDownloadForRepo(downloadStatusByRepo, model.repoId);
+        const downloadKey = repoDownload?.[0] ?? model.repoId;
+        const downloadStatus = repoDownload?.[1];
+        const modelError = downloadErrors[downloadKey] ?? downloadErrors[model.repoId];
         const isHydratingDetails = hydratingRepoIds.has(model.repoId);
         const repoSelected = selectedGroups[model.repoId] ?? new Set<string>();
 
@@ -96,6 +111,7 @@ export function RemoteModelsList({
           <RemoteModelListItem
             key={model.repoId}
             model={model}
+            downloadKey={downloadKey}
             downloadStatus={downloadStatus}
             modelError={modelError}
             isHydratingDetails={isHydratingDetails}

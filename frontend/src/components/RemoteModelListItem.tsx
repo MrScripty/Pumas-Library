@@ -15,6 +15,7 @@ import { ListItem } from './ui';
 
 interface RemoteModelListItemProps {
   model: RemoteModelInfo;
+  downloadKey: string;
   downloadStatus?: DownloadStatus;
   modelError?: string;
   isHydratingDetails: boolean;
@@ -26,9 +27,9 @@ interface RemoteModelListItemProps {
   onClearSelection: () => void;
   onHydrateModelDetails?: (model: RemoteModelInfo) => Promise<void>;
   onStartDownload: (model: RemoteModelInfo, quant?: string | null, filenames?: string[] | null) => Promise<void>;
-  onCancelDownload: (repoId: string) => Promise<void>;
-  onPauseDownload: (repoId: string) => Promise<void>;
-  onResumeDownload: (repoId: string) => Promise<void>;
+  onCancelDownload: (downloadKey: string) => Promise<void>;
+  onPauseDownload: (downloadKey: string) => Promise<void>;
+  onResumeDownload: (downloadKey: string) => Promise<void>;
   onOpenUrl: (url: string) => void;
   onSearchDeveloper?: (developer: string) => void;
   onHfAuthClick?: () => void;
@@ -36,6 +37,7 @@ interface RemoteModelListItemProps {
 
 export function RemoteModelListItem({
   model,
+  downloadKey,
   downloadStatus,
   modelError,
   isHydratingDetails,
@@ -85,6 +87,7 @@ export function RemoteModelListItem({
           isHydratingDetails={isHydratingDetails}
           isMenuOpen={isMenuOpen}
           model={model}
+          downloadKey={downloadKey}
           progressDegrees={progressDegrees}
           selectedGroups={selectedGroups}
           selectedTotalBytes={selectedTotalBytes}

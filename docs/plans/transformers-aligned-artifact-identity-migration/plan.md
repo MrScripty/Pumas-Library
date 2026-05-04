@@ -429,14 +429,14 @@ family without breaking existing metadata readers.
 **Goal:** Prevent repository-level progress collisions in the GUI.
 
 **Tasks:**
-- [ ] Change frontend download status maps from repo-keyed state to
+- [x] Change frontend download status maps from repo-keyed state to
       selected-artifact-keyed state.
-- [ ] Keep an adapter or facade for existing repo-keyed props until
+- [x] Keep an adapter or facade for existing repo-keyed props until
       `RemoteModelsList`, local download overlays, delete-side cancellation,
       header status, and auth prompts are migrated.
-- [ ] Keep repository id available as display/search metadata, not as the
+- [x] Keep repository id available as display/search metadata, not as the
       uniqueness key for active progress.
-- [ ] Update active-download guards to block only the same selected artifact or
+- [x] Update active-download guards to block only the same selected artifact or
       same destination path.
 - [ ] Update UI labels to distinguish artifact selections when one repository
       has multiple downloadable variants.
@@ -451,7 +451,7 @@ family without breaking existing metadata readers.
 - Manual GUI check or screenshot during implementation if existing frontend
   standards require it for the touched flow.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 4: Migration Dry-Run Planning
 
@@ -559,6 +559,16 @@ Update during implementation:
   may need a migration/rebuild step before search-family projection uses
   `architecture_family`. New databases and explicit rebuilds use the new
   projection.
+- 2026-05-04: Integrated the frontend artifact-keyed download-state slice.
+  Download maps and pause/resume/cancel actions now key by
+  `selectedArtifactId ?? artifactId ?? repoId`, while `repoId` remains attached
+  to each status for display, delete-side cancellation, and compatibility
+  fallbacks.
+- 2026-05-04: Frontend display follow-up recorded: the remote search list is
+  still one row per repository, so it can track multiple same-repo artifacts in
+  state but only renders one active artifact status on that repo row at a time.
+  A later UI slice should surface per-artifact status/labels in the quant menu
+  or an equivalent artifact-level affordance.
 
 ## Commit Cadence Notes
 
@@ -623,6 +633,7 @@ integrate one worker wave at a time.
 
 - Milestone 1 backend identity contract slice.
 - Milestone 2 persisted metadata/index projection slice is partially complete.
+- Milestone 3 frontend download-state keying slice is partially complete.
 
 ### Deviations
 
@@ -634,6 +645,8 @@ integrate one worker wave at a time.
   databases pick up the `architecture_family` projection.
 - Complete `.pumas_download` selected-artifact recovery reads before migration
   execution moves or splits partial downloads.
+- Add artifact-level labels/status in the remote model row or quant menu so
+  simultaneous same-repo artifact downloads are visibly distinguished.
 
 ### Verification Summary
 
@@ -646,6 +659,8 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_upsert_download_metadata_stub_persists_hf_evidence`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_fts5_prefers_architecture_family_projection`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `npm run -w frontend test:run -- src/hooks/useModelDownloads.test.ts src/hooks/useDownloadCompletionRefresh.test.ts src/components/ModelManagerRemoteDownload.test.ts src/hooks/useModelLibraryActions.test.ts src/components/ModelManagerUtils.test.ts src/components/RemoteModelsList.test.tsx src/components/RemoteModelListItem.test.tsx src/components/LocalModelDownloadActions.test.tsx src/components/LocalModelRowState.test.ts`
+- 2026-05-04: `npm run -w frontend check:types`
 
 ### Traceability Links
 

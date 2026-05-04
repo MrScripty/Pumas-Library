@@ -37,13 +37,13 @@ function formatPartialResumeError(reasonCode?: string, fallback?: string): strin
 
 interface UseModelLibraryActionsOptions {
   downloadStatusByRepo: Record<string, DownloadStatus>;
-  cancelDownload: (repoId: string) => Promise<void> | void;
+  cancelDownload: (downloadKey: string) => Promise<void> | void;
   onModelsImported?: () => void;
   setDownloadErrors: Dispatch<SetStateAction<Record<string, string>>>;
   startDownload: (
-    repoId: string,
+    downloadKey: string,
     downloadId: string,
-    details?: { modelName?: string; modelType?: string }
+    details?: { modelName?: string; modelType?: string; repoId?: string }
   ) => void;
 }
 
@@ -208,6 +208,7 @@ export function useModelLibraryActions({
         downloadId: result.download_id,
       });
       startDownload(repoId, result.download_id, {
+        repoId,
         modelName: model.name,
         modelType: model.category,
       });
@@ -238,12 +239,13 @@ export function useModelLibraryActions({
 
   const handleDeleteModel = useCallback(async (modelId: string) => {
     try {
-      for (const [repoId, status] of Object.entries(downloadStatusByRepo)) {
+      for (const [downloadKey, status] of Object.entries(downloadStatusByRepo)) {
         if (['queued', 'downloading', 'pausing', 'paused', 'error'].includes(status.status)) {
           const modelSuffix = modelId.split('/').slice(1).join('/');
+          const repoId = status.repoId ?? downloadKey;
           if (repoId === modelSuffix || repoId.toLowerCase() === modelSuffix.toLowerCase()) {
-            logger.info('Cancelling active download before delete', { modelId, repoId });
-            await cancelDownload(repoId);
+            logger.info('Cancelling active download before delete', { modelId, repoId, downloadKey });
+            await cancelDownload(downloadKey);
           }
         }
       }

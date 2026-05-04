@@ -36,6 +36,7 @@ describe('startRemoteModelDownload', () => {
       start_model_download_from_hf: vi.fn().mockResolvedValue({
         success: true,
         download_id: 'download-1',
+        selectedArtifactId: 'org/model::Q4_K_M',
       }),
     };
     const startDownload = vi.fn();
@@ -64,7 +65,10 @@ describe('startRemoteModelDownload', () => {
       'Q4_K_M',
       ['model.gguf']
     );
-    expect(startDownload).toHaveBeenCalledWith('org/model', 'download-1', {
+    expect(startDownload).toHaveBeenCalledWith('org/model::Q4_K_M', 'download-1', {
+      repoId: 'org/model',
+      selectedArtifactId: 'org/model::Q4_K_M',
+      artifactId: undefined,
       modelName: 'Model',
       modelType: 'llm',
     });

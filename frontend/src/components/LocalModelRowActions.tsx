@@ -9,12 +9,12 @@ interface LocalModelRowActionsProps {
   model: ModelInfo;
   rowState: LocalModelRowState;
   selectedAppId: string | null;
-  onCancelDownload?: (repoId: string) => void;
+  onCancelDownload?: (downloadKey: string) => void;
   onConvertModel?: (modelId: string) => void;
   onDeleteModel?: (modelId: string) => void;
-  onPauseDownload?: (repoId: string) => void;
+  onPauseDownload?: (downloadKey: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
-  onResumeDownload?: (repoId: string) => void;
+  onResumeDownload?: (downloadKey: string) => void;
   onToggleLink: (modelId: string) => void;
   onToggleRelated: (modelId: string) => void;
 }

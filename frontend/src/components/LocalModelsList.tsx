@@ -28,9 +28,9 @@ interface LocalModelsListProps {
   expandedRelated: Set<string>;
   onToggleRelated: (modelId: string) => void;
   onOpenRelatedUrl: (url: string) => void;
-  onPauseDownload?: (repoId: string) => void;
-  onResumeDownload?: (repoId: string) => void;
-  onCancelDownload?: (repoId: string) => void;
+  onPauseDownload?: (downloadKey: string) => void;
+  onResumeDownload?: (downloadKey: string) => void;
+  onCancelDownload?: (downloadKey: string) => void;
   onRecoverPartialDownload?: (model: ModelInfo) => void;
   recoveringPartialRepoIds?: Set<string>;
   downloadErrors?: Record<string, string>;

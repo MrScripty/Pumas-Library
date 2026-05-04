@@ -1029,6 +1029,21 @@ impl ModelLibrary {
                             model_id, err
                         ));
                     }
+                    let selected_artifact_files =
+                        metadata.selected_artifact_files.clone().unwrap_or_default();
+                    let expected_files = metadata.expected_files.clone().unwrap_or_default();
+                    let artifact_findings = artifact_directory_findings(
+                        &model_dir,
+                        &selected_artifact_files,
+                        &expected_files,
+                    );
+                    if !artifact_findings.is_empty() {
+                        errors.push(format!(
+                            "artifact directory validation failed for {}: findings=[{}]",
+                            model_id,
+                            artifact_findings.join(",")
+                        ));
+                    }
                 }
                 Ok(None) => {
                     errors.push(format!("metadata missing for {}", model_id));

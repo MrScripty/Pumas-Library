@@ -744,6 +744,8 @@ impl ModelLibrary {
         report.index_stale_model_count = integrity.index_stale_model_count;
         report.referential_integrity_errors = integrity.errors;
         report.referential_integrity_ok = report.referential_integrity_errors.is_empty();
+        report.orphan_payload_dirs = collect_orphan_payload_dirs(&self.library_root);
+        report.orphan_payload_dir_count = report.orphan_payload_dirs.len();
         if !report.referential_integrity_ok {
             report.error_count += report.referential_integrity_errors.len();
         }
@@ -1496,6 +1498,54 @@ fn artifact_directory_findings(
     findings
 }
 
+fn collect_orphan_payload_dirs(library_root: &Path) -> Vec<String> {
+    let mut dirs = Vec::new();
+    for entry in WalkDir::new(library_root)
+        .min_depth(1)
+        .max_depth(3)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_dir())
+    {
+        let dir = entry.path();
+        let dir_name = dir.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        if dir_name.starts_with('.') || dir_name.starts_with(".tmp_import_") {
+            continue;
+        }
+        if dir.join(METADATA_FILENAME).exists() {
+            continue;
+        }
+
+        let entries: Vec<_> = match std::fs::read_dir(dir) {
+            Ok(reader) => reader.filter_map(|entry| entry.ok()).collect(),
+            Err(_) => continue,
+        };
+        if entries
+            .iter()
+            .any(|entry| entry.file_name().to_string_lossy().ends_with(".part"))
+        {
+            continue;
+        }
+
+        let has_payload = entries.iter().any(|entry| {
+            if !entry.file_type().ok().is_some_and(|kind| kind.is_file()) {
+                return false;
+            }
+            entry
+                .path()
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(|ext| MODEL_EXTENSIONS.contains(&ext.to_lowercase().as_str()))
+                .unwrap_or(false)
+        });
+        if has_payload {
+            dirs.push(dir.display().to_string());
+        }
+    }
+    dirs.sort();
+    dirs
+}
+
 #[derive(Debug, Clone, Default)]
 pub(super) struct PostMigrationIntegritySummary {
     pub(super) metadata_dir_count: usize,
@@ -1613,6 +1663,10 @@ pub struct MigrationExecutionReport {
     pub index_metadata_model_count: usize,
     pub index_partial_download_count: usize,
     pub index_stale_model_count: usize,
+    #[serde(default)]
+    pub orphan_payload_dir_count: usize,
+    #[serde(default)]
+    pub orphan_payload_dirs: Vec<String>,
     pub referential_integrity_ok: bool,
     pub referential_integrity_errors: Vec<String>,
     pub machine_readable_report_path: Option<String>,

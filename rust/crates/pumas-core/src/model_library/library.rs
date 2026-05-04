@@ -4550,6 +4550,10 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
         report.index_stale_model_count
     ));
     output.push_str(&format!(
+        "- Orphan Payload Directory Count: `{}`\n",
+        report.orphan_payload_dir_count
+    ));
+    output.push_str(&format!(
         "- Referential Integrity OK: `{}`\n",
         report.referential_integrity_ok
     ));
@@ -4579,6 +4583,13 @@ fn render_migration_execution_markdown(report: &MigrationExecutionReport) -> Str
         output.push_str("\n## Integrity Validation Errors\n\n");
         for error in &report.referential_integrity_errors {
             output.push_str(&format!("- `{}`\n", error));
+        }
+    }
+
+    if !report.orphan_payload_dirs.is_empty() {
+        output.push_str("\n## Orphan Payload Directories\n\n");
+        for path in &report.orphan_payload_dirs {
+            output.push_str(&format!("- `{}`\n", path));
         }
     }
 
@@ -9631,6 +9642,11 @@ mod tests {
         assert_eq!(report.planned_move_count, 1);
         assert_eq!(report.completed_move_count, 1);
         assert_eq!(report.skipped_move_count, 0);
+        assert_eq!(report.orphan_payload_dir_count, 1);
+        assert_eq!(
+            report.orphan_payload_dirs,
+            vec![source_dir.display().to_string()]
+        );
         assert_eq!(
             report.error_count, 0,
             "{:?}",

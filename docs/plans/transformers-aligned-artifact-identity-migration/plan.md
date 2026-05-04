@@ -670,10 +670,11 @@ Update during implementation:
   metadata JSON; `architecture_family` and selected-artifact identity are
   canonical, while `family` and repo-keyed frontend aliases remain compatibility
   projections.
-- 2026-05-04: Recorded a split-execution follow-up: when a mixed directory is
-  split, unrelated payload files are intentionally left behind without metadata
-  rather than deleted. A future cleanup/import flow can re-identify those
-  orphaned payloads if the user wants them listed.
+- 2026-05-04: Resolved the split-execution orphan handoff follow-up. Migration
+  execution reports now list metadata-free payload directories left behind
+  after safe split execution, giving the existing startup scan and
+  `adopt_orphan_models` API a concrete cleanup/import handoff without deleting
+  unrelated files.
 - 2026-05-04: Resolved the deployed-database FTS5 compatibility follow-up.
   Index setup now treats stale or incomplete trigger sets as a versioned unit:
   it drops the FTS5 synchronization triggers, recreates the current
@@ -755,8 +756,7 @@ integrate one worker wave at a time.
 
 ### Follow-Ups
 
-- Add a cleanup/import flow for non-selected payload files intentionally left
-  behind after safe split-directory execution.
+- None.
 
 ### Verification Summary
 
@@ -817,6 +817,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_split_directory`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/api/state_hf.rs rust/crates/pumas-core/src/model_library/artifact_identity.rs rust/crates/pumas-core/src/model_library/library.rs rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/mod.rs`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_splits_complete_artifact_directory`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library.rs rust/crates/pumas-core/src/model_library/library/migration.rs`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`

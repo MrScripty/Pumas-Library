@@ -292,6 +292,28 @@ pub struct ModelLibraryUpdateFeed {
     pub snapshot_required: bool,
 }
 
+/// Realtime notification that the durable model-library update feed advanced.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelLibraryUpdateNotification {
+    pub cursor: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<ModelLibraryUpdateEvent>,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+}
+
+impl From<ModelLibraryUpdateFeed> for ModelLibraryUpdateNotification {
+    fn from(feed: ModelLibraryUpdateFeed) -> Self {
+        Self {
+            cursor: feed.cursor,
+            events: feed.events,
+            stale_cursor: feed.stale_cursor,
+            snapshot_required: feed.snapshot_required,
+        }
+    }
+}
+
 /// Consumer-visible freshness/source state for a package-facts summary row.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -435,4 +457,54 @@ fn component_status(
         .map(|component| component.status)
         .find(|status| *status != PackageFactStatus::Uninspected)
         .unwrap_or(PackageFactStatus::Uninspected)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_library_update_notification_serializes_contract_shape() {
+        let notification = ModelLibraryUpdateNotification {
+            cursor: "model-library-updates:42".to_string(),
+            events: vec![ModelLibraryUpdateEvent {
+                cursor: "model-library-updates:42".to_string(),
+                model_id: "llm/llama/test".to_string(),
+                change_kind: ModelLibraryChangeKind::ModelAdded,
+                fact_family: ModelFactFamily::ModelRecord,
+                refresh_scope: ModelLibraryRefreshScope::SummaryAndDetail,
+                selected_artifact_id: Some("artifact".to_string()),
+                producer_revision: Some("2026-05-04T00:00:00Z".to_string()),
+            }],
+            stale_cursor: false,
+            snapshot_required: false,
+        };
+
+        let value = serde_json::to_value(&notification).unwrap();
+        assert_eq!(value["cursor"], "model-library-updates:42");
+        assert_eq!(value["stale_cursor"], false);
+        assert_eq!(value["snapshot_required"], false);
+        assert_eq!(value["events"][0]["change_kind"], "model_added");
+        assert_eq!(value["events"][0]["fact_family"], "model_record");
+        assert_eq!(value["events"][0]["refresh_scope"], "summary_and_detail");
+
+        let parsed: ModelLibraryUpdateNotification = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed, notification);
+    }
+
+    #[test]
+    fn model_library_update_notification_can_be_built_from_feed() {
+        let feed = ModelLibraryUpdateFeed {
+            cursor: "model-library-updates:7".to_string(),
+            events: Vec::new(),
+            stale_cursor: true,
+            snapshot_required: true,
+        };
+
+        let notification = ModelLibraryUpdateNotification::from(feed);
+        assert_eq!(notification.cursor, "model-library-updates:7");
+        assert!(notification.events.is_empty());
+        assert!(notification.stale_cursor);
+        assert!(notification.snapshot_required);
+    }
 }

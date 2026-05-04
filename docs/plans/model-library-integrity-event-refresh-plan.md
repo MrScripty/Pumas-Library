@@ -267,18 +267,18 @@ durable update feed.
 durable feed advancement without exposing UI decisions.
 
 **Tasks:**
-- [ ] Add a Rust DTO for model-library update notifications.
-- [ ] Include cursor and enough feed summary data for consumers to decide
+- [x] Add a Rust DTO for model-library update notifications.
+- [x] Include cursor and enough feed summary data for consumers to decide
   whether to refresh model summaries.
-- [ ] Preserve `list_model_library_updates_since` as the durable recovery API.
-- [ ] Add TypeScript DTO/validator for the Electron/preload boundary.
+- [x] Preserve `list_model_library_updates_since` as the durable recovery API.
+- [x] Add TypeScript DTO/validator for the Electron/preload boundary.
 
 **Verification:**
 - Rust serialization tests.
 - TypeScript validator tests.
 - Contract fixture or snapshot if existing test patterns support it.
 
-**Status:** Not started.
+**Status:** Complete.
 
 ### Milestone 3: Backend-Pushed Delivery
 
@@ -386,6 +386,9 @@ Update during implementation:
   covering the metadata-refetch producer boundary.
 - 2026-05-04: Public `list_models` on-demand reconciliation now has an
   update-feed regression test.
+- 2026-05-04: Added append-only Rust and TypeScript
+  `ModelLibraryUpdateNotification` contracts with runtime validation for the
+  future Electron/preload subscription boundary.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -454,6 +457,7 @@ Update during implementation:
 - Delete update-feed behavior covered by targeted flow test.
 - Metadata refresh update-feed behavior covered by targeted flow test.
 - Reconciliation update-feed behavior covered by targeted API flow test.
+- Backend notification DTO and frontend validator implemented and tested.
 
 ### Deviations
 
@@ -479,6 +483,9 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_delete_model_advances_update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_update_metadata_from_hf_advances_update_feed`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_reconciliation_advances_update_feed`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update_notification`
+- `npm run -w frontend test:run -- api-package-facts.test.ts`
+- `npm run -w frontend check:types`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
   failed; recorded as a follow-up migration-validation issue.
 

@@ -338,19 +338,19 @@ shape from generic repository, architecture, and artifact-selection evidence.
 implementation adds logic to oversized files.
 
 **Tasks:**
-- [ ] Record the final selected-artifact DTO fields and wire casing for Rust
+- [x] Record the final selected-artifact DTO fields and wire casing for Rust
       serde, RPC JSON, TypeScript, UniFFI, Rustler, and persisted JSON.
-- [ ] Decide which fields are canonical, compatibility-only, and deprecated
+- [x] Decide which fields are canonical, compatibility-only, and deprecated
       candidates:
   - canonical: `architecture_family`, selected-artifact identity fields
   - compatibility: `family`, repo-keyed frontend aliases during transition
   - deprecated candidate: repo-only download progress keying
-- [ ] Add a decomposition review note for the oversized backend files and
+- [x] Add a decomposition review note for the oversized backend files and
       assign new logic to focused modules instead of expanding those files.
-- [ ] Add a frontend rename/compatibility strategy so repo-keyed props can be
+- [x] Add a frontend rename/compatibility strategy so repo-keyed props can be
       migrated without breaking every model-manager caller in one uncontrolled
       edit.
-- [ ] Update or queue README/contract documentation for `model_library/hf`,
+- [x] Update or queue README/contract documentation for `model_library/hf`,
       `model_library/library`, `api`, `pumas-rpc`, frontend `hooks`, frontend
       `components`, and native bindings.
 
@@ -363,7 +363,7 @@ implementation adds logic to oversized files.
 - File-boundary review confirms the first code slice has a focused write set
   and does not grow oversized modules unnecessarily.
 
-**Status:** In progress
+**Status:** Complete on 2026-05-04
 
 ### Milestone 1: Identity Contract Vertical Slice
 
@@ -482,8 +482,9 @@ before any filesystem mutation.
       Current descriptors are resolved on demand from the model id and package
       facts instead of persisted as durable rows, so no separate descriptor
       remap store was found in this slice.
-- [x] Block ordinary move actions when authoritative model-id references exist
-      and the migration remap implementation is not yet available.
+- [x] Add a guardrail for ordinary move actions when authoritative model-id
+      references exist, then replace that guardrail with transactional remap
+      execution once the remap implementation is available.
 
 **Verification:**
 - Migration dry-run fixture for the reported Q4/Q5 mixed directory shape.
@@ -492,7 +493,7 @@ before any filesystem mutation.
 - Dry-run fixture verifies existing repo-id duplicate findings are not treated
   as fatal when selected-artifact ids differ.
 
-**Status:** In progress
+**Status:** Complete on 2026-05-04
 
 ### Milestone 5: Checkpointed Migration Execution
 
@@ -664,6 +665,16 @@ Update during implementation:
   now display active selected-artifact labels for same-repository downloads, so
   simultaneous variants such as Q4 and Q5 are visible instead of collapsing into
   one repo-level status indicator.
+- 2026-05-04: Finalized the standards/contract guardrail bookkeeping. The
+  selected-artifact fields are documented as append-only across Rust serde/RPC,
+  TypeScript, UniFFI/Rustler/native binding contracts, `.pumas_download`, and
+  metadata JSON; `architecture_family` and selected-artifact identity are
+  canonical, while `family` and repo-keyed frontend aliases remain compatibility
+  projections.
+- 2026-05-04: Recorded a split-execution follow-up: when a mixed directory is
+  split, unrelated payload files are intentionally left behind without metadata
+  rather than deleted. A future cleanup/import flow can re-identify those
+  orphaned payloads if the user wants them listed.
 
 ## Commit Cadence Notes
 
@@ -726,11 +737,12 @@ integrate one worker wave at a time.
 
 ### Completed
 
+- Milestone 0 standards and contract guardrails.
 - Milestone 1 backend identity contract slice.
-- Milestone 2 persisted metadata/index projection slice is partially complete.
-- Milestone 3 frontend download-state keying slice is partially complete.
-- Milestone 4 migration dry-run artifact report slice is partially complete.
-- Milestone 5 checkpointed ordinary-move execution slice is partially complete.
+- Milestone 2 persisted metadata/index projection slice.
+- Milestone 3 frontend download-state keying and artifact-label slice.
+- Milestone 4 migration dry-run artifact report slice.
+- Milestone 5 checkpointed ordinary-move and split-directory execution slice.
 - Milestone 6 documentation and compatibility cleanup slice.
 
 ### Deviations
@@ -741,17 +753,11 @@ integrate one worker wave at a time.
 
 - Add a migration/rebuild step for existing FTS5 triggers so deployed
   databases pick up the `architecture_family` projection.
-- Complete `.pumas_download` selected-artifact recovery reads before migration
-  execution moves or splits partial downloads.
-- Add artifact-level labels/status in the remote model row or quant menu so
-  simultaneous same-repo artifact downloads are visibly distinguished.
 - Decide whether artifact path slugs must preserve the exact
   `selected_artifact_id` separators or whether normalized path-safe slugs remain
   the intended storage contract.
-- Extend the transactional model-id remap to split-directory actions after
-  split execution exists.
-- Add split-directory execution and apply the same remap/validation guarantees
-  to split actions.
+- Add a cleanup/import flow for non-selected payload files intentionally left
+  behind after safe split-directory execution.
 
 ### Verification Summary
 

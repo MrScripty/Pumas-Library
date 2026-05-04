@@ -502,9 +502,9 @@ with resumable checkpoints.
 **Tasks:**
 - [x] Extend checkpoint state to represent split-directory actions without
       losing completed-result tracking.
-- [ ] Implement safe split behavior that copies or moves only files belonging
+- [x] Implement safe split behavior that copies or moves only files belonging
       to each selected artifact into the correct target directory.
-- [ ] Preserve sidecars and metadata by regenerating or rewriting them per
+- [x] Preserve sidecars and metadata by regenerating or rewriting them per
       target artifact.
 - [x] Block or skip active partial downloads unless the action can safely
       relocate the partial and sidecar together.
@@ -516,7 +516,7 @@ with resumable checkpoints.
 - [x] Confirm execution descriptors do not have a separate durable remap store
       in the current codebase; they are resolved on demand from the moved model
       id and regenerated package facts.
-- [ ] Remap model-id references for split-directory migration actions once
+- [x] Remap model-id references for split-directory migration actions once
       split execution exists.
 - [x] Add post-migration validation for mixed artifact directories.
 - [x] Add post-migration validation for duplicate selected-artifact ids,
@@ -653,6 +653,13 @@ Update during implementation:
   directories with partial download artifacts are skipped with
   `skipped_split_partial_download` instead of silently disappearing from
   execution reports.
+- 2026-05-04: Implemented safe complete-artifact split execution. For split
+  rows with known selected files, no partial artifacts, and a distinct target
+  path, checkpoint execution moves only the selected artifact files to the
+  target directory, rewrites target metadata and sidecar state, remaps model-id
+  references through the same transactional path used by ordinary moves, and
+  leaves unrelated payload files behind without metadata instead of deleting
+  them.
 
 ## Commit Cadence Notes
 
@@ -781,6 +788,10 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_reports_skipped_partial_downloads`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - 2026-05-04: `git diff --check -- docs/plans/transformers-aligned-artifact-identity-migration/plan.md rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_splits_complete_artifact_directory`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_skips_partial_split_directories`
+- 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- 2026-05-04: `git diff --check -- rust/crates/pumas-core/src/model_library/library/migration.rs rust/crates/pumas-core/src/model_library/library.rs`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_identity_layout_drift`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - 2026-05-04: `cargo check --manifest-path rust/Cargo.toml -p pumas-library`

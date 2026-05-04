@@ -9575,6 +9575,73 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_splits_complete_artifact_directory() {
+        let (_, library) = setup_library().await;
+        let source_dir = library.build_model_path("vlm", "qwen35", "legacy-mixed-repo");
+        std::fs::create_dir_all(&source_dir).unwrap();
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
+        write_min_safetensors(&source_dir.join("Qwen3.6-27B-Q4_K_M.gguf"));
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/qwen35/legacy-mixed-repo".to_string()),
+            family: Some("qwen35".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("legacy-mixed-repo".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&source_dir, &metadata).await.unwrap();
+        library.index_model_dir(&source_dir).await.unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 1);
+        assert_eq!(report.skipped_move_count, 0);
+        assert_eq!(
+            report.error_count, 0,
+            "{:?}",
+            report.referential_integrity_errors
+        );
+        assert!(report.referential_integrity_ok);
+        assert!(report
+            .results
+            .iter()
+            .any(|row| row.action == "split_directory"));
+
+        let target_dir =
+            library.build_model_path("vlm", "qwen3_6", "owner_qwen3_6-27b-gguf_q5_k_m");
+        assert!(target_dir.join("Qwen3.6-27B-Q5_K_M.gguf").is_file());
+        assert!(target_dir.join(METADATA_FILENAME).is_file());
+        assert!(!source_dir.join(METADATA_FILENAME).exists());
+        assert!(!source_dir.join("Qwen3.6-27B-Q5_K_M.gguf").exists());
+        assert!(source_dir.join("Qwen3.6-27B-Q4_K_M.gguf").is_file());
+
+        let target_metadata = library.load_metadata(&target_dir).unwrap().unwrap();
+        assert_eq!(
+            target_metadata.model_id.as_deref(),
+            Some("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+        );
+        assert_eq!(
+            target_metadata.selected_artifact_files.as_deref(),
+            Some(&["Qwen3.6-27B-Q5_K_M.gguf".to_string()][..])
+        );
+        assert!(library
+            .index()
+            .get("vlm/qwen35/legacy-mixed-repo")
+            .unwrap()
+            .is_none());
+        assert!(library
+            .index()
+            .get("vlm/qwen3_6/owner_qwen3_6-27b-gguf_q5_k_m")
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
     async fn test_generate_migration_dry_run_keeps_metadata_backed_image_turbo_diffusion() {
         let (_, library) = setup_library().await;
         let model_dir =

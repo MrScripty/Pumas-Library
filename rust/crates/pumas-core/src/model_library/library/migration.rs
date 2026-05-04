@@ -709,7 +709,9 @@ impl ModelLibrary {
         report.results = checkpoint_state.completed_results.clone();
         for item in &report.results {
             match item.action.as_str() {
-                "moved" | "already_migrated" => report.completed_move_count += 1,
+                "moved" | "already_migrated" | "split_directory" => {
+                    report.completed_move_count += 1
+                }
                 "blocked_collision"
                 | "missing_source"
                 | "skipped_partial_download"
@@ -966,15 +968,204 @@ impl ModelLibrary {
             };
         }
 
+        if source_dir == target_dir {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "skipped_split_directory".to_string(),
+                error: Some("split target path is the same as the source path".to_string()),
+            };
+        }
+
+        if path_exists(&target_dir).await.unwrap_or(false) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "blocked_collision".to_string(),
+                error: Some(format!(
+                    "Split target already exists: {}",
+                    target_dir.display()
+                )),
+            };
+        }
+
+        if planned.selected_artifact_files.is_empty() {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "skipped_split_directory".to_string(),
+                error: Some("split directory has no selected artifact files".to_string()),
+            };
+        }
+
+        let mut selected_paths = Vec::new();
+        for selected_file in &planned.selected_artifact_files {
+            let Some(relative_path) = safe_relative_artifact_path(selected_file) else {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(format!(
+                        "selected artifact file is not a safe relative path: {}",
+                        selected_file
+                    )),
+                };
+            };
+            let source_file = source_dir.join(&relative_path);
+            if !source_file.is_file() {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(format!(
+                        "selected artifact file missing from split source: {}",
+                        source_file.display()
+                    )),
+                };
+            }
+            selected_paths.push(relative_path);
+        }
+
+        let mut metadata = match self.load_metadata(&source_dir) {
+            Ok(Some(metadata)) => metadata,
+            Ok(None) => {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some("metadata.json missing from split source directory".to_string()),
+                };
+            }
+            Err(err) => {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(err.to_string()),
+                };
+            }
+        };
+        metadata.model_id = Some(planned.target_model_id.clone());
+        apply_target_identity_to_metadata(&mut metadata, &planned.target_model_id);
+        if let Some(selected_artifact_id) = planned.selected_artifact_id.clone() {
+            metadata.selected_artifact_id = Some(selected_artifact_id);
+        }
+        metadata.selected_artifact_files = Some(planned.selected_artifact_files.clone());
+        metadata.expected_files = Some(planned.selected_artifact_files.clone());
+        metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+
+        if let Err(err) = validate_metadata_v2_with_index(&metadata, self.index()) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(err.to_string()),
+            };
+        }
+
+        if let Err(err) = fs::create_dir_all(&target_dir).await {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Failed to create split target directory {}: {}",
+                    target_dir.display(),
+                    err
+                )),
+            };
+        }
+
+        for relative_path in &selected_paths {
+            let source_file = source_dir.join(relative_path);
+            let target_file = target_dir.join(relative_path);
+            if let Some(parent) = target_file.parent() {
+                if let Err(err) = fs::create_dir_all(parent).await {
+                    return MigrationExecutionItem {
+                        model_id: planned.model_id.clone(),
+                        target_model_id: planned.target_model_id.clone(),
+                        action: "error".to_string(),
+                        error: Some(format!(
+                            "Failed to create split target parent {}: {}",
+                            parent.display(),
+                            err
+                        )),
+                    };
+                }
+            }
+            if let Err(err) = fs::rename(&source_file, &target_file).await {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(format!(
+                        "Failed to move split artifact file {} -> {}: {}",
+                        source_file.display(),
+                        target_file.display(),
+                        err
+                    )),
+                };
+            }
+        }
+
+        let source_marker = source_dir.join(".pumas_download");
+        let target_marker = target_dir.join(".pumas_download");
+        if source_marker.is_file() {
+            let _ = fs::rename(&source_marker, &target_marker).await;
+        }
+
+        if let Err(err) = self.save_metadata(&target_dir, &metadata).await {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Split completed but failed to save metadata: {}",
+                    err
+                )),
+            };
+        }
+
+        let record = metadata_to_record(&planned.target_model_id, &target_dir, &metadata);
+        if let Err(err) = self
+            .index
+            .replace_model_id_preserving_references(&planned.model_id, &record)
+        {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "error".to_string(),
+                error: Some(format!(
+                    "Split completed but failed to remap model index references: {}",
+                    err
+                )),
+            };
+        }
+
+        if let Err(err) = fs::remove_file(source_dir.join(METADATA_FILENAME)).await {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                return MigrationExecutionItem {
+                    model_id: planned.model_id.clone(),
+                    target_model_id: planned.target_model_id.clone(),
+                    action: "error".to_string(),
+                    error: Some(format!(
+                        "Split completed but failed to remove source metadata: {}",
+                        err
+                    )),
+                };
+            }
+        }
+        let _ = self
+            .rewrite_conversion_source_refs(&planned.model_id, &planned.target_model_id)
+            .await;
+
+        cleanup_empty_parent_dirs_after_move_async(source_dir, self.library_root.clone()).await;
+
         MigrationExecutionItem {
             model_id: planned.model_id.clone(),
             target_model_id: planned.target_model_id.clone(),
-            action: "skipped_split_directory".to_string(),
-            error: Some(format!(
-                "split directory execution is not implemented for complete artifacts: {} -> {}",
-                source_dir.display(),
-                target_dir.display()
-            )),
+            action: "split_directory".to_string(),
+            error: None,
         }
     }
 
@@ -1178,6 +1369,32 @@ fn planned_action_kind(action: &str, block_reason: &Option<String>, same_path: b
         "keep" if block_reason.is_none() && same_path => "rewrite_metadata_only".to_string(),
         "keep" => "keep".to_string(),
         other => other.to_string(),
+    }
+}
+
+fn safe_relative_artifact_path(raw_path: &str) -> Option<PathBuf> {
+    let raw_path = raw_path.trim();
+    if raw_path.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(raw_path);
+    if path.is_absolute() {
+        return None;
+    }
+
+    let mut safe_path = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => safe_path.push(value),
+            _ => return None,
+        }
+    }
+
+    if safe_path.as_os_str().is_empty() {
+        None
+    } else {
+        Some(safe_path)
     }
 }
 

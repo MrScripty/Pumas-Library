@@ -647,7 +647,7 @@ impl ModelLibrary {
             let pending_moves = dry_run
                 .items
                 .iter()
-                .filter(|item| item.action == "move")
+                .filter(|item| item.action == "move" || item.action == "split_artifact_directory")
                 .filter_map(|item| {
                     Some(MigrationPlannedMove {
                         model_id: item.model_id.clone(),
@@ -710,9 +710,11 @@ impl ModelLibrary {
         for item in &report.results {
             match item.action.as_str() {
                 "moved" | "already_migrated" => report.completed_move_count += 1,
-                "blocked_collision" | "missing_source" | "skipped_partial_download" => {
-                    report.skipped_move_count += 1
-                }
+                "blocked_collision"
+                | "missing_source"
+                | "skipped_partial_download"
+                | "skipped_split_partial_download"
+                | "skipped_split_directory" => report.skipped_move_count += 1,
                 _ => report.error_count += 1,
             }
         }
@@ -760,6 +762,10 @@ impl ModelLibrary {
         &self,
         planned: &MigrationPlannedMove,
     ) -> MigrationExecutionItem {
+        if planned.action_kind.as_deref() == Some("split_artifact_directory") {
+            return self.execute_planned_split_directory(planned).await;
+        }
+
         let source_dir = planned_path_or_model_id(
             &self.library_root,
             planned.current_path.as_str(),
@@ -918,6 +924,57 @@ impl ModelLibrary {
             target_model_id: planned.target_model_id.clone(),
             action: "moved".to_string(),
             error: None,
+        }
+    }
+
+    async fn execute_planned_split_directory(
+        &self,
+        planned: &MigrationPlannedMove,
+    ) -> MigrationExecutionItem {
+        let source_dir = planned_path_or_model_id(
+            &self.library_root,
+            planned.current_path.as_str(),
+            planned.model_id.as_str(),
+        );
+        let target_dir = planned_path_or_model_id(
+            &self.library_root,
+            planned.target_path.as_str(),
+            planned.target_model_id.as_str(),
+        );
+
+        if !path_exists(&source_dir).await.unwrap_or(false) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "missing_source".to_string(),
+                error: Some(format!(
+                    "Split source directory not found: {}",
+                    source_dir.display()
+                )),
+            };
+        }
+
+        if has_pending_download_artifacts(&source_dir) {
+            return MigrationExecutionItem {
+                model_id: planned.model_id.clone(),
+                target_model_id: planned.target_model_id.clone(),
+                action: "skipped_split_partial_download".to_string(),
+                error: Some(
+                    "split directory contains partial download artifacts; migration split skipped"
+                        .to_string(),
+                ),
+            };
+        }
+
+        MigrationExecutionItem {
+            model_id: planned.model_id.clone(),
+            target_model_id: planned.target_model_id.clone(),
+            action: "skipped_split_directory".to_string(),
+            error: Some(format!(
+                "split directory execution is not implemented for complete artifacts: {} -> {}",
+                source_dir.display(),
+                target_dir.display()
+            )),
         }
     }
 

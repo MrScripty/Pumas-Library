@@ -9535,6 +9535,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_migration_with_checkpoint_skips_partial_split_directories() {
+        let (_, library) = setup_library().await;
+        let model_dir =
+            library.build_model_path("vlm", "qwen3_6", "owner--qwen3_6-27b-gguf__q5_k_m");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        write_min_safetensors(&model_dir.join("Qwen3.6-27B-Q5_K_M.gguf"));
+        std::fs::write(model_dir.join("Qwen3.6-27B-Q4_K_M.gguf.part"), b"partial").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/qwen3_6/owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            family: Some("qwen3_6".to_string()),
+            architecture_family: Some("qwen3_6".to_string()),
+            model_type: Some("vlm".to_string()),
+            cleaned_name: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            repo_id: Some("Owner/Qwen3.6-27B-GGUF".to_string()),
+            selected_artifact_id: Some("owner--qwen3_6-27b-gguf__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["Qwen3.6-27B-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let report = library.execute_migration_with_checkpoint().await.unwrap();
+        assert_eq!(report.planned_move_count, 1);
+        assert_eq!(report.completed_move_count, 0);
+        assert_eq!(report.skipped_move_count, 1);
+        assert!(report.error_count >= 1);
+        assert!(!report.referential_integrity_ok);
+        assert!(report
+            .results
+            .iter()
+            .any(|row| row.action == "skipped_split_partial_download"));
+        assert!(report
+            .referential_integrity_errors
+            .iter()
+            .any(|error| error.contains("mixed_gguf_artifact_files")));
+    }
+
+    #[tokio::test]
     async fn test_generate_migration_dry_run_keeps_metadata_backed_image_turbo_diffusion() {
         let (_, library) = setup_library().await;
         let model_dir =

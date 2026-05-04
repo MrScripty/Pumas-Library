@@ -4427,9 +4427,9 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
     output.push('\n');
     output.push_str("## Items\n\n");
     output.push_str(
-        "| Model ID | Target Model ID | Action | Artifact ID | Block Reason | Findings | Error |\n",
+        "| Model ID | Target Model ID | Action | Action Kind | Artifact ID | Block Reason | Findings | Error |\n",
     );
-    output.push_str("| --- | --- | --- | --- | --- | --- | --- |\n");
+    output.push_str("| --- | --- | --- | --- | --- | --- | --- | --- |\n");
     for item in &report.items {
         let findings = if item.findings.is_empty() {
             String::new()
@@ -4438,11 +4438,19 @@ fn render_migration_dry_run_markdown(report: &MigrationDryRunReport) -> String {
         };
         let error = item.error.as_deref().unwrap_or("");
         let target = item.target_model_id.as_deref().unwrap_or("");
+        let action_kind = item.action_kind.as_deref().unwrap_or("");
         let artifact_id = item.selected_artifact_id.as_deref().unwrap_or("");
         let block_reason = item.block_reason.as_deref().unwrap_or("");
         output.push_str(&format!(
-            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
-            item.model_id, target, item.action, artifact_id, block_reason, findings, error
+            "| `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            item.model_id,
+            target,
+            item.action,
+            action_kind,
+            artifact_id,
+            block_reason,
+            findings,
+            error
         ));
     }
 
@@ -9243,6 +9251,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(row.action, "move");
+        assert_eq!(row.action_kind.as_deref(), Some("move_directory"));
         assert_eq!(row.current_family.as_deref(), Some("qwen35"));
         assert_eq!(row.resolved_family.as_deref(), Some("qwen3_6"));
         assert_eq!(
@@ -9291,6 +9300,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(row.action, "split_artifact_directory");
+        assert_eq!(row.action_kind.as_deref(), Some("split_artifact_directory"));
         assert_eq!(
             row.block_reason.as_deref(),
             Some("directory_contains_multiple_artifacts")

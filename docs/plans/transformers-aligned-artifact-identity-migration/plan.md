@@ -464,7 +464,7 @@ before any filesystem mutation.
 - [x] Detect metadata records missing selected-artifact identity.
 - [x] Detect directories containing files from multiple selected artifacts.
 - [x] Detect completed artifact plus partial artifact mixtures.
-- [ ] Add planned action kinds for `move_directory`,
+- [x] Add planned action kinds for `move_directory`,
       `split_artifact_directory`, `rewrite_metadata_only`,
       `blocked_collision`, and `skipped_active_download`.
 - [x] Include old id, new id, selected artifact files, source path, target path,
@@ -597,6 +597,9 @@ Update during implementation:
   markers already include `selected_artifact`; marker reads now feed migration
   planning, and partial-move marker updates write `architecture_family` while
   preserving the selected-artifact payload.
+- 2026-05-04: Added append-only migration dry-run `action_kind` values for the
+  new migration action vocabulary while preserving legacy `action` strings for
+  existing callers and checkpoint execution compatibility.
 
 ## Commit Cadence Notes
 
@@ -699,6 +702,8 @@ integrate one worker wave at a time.
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_with_checkpoint_resumes_existing_checkpoint`
 - 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library update_download_marker_adds_architecture_family_and_preserves_artifact`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_artifact_identity_target`
+- 2026-05-04: `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_generate_migration_dry_run_reports_mixed_artifact_directory`
 - 2026-05-04: `git diff --check -- docs/contracts/native-bindings-surface.md rust/crates/pumas-core/src/model_library/hf/README.md frontend/src/hooks/README.md docs/plans/transformers-aligned-artifact-identity-migration/plan.md`
 - 2026-05-04: Markdown linter not run; no `markdownlint`,
   `markdownlint-cli2`, or `remark` command was available in this workspace.

@@ -95,6 +95,7 @@ impl ModelLibrary {
                         current_path: String::new(),
                         target_path: None,
                         action: "error".to_string(),
+                        action_kind: Some("error".to_string()),
                         current_model_type: None,
                         resolved_model_type: None,
                         resolver_source: None,
@@ -260,6 +261,7 @@ impl ModelLibrary {
                 current_path: record.path,
                 target_path: None,
                 action: "missing_source".to_string(),
+                action_kind: Some("missing_source".to_string()),
                 current_model_type: Some(record.model_type),
                 resolved_model_type: None,
                 resolver_source: None,
@@ -443,6 +445,7 @@ impl ModelLibrary {
         } else {
             "move"
         };
+        let action_kind = planned_action_kind(action, &block_reason, target_dir == model_dir);
 
         let metadata_needs_review = metadata
             .as_ref()
@@ -528,6 +531,7 @@ impl ModelLibrary {
             current_path: model_dir.display().to_string(),
             target_path: Some(target_dir.display().to_string()),
             action: action.to_string(),
+            action_kind: Some(action_kind),
             current_model_type: current_type,
             resolved_model_type: Some(resolved_type),
             resolver_source: Some(resolved.source),
@@ -581,7 +585,10 @@ impl ModelLibrary {
                         target_path: item.target_path.clone()?,
                         selected_artifact_id: item.selected_artifact_id.clone(),
                         selected_artifact_files: item.selected_artifact_files.clone(),
-                        action_kind: Some(item.action.clone()),
+                        action_kind: item
+                            .action_kind
+                            .clone()
+                            .or_else(|| Some(item.action.clone())),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -946,6 +953,18 @@ fn planned_path_or_model_id(library_root: &Path, planned_path: &str, model_id: &
     }
 }
 
+fn planned_action_kind(action: &str, block_reason: &Option<String>, same_path: bool) -> String {
+    match action {
+        "move" => "move_directory".to_string(),
+        "split_artifact_directory" => "split_artifact_directory".to_string(),
+        "blocked_collision" => "blocked_collision".to_string(),
+        "blocked_partial_download" => "skipped_active_download".to_string(),
+        "keep" if block_reason.is_none() && same_path => "rewrite_metadata_only".to_string(),
+        "keep" => "keep".to_string(),
+        other => other.to_string(),
+    }
+}
+
 fn string_field(metadata: &Value, key: &str) -> Option<String> {
     metadata
         .get(key)
@@ -1058,6 +1077,8 @@ pub struct MigrationDryRunItem {
     pub current_path: String,
     pub target_path: Option<String>,
     pub action: String,
+    #[serde(default)]
+    pub action_kind: Option<String>,
     pub current_model_type: Option<String>,
     pub resolved_model_type: Option<String>,
     pub resolver_source: Option<String>,

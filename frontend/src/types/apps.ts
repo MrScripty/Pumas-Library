@@ -45,6 +45,9 @@ export interface ModelInfo {
   wasDequantized?: boolean;
   convertedFrom?: string;
   repoId?: string;
+  selectedArtifactId?: string | null;
+  selectedArtifactFiles?: string[];
+  selectedArtifactQuant?: string | null;
   hasDependencies?: boolean;
   dependencyCount?: number;
   hasIntegrityIssue?: boolean;

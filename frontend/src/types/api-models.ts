@@ -29,6 +29,9 @@ export interface ModelRecordMetadata {
   recommended_backend?: string | null;
   primary_format?: string | null;
   quantization?: string | null;
+  selected_artifact_id?: string | null;
+  selected_artifact_files?: string[];
+  selected_artifact_quant?: string | null;
   related_available?: boolean;
   [key: string]: unknown;
 }

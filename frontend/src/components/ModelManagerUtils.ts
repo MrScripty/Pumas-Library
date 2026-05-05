@@ -35,6 +35,76 @@ export function buildDownloadingModels(
     });
 }
 
+function normalizeIdentity(value?: string | null): string | undefined {
+  const normalized = value?.trim().toLowerCase();
+  return normalized || undefined;
+}
+
+function normalizeArtifactToken(value?: string | null): string | undefined {
+  const normalized = normalizeIdentity(value)?.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+  return normalized || undefined;
+}
+
+function getDownloadArtifactIdentity(download: ModelInfo): string | undefined {
+  return normalizeIdentity(download.downloadSelectedArtifactId ?? download.downloadArtifactId);
+}
+
+function getModelArtifactIdentity(model: ModelInfo): string | undefined {
+  return normalizeIdentity(model.selectedArtifactId);
+}
+
+function artifactIdentityContainsQuant(artifactIdentity: string, quant?: string | null): boolean {
+  const quantToken = normalizeArtifactToken(quant);
+  if (!quantToken) {
+    return false;
+  }
+
+  const artifactToken = normalizeArtifactToken(artifactIdentity);
+  return Boolean(
+    artifactToken &&
+      (artifactToken === quantToken ||
+        artifactToken.endsWith(`_${quantToken}`) ||
+        artifactToken.includes(`__${quantToken}`))
+  );
+}
+
+function downloadMatchesLocalModel(model: ModelInfo, download: ModelInfo): boolean {
+  const modelRepoId = normalizeIdentity(model.repoId);
+  const downloadRepoId = normalizeIdentity(download.downloadRepoId);
+  if (!modelRepoId || !downloadRepoId || modelRepoId !== downloadRepoId) {
+    return false;
+  }
+
+  const downloadArtifactIdentity = getDownloadArtifactIdentity(download);
+  if (!downloadArtifactIdentity) {
+    return true;
+  }
+
+  const modelArtifactIdentity = getModelArtifactIdentity(model);
+  if (modelArtifactIdentity) {
+    return modelArtifactIdentity === downloadArtifactIdentity;
+  }
+
+  return (
+    artifactIdentityContainsQuant(downloadArtifactIdentity, model.selectedArtifactQuant) ||
+    artifactIdentityContainsQuant(downloadArtifactIdentity, model.quant)
+  );
+}
+
+function mergeDownloadState(model: ModelInfo, download: ModelInfo): ModelInfo {
+  return {
+    ...model,
+    isDownloading: true,
+    downloadProgress: download.downloadProgress,
+    downloadStatus: download.downloadStatus,
+    downloadKey: download.downloadKey,
+    downloadRepoId: download.downloadRepoId,
+    downloadSelectedArtifactId: download.downloadSelectedArtifactId,
+    downloadArtifactId: download.downloadArtifactId,
+    downloadTotalBytes: download.downloadTotalBytes,
+  };
+}
+
 export function mergeLocalModelGroups(
   modelGroups: ModelCategory[],
   downloadingModels: ModelInfo[]
@@ -43,35 +113,18 @@ export function mergeLocalModelGroups(
     return modelGroups;
   }
 
-  const downloadByRepoId = new Map<string, ModelInfo>();
-  for (const download of downloadingModels) {
-    if (!download.downloadRepoId) {
-      continue;
-    }
-
-    const key = download.downloadRepoId.toLowerCase();
-    if (!downloadByRepoId.has(key)) {
-      downloadByRepoId.set(key, download);
-    }
-  }
-
-  const mergedRepoKeys = new Set<string>();
+  const mergedDownloadKeys = new Set<string>();
   const groupMap = new Map<string, ModelInfo[]>();
 
   modelGroups.forEach((group) => {
     const models = group.models.map((model) => {
-      const key = model.repoId?.toLowerCase();
-      const download = key ? downloadByRepoId.get(key) : undefined;
-      if (key && download) {
-        mergedRepoKeys.add(key);
-        return {
-          ...model,
-          isDownloading: true,
-          downloadProgress: download.downloadProgress,
-          downloadStatus: download.downloadStatus,
-          downloadRepoId: download.downloadRepoId,
-          downloadTotalBytes: download.downloadTotalBytes,
-        };
+      const download = downloadingModels.find((candidate) =>
+        !mergedDownloadKeys.has(candidate.downloadKey ?? candidate.id) &&
+        downloadMatchesLocalModel(model, candidate)
+      );
+      if (download) {
+        mergedDownloadKeys.add(download.downloadKey ?? download.id);
+        return mergeDownloadState(model, download);
       }
       return model;
     });
@@ -79,7 +132,7 @@ export function mergeLocalModelGroups(
   });
 
   const orphanDownloads = downloadingModels.filter(
-    (download) => !download.downloadRepoId || !mergedRepoKeys.has(download.downloadRepoId.toLowerCase())
+    (download) => !mergedDownloadKeys.has(download.downloadKey ?? download.id)
   );
   orphanDownloads.forEach((model) => {
     const existing = groupMap.get(model.category);

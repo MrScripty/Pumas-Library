@@ -17,6 +17,11 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function asStringArray(value: unknown): string[] | undefined {
+  const strings = asArray(value).filter((item): item is string => typeof item === 'string');
+  return strings.length > 0 ? strings : undefined;
+}
+
 function getIntegrityIssueMessage(metadata: ModelRecordMetadata): string | undefined {
   if (!metadata.integrity_issue_duplicate_repo_id) {
     return undefined;
@@ -53,6 +58,9 @@ export function mapModelRecordToInfo(model: ModelRecord): ModelInfo {
     relatedAvailable: asBoolean(metadata.related_available) ?? false,
     isPartialDownload: asBoolean(metadata.download_incomplete) ?? false,
     repoId: asString(metadata.repo_id),
+    selectedArtifactId: asString(metadata.selected_artifact_id),
+    selectedArtifactFiles: asStringArray(metadata.selected_artifact_files),
+    selectedArtifactQuant: asString(metadata.selected_artifact_quant),
     hasDependencies: dependencyBindings.length > 0,
     dependencyCount: dependencyBindings.length || undefined,
     hasIntegrityIssue: asBoolean(metadata.integrity_issue_duplicate_repo_id) ?? false,

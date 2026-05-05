@@ -426,6 +426,15 @@ Update during implementation:
   current execution reports the partial split as skipped but no longer produces
   the expected integrity error count. This should be resolved in a separate
   migration-validation slice.
+- 2026-05-04: User validation showed a completed Q5_K_M row no longer had a
+  partial tag but still inherited the active Q4_K_M download ring. The root
+  cause was frontend local/download merge logic matching active downloads by
+  `repoId` only after backend artifact-scoped download state was already
+  available. The frontend now projects selected-artifact metadata into
+  `ModelInfo`, matches active downloads by selected artifact or quant before
+  allowing legacy repo fallback, and preserves the artifact-scoped
+  `downloadKey` on merged local rows so local pause/resume/cancel actions
+  address the correct download.
 
 ## Commit Cadence Notes
 
@@ -520,6 +529,9 @@ Update during implementation:
   recovery reason and the frontend surfaces missing repository metadata for
   metadata-less partial rows instead of leaving the disabled recovery action
   unexplained.
+- Frontend local/download merge logic now keeps active artifact downloads
+  scoped to their selected artifact or quant, preventing same-repo complete
+  variants such as Q5_K_M from inheriting a Q4_K_M progress ring.
 
 ### Deviations
 
@@ -566,6 +578,9 @@ Update during implementation:
 - `npm run -w frontend test:run -- LocalModelRowState.test.ts`
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
 - `npm run -w frontend check:types`
+- `npm run -w frontend test:run -- ModelManagerUtils.test.ts`
+- `npm run -w frontend test:run -- useModelDownloads.test.ts LocalModelRowState.test.ts`
+- `git diff --check`
 
 ### Traceability Links
 

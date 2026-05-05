@@ -43,7 +43,13 @@ interface UseModelLibraryActionsOptions {
   startDownload: (
     downloadKey: string,
     downloadId: string,
-    details?: { modelName?: string; modelType?: string; repoId?: string }
+    details?: {
+      modelName?: string;
+      modelType?: string;
+      repoId?: string;
+      selectedArtifactId?: string | null;
+      artifactId?: string | null;
+    }
   ) => void;
 }
 
@@ -207,8 +213,11 @@ export function useModelLibraryActions({
         action,
         downloadId: result.download_id,
       });
-      startDownload(repoId, result.download_id, {
+      const downloadKey = model.selectedArtifactId ?? model.downloadSelectedArtifactId ?? repoId;
+      startDownload(downloadKey, result.download_id, {
         repoId,
+        selectedArtifactId: model.selectedArtifactId ?? model.downloadSelectedArtifactId,
+        artifactId: model.downloadArtifactId,
         modelName: model.name,
         modelType: model.category,
       });

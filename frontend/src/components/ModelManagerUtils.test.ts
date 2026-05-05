@@ -136,6 +136,91 @@ describe('ModelManagerUtils', () => {
     });
   });
 
+  it('does not merge an artifact-specific download onto a different quant from the same repo', () => {
+    const localGroups: ModelCategory[] = [
+      {
+        category: 'vlm',
+        models: [
+          createLocalModel({
+            id: 'vlm/davidau/qwen3_6-27b-heretic/q4',
+            name: 'Qwen3.6 Heretic Q4_K_M',
+            category: 'vlm',
+            repoId: 'DavidAU/Qwen3.6-Heretic-GGUF',
+            quant: 'Q4_K_M',
+          }),
+          createLocalModel({
+            id: 'vlm/davidau/qwen3_6-27b-heretic/q5',
+            name: 'Qwen3.6 Heretic Q5_K_M',
+            category: 'vlm',
+            repoId: 'DavidAU/Qwen3.6-Heretic-GGUF',
+            quant: 'Q5_K_M',
+            selectedArtifactId: 'davidau--qwen3_6-heretic-gguf__q5_k_m',
+          }),
+        ],
+      },
+    ];
+    const downloadingModels: ModelInfo[] = [
+      {
+        id: 'download:davidau--qwen3_6-heretic-gguf__q4_k_m',
+        name: 'Qwen3.6 Heretic Q4_K_M',
+        category: 'vlm',
+        isDownloading: true,
+        downloadKey: 'davidau--qwen3_6-heretic-gguf__q4_k_m',
+        downloadRepoId: 'davidau/qwen3.6-heretic-gguf',
+        downloadSelectedArtifactId: 'davidau--qwen3_6-heretic-gguf__q4_k_m',
+        downloadProgress: 0.33,
+      },
+    ];
+
+    const merged = mergeLocalModelGroups(localGroups, downloadingModels);
+
+    expect(merged[0]?.models[0]).toMatchObject({
+      id: 'vlm/davidau/qwen3_6-27b-heretic/q4',
+      isDownloading: true,
+      downloadKey: 'davidau--qwen3_6-heretic-gguf__q4_k_m',
+      downloadProgress: 0.33,
+    });
+    expect(merged[0]?.models[1]).toMatchObject({
+      id: 'vlm/davidau/qwen3_6-27b-heretic/q5',
+      quant: 'Q5_K_M',
+    });
+    expect(merged[0]?.models[1]?.isDownloading).toBeUndefined();
+    expect(merged[0]?.models).toHaveLength(2);
+  });
+
+  it('falls back to repo matching when a download has no artifact identity', () => {
+    const localGroups: ModelCategory[] = [
+      {
+        category: 'llm',
+        models: [
+          createLocalModel({
+            repoId: 'Org/Alpha',
+          }),
+        ],
+      },
+    ];
+    const downloadingModels: ModelInfo[] = [
+      {
+        id: 'download:org/alpha',
+        name: 'Alpha Download',
+        category: 'llm',
+        isDownloading: true,
+        downloadKey: 'org/alpha',
+        downloadRepoId: 'org/alpha',
+        downloadProgress: 0.25,
+      },
+    ];
+
+    const merged = mergeLocalModelGroups(localGroups, downloadingModels);
+
+    expect(merged[0]?.models[0]).toMatchObject({
+      id: 'model-1',
+      isDownloading: true,
+      downloadKey: 'org/alpha',
+      downloadProgress: 0.25,
+    });
+  });
+
   it('filters local groups by selected category and matches search against model path', () => {
     const groups: ModelCategory[] = [
       {

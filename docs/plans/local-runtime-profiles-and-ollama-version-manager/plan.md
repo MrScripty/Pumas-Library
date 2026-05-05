@@ -389,7 +389,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Add llama.cpp as a second provider under the same runtime profile architecture.
 
 **Tasks:**
-- [ ] Add a llama.cpp provider adapter behind the runtime-profile service.
+- [x] Add a llama.cpp provider adapter behind the runtime-profile service.
 - [ ] Support managed router profiles using `llama-server` router mode.
 - [ ] Support managed dedicated process profiles using `llama-server -m <model>`.
 - [ ] Generate deterministic model catalog or preset data for router profiles from Pumas library GGUF artifacts.
@@ -404,7 +404,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Rust tests for dedicated process command construction and profile-scoped PID/log paths.
 - Existing Ollama runtime profile tests still pass.
 
-**Status:** Not started.
+**Status:** In progress. The llama.cpp provider adapter boundary is implemented; managed router/dedicated launch behavior and catalog generation remain.
+
+**Implementation Notes:**
+- 2026-05-05: Added `LlamaCppRuntimeProviderAdapter` behind the existing `RuntimeProviderAdapter` trait and moved llama.cpp profile validation out of the generic service path. The adapter accepts router and dedicated provider modes, rejects provider/mode mismatches, and keeps external endpoint requirements provider-owned.
+- 2026-05-05: Validated the llama.cpp adapter with `cargo test -p pumas-library llama_cpp_provider_adapter --manifest-path rust/Cargo.toml` and re-ran the existing service profile filter with `cargo test -p pumas-library runtime_profile_service --manifest-path rust/Cargo.toml`.
 
 ### Milestone 7: Add Frontend Local Runtime Profile Settings
 

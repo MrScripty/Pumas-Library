@@ -115,6 +115,43 @@ impl RuntimeProviderAdapter for OllamaRuntimeProviderAdapter {
     }
 }
 
+pub struct LlamaCppRuntimeProviderAdapter;
+
+#[async_trait]
+impl RuntimeProviderAdapter for LlamaCppRuntimeProviderAdapter {
+    fn provider(&self) -> RuntimeProviderId {
+        RuntimeProviderId::LlamaCpp
+    }
+
+    fn capabilities(&self) -> RuntimeProviderCapabilities {
+        RuntimeProviderCapabilities::llama_cpp()
+    }
+
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        if profile.provider != RuntimeProviderId::LlamaCpp {
+            return Err(PumasError::InvalidParams {
+                message: "llama.cpp adapter received a non-llama.cpp profile".to_string(),
+            });
+        }
+        match profile.provider_mode {
+            RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {}
+            _ => {
+                return Err(PumasError::InvalidParams {
+                    message: "llama.cpp provider mode does not match provider".to_string(),
+                });
+            }
+        }
+        if profile.management_mode == RuntimeManagementMode::External
+            && profile.endpoint_url.is_none()
+        {
+            return Err(PumasError::InvalidParams {
+                message: "external llama.cpp profiles require endpoint_url".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeProfileService {
     launcher_root: PathBuf,
@@ -1043,22 +1080,9 @@ async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
     match profile.provider {
         RuntimeProviderId::Ollama => OllamaRuntimeProviderAdapter.validate_profile(profile).await,
         RuntimeProviderId::LlamaCpp => {
-            match profile.provider_mode {
-                RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {}
-                _ => {
-                    return Err(PumasError::InvalidParams {
-                        message: "llama.cpp provider mode does not match provider".to_string(),
-                    });
-                }
-            }
-            if profile.management_mode == RuntimeManagementMode::External
-                && profile.endpoint_url.is_none()
-            {
-                return Err(PumasError::InvalidParams {
-                    message: "external llama.cpp profiles require endpoint_url".to_string(),
-                });
-            }
-            Ok(())
+            LlamaCppRuntimeProviderAdapter
+                .validate_profile(profile)
+                .await
         }
     }
 }
@@ -1075,6 +1099,7 @@ fn validate_model_route(route: &ModelRuntimeRoute) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{RuntimeDeviceSettings, RuntimeSchedulerSettings};
 
     #[test]
     fn provider_capabilities_separate_ollama_and_llama_cpp_modes() {
@@ -1107,6 +1132,61 @@ mod tests {
             .await;
 
         assert!(result.is_err());
+    }
+
+    fn managed_llama_cpp_profile(profile_id: &str) -> RuntimeProfileConfig {
+        RuntimeProfileConfig {
+            profile_id: RuntimeProfileId::parse(profile_id).unwrap(),
+            provider: RuntimeProviderId::LlamaCpp,
+            provider_mode: RuntimeProviderMode::LlamaCppRouter,
+            management_mode: RuntimeManagementMode::Managed,
+            name: "llama.cpp Router".to_string(),
+            enabled: true,
+            endpoint_url: RuntimeEndpointUrl::parse("http://127.0.0.1:18080").ok(),
+            port: RuntimePort::parse(18080).ok(),
+            device: RuntimeDeviceSettings::default(),
+            scheduler: RuntimeSchedulerSettings::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_provider_adapter_accepts_router_and_dedicated_modes() {
+        let mut profile = managed_llama_cpp_profile("llama-router");
+        LlamaCppRuntimeProviderAdapter
+            .validate_profile(&profile)
+            .await
+            .unwrap();
+
+        profile.profile_id = RuntimeProfileId::parse("llama-dedicated").unwrap();
+        profile.provider_mode = RuntimeProviderMode::LlamaCppDedicated;
+        LlamaCppRuntimeProviderAdapter
+            .validate_profile(&profile)
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn llama_cpp_provider_adapter_rejects_wrong_mode_and_external_missing_endpoint() {
+        let mut profile = managed_llama_cpp_profile("llama-invalid");
+        profile.provider_mode = RuntimeProviderMode::OllamaServe;
+        let wrong_mode = LlamaCppRuntimeProviderAdapter
+            .validate_profile(&profile)
+            .await;
+        assert!(wrong_mode
+            .unwrap_err()
+            .to_string()
+            .contains("provider mode does not match"));
+
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+        profile.management_mode = RuntimeManagementMode::External;
+        profile.endpoint_url = None;
+        let missing_endpoint = LlamaCppRuntimeProviderAdapter
+            .validate_profile(&profile)
+            .await;
+        assert!(missing_endpoint
+            .unwrap_err()
+            .to_string()
+            .contains("endpoint_url"));
     }
 
     #[tokio::test]

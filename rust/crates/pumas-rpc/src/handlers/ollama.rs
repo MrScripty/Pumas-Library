@@ -2,7 +2,7 @@
 
 use super::{get_str_param, parse_params, require_str_param};
 use crate::server::AppState;
-use pumas_library::models::{RuntimeProfileId, RuntimeProviderId};
+use pumas_library::models::{RuntimeEndpointUrl, RuntimeProfileId, RuntimeProviderId};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
@@ -22,7 +22,7 @@ async fn get_primary_model_file(
 
 pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
     let models = client.list_models().await?;
     Ok(json!({
         "success": true,
@@ -57,6 +57,20 @@ async fn resolve_ollama_profile_endpoint(
         .api
         .resolve_runtime_profile_endpoint_for_operation(RuntimeProviderId::Ollama, profile_id)
         .await
+}
+
+fn ollama_client_for_connection_url(
+    connection_url: Option<&str>,
+) -> pumas_library::Result<pumas_app_manager::OllamaClient> {
+    let endpoint = connection_url
+        .map(RuntimeEndpointUrl::parse)
+        .transpose()
+        .map_err(|message| pumas_library::error::PumasError::InvalidParams {
+            message: format!("invalid legacy Ollama connection_url: {message}"),
+        })?;
+    Ok(pumas_app_manager::OllamaClient::new(
+        endpoint.as_ref().map(RuntimeEndpointUrl::as_str),
+    ))
 }
 
 async fn resolve_ollama_operation_endpoint(
@@ -264,7 +278,7 @@ async fn create_ollama_model(
         .and_then(|r| r.hashes.get("sha256"))
         .cloned();
 
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url)?;
     client
         .create_model(&ollama_name, &gguf_path, known_sha256.as_deref())
         .await?;
@@ -286,7 +300,7 @@ pub async fn ollama_delete_model(
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
     client.delete_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -296,7 +310,7 @@ pub async fn ollama_load_model(_state: &AppState, params: &Value) -> pumas_libra
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
     client.load_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -309,7 +323,7 @@ pub async fn ollama_unload_model(
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
     client.unload_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -321,8 +335,29 @@ pub async fn ollama_list_running(
 ) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
     let models = client.list_running_models().await?;
 
     Ok(json!({ "success": true, "models": models }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_connection_url_is_validated_at_rpc_boundary() {
+        let err = match ollama_client_for_connection_url(Some("file:///tmp/ollama.sock")) {
+            Ok(_) => panic!("legacy connection_url should reject unsupported schemes"),
+            Err(err) => err,
+        };
+
+        match err {
+            pumas_library::error::PumasError::InvalidParams { message } => {
+                assert!(message.contains("invalid legacy Ollama connection_url"));
+                assert!(message.contains("http or https"));
+            }
+            other => panic!("expected InvalidParams, got {other:?}"),
+        }
+    }
 }

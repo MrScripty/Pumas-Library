@@ -358,7 +358,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Tasks:**
 - [x] Add model-route resolution for create/load/unload/delete/list actions.
 - [x] Add profile-aware model operations that accept `profile_id`.
-- [ ] Keep `connection_url` accepted only as legacy compatibility input and convert it at the boundary.
+- [x] Keep `connection_url` accepted only as legacy compatibility input and convert it at the boundary.
 - [x] Split register/create from load, or make auto-load an explicit per-route setting.
 - [x] Return clear errors when a route points to a stopped or unhealthy profile.
 - [x] Keep external endpoint profiles supported.
@@ -368,7 +368,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Tests showing `connection_url` compatibility still works.
 - Tests showing model-specific profile routing chooses the expected endpoint.
 
-**Status:** Mostly complete for backend Ollama routing. Legacy `connection_url` boundary conversion cleanup remains.
+**Status:** Complete for backend Ollama routing. Remaining work moves to llama.cpp provider support and frontend runtime-profile controls.
 
 **Implementation Notes:**
 - 2026-05-05: Added append-only `ollama_create_model_for_profile`, `ollama_delete_model_for_profile`, and `ollama_unload_model_for_profile` commands through Rust RPC, Electron preload validation, and frontend bridge types. Existing connection-url commands remain unchanged.
@@ -381,6 +381,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated stopped managed-profile rejection and external endpoint allowance with `cargo test -p pumas-library runtime_profile_service --manifest-path rust/Cargo.toml` and recompiled RPC with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Wired `ModelRuntimeRoute.auto_load` into profile-aware Ollama create. Legacy `ollama_create_model(connection_url)` still auto-loads for compatibility; `ollama_create_model_for_profile` defaults to auto-load when no route exists and skips the implicit load when a backend route sets `auto_load=false`.
 - 2026-05-05: Validated auto-load route policy lookup with `cargo test -p pumas-library runtime_profile_service_reads_model_route_auto_load_policy --manifest-path rust/Cargo.toml` and recompiled RPC with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Converted legacy Ollama `connection_url` inputs into `RuntimeEndpointUrl` at the RPC boundary before constructing an Ollama client. Profile-aware commands remain the canonical route path; legacy URL input is retained only for compatibility and now rejects invalid schemes as `InvalidParams`.
+- 2026-05-05: Validated legacy endpoint boundary handling with `cargo test -p pumas-rpc legacy_connection_url --manifest-path rust/Cargo.toml` and recompiled the runtime-profile RPC surface with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
 
 ### Milestone 6: Add llama.cpp Runtime Adapter
 

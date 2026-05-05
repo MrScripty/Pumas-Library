@@ -15,6 +15,7 @@ impl PumasApi {
                 .await;
         }
 
+        self.refresh_default_ollama_profile_status().await?;
         self.primary().runtime_profile_service.snapshot().await
     }
 
@@ -31,6 +32,7 @@ impl PumasApi {
                 .await;
         }
 
+        self.refresh_default_ollama_profile_status().await?;
         self.primary()
             .runtime_profile_service
             .list_updates_since(cursor)
@@ -131,5 +133,14 @@ impl PumasApi {
             .runtime_profile_service
             .resolve_profile_endpoint(provider, profile_id)
             .await
+    }
+
+    async fn refresh_default_ollama_profile_status(&self) -> Result<()> {
+        let is_running = self.is_ollama_running().await;
+        self.primary()
+            .runtime_profile_service
+            .record_default_ollama_status(is_running)
+            .await?;
+        Ok(())
     }
 }

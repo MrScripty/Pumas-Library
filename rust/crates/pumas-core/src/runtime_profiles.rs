@@ -2,17 +2,22 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::models::{
-    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeManagementMode,
-    RuntimeProfileConfig, RuntimeProfileId, RuntimeProfileMutationResponse,
+    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState,
+    RuntimeManagementMode, RuntimeProfileConfig, RuntimeProfileEvent, RuntimeProfileEventKind,
+    RuntimeProfileId, RuntimeProfileMutationResponse, RuntimeProfileStatus,
     RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse, RuntimeProfilesConfigFile,
-    RuntimeProfilesSnapshotResponse, RuntimeProviderId, RuntimeProviderMode,
+    RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse, RuntimeProviderId,
+    RuntimeProviderMode,
 };
 use crate::{PumasError, Result};
+
+const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -110,6 +115,7 @@ impl RuntimeProviderAdapter for OllamaRuntimeProviderAdapter {
 pub struct RuntimeProfileService {
     config_path: PathBuf,
     write_lock: Arc<RwLock<()>>,
+    event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
 }
 
 impl RuntimeProfileService {
@@ -121,6 +127,7 @@ impl RuntimeProfileService {
                 .join("metadata")
                 .join("runtime-profiles.json"),
             write_lock: Arc::new(RwLock::new(())),
+            event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
         }
     }
 
@@ -140,10 +147,12 @@ impl RuntimeProfileService {
             ))
         })??;
 
+        let snapshot = self.apply_runtime_statuses(config.snapshot())?;
+
         Ok(RuntimeProfilesSnapshotResponse {
             success: true,
             error: None,
-            snapshot: config.snapshot(),
+            snapshot,
         })
     }
 
@@ -154,18 +163,12 @@ impl RuntimeProfileService {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         let requested_cursor = cursor.map(ToOwned::to_owned);
-        let feed = tokio::task::spawn_blocking(move || {
+        let config_cursor = tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
             })?;
             let config = load_or_initialize_config(&config_path)?;
-            Ok::<_, PumasError>(
-                if requested_cursor.as_deref() == Some(config.cursor.as_str()) {
-                    RuntimeProfileUpdateFeed::empty(Some(&config.cursor))
-                } else {
-                    RuntimeProfileUpdateFeed::snapshot_required(config.cursor)
-                },
-            )
+            Ok::<_, PumasError>(config.cursor)
         })
         .await
         .map_err(|err| {
@@ -173,12 +176,65 @@ impl RuntimeProfileService {
                 "Failed to join runtime profile update-feed task: {err}"
             ))
         })??;
+        let feed = self.build_update_feed(requested_cursor.as_deref(), &config_cursor)?;
 
         Ok(RuntimeProfileUpdateFeedResponse {
             success: true,
             error: None,
             feed,
         })
+    }
+
+    pub async fn record_default_ollama_status(
+        &self,
+        is_running: bool,
+    ) -> Result<Option<RuntimeProfileEvent>> {
+        let config_path = self.config_path.clone();
+        let write_lock = self.write_lock.clone();
+        let default_status =
+            tokio::task::spawn_blocking(move || -> Result<Option<RuntimeProfileStatus>> {
+                let _guard = write_lock.write().map_err(|_| {
+                    PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+                })?;
+                let config = load_or_initialize_config(&config_path)?;
+                let Some(default_profile_id) = config.default_profile_id.clone() else {
+                    return Ok(None);
+                };
+                let Some(profile) = config
+                    .profiles
+                    .iter()
+                    .find(|profile| profile.profile_id == default_profile_id)
+                else {
+                    return Ok(None);
+                };
+                if profile.provider != RuntimeProviderId::Ollama {
+                    return Ok(None);
+                }
+
+                Ok(Some(RuntimeProfileStatus {
+                    profile_id: profile.profile_id.clone(),
+                    state: if is_running {
+                        RuntimeLifecycleState::Running
+                    } else {
+                        RuntimeLifecycleState::Stopped
+                    },
+                    endpoint_url: profile.endpoint_url.clone(),
+                    pid: None,
+                    log_path: None,
+                    last_error: None,
+                }))
+            })
+            .await
+            .map_err(|err| {
+                PumasError::Other(format!(
+                    "Failed to join default Ollama status refresh task: {err}"
+                ))
+            })??;
+
+        let Some(status) = default_status else {
+            return Ok(None);
+        };
+        self.record_profile_status(status)
     }
 
     pub async fn upsert_profile(
@@ -355,6 +411,151 @@ impl RuntimeProfileService {
             ))
         })?
     }
+
+    fn apply_runtime_statuses(
+        &self,
+        mut snapshot: RuntimeProfilesSnapshot,
+    ) -> Result<RuntimeProfilesSnapshot> {
+        let mut journal = self.event_journal.write().map_err(|_| {
+            PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
+        })?;
+        journal.ensure_cursor_at_least(&snapshot.cursor);
+        snapshot.cursor = journal.current_cursor();
+        for status in &mut snapshot.statuses {
+            if let Some(runtime_status) = journal.status_for(&status.profile_id) {
+                *status = runtime_status;
+            }
+        }
+        Ok(snapshot)
+    }
+
+    fn build_update_feed(
+        &self,
+        requested_cursor: Option<&str>,
+        config_cursor: &str,
+    ) -> Result<RuntimeProfileUpdateFeed> {
+        let mut journal = self.event_journal.write().map_err(|_| {
+            PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
+        })?;
+        journal.ensure_cursor_at_least(config_cursor);
+        let current_cursor = journal.current_cursor();
+        let config_cursor_number =
+            parse_runtime_profile_cursor(config_cursor).ok_or_else(|| {
+                PumasError::InvalidParams {
+                    message: format!("invalid runtime profile cursor: {config_cursor}"),
+                }
+            })?;
+
+        let Some(requested_cursor) = requested_cursor else {
+            return Ok(RuntimeProfileUpdateFeed::snapshot_required(current_cursor));
+        };
+        let Some(requested_cursor_number) = parse_runtime_profile_cursor(requested_cursor) else {
+            return Ok(RuntimeProfileUpdateFeed::snapshot_required(current_cursor));
+        };
+        if requested_cursor_number < config_cursor_number {
+            return Ok(RuntimeProfileUpdateFeed::snapshot_required(current_cursor));
+        }
+        if requested_cursor_number == journal.cursor {
+            return Ok(RuntimeProfileUpdateFeed::empty(Some(&current_cursor)));
+        }
+
+        if let Some(events) = journal.events_after(requested_cursor_number) {
+            if !events.is_empty() {
+                return Ok(RuntimeProfileUpdateFeed {
+                    cursor: current_cursor,
+                    events,
+                    stale_cursor: false,
+                    snapshot_required: false,
+                });
+            }
+        }
+
+        Ok(RuntimeProfileUpdateFeed::snapshot_required(current_cursor))
+    }
+
+    fn record_profile_status(
+        &self,
+        status: RuntimeProfileStatus,
+    ) -> Result<Option<RuntimeProfileEvent>> {
+        let mut journal = self.event_journal.write().map_err(|_| {
+            PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
+        })?;
+        Ok(journal.record_status(status))
+    }
+}
+
+#[derive(Debug, Default)]
+struct RuntimeProfileEventJournal {
+    cursor: u64,
+    events: VecDeque<RuntimeProfileEvent>,
+    statuses: HashMap<RuntimeProfileId, RuntimeProfileStatus>,
+}
+
+impl RuntimeProfileEventJournal {
+    fn ensure_cursor_at_least(&mut self, cursor: &str) {
+        if let Some(cursor) = parse_runtime_profile_cursor(cursor) {
+            self.cursor = self.cursor.max(cursor);
+        }
+    }
+
+    fn current_cursor(&self) -> String {
+        format_runtime_profile_cursor(self.cursor)
+    }
+
+    fn status_for(&self, profile_id: &RuntimeProfileId) -> Option<RuntimeProfileStatus> {
+        self.statuses.get(profile_id).cloned()
+    }
+
+    fn events_after(&self, requested_cursor: u64) -> Option<Vec<RuntimeProfileEvent>> {
+        if let Some(first_event) = self.events.front() {
+            let first_event_cursor = parse_runtime_profile_cursor(&first_event.cursor)?;
+            if requested_cursor.saturating_add(1) < first_event_cursor {
+                return None;
+            }
+        } else if requested_cursor < self.cursor {
+            return None;
+        }
+
+        Some(
+            self.events
+                .iter()
+                .filter(|event| {
+                    parse_runtime_profile_cursor(&event.cursor)
+                        .map(|cursor| cursor > requested_cursor)
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect(),
+        )
+    }
+
+    fn record_status(&mut self, status: RuntimeProfileStatus) -> Option<RuntimeProfileEvent> {
+        let status_changed = self
+            .statuses
+            .get(&status.profile_id)
+            .map(|existing| existing != &status)
+            .unwrap_or(status.state != RuntimeLifecycleState::Stopped);
+        self.statuses
+            .insert(status.profile_id.clone(), status.clone());
+
+        if !status_changed {
+            return None;
+        }
+
+        self.cursor = self.cursor.saturating_add(1);
+        let event = RuntimeProfileEvent {
+            cursor: self.current_cursor(),
+            event_kind: RuntimeProfileEventKind::StatusChanged,
+            profile_id: Some(status.profile_id),
+            model_id: None,
+            producer_revision: Some("runtime-profile-status".to_string()),
+        };
+        self.events.push_back(event.clone());
+        while self.events.len() > RUNTIME_PROFILE_EVENT_RETAIN_LIMIT {
+            self.events.pop_front();
+        }
+        Some(event)
+    }
 }
 
 fn load_or_initialize_config(path: &Path) -> Result<RuntimeProfilesConfigFile> {
@@ -376,6 +577,16 @@ fn bump_cursor(config: &mut RuntimeProfilesConfigFile) {
         .unwrap_or(0)
         .saturating_add(1);
     config.cursor = format!("runtime-profiles:{next}");
+}
+
+fn parse_runtime_profile_cursor(cursor: &str) -> Option<u64> {
+    cursor
+        .strip_prefix("runtime-profiles:")
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn format_runtime_profile_cursor(cursor: u64) -> String {
+    format!("runtime-profiles:{cursor}")
 }
 
 async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
@@ -512,5 +723,44 @@ mod tests {
             .unwrap();
 
         assert_eq!(endpoint.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_status_changes_emit_update_events() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let snapshot = service.snapshot().await.unwrap();
+        let cursor = snapshot.snapshot.cursor.clone();
+
+        let stopped_event = service.record_default_ollama_status(false).await.unwrap();
+        assert!(stopped_event.is_none());
+
+        let running_event = service.record_default_ollama_status(true).await.unwrap();
+        assert_eq!(
+            running_event.as_ref().map(|event| event.event_kind),
+            Some(RuntimeProfileEventKind::StatusChanged)
+        );
+
+        let feed = service
+            .list_updates_since(Some(cursor.as_str()))
+            .await
+            .unwrap();
+        assert!(feed.success);
+        assert_eq!(feed.feed.events.len(), 1);
+        assert_eq!(
+            feed.feed.events[0]
+                .profile_id
+                .as_ref()
+                .map(RuntimeProfileId::as_str),
+            Some("ollama-default")
+        );
+        assert!(!feed.feed.snapshot_required);
+
+        let snapshot = service.snapshot().await.unwrap();
+        assert_eq!(
+            snapshot.snapshot.statuses[0].state,
+            RuntimeLifecycleState::Running
+        );
+        assert_eq!(snapshot.snapshot.cursor, feed.feed.cursor);
     }
 }

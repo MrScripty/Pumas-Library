@@ -287,8 +287,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - [x] Add one profile-aware list path using `profile_id`.
 - [x] Add one profile-aware load path using `profile_id`.
 - [x] Expose one runtime/profile snapshot API.
-- [ ] Add one backend-pushed runtime/profile event when the default profile status changes.
-- [ ] Preserve app-level aggregate status and existing singleton commands.
+- [x] Add one backend-pushed runtime/profile event when the default profile status changes.
+- [x] Preserve app-level aggregate status and existing singleton commands.
 
 **Verification:**
 - Rust tests for default profile creation and route resolution.
@@ -297,7 +297,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Tests showing legacy `connection_url` compatibility still works at the boundary.
 - Existing process tests still pass.
 
-**Status:** Partially complete. The default-profile storage, snapshot API, Ollama provider adapter, and profile-aware Ollama list/load paths are implemented. Pushed profile events and aggregate status preservation validation remain.
+**Status:** Complete for the default-profile backend vertical slice. Managed lifecycle, multi-profile process isolation, full model-operation routing, llama.cpp support, and frontend settings remain in later milestones.
 
 **Implementation Notes:**
 - 2026-05-05: Added default-profile endpoint resolution to `RuntimeProfileService` and `PumasApi`, including IPC dispatch for secondary clients.
@@ -305,9 +305,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 - 2026-05-05: Added append-only `ollama_load_model_for_profile` RPC/preload/TypeScript bridge method using the same backend `profile_id` endpoint resolution. Existing `ollama_load_model(connection_url)` remains unchanged.
 - 2026-05-05: Added `OllamaRuntimeProviderAdapter` and routed Ollama profile validation through it from `RuntimeProfileService`, keeping provider-specific mode checks out of generic profile mutation flow.
-- 2026-05-05: Added the runtime-profile pushed update transport: Rust SSE route `/events/runtime-profile-updates`, Electron bridge parsing/reconnect/cleanup, main-process forwarding on `runtime-profile:update`, and preload/window typing through `onRuntimeProfileUpdate`. Lifecycle status events still need a real status producer before the default-profile status-change task can be marked complete.
+- 2026-05-05: Added the runtime-profile pushed update transport: Rust SSE route `/events/runtime-profile-updates`, Electron bridge parsing/reconnect/cleanup, main-process forwarding on `runtime-profile:update`, and preload/window typing through `onRuntimeProfileUpdate`.
 - 2026-05-05: Added a backend regression test proving default runtime profile snapshot initialization does not redefine app-level aggregate Ollama status; `get_status().ollama_running` still mirrors the existing singleton `is_ollama_running()` command.
+- 2026-05-05: Added a backend-owned in-memory runtime profile status journal. Runtime profile snapshot and update-feed calls refresh the default Ollama profile from the existing singleton probe, emit `status_changed` events when the default profile transitions between stopped/running, and keep status cursors separate from frontend polling logic.
 - 2026-05-05: Validated event transport with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
+- 2026-05-05: Validated status event production with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml` and recompiled the RPC runtime-profile target with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
 
 ### Milestone 4: Implement Managed Profile Lifecycle Backend
 

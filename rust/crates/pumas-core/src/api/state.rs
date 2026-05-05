@@ -509,11 +509,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(updates)?)
             }
             "get_runtime_profiles_snapshot" => {
+                let ollama_running = is_ollama_running(self).await;
+                self.runtime_profile_service
+                    .record_default_ollama_status(ollama_running)
+                    .await?;
                 let snapshot = self.runtime_profile_service.snapshot().await?;
                 Ok(serde_json::to_value(snapshot)?)
             }
             "list_runtime_profile_updates_since" => {
                 let cursor = params["cursor"].as_str();
+                let ollama_running = is_ollama_running(self).await;
+                self.runtime_profile_service
+                    .record_default_ollama_status(ollama_running)
+                    .await?;
                 let feed = self
                     .runtime_profile_service
                     .list_updates_since(cursor)

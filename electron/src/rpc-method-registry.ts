@@ -125,10 +125,13 @@ export const RPC_METHOD_REGISTRY = {
     'ollama_list_models',
     'ollama_list_models_for_profile',
     'ollama_create_model',
+    'ollama_create_model_for_profile',
     'ollama_delete_model',
+    'ollama_delete_model_for_profile',
     'ollama_load_model',
     'ollama_load_model_for_profile',
     'ollama_unload_model',
+    'ollama_unload_model_for_profile',
     'ollama_list_running',
     'torch_list_slots',
     'torch_load_model',
@@ -366,7 +369,32 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
       profile_id: 'string',
     },
   },
+  ollama_create_model_for_profile: {
+    required: {
+      model_id: 'string',
+    },
+    optional: {
+      model_name: 'string',
+      profile_id: 'string',
+    },
+  },
+  ollama_delete_model_for_profile: {
+    required: {
+      model_name: 'string',
+    },
+    optional: {
+      profile_id: 'string',
+    },
+  },
   ollama_load_model_for_profile: {
+    required: {
+      model_name: 'string',
+    },
+    optional: {
+      profile_id: 'string',
+    },
+  },
+  ollama_unload_model_for_profile: {
     required: {
       model_name: 'string',
     },

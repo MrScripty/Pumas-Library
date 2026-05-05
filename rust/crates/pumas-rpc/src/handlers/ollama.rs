@@ -41,15 +41,29 @@ struct OllamaProfileModelParams {
     profile_id: Option<RuntimeProfileId>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OllamaProfileCreateModelParams {
+    model_id: String,
+    model_name: Option<String>,
+    profile_id: Option<RuntimeProfileId>,
+}
+
+async fn resolve_ollama_profile_endpoint(
+    state: &AppState,
+    profile_id: Option<RuntimeProfileId>,
+) -> pumas_library::Result<pumas_library::models::RuntimeEndpointUrl> {
+    state
+        .api
+        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, profile_id)
+        .await
+}
+
 pub async fn ollama_list_models_for_profile(
     state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let command: OllamaProfileParams = parse_params("ollama_list_models_for_profile", params)?;
-    let endpoint = state
-        .api
-        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, command.profile_id)
-        .await?;
+    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
     let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
     let models = client.list_models().await?;
     Ok(json!({
@@ -71,14 +85,69 @@ pub async fn ollama_load_model_for_profile(
         }));
     }
 
-    let endpoint = state
-        .api
-        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, command.profile_id)
-        .await?;
+    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
     let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
     client.load_model(model_name).await?;
 
     Ok(json!({ "success": true }))
+}
+
+pub async fn ollama_unload_model_for_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: OllamaProfileModelParams =
+        parse_params("ollama_unload_model_for_profile", params)?;
+    let model_name = command.model_name.trim();
+    if model_name.is_empty() {
+        return Ok(json!({
+            "success": false,
+            "error": "model_name is required"
+        }));
+    }
+
+    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    client.unload_model(model_name).await?;
+
+    Ok(json!({ "success": true }))
+}
+
+pub async fn ollama_delete_model_for_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: OllamaProfileModelParams =
+        parse_params("ollama_delete_model_for_profile", params)?;
+    let model_name = command.model_name.trim();
+    if model_name.is_empty() {
+        return Ok(json!({
+            "success": false,
+            "error": "model_name is required"
+        }));
+    }
+
+    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    client.delete_model(model_name).await?;
+
+    Ok(json!({ "success": true }))
+}
+
+pub async fn ollama_create_model_for_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: OllamaProfileCreateModelParams =
+        parse_params("ollama_create_model_for_profile", params)?;
+    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    create_ollama_model(
+        state,
+        command.model_id,
+        command.model_name.as_deref(),
+        Some(endpoint.as_str()),
+    )
+    .await
 }
 
 pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {
@@ -86,6 +155,15 @@ pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_libr
     let model_name = get_str_param(params, "model_name", "modelName");
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
+    create_ollama_model(state, model_id, model_name, connection_url).await
+}
+
+async fn create_ollama_model(
+    state: &AppState,
+    model_id: String,
+    model_name: Option<&str>,
+    connection_url: Option<&str>,
+) -> pumas_library::Result<Value> {
     // Resolve GGUF path from library
     let library = state.api.model_library().clone();
     let primary_file = get_primary_model_file(library.clone(), model_id.clone()).await?;

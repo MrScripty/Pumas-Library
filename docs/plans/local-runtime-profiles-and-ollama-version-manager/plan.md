@@ -357,7 +357,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 **Tasks:**
 - [ ] Add model-route resolution for create/load/unload/delete/list actions.
-- [ ] Add profile-aware model operations that accept `profile_id`.
+- [x] Add profile-aware model operations that accept `profile_id`.
 - [ ] Keep `connection_url` accepted only as legacy compatibility input and convert it at the boundary.
 - [ ] Split register/create from load, or make auto-load an explicit per-route setting.
 - [ ] Return clear errors when a route points to a stopped or unhealthy profile.
@@ -368,7 +368,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Tests showing `connection_url` compatibility still works.
 - Tests showing model-specific profile routing chooses the expected endpoint.
 
-**Status:** Not started.
+**Status:** Started. Append-only profile-aware Ollama list/load/create/unload/delete commands exist; model-route resolution, legacy boundary conversion cleanup, stopped/unhealthy profile errors, and auto-load policy remain.
+
+**Implementation Notes:**
+- 2026-05-05: Added append-only `ollama_create_model_for_profile`, `ollama_delete_model_for_profile`, and `ollama_unload_model_for_profile` commands through Rust RPC, Electron preload validation, and frontend bridge types. Existing connection-url commands remain unchanged.
+- 2026-05-05: Validated profile-aware Ollama command wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 6: Add llama.cpp Runtime Adapter
 

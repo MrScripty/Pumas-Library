@@ -461,12 +461,21 @@ async fn dispatch_method(
             ollama::ollama_list_models_for_profile(state, params).await
         }
         "ollama_create_model" => ollama::ollama_create_model(state, params).await,
+        "ollama_create_model_for_profile" => {
+            ollama::ollama_create_model_for_profile(state, params).await
+        }
         "ollama_delete_model" => ollama::ollama_delete_model(state, params).await,
+        "ollama_delete_model_for_profile" => {
+            ollama::ollama_delete_model_for_profile(state, params).await
+        }
         "ollama_load_model" => ollama::ollama_load_model(state, params).await,
         "ollama_load_model_for_profile" => {
             ollama::ollama_load_model_for_profile(state, params).await
         }
         "ollama_unload_model" => ollama::ollama_unload_model(state, params).await,
+        "ollama_unload_model_for_profile" => {
+            ollama::ollama_unload_model_for_profile(state, params).await
+        }
         "ollama_list_running" => ollama::ollama_list_running(state, params).await,
 
         // Torch Inference Server

@@ -129,6 +129,7 @@ export interface DesktopBridgeRuntimeAPI {
 
   // Ollama Model Management
   ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;
+  ollama_list_models_for_profile(profileId?: string): Promise<OllamaListModelsResponse>;
   ollama_create_model(
     modelId: string,
     modelName?: string,

@@ -1,8 +1,9 @@
 //! Local runtime profile API methods.
 
 use crate::models::{
-    ModelRuntimeRoute, RuntimeProfileConfig, RuntimeProfileId, RuntimeProfileMutationResponse,
-    RuntimeProfileUpdateFeedResponse, RuntimeProfilesSnapshotResponse,
+    ModelRuntimeRoute, RuntimeEndpointUrl, RuntimeProfileConfig, RuntimeProfileId,
+    RuntimeProfileMutationResponse, RuntimeProfileUpdateFeedResponse,
+    RuntimeProfilesSnapshotResponse, RuntimeProviderId,
 };
 use crate::{PumasApi, Result};
 
@@ -109,6 +110,26 @@ impl PumasApi {
         self.primary()
             .runtime_profile_service
             .clear_model_route(model_id)
+            .await
+    }
+
+    pub async fn resolve_runtime_profile_endpoint(
+        &self,
+        provider: RuntimeProviderId,
+        profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_runtime_profile_endpoint",
+                    serde_json::json!({ "provider": provider, "profile_id": profile_id }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .runtime_profile_service
+            .resolve_profile_endpoint(provider, profile_id)
             .await
     }
 }

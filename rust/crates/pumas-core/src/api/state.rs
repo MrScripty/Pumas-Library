@@ -566,6 +566,30 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(response)?)
             }
+            "resolve_runtime_profile_endpoint" => {
+                let provider: models::RuntimeProviderId =
+                    serde_json::from_value(params["provider"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime provider: {e}"),
+                        }
+                    })?;
+                let profile_id = if params["profile_id"].is_null() {
+                    None
+                } else {
+                    Some(
+                        serde_json::from_value(params["profile_id"].clone()).map_err(|e| {
+                            PumasError::InvalidParams {
+                                message: format!("Invalid runtime profile id: {e}"),
+                            }
+                        })?,
+                    )
+                };
+                let endpoint = self
+                    .runtime_profile_service
+                    .resolve_profile_endpoint(provider, profile_id)
+                    .await?;
+                Ok(serde_json::to_value(endpoint)?)
+            }
             "resolve_model_package_facts_summary" => {
                 let model_id =
                     params["model_id"]

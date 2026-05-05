@@ -1,7 +1,9 @@
 //! Ollama model management handlers.
 
-use super::{get_str_param, require_str_param};
+use super::{get_str_param, parse_params, require_str_param};
 use crate::server::AppState;
+use pumas_library::models::{RuntimeProfileId, RuntimeProviderId};
+use serde::Deserialize;
 use serde_json::{json, Value};
 
 async fn get_primary_model_file(
@@ -21,6 +23,28 @@ async fn get_primary_model_file(
 pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
     let client = pumas_app_manager::OllamaClient::new(connection_url);
+    let models = client.list_models().await?;
+    Ok(json!({
+        "success": true,
+        "models": models
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaProfileParams {
+    profile_id: Option<RuntimeProfileId>,
+}
+
+pub async fn ollama_list_models_for_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: OllamaProfileParams = parse_params("ollama_list_models_for_profile", params)?;
+    let endpoint = state
+        .api
+        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, command.profile_id)
+        .await?;
+    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
     let models = client.list_models().await?;
     Ok(json!({
         "success": true,

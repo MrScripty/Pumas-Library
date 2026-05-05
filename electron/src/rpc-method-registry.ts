@@ -121,6 +121,7 @@ export const RPC_METHOD_REGISTRY = {
     'open_url',
     'open_active_install',
     'ollama_list_models',
+    'ollama_list_models_for_profile',
     'ollama_create_model',
     'ollama_delete_model',
     'ollama_load_model',
@@ -342,6 +343,11 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
   clear_model_runtime_route: {
     required: {
       model_id: 'string',
+    },
+  },
+  ollama_list_models_for_profile: {
+    optional: {
+      profile_id: 'string',
     },
   },
   resolve_pumas_model_ref: {

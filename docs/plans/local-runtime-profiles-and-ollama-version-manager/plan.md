@@ -281,11 +281,12 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Prove the profile architecture with one default profile before adding CPU/GPU/external profile complexity.
 
 **Tasks:**
-- [ ] Add `RuntimeProfileService` or equivalent backend service boundary.
+- [x] Add `RuntimeProfileService` or equivalent backend service boundary.
 - [ ] Add an Ollama provider adapter behind the service.
-- [ ] Seed a default Ollama profile that maps to existing singleton Ollama behavior.
-- [ ] Add one profile-aware list/load path using `profile_id`.
-- [ ] Expose one runtime/profile snapshot API.
+- [x] Seed a default Ollama profile that maps to existing singleton Ollama behavior.
+- [x] Add one profile-aware list path using `profile_id`.
+- [ ] Add one profile-aware load path using `profile_id`.
+- [x] Expose one runtime/profile snapshot API.
 - [ ] Add one backend-pushed runtime/profile event when the default profile status changes.
 - [ ] Preserve app-level aggregate status and existing singleton commands.
 
@@ -296,7 +297,12 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Tests showing legacy `connection_url` compatibility still works at the boundary.
 - Existing process tests still pass.
 
-**Status:** Not started.
+**Status:** Partially complete. The default-profile storage, snapshot API, and one profile-aware Ollama list path are implemented. Provider adapter extraction, pushed profile events, and aggregate status preservation validation remain.
+
+**Implementation Notes:**
+- 2026-05-05: Added default-profile endpoint resolution to `RuntimeProfileService` and `PumasApi`, including IPC dispatch for secondary clients.
+- 2026-05-05: Added append-only `ollama_list_models_for_profile` RPC/preload/TypeScript bridge method. It resolves `profile_id` through backend-owned runtime profiles and calls the Ollama client with the resolved endpoint; existing `ollama_list_models(connection_url)` remains unchanged.
+- 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 4: Implement Managed Profile Lifecycle Backend
 

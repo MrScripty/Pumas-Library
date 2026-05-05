@@ -393,6 +393,9 @@ async fn dispatch_method(
 
         // Ollama Model Management
         "ollama_list_models" => ollama::ollama_list_models(state, params).await,
+        "ollama_list_models_for_profile" => {
+            ollama::ollama_list_models_for_profile(state, params).await
+        }
         "ollama_create_model" => ollama::ollama_create_model(state, params).await,
         "ollama_delete_model" => ollama::ollama_delete_model(state, params).await,
         "ollama_load_model" => ollama::ollama_load_model(state, params).await,

@@ -336,6 +336,8 @@ const electronAPI = {
   // Ollama Model Management
   ollama_list_models: (connectionUrl?: string) =>
     apiCall('ollama_list_models', { connection_url: connectionUrl }),
+  ollama_list_models_for_profile: (profileId?: string) =>
+    apiCall('ollama_list_models_for_profile', { profile_id: profileId }),
   ollama_create_model: (modelId: string, modelName?: string, connectionUrl?: string) =>
     apiCall('ollama_create_model', {
       model_id: modelId,

@@ -7,10 +7,10 @@ use std::sync::{Arc, RwLock};
 
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::models::{
-    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeManagementMode, RuntimeProfileConfig,
-    RuntimeProfileId, RuntimeProfileMutationResponse, RuntimeProfileUpdateFeed,
-    RuntimeProfileUpdateFeedResponse, RuntimeProfilesConfigFile, RuntimeProfilesSnapshotResponse,
-    RuntimeProviderId, RuntimeProviderMode,
+    ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeManagementMode,
+    RuntimeProfileConfig, RuntimeProfileId, RuntimeProfileMutationResponse,
+    RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse, RuntimeProfilesConfigFile,
+    RuntimeProfilesSnapshotResponse, RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::{PumasError, Result};
 
@@ -242,6 +242,60 @@ impl RuntimeProfileService {
         .await
     }
 
+    pub async fn resolve_profile_endpoint(
+        &self,
+        provider: RuntimeProviderId,
+        profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        let config_path = self.config_path.clone();
+        let write_lock = self.write_lock.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = write_lock.write().map_err(|_| {
+                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+            })?;
+            let config = load_or_initialize_config(&config_path)?;
+            let selected_profile_id = profile_id
+                .or_else(|| config.default_profile_id.clone())
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: "runtime profile id is required".to_string(),
+                })?;
+            let profile = config
+                .profiles
+                .iter()
+                .find(|profile| profile.profile_id == selected_profile_id)
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: format!(
+                        "runtime profile not found: {}",
+                        selected_profile_id.as_str()
+                    ),
+                })?;
+            if profile.provider != provider {
+                return Err(PumasError::InvalidParams {
+                    message: format!(
+                        "runtime profile {} does not use provider {:?}",
+                        selected_profile_id.as_str(),
+                        provider
+                    ),
+                });
+            }
+            profile
+                .endpoint_url
+                .clone()
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: format!(
+                        "runtime profile {} does not define endpoint_url",
+                        selected_profile_id.as_str()
+                    ),
+                })
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join runtime profile endpoint resolution task: {err}"
+            ))
+        })?
+    }
+
     async fn mutate_config<F>(&self, mutate: F) -> Result<RuntimeProfileMutationResponse>
     where
         F: FnOnce(&mut RuntimeProfilesConfigFile) -> Result<RuntimeProfileMutationResponse>
@@ -397,5 +451,18 @@ mod tests {
             auto_load: true,
         };
         assert!(service.set_model_route(invalid_route).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_resolves_default_ollama_endpoint() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let endpoint = service
+            .resolve_profile_endpoint(RuntimeProviderId::Ollama, None)
+            .await
+            .unwrap();
+
+        assert_eq!(endpoint.as_str(), "http://127.0.0.1:11434/");
     }
 }

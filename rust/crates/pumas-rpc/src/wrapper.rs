@@ -134,6 +134,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "get_sandbox_info"
         | "validate_installations"
         | "ollama_list_models"
+        | "ollama_list_models_for_profile"
         | "ollama_create_model"
         | "ollama_delete_model"
         | "ollama_load_model"

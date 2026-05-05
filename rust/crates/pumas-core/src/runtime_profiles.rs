@@ -446,39 +446,54 @@ impl RuntimeProfileService {
                 .ok_or_else(|| PumasError::InvalidParams {
                     message: "runtime profile id is required".to_string(),
                 })?;
-            let profile = config
-                .profiles
-                .iter()
-                .find(|profile| profile.profile_id == selected_profile_id)
-                .ok_or_else(|| PumasError::InvalidParams {
-                    message: format!(
-                        "runtime profile not found: {}",
-                        selected_profile_id.as_str()
-                    ),
-                })?;
-            if profile.provider != provider {
-                return Err(PumasError::InvalidParams {
-                    message: format!(
-                        "runtime profile {} does not use provider {:?}",
-                        selected_profile_id.as_str(),
-                        provider
-                    ),
-                });
-            }
-            profile
-                .endpoint_url
-                .clone()
-                .ok_or_else(|| PumasError::InvalidParams {
-                    message: format!(
-                        "runtime profile {} does not define endpoint_url",
-                        selected_profile_id.as_str()
-                    ),
-                })
+            resolve_config_profile_endpoint(&config, provider, selected_profile_id)
         })
         .await
         .map_err(|err| {
             PumasError::Other(format!(
                 "Failed to join runtime profile endpoint resolution task: {err}"
+            ))
+        })?
+    }
+
+    pub async fn resolve_model_endpoint(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+        explicit_profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        let model_id = model_id.trim().to_string();
+        if model_id.is_empty() {
+            return Err(PumasError::InvalidParams {
+                message: "model_id is required".to_string(),
+            });
+        }
+
+        let config_path = self.config_path.clone();
+        let write_lock = self.write_lock.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = write_lock.write().map_err(|_| {
+                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+            })?;
+            let config = load_or_initialize_config(&config_path)?;
+            let routed_profile_id = explicit_profile_id
+                .or_else(|| {
+                    config
+                        .routes
+                        .iter()
+                        .find(|route| route.model_id == model_id)
+                        .and_then(|route| route.profile_id.clone())
+                })
+                .or_else(|| config.default_profile_id.clone())
+                .ok_or_else(|| PumasError::InvalidParams {
+                    message: "runtime profile id is required".to_string(),
+                })?;
+            resolve_config_profile_endpoint(&config, provider, routed_profile_id)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join model runtime profile endpoint resolution task: {err}"
             ))
         })?
     }
@@ -717,6 +732,38 @@ fn derive_managed_profile_launch_specs(
     }
 
     Ok(specs)
+}
+
+fn resolve_config_profile_endpoint(
+    config: &RuntimeProfilesConfigFile,
+    provider: RuntimeProviderId,
+    profile_id: RuntimeProfileId,
+) -> Result<RuntimeEndpointUrl> {
+    let profile = config
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == profile_id)
+        .ok_or_else(|| PumasError::InvalidParams {
+            message: format!("runtime profile not found: {}", profile_id.as_str()),
+        })?;
+    if profile.provider != provider {
+        return Err(PumasError::InvalidParams {
+            message: format!(
+                "runtime profile {} does not use provider {:?}",
+                profile_id.as_str(),
+                provider
+            ),
+        });
+    }
+    profile
+        .endpoint_url
+        .clone()
+        .ok_or_else(|| PumasError::InvalidParams {
+            message: format!(
+                "runtime profile {} does not define endpoint_url",
+                profile_id.as_str()
+            ),
+        })
 }
 
 fn allocate_implicit_runtime_port(
@@ -990,6 +1037,42 @@ mod tests {
             auto_load: true,
         };
         assert!(service.set_model_route(invalid_route).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_resolves_model_route_endpoint() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.profile_id = RuntimeProfileId::parse("ollama-route").unwrap();
+        profile.name = "Ollama Route".to_string();
+        profile.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:12557").ok();
+        profile.port = RuntimePort::parse(12557).ok();
+        service.upsert_profile(profile).await.unwrap();
+        service
+            .set_model_route(ModelRuntimeRoute {
+                model_id: "llm/test/model".to_string(),
+                profile_id: Some(RuntimeProfileId::parse("ollama-route").unwrap()),
+                auto_load: true,
+            })
+            .await
+            .unwrap();
+
+        let routed_endpoint = service
+            .resolve_model_endpoint(RuntimeProviderId::Ollama, "llm/test/model", None)
+            .await
+            .unwrap();
+        assert_eq!(routed_endpoint.as_str(), "http://127.0.0.1:12557/");
+
+        let explicit_endpoint = service
+            .resolve_model_endpoint(
+                RuntimeProviderId::Ollama,
+                "llm/test/model",
+                Some(RuntimeProfileId::parse("ollama-default").unwrap()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(explicit_endpoint.as_str(), "http://127.0.0.1:11434/");
     }
 
     #[tokio::test]

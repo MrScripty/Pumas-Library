@@ -136,6 +136,31 @@ impl PumasApi {
             .await
     }
 
+    pub async fn resolve_model_runtime_profile_endpoint(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+        profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "resolve_model_runtime_profile_endpoint",
+                    serde_json::json!({
+                        "provider": provider,
+                        "model_id": model_id,
+                        "profile_id": profile_id
+                    }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .runtime_profile_service
+            .resolve_model_endpoint(provider, model_id, profile_id)
+            .await
+    }
+
     pub async fn launch_runtime_profile(
         &self,
         profile_id: RuntimeProfileId,

@@ -140,7 +140,14 @@ pub async fn ollama_create_model_for_profile(
 ) -> pumas_library::Result<Value> {
     let command: OllamaProfileCreateModelParams =
         parse_params("ollama_create_model_for_profile", params)?;
-    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    let endpoint = state
+        .api
+        .resolve_model_runtime_profile_endpoint(
+            RuntimeProviderId::Ollama,
+            &command.model_id,
+            command.profile_id,
+        )
+        .await?;
     create_ollama_model(
         state,
         command.model_id,

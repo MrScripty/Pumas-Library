@@ -10,3 +10,4 @@ export { DependencyStatusSection, type DependencyStatusSectionProps } from './De
 export { StatsSection, type StatsSectionProps, type StatsSectionConfig } from './StatsSection';
 export { ModelSelectorSection, type ModelSelectorSectionProps, type ModelSelectorSectionConfig } from './ModelSelectorSection';
 export { ModelLibrarySection, type ModelLibrarySectionProps } from './ModelLibrarySection';
+export { RuntimeProfileSettingsSection } from './RuntimeProfileSettingsSection';

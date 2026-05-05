@@ -433,12 +433,12 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Tasks:**
 - [x] Add a frontend runtime/profile subscription hook that follows the existing model-library update subscription pattern. The bridge event source exists as `onRuntimeProfileUpdate`; the React hook still needs to consume it.
 - [x] Add snapshot refresh on runtime/profile events.
-- [ ] Add a local runtime profile settings section.
-- [ ] Add profile create/edit controls for provider, provider mode, name, endpoint, port, scheduler settings, and managed/external status.
+- [x] Add a local runtime profile settings section.
+- [x] Add profile create/edit controls for provider, provider mode, name, endpoint, port, scheduler settings, and managed/external status.
 - [ ] Add per-model route controls for assigning a model to auto/Ollama/llama.cpp/CPU/GPU/external profiles.
-- [ ] Show profile status and model running state from backend-confirmed responses.
-- [ ] Show provider-specific advanced controls only when the selected provider/mode supports them.
-- [ ] Avoid optimistic persistence; refresh or accept backend-pushed state after save.
+- [x] Show profile status and model running state from backend-confirmed responses.
+- [x] Show provider-specific advanced controls only when the selected provider/mode supports them.
+- [x] Avoid optimistic persistence; refresh or accept backend-pushed state after save.
 - [ ] Remove or bypass component-owned Ollama state polling for profile-backed views.
 
 **Verification:**
@@ -448,11 +448,13 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Subscription cleanup tests for runtime/profile events.
 - Typecheck and lint.
 
-**Status:** In progress. Runtime profile snapshot/subscription state is available to React; settings UI, route controls, and polling cleanup remain.
+**Status:** In progress. Runtime profile snapshot/subscription state and the first settings editor are available to React; per-model route controls and polling cleanup remain.
 
 **Implementation Notes:**
 - 2026-05-05: Added `useRuntimeProfileUpdateSubscription` and `useRuntimeProfiles` so React code can subscribe to backend-pushed runtime/profile update feeds, validate the feed shape, debounce notifications, and refresh the backend-owned runtime profile snapshot without adding component-level polling.
 - 2026-05-05: Validated the hook/type surface with `npm run -w frontend check:types`. A focused `vitest run useRuntimeProfiles api-runtime-profiles` command found no matching tests yet, so subscription cleanup tests remain part of later frontend test work.
+- 2026-05-05: Added `RuntimeProfileSettingsSection` to the Ollama panel. The section lists backend-confirmed profiles and statuses, exposes create/edit/delete controls for provider, provider mode, management mode, endpoint, port, enabled state, device mode, device id, and llama.cpp GPU layers, and refreshes the backend snapshot after every mutation rather than mutating local state optimistically.
+- 2026-05-05: Validated the settings section with `npm run -w frontend check:types`.
 
 ### Milestone 8: Integration, Documentation, and Release Validation
 

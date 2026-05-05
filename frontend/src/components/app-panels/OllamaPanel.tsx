@@ -2,6 +2,7 @@ import { AppConnectionInfo } from '../AppConnectionInfo';
 import { ModelManager, type ModelManagerProps } from '../ModelManager';
 import { VersionManagementPanel } from './VersionManagementPanel';
 import { OllamaModelSection } from './sections/OllamaModelSection';
+import { RuntimeProfileSettingsSection } from './sections/RuntimeProfileSettingsSection';
 import type { AppVersionState } from '../../utils/appVersionState';
 import type { ModelCategory } from '../../types/apps';
 
@@ -55,6 +56,8 @@ export function OllamaPanel({
           modelGroups={modelGroups}
         />
       )}
+
+      {!isManagerOpen && <RuntimeProfileSettingsSection />}
 
       {!isManagerOpen && <ModelManager {...modelManagerProps} />}
     </div>

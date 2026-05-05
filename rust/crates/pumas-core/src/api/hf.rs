@@ -1351,6 +1351,9 @@ pub(crate) fn partial_download_reason_code(err: &PumasError) -> &'static str {
         PumasError::ModelNotFound { .. } => "repo_not_found",
         PumasError::RateLimited { .. } => "rate_limited",
         PumasError::PermissionDenied(_) => "permission_denied",
+        PumasError::Network { message, .. } if message.contains("404 Not Found") => {
+            "repo_not_found"
+        }
         PumasError::Timeout(_)
         | PumasError::Network { .. }
         | PumasError::CircuitBreakerOpen { .. } => "network_error",
@@ -1383,6 +1386,15 @@ mod tests {
             cause: None,
         };
         assert_eq!(partial_download_reason_code(&err), "network_error");
+    }
+
+    #[test]
+    fn test_partial_download_reason_code_maps_hf_404_network_errors_to_repo_not_found() {
+        let err = PumasError::Network {
+            message: "HuggingFace API returned 404 Not Found".to_string(),
+            cause: None,
+        };
+        assert_eq!(partial_download_reason_code(&err), "repo_not_found");
     }
 
     #[test]

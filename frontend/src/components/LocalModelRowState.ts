@@ -101,6 +101,7 @@ function getPartialDownloadState({
   recoveringPartialRepoIds?: Set<string>;
 }): PartialDownloadState {
   const partialRepoId = model.repoId ?? model.downloadRepoId;
+  const missingRecoveryMetadata = isPartialDownload && (!model.repoId || !model.modelDir);
 
   return {
     canRecoverPartial:
@@ -110,7 +111,11 @@ function getPartialDownloadState({
       Boolean(model.repoId) &&
       Boolean(model.modelDir),
     isRecoveringPartial: Boolean(partialRepoId && recoveringPartialRepoIds?.has(partialRepoId)),
-    partialError: partialRepoId ? downloadErrors?.[partialRepoId] : undefined,
+    partialError: missingRecoveryMetadata
+      ? 'Cannot resume partial download: repository metadata is missing.'
+      : partialRepoId
+        ? downloadErrors?.[partialRepoId]
+        : undefined,
     partialRepoId,
   };
 }

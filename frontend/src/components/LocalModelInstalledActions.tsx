@@ -66,7 +66,7 @@ export function LocalModelInstalledActions({
               ? rowState.isRecoveringPartial
                 ? 'Resuming partial download...'
                 : 'Resume partial download'
-              : 'Partial download'
+              : rowState.partialError ?? 'Partial download'
           }
           onClick={
             rowState.canRecoverPartial && onRecoverPartialDownload && !rowState.isRecoveringPartial

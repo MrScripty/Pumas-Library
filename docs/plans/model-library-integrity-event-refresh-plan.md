@@ -512,6 +512,14 @@ Update during implementation:
 - Migration execution now emits a backend-owned library-wide refresh event even
   when no individual index row changes, so read-time integrity projections and
   stale renderer labels are invalidated after successful maintenance runs.
+- Partial-download projection now keeps a complete GGUF artifact available when
+  it shares a directory with a different expected `.part` artifact, preventing a
+  completed quant variant from inheriting another quant's partial-download
+  state.
+- Partial-download recovery now maps HuggingFace 404s to a repo-not-found
+  recovery reason and the frontend surfaces missing repository metadata for
+  metadata-less partial rows instead of leaving the disabled recovery action
+  unexplained.
 
 ### Deviations
 
@@ -551,6 +559,13 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_dedupes_duplicate_repo_ids_and_marks_integrity_issue`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_cleanup_duplicate_repo_entries_removes_partial_duplicate_against_complete_copy`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_notifies_model_library_refresh_even_when_no_moves`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_partial_download_projection_keeps_complete_gguf_variant_available`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_indexed_metadata_marks_partial_download_when_part_exists`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_partial_download_reason_code_maps_hf_404_network_errors_to_repo_not_found`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_partial_download_reason_code_maps_network_errors`
+- `npm run -w frontend test:run -- LocalModelRowState.test.ts`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `npm run -w frontend check:types`
 
 ### Traceability Links
 

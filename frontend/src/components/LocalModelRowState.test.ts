@@ -53,6 +53,29 @@ describe('getLocalModelRowState', () => {
     expect(rowState.ringDegrees).toBe(360);
   });
 
+  it('surfaces missing repository metadata for non-resumable partial downloads', () => {
+    const rowState = getLocalModelRowState({
+      excludedModels: new Set(),
+      expandedRelated: new Set(),
+      model: createModel({
+        isDownloading: false,
+        isPartialDownload: true,
+        modelDir: '/models/partial',
+      }),
+      relatedModelsById: {},
+      starredModels: new Set(),
+      canConvertModel: true,
+      canPauseDownload: true,
+      canRecoverDownload: true,
+      canResumeDownload: true,
+    });
+
+    expect(rowState.canRecoverPartial).toBe(false);
+    expect(rowState.partialError).toBe(
+      'Cannot resume partial download: repository metadata is missing.'
+    );
+  });
+
   it('does not retain the progress ring while a download is active', () => {
     const rowState = getLocalModelRowState({
       excludedModels: new Set(),

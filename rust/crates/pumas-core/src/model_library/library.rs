@@ -5172,22 +5172,64 @@ fn verify_model_hash(
 fn download_projection_status(model_dir: &Path, metadata: &ModelMetadata) -> (bool, bool, usize) {
     let has_part_files = has_pending_download_artifacts(model_dir);
 
-    let missing_expected_files = metadata
-        .expected_files
-        .as_ref()
-        .map(|expected| {
-            expected
-                .iter()
-                .filter(|relative_path| !model_dir.join(relative_path).exists())
-                .count()
-        })
-        .unwrap_or(0);
+    let expected_files = metadata.expected_files.as_deref().unwrap_or(&[]);
+    let missing_expected_files = if expected_files.is_empty() {
+        0
+    } else {
+        expected_files
+            .iter()
+            .filter(|relative_path| !model_dir.join(relative_path).exists())
+            .count()
+    };
+    let has_complete_gguf_outside_partial_selection = metadata.match_source.as_deref()
+        == Some("download_partial")
+        && has_complete_gguf_payload_outside_expected_files(model_dir, expected_files);
 
     (
-        has_part_files || missing_expected_files > 0,
+        (has_part_files || missing_expected_files > 0)
+            && !has_complete_gguf_outside_partial_selection,
         has_part_files,
         missing_expected_files,
     )
+}
+
+fn has_complete_gguf_payload_outside_expected_files(
+    model_dir: &Path,
+    expected_files: &[String],
+) -> bool {
+    if expected_files.is_empty() {
+        return false;
+    }
+
+    let expected = expected_files
+        .iter()
+        .map(|value| value.replace('\\', "/"))
+        .collect::<HashSet<_>>();
+
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .max_depth(2)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .any(|entry| {
+            if !entry.file_type().is_file() {
+                return false;
+            }
+            let name = entry.file_name().to_string_lossy();
+            if name.ends_with(".part")
+                || !name
+                    .rsplit_once('.')
+                    .is_some_and(|(_, ext)| ext.eq_ignore_ascii_case("gguf"))
+            {
+                return false;
+            }
+
+            let Ok(relative) = entry.path().strip_prefix(model_dir) else {
+                return false;
+            };
+            let relative = relative.to_string_lossy().replace('\\', "/");
+            !expected.contains(&relative)
+        })
 }
 
 fn has_pending_download_artifacts(model_dir: &Path) -> bool {
@@ -6695,6 +6737,54 @@ mod tests {
         assert_eq!(
             record.metadata[PRIMARY_FORMAT_METADATA_KEY].as_str(),
             Some("gguf")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_partial_download_projection_keeps_complete_gguf_variant_available() {
+        let (_, library) = setup_library().await;
+        let model_dir = library.build_model_path("vlm", "test", "mixed-gguf-partial");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model-Q4_K_M.gguf.part"), b"partial").unwrap();
+        std::fs::write(model_dir.join("model-Q5_K_M.gguf"), b"complete").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some("vlm/test/mixed-gguf-partial".to_string()),
+            family: Some("test".to_string()),
+            model_type: Some("vlm".to_string()),
+            official_name: Some("Mixed GGUF Partial".to_string()),
+            cleaned_name: Some("mixed-gguf-partial".to_string()),
+            match_source: Some("download_partial".to_string()),
+            expected_files: Some(vec!["model-Q4_K_M.gguf".to_string()]),
+            files: Some(vec![crate::models::ModelFileInfo {
+                name: "model-Q5_K_M.gguf".to_string(),
+                original_name: None,
+                size: Some(10_000),
+                sha256: None,
+                blake3: None,
+            }]),
+            ..Default::default()
+        };
+
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let record = library
+            .get_model("vlm/test/mixed-gguf-partial")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            record.metadata["download_incomplete"].as_bool(),
+            Some(false)
+        );
+        assert_eq!(
+            record.metadata["download_has_part_files"].as_bool(),
+            Some(true)
+        );
+        assert_eq!(
+            record.metadata[QUANTIZATION_METADATA_KEY].as_str(),
+            Some("Q5_K_M")
         );
     }
 

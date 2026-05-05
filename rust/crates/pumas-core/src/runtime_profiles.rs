@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::models::{
@@ -121,6 +121,7 @@ pub struct RuntimeProfileService {
     config_path: PathBuf,
     write_lock: Arc<RwLock<()>>,
     event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
+    operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -136,6 +137,20 @@ pub struct RuntimeProfileLaunchSpec {
     pub health_check_url: RuntimeEndpointUrl,
 }
 
+#[derive(Debug)]
+pub struct RuntimeProfileOperationGuard {
+    profile_id: RuntimeProfileId,
+    operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
+}
+
+impl Drop for RuntimeProfileOperationGuard {
+    fn drop(&mut self) {
+        if let Ok(mut operation_locks) = self.operation_locks.lock() {
+            operation_locks.remove(&self.profile_id);
+        }
+    }
+}
+
 impl RuntimeProfileService {
     pub fn new(launcher_root: impl AsRef<Path>) -> Self {
         let launcher_root = launcher_root.as_ref().to_path_buf();
@@ -147,6 +162,7 @@ impl RuntimeProfileService {
             launcher_root,
             write_lock: Arc::new(RwLock::new(())),
             event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
+            operation_locks: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -273,6 +289,27 @@ impl RuntimeProfileService {
                 "Failed to join runtime profile launch-spec task: {err}"
             ))
         })?
+    }
+
+    pub fn begin_profile_operation(
+        &self,
+        profile_id: RuntimeProfileId,
+    ) -> Result<RuntimeProfileOperationGuard> {
+        let mut operation_locks = self.operation_locks.lock().map_err(|_| {
+            PumasError::Other("Failed to acquire runtime profile operation lock".to_string())
+        })?;
+        if !operation_locks.insert(profile_id.clone()) {
+            return Err(PumasError::InvalidParams {
+                message: format!(
+                    "runtime profile operation already in progress: {}",
+                    profile_id.as_str()
+                ),
+            });
+        }
+        Ok(RuntimeProfileOperationGuard {
+            profile_id,
+            operation_locks: self.operation_locks.clone(),
+        })
     }
 
     pub async fn upsert_profile(
@@ -1063,6 +1100,23 @@ mod tests {
                 .map(String::as_str),
             Some("")
         );
+    }
+
+    #[test]
+    fn runtime_profile_service_serializes_profile_operations() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let profile_id = RuntimeProfileId::parse("ollama-default").unwrap();
+
+        let guard = service
+            .begin_profile_operation(profile_id.clone())
+            .expect("first profile operation should start");
+        let overlapping = service.begin_profile_operation(profile_id.clone());
+        assert!(overlapping.is_err());
+
+        drop(guard);
+        let next = service.begin_profile_operation(profile_id);
+        assert!(next.is_ok());
     }
 
     #[tokio::test]

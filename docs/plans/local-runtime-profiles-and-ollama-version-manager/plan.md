@@ -338,6 +338,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated launch spec derivation and collision handling with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Added profile environment derivation to launch specs, including `PUMAS_RUNTIME_PROFILE_ID`, Ollama `OLLAMA_HOST`, CPU mode GPU-hiding variables, and GPU/specific-device visibility variables when a device ID is configured.
 - 2026-05-05: Validated CPU/GPU environment derivation with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Added a per-profile operation guard inside `RuntimeProfileService` so lifecycle start/stop paths can reject overlapping operations for the same profile without holding config locks across process work. The serialization task remains open until start/stop commands use the guard.
+- 2026-05-05: Validated operation serialization infrastructure with `cargo test -p pumas-library runtime_profile_service_serializes_profile_operations --manifest-path rust/Cargo.toml`.
 
 ### Milestone 5: Route Ollama Model Operations Through Profiles
 

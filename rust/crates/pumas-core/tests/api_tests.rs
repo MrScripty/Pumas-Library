@@ -11,8 +11,9 @@
 
 use pumas_library::models::{
     ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
-    ModelPackageFactsSummaryStatus, RuntimeLifecycleState, RuntimePort, RuntimeProfileConfig,
-    RuntimeProfileId,
+    ModelPackageFactsSummaryStatus, RuntimeEndpointUrl, RuntimeLifecycleState,
+    RuntimeManagementMode, RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId,
+    RuntimeProviderMode,
 };
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
@@ -204,6 +205,59 @@ async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
         .as_deref()
         .unwrap_or_default()
         .contains("Binary not found"));
+}
+
+#[tokio::test]
+async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+
+    let profile = RuntimeProfileConfig {
+        profile_id: RuntimeProfileId::parse("llama-router-test").unwrap(),
+        provider: RuntimeProviderId::LlamaCpp,
+        provider_mode: RuntimeProviderMode::LlamaCppRouter,
+        management_mode: RuntimeManagementMode::Managed,
+        name: "llama.cpp Router Test".to_string(),
+        enabled: true,
+        endpoint_url: RuntimeEndpointUrl::parse("http://127.0.0.1:18080").ok(),
+        port: RuntimePort::parse(18080).ok(),
+        device: Default::default(),
+        scheduler: Default::default(),
+    };
+    api.upsert_runtime_profile(profile).await.unwrap();
+
+    let version_dir = temp_dir.path().join("launcher-data").join("llama-cpp");
+    std::fs::create_dir_all(&version_dir).unwrap();
+    let response = api
+        .launch_runtime_profile(
+            RuntimeProfileId::parse("llama-router-test").unwrap(),
+            "local-build",
+            &version_dir,
+        )
+        .await
+        .unwrap();
+
+    assert!(!response.success);
+    assert!(response
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("llama-server"));
+
+    let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
+    let status = snapshot
+        .snapshot
+        .statuses
+        .iter()
+        .find(|status| status.profile_id.as_str() == "llama-router-test")
+        .unwrap();
+    assert_eq!(status.state, RuntimeLifecycleState::Failed);
+    assert!(status
+        .last_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("llama-server"));
 }
 
 #[tokio::test]

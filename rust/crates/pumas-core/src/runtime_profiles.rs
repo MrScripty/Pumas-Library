@@ -165,6 +165,7 @@ pub struct RuntimeProfileService {
 pub struct RuntimeProfileLaunchSpec {
     pub profile_id: RuntimeProfileId,
     pub provider: RuntimeProviderId,
+    pub provider_mode: RuntimeProviderMode,
     pub endpoint_url: RuntimeEndpointUrl,
     pub port: RuntimePort,
     pub extra_args: Vec<String>,
@@ -871,6 +872,7 @@ fn derive_managed_profile_launch_specs(
         specs.push(RuntimeProfileLaunchSpec {
             profile_id: profile.profile_id.clone(),
             provider: profile.provider,
+            provider_mode: profile.provider_mode,
             endpoint_url: endpoint_url.clone(),
             port,
             extra_args: profile_runtime_extra_args(launcher_root, profile, &endpoint_url, port)?,

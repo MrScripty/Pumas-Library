@@ -4,7 +4,7 @@ use super::state::PrimaryState;
 use crate::error::PumasError;
 use crate::models::{
     LaunchResponse, RuntimeLifecycleState, RuntimeProfileId, RuntimeProfileStatus,
-    RuntimeProviderId,
+    RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
 use std::fs;
@@ -24,10 +24,15 @@ pub(super) async fn launch_runtime_profile(
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
 
-    if spec.provider != RuntimeProviderId::Ollama {
+    if spec.provider == RuntimeProviderId::LlamaCpp
+        && spec.provider_mode != RuntimeProviderMode::LlamaCppRouter
+    {
         return Ok(LaunchResponse {
             success: false,
-            error: Some("runtime profile launch currently supports Ollama profiles".to_string()),
+            error: Some(
+                "runtime profile launch currently supports Ollama and llama.cpp router profiles"
+                    .to_string(),
+            ),
             log_path: None,
             ready: Some(false),
         });
@@ -48,11 +53,7 @@ pub(super) async fn launch_runtime_profile(
     let version_dir = version_dir.to_path_buf();
     let launch_spec = spec.clone();
     let launch_result = tokio::task::spawn_blocking(move || {
-        let config = BinaryLaunchConfig::ollama(&tag, &version_dir)
-            .with_pid_file(&launch_spec.pid_file)
-            .with_log_file(&launch_spec.log_file)
-            .with_health_check_url(launch_spec.health_check_url.as_str())
-            .with_env_vars(launch_spec.env_vars);
+        let config = runtime_profile_binary_launch_config(&tag, &version_dir, &launch_spec)?;
         ProcessLauncher::launch_binary(&config)
     })
     .await
@@ -88,6 +89,43 @@ pub(super) async fn launch_runtime_profile(
             .map(|path| path.to_string_lossy().to_string()),
         ready: Some(launch_result.ready),
     })
+}
+
+fn runtime_profile_binary_launch_config(
+    tag: &str,
+    version_dir: &Path,
+    launch_spec: &crate::runtime_profiles::RuntimeProfileLaunchSpec,
+) -> std::result::Result<BinaryLaunchConfig, PumasError> {
+    let config = match launch_spec.provider {
+        RuntimeProviderId::Ollama => BinaryLaunchConfig::ollama(tag, version_dir),
+        RuntimeProviderId::LlamaCpp => match launch_spec.provider_mode {
+            RuntimeProviderMode::LlamaCppRouter => BinaryLaunchConfig::llama_cpp_router(
+                tag,
+                version_dir,
+                "127.0.0.1",
+                launch_spec.port.value(),
+                version_dir,
+            ),
+            RuntimeProviderMode::LlamaCppDedicated => {
+                return Err(PumasError::InvalidParams {
+                    message: "managed llama.cpp dedicated launch is not implemented yet"
+                        .to_string(),
+                });
+            }
+            RuntimeProviderMode::OllamaServe => {
+                return Err(PumasError::InvalidParams {
+                    message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
+                });
+            }
+        },
+    };
+
+    Ok(config
+        .with_extra_args(launch_spec.extra_args.clone())
+        .with_pid_file(&launch_spec.pid_file)
+        .with_log_file(&launch_spec.log_file)
+        .with_health_check_url(launch_spec.health_check_url.as_str())
+        .with_env_vars(launch_spec.env_vars.clone()))
 }
 
 pub(super) async fn stop_runtime_profile(

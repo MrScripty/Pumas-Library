@@ -316,13 +316,13 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Let the backend safely manage multiple provider-backed runtime profiles after the default-profile slice is proven.
 
 **Tasks:**
-- [ ] Add profile-aware process lifecycle through the runtime-profile service.
+- [x] Add profile-aware process lifecycle through the runtime-profile service.
 - [x] Generate profile-specific ports, health URLs, PID files, and log files.
 - [x] Apply profile environment variables, including CPU/GPU visibility settings where platform-supported.
-- [ ] Serialize start/stop operations per profile.
-- [ ] Report profile status, last error, endpoint URL, and running state through the snapshot/event path.
-- [ ] Keep broad singleton process cleanup separate from profile-scoped stop operations.
-- [ ] Preserve app-level aggregate status for existing UI.
+- [x] Serialize start/stop operations per profile.
+- [x] Report profile status, last error, endpoint URL, and running state through the snapshot/event path.
+- [x] Keep broad singleton process cleanup separate from profile-scoped stop operations.
+- [x] Preserve app-level aggregate status for existing UI.
 
 **Verification:**
 - Rust tests for start/stop state transitions with fake process launchers where possible.
@@ -331,7 +331,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Rust tests that profile-scoped stop does not target unrelated Ollama processes.
 - Existing process tests still pass.
 
-**Status:** Started. Profile-scoped launch spec and environment derivation are implemented and validated; process spawning, serialized operations, and profile-scoped stop behavior remain.
+**Status:** Complete for the backend managed Ollama lifecycle slice. Successful real-process smoke coverage remains part of release validation, and llama.cpp lifecycle support remains in Milestone 6.
 
 **Implementation Notes:**
 - 2026-05-05: Added backend-managed runtime launch specs derived from persisted profiles. Specs resolve deterministic profile runtime directories under `launcher-data/runtime-profiles/{provider}/{profile_id}`, profile-scoped PID/log files, health URLs, explicit or deterministic implicit ports, and managed-port collision validation without touching singleton process launch behavior.
@@ -347,6 +347,9 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Added the first profile-scoped stop path. Core API and primary IPC dispatch stop only the selected profile PID file, never the legacy broad Ollama cleanup path, and record stopping/stopped/failed lifecycle status through the runtime profile service.
 - 2026-05-05: Validated the no-PID profile-scoped stop path without touching real processes using `cargo test -p pumas-library test_stop_runtime_profile_without_pid_is_profile_scoped --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Added append-only desktop bridge command wiring for `stop_runtime_profile(profile_id)`. The command delegates to the profile-scoped PID-file stop path and leaves legacy `stop_ollama` unchanged.
+
+**Discovered Issues:**
+- 2026-05-05: `ProcessLauncher` is currently a static process executor, so managed profile lifecycle tests cover command construction, missing-binary failure, no-PID stop, and status transitions, but not a successful fake-spawn path. Add a fake launcher seam before expanding lifecycle policy if successful start/stop transitions need deterministic unit coverage without installed Ollama binaries.
 
 ### Milestone 5: Route Ollama Model Operations Through Profiles
 

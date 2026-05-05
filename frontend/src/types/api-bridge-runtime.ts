@@ -143,6 +143,10 @@ export interface DesktopBridgeRuntimeAPI {
     modelName: string,
     connectionUrl?: string
   ): Promise<BaseResponse>;
+  ollama_load_model_for_profile(
+    modelName: string,
+    profileId?: string
+  ): Promise<BaseResponse>;
   ollama_unload_model(
     modelName: string,
     connectionUrl?: string

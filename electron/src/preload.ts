@@ -354,6 +354,11 @@ const electronAPI = {
       model_name: modelName,
       connection_url: connectionUrl,
     }),
+  ollama_load_model_for_profile: (modelName: string, profileId?: string) =>
+    apiCall('ollama_load_model_for_profile', {
+      model_name: modelName,
+      profile_id: profileId,
+    }),
   ollama_unload_model: (modelName: string, connectionUrl?: string) =>
     apiCall('ollama_unload_model', {
       model_name: modelName,

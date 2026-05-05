@@ -35,6 +35,12 @@ struct OllamaProfileParams {
     profile_id: Option<RuntimeProfileId>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OllamaProfileModelParams {
+    model_name: String,
+    profile_id: Option<RuntimeProfileId>,
+}
+
 pub async fn ollama_list_models_for_profile(
     state: &AppState,
     params: &Value,
@@ -50,6 +56,29 @@ pub async fn ollama_list_models_for_profile(
         "success": true,
         "models": models
     }))
+}
+
+pub async fn ollama_load_model_for_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: OllamaProfileModelParams = parse_params("ollama_load_model_for_profile", params)?;
+    let model_name = command.model_name.trim();
+    if model_name.is_empty() {
+        return Ok(json!({
+            "success": false,
+            "error": "model_name is required"
+        }));
+    }
+
+    let endpoint = state
+        .api
+        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, command.profile_id)
+        .await?;
+    let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
+    client.load_model(model_name).await?;
+
+    Ok(json!({ "success": true }))
 }
 
 pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_library::Result<Value> {

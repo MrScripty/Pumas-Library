@@ -138,6 +138,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "ollama_create_model"
         | "ollama_delete_model"
         | "ollama_load_model"
+        | "ollama_load_model_for_profile"
         | "ollama_unload_model"
         | "ollama_list_running"
         | "start_model_conversion"

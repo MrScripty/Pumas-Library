@@ -106,6 +106,53 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a new binary launch config for llama.cpp router mode.
+    ///
+    /// Router mode is selected by launching `llama-server` without a model path.
+    /// Pumas passes a models directory so the router can discover local GGUF
+    /// artifacts without coupling process launch to model catalog generation.
+    pub fn llama_cpp_router(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        host: impl Into<String>,
+        port: u16,
+        models_dir: impl AsRef<Path>,
+    ) -> Self {
+        let version_dir = version_dir.as_ref().to_path_buf();
+        let host = host.into();
+        let binary_path = version_dir
+            .join("build")
+            .join("bin")
+            .join(executable_name("llama-server"));
+        let pid_file = version_dir.join("llama-server.pid");
+
+        Self {
+            tag: tag.into(),
+            version_dir: version_dir.clone(),
+            binary_path,
+            command: None,
+            extra_args: vec![
+                "--host".to_string(),
+                host.clone(),
+                "--port".to_string(),
+                port.to_string(),
+                "--models-dir".to_string(),
+                models_dir.as_ref().to_string_lossy().to_string(),
+            ],
+            env_vars: HashMap::new(),
+            pid_file,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: Some(format!("http://{host}:{port}")),
+        }
+    }
+
+    /// Set extra arguments.
+    pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
+        self.extra_args = args;
+        self
+    }
+
     /// Set the log file path.
     pub fn with_log_file(mut self, path: impl AsRef<Path>) -> Self {
         self.log_file = Some(path.as_ref().to_path_buf());
@@ -141,6 +188,17 @@ impl BinaryLaunchConfig {
             self.env_vars.insert(key.into(), value.into());
         }
         self
+    }
+}
+
+fn executable_name(name: &str) -> String {
+    #[cfg(windows)]
+    {
+        format!("{name}.exe")
+    }
+    #[cfg(not(windows))]
+    {
+        name.to_string()
     }
 }
 
@@ -594,6 +652,44 @@ mod tests {
                 .map(String::as_str),
             Some("0")
         );
+    }
+
+    #[test]
+    fn test_llama_cpp_router_binary_launch_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("launcher-data/llama-cpp");
+        let models_dir = temp_dir.path().join("shared-resources/models");
+
+        let config = BinaryLaunchConfig::llama_cpp_router(
+            "local-build",
+            &version_dir,
+            "127.0.0.1",
+            18080,
+            &models_dir,
+        );
+
+        assert!(config.binary_path.ends_with(
+            Path::new("build")
+                .join("bin")
+                .join(executable_name("llama-server"))
+        ));
+        assert_eq!(config.command, None);
+        assert_eq!(
+            config.extra_args,
+            vec![
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                "18080".to_string(),
+                "--models-dir".to_string(),
+                models_dir.to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(
+            config.health_check_url.as_deref(),
+            Some("http://127.0.0.1:18080")
+        );
+        assert_eq!(config.ready_timeout, Duration::from_secs(60));
     }
 
     #[test]

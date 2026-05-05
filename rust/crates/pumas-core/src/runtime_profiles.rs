@@ -167,6 +167,7 @@ pub struct RuntimeProfileLaunchSpec {
     pub provider: RuntimeProviderId,
     pub endpoint_url: RuntimeEndpointUrl,
     pub port: RuntimePort,
+    pub extra_args: Vec<String>,
     pub env_vars: HashMap<String, String>,
     pub runtime_dir: PathBuf,
     pub pid_file: PathBuf,
@@ -872,6 +873,7 @@ fn derive_managed_profile_launch_specs(
             provider: profile.provider,
             endpoint_url: endpoint_url.clone(),
             port,
+            extra_args: profile_runtime_extra_args(launcher_root, profile, &endpoint_url, port)?,
             env_vars: profile_runtime_env_vars(profile, &endpoint_url, port)?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
@@ -993,14 +995,77 @@ fn profile_runtime_env_vars(
     Ok(env_vars)
 }
 
-fn runtime_host_port(endpoint_url: &RuntimeEndpointUrl, port: RuntimePort) -> Result<String> {
+fn profile_runtime_extra_args(
+    launcher_root: &Path,
+    profile: &RuntimeProfileConfig,
+    endpoint_url: &RuntimeEndpointUrl,
+    port: RuntimePort,
+) -> Result<Vec<String>> {
+    match profile.provider {
+        RuntimeProviderId::Ollama => Ok(Vec::new()),
+        RuntimeProviderId::LlamaCpp => match profile.provider_mode {
+            RuntimeProviderMode::LlamaCppRouter => {
+                let mut args = vec![
+                    "--host".to_string(),
+                    runtime_host(endpoint_url)?.to_string(),
+                    "--port".to_string(),
+                    port.value().to_string(),
+                    "--models-dir".to_string(),
+                    llama_cpp_router_models_dir(launcher_root)
+                        .to_string_lossy()
+                        .to_string(),
+                ];
+                apply_llama_cpp_device_args(&mut args, profile);
+                Ok(args)
+            }
+            RuntimeProviderMode::LlamaCppDedicated => Ok(Vec::new()),
+            RuntimeProviderMode::OllamaServe => Err(PumasError::InvalidParams {
+                message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
+            }),
+        },
+    }
+}
+
+fn apply_llama_cpp_device_args(args: &mut Vec<String>, profile: &RuntimeProfileConfig) {
+    if profile.device.mode == RuntimeDeviceMode::Cpu {
+        args.extend(["--n-gpu-layers".to_string(), "0".to_string()]);
+    } else if let Some(gpu_layers) = profile.device.gpu_layers {
+        args.extend(["--n-gpu-layers".to_string(), gpu_layers.to_string()]);
+    }
+
+    if let Some(tensor_split) = &profile.device.tensor_split {
+        if !tensor_split.is_empty() {
+            args.extend([
+                "--tensor-split".to_string(),
+                tensor_split
+                    .iter()
+                    .map(|value| value.to_string())
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ]);
+        }
+    }
+}
+
+fn llama_cpp_router_models_dir(launcher_root: &Path) -> PathBuf {
+    launcher_root.join("shared-resources").join("models")
+}
+
+fn runtime_host(endpoint_url: &RuntimeEndpointUrl) -> Result<String> {
     let parsed =
         url::Url::parse(endpoint_url.as_str()).map_err(|err| PumasError::InvalidParams {
             message: format!("invalid runtime endpoint URL: {err}"),
         })?;
-    let host = parsed.host_str().ok_or_else(|| PumasError::InvalidParams {
-        message: "runtime endpoint URL must include a host".to_string(),
-    })?;
+    parsed
+        .host_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| PumasError::InvalidParams {
+            message: "runtime endpoint URL must include a host".to_string(),
+        })
+}
+
+fn runtime_host_port(endpoint_url: &RuntimeEndpointUrl, port: RuntimePort) -> Result<String> {
+    let host = runtime_host(endpoint_url)?;
     Ok(format!("{host}:{}", port.value()))
 }
 
@@ -1488,6 +1553,59 @@ mod tests {
                 .get("ROCR_VISIBLE_DEVICES")
                 .map(String::as_str),
             Some("")
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_derives_llama_cpp_router_launch_specs() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut profile = managed_llama_cpp_profile("llama-router-gpu");
+        profile.name = "llama.cpp GPU Router".to_string();
+        profile.endpoint_url = RuntimeEndpointUrl::parse("http://127.0.0.1:18080").ok();
+        profile.port = RuntimePort::parse(18080).ok();
+        profile.device.mode = RuntimeDeviceMode::Gpu;
+        profile.device.device_id = Some("1".to_string());
+        profile.device.gpu_layers = Some(35);
+        profile.device.tensor_split = Some(vec![3.0, 1.0]);
+        service.upsert_profile(profile).await.unwrap();
+
+        let specs = service.list_managed_profile_launch_specs().await.unwrap();
+        let spec = specs
+            .iter()
+            .find(|spec| spec.profile_id.as_str() == "llama-router-gpu")
+            .unwrap();
+
+        assert_eq!(spec.provider, RuntimeProviderId::LlamaCpp);
+        assert_eq!(spec.port.value(), 18080);
+        assert!(spec
+            .runtime_dir
+            .ends_with("runtime-profiles/llama-cpp/llama-router-gpu"));
+        assert_eq!(
+            spec.extra_args,
+            vec![
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                "18080".to_string(),
+                "--models-dir".to_string(),
+                temp_dir
+                    .path()
+                    .join("shared-resources/models")
+                    .to_string_lossy()
+                    .to_string(),
+                "--n-gpu-layers".to_string(),
+                "35".to_string(),
+                "--tensor-split".to_string(),
+                "3,1".to_string(),
+            ]
+        );
+        assert_eq!(
+            spec.env_vars
+                .get("CUDA_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("1")
         );
     }
 

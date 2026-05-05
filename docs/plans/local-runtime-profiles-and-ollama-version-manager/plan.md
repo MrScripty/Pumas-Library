@@ -409,6 +409,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Implementation Notes:**
 - 2026-05-05: Added `LlamaCppRuntimeProviderAdapter` behind the existing `RuntimeProviderAdapter` trait and moved llama.cpp profile validation out of the generic service path. The adapter accepts router and dedicated provider modes, rejects provider/mode mismatches, and keeps external endpoint requirements provider-owned.
 - 2026-05-05: Validated the llama.cpp adapter with `cargo test -p pumas-library llama_cpp_provider_adapter --manifest-path rust/Cargo.toml` and re-ran the existing service profile filter with `cargo test -p pumas-library runtime_profile_service --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Added backend-only llama.cpp router command construction. Runtime profile launch specs now carry provider-specific process args, llama.cpp router profiles derive `--host`, `--port`, `--models-dir`, `--n-gpu-layers`, and `--tensor-split` from typed profile fields, and `BinaryLaunchConfig::llama_cpp_router` targets the existing `launcher-data/llama-cpp/build/bin/llama-server` layout without a `--model` argument.
+- 2026-05-05: Validated router command construction with `cargo test -p pumas-library llama_cpp_router --manifest-path rust/Cargo.toml` and `cargo test -p pumas-library runtime_profile_service_derives_llama_cpp_router_launch_specs --manifest-path rust/Cargo.toml`.
+
+**Discovered Issues:**
+- 2026-05-05: The desktop/RPC `launch_runtime_profile` path is still coupled to the Ollama version manager before it calls core launch. Provider-aware runtime launch must split version-dir resolution by provider before llama.cpp router profiles can be launched from the UI or RPC.
 
 ### Milestone 7: Add Frontend Local Runtime Profile Settings
 

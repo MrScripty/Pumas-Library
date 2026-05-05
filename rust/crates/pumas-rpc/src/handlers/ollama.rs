@@ -38,6 +38,7 @@ struct OllamaProfileParams {
 #[derive(Debug, Deserialize)]
 struct OllamaProfileModelParams {
     model_name: String,
+    model_id: Option<String>,
     profile_id: Option<RuntimeProfileId>,
 }
 
@@ -56,6 +57,26 @@ async fn resolve_ollama_profile_endpoint(
         .api
         .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, profile_id)
         .await
+}
+
+async fn resolve_ollama_operation_endpoint(
+    state: &AppState,
+    model_id: Option<&str>,
+    profile_id: Option<RuntimeProfileId>,
+) -> pumas_library::Result<pumas_library::models::RuntimeEndpointUrl> {
+    match model_id {
+        Some(model_id) if !model_id.trim().is_empty() => {
+            state
+                .api
+                .resolve_model_runtime_profile_endpoint(
+                    RuntimeProviderId::Ollama,
+                    model_id,
+                    profile_id,
+                )
+                .await
+        }
+        _ => resolve_ollama_profile_endpoint(state, profile_id).await,
+    }
 }
 
 pub async fn ollama_list_models_for_profile(
@@ -85,7 +106,9 @@ pub async fn ollama_load_model_for_profile(
         }));
     }
 
-    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    let endpoint =
+        resolve_ollama_operation_endpoint(state, command.model_id.as_deref(), command.profile_id)
+            .await?;
     let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
     client.load_model(model_name).await?;
 
@@ -106,7 +129,9 @@ pub async fn ollama_unload_model_for_profile(
         }));
     }
 
-    let endpoint = resolve_ollama_profile_endpoint(state, command.profile_id).await?;
+    let endpoint =
+        resolve_ollama_operation_endpoint(state, command.model_id.as_deref(), command.profile_id)
+            .await?;
     let client = pumas_app_manager::OllamaClient::new(Some(endpoint.as_str()));
     client.unload_model(model_name).await?;
 

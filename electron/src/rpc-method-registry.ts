@@ -383,6 +383,7 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
       model_name: 'string',
     },
     optional: {
+      model_id: 'string',
       profile_id: 'string',
     },
   },
@@ -391,6 +392,7 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
       model_name: 'string',
     },
     optional: {
+      model_id: 'string',
       profile_id: 'string',
     },
   },
@@ -399,6 +401,7 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
       model_name: 'string',
     },
     optional: {
+      model_id: 'string',
       profile_id: 'string',
     },
   },

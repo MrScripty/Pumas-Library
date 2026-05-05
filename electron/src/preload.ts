@@ -382,9 +382,10 @@ const electronAPI = {
       model_name: modelName,
       connection_url: connectionUrl,
     }),
-  ollama_delete_model_for_profile: (modelName: string, profileId?: string) =>
+  ollama_delete_model_for_profile: (modelName: string, profileId?: string, modelId?: string) =>
     apiCall('ollama_delete_model_for_profile', {
       model_name: modelName,
+      model_id: modelId,
       profile_id: profileId,
     }),
   ollama_load_model: (modelName: string, connectionUrl?: string) =>
@@ -392,9 +393,10 @@ const electronAPI = {
       model_name: modelName,
       connection_url: connectionUrl,
     }),
-  ollama_load_model_for_profile: (modelName: string, profileId?: string) =>
+  ollama_load_model_for_profile: (modelName: string, profileId?: string, modelId?: string) =>
     apiCall('ollama_load_model_for_profile', {
       model_name: modelName,
+      model_id: modelId,
       profile_id: profileId,
     }),
   ollama_unload_model: (modelName: string, connectionUrl?: string) =>
@@ -402,9 +404,10 @@ const electronAPI = {
       model_name: modelName,
       connection_url: connectionUrl,
     }),
-  ollama_unload_model_for_profile: (modelName: string, profileId?: string) =>
+  ollama_unload_model_for_profile: (modelName: string, profileId?: string, modelId?: string) =>
     apiCall('ollama_unload_model_for_profile', {
       model_name: modelName,
+      model_id: modelId,
       profile_id: profileId,
     }),
   ollama_list_running: (connectionUrl?: string) =>

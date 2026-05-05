@@ -148,7 +148,8 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<BaseResponse>;
   ollama_delete_model_for_profile(
     modelName: string,
-    profileId?: string
+    profileId?: string,
+    modelId?: string
   ): Promise<BaseResponse>;
   ollama_load_model(
     modelName: string,
@@ -156,7 +157,8 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<BaseResponse>;
   ollama_load_model_for_profile(
     modelName: string,
-    profileId?: string
+    profileId?: string,
+    modelId?: string
   ): Promise<BaseResponse>;
   ollama_unload_model(
     modelName: string,
@@ -164,7 +166,8 @@ export interface DesktopBridgeRuntimeAPI {
   ): Promise<BaseResponse>;
   ollama_unload_model_for_profile(
     modelName: string,
-    profileId?: string
+    profileId?: string,
+    modelId?: string
   ): Promise<BaseResponse>;
   ollama_list_running(
     connectionUrl?: string

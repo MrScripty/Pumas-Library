@@ -373,8 +373,10 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Implementation Notes:**
 - 2026-05-05: Added append-only `ollama_create_model_for_profile`, `ollama_delete_model_for_profile`, and `ollama_unload_model_for_profile` commands through Rust RPC, Electron preload validation, and frontend bridge types. Existing connection-url commands remain unchanged.
 - 2026-05-05: Validated profile-aware Ollama command wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
-- 2026-05-05: Added backend-owned model route endpoint resolution with precedence `explicit profile_id > saved model route > default profile`, and routed `ollama_create_model_for_profile` through it because create has the Pumas `model_id` available at the operation boundary. Load/unload/delete still need model-route-aware inputs or route lookup by model ID before the route-resolution task can be marked complete.
+- 2026-05-05: Added backend-owned model route endpoint resolution with precedence `explicit profile_id > saved model route > default profile`, and routed `ollama_create_model_for_profile` through it because create has the Pumas `model_id` available at the operation boundary.
 - 2026-05-05: Validated route endpoint resolution with `cargo test -p pumas-library runtime_profile_service_resolves_model_route_endpoint --manifest-path rust/Cargo.toml` and recompiled RPC with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Added optional `model_id` inputs to profile-aware load/unload/delete commands so callers can use saved model routes for model-specific operations. `ollama_list_models_for_profile` remains profile-only because it lists endpoint inventory rather than a model-specific route.
+- 2026-05-05: Validated route-aware load/unload/delete command wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 6: Add llama.cpp Runtime Adapter
 

@@ -137,6 +137,13 @@ pub struct RuntimeProfileLaunchSpec {
     pub health_check_url: RuntimeEndpointUrl,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedRuntimeProfileEndpoint {
+    profile_id: RuntimeProfileId,
+    endpoint_url: RuntimeEndpointUrl,
+    management_mode: RuntimeManagementMode,
+}
+
 #[derive(Debug)]
 pub struct RuntimeProfileOperationGuard {
     profile_id: RuntimeProfileId,
@@ -434,6 +441,29 @@ impl RuntimeProfileService {
         provider: RuntimeProviderId,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        Ok(self
+            .resolve_profile_endpoint_detail(provider, profile_id)
+            .await?
+            .endpoint_url)
+    }
+
+    pub async fn resolve_profile_endpoint_for_operation(
+        &self,
+        provider: RuntimeProviderId,
+        profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        let resolved = self
+            .resolve_profile_endpoint_detail(provider, profile_id)
+            .await?;
+        self.ensure_profile_available_for_operation(&resolved)?;
+        Ok(resolved.endpoint_url)
+    }
+
+    async fn resolve_profile_endpoint_detail(
+        &self,
+        provider: RuntimeProviderId,
+        profile_id: Option<RuntimeProfileId>,
+    ) -> Result<ResolvedRuntimeProfileEndpoint> {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
         tokio::task::spawn_blocking(move || {
@@ -462,6 +492,31 @@ impl RuntimeProfileService {
         model_id: &str,
         explicit_profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
+        Ok(self
+            .resolve_model_endpoint_detail(provider, model_id, explicit_profile_id)
+            .await?
+            .endpoint_url)
+    }
+
+    pub async fn resolve_model_endpoint_for_operation(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+        explicit_profile_id: Option<RuntimeProfileId>,
+    ) -> Result<RuntimeEndpointUrl> {
+        let resolved = self
+            .resolve_model_endpoint_detail(provider, model_id, explicit_profile_id)
+            .await?;
+        self.ensure_profile_available_for_operation(&resolved)?;
+        Ok(resolved.endpoint_url)
+    }
+
+    async fn resolve_model_endpoint_detail(
+        &self,
+        provider: RuntimeProviderId,
+        model_id: &str,
+        explicit_profile_id: Option<RuntimeProfileId>,
+    ) -> Result<ResolvedRuntimeProfileEndpoint> {
         let model_id = model_id.trim().to_string();
         if model_id.is_empty() {
             return Err(PumasError::InvalidParams {
@@ -496,6 +551,34 @@ impl RuntimeProfileService {
                 "Failed to join model runtime profile endpoint resolution task: {err}"
             ))
         })?
+    }
+
+    fn ensure_profile_available_for_operation(
+        &self,
+        resolved: &ResolvedRuntimeProfileEndpoint,
+    ) -> Result<()> {
+        if resolved.management_mode == RuntimeManagementMode::External {
+            return Ok(());
+        }
+
+        let journal = self.event_journal.read().map_err(|_| {
+            PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
+        })?;
+        let state = journal
+            .status_for(&resolved.profile_id)
+            .map(|status| status.state)
+            .unwrap_or(RuntimeLifecycleState::Stopped);
+        if state == RuntimeLifecycleState::Running {
+            return Ok(());
+        }
+
+        Err(PumasError::InvalidParams {
+            message: format!(
+                "runtime profile {} is not running (state={:?})",
+                resolved.profile_id.as_str(),
+                state
+            ),
+        })
     }
 
     async fn mutate_config<F>(&self, mutate: F) -> Result<RuntimeProfileMutationResponse>
@@ -738,7 +821,7 @@ fn resolve_config_profile_endpoint(
     config: &RuntimeProfilesConfigFile,
     provider: RuntimeProviderId,
     profile_id: RuntimeProfileId,
-) -> Result<RuntimeEndpointUrl> {
+) -> Result<ResolvedRuntimeProfileEndpoint> {
     let profile = config
         .profiles
         .iter()
@@ -755,7 +838,7 @@ fn resolve_config_profile_endpoint(
             ),
         });
     }
-    profile
+    let endpoint_url = profile
         .endpoint_url
         .clone()
         .ok_or_else(|| PumasError::InvalidParams {
@@ -763,7 +846,12 @@ fn resolve_config_profile_endpoint(
                 "runtime profile {} does not define endpoint_url",
                 profile_id.as_str()
             ),
-        })
+        })?;
+    Ok(ResolvedRuntimeProfileEndpoint {
+        profile_id,
+        endpoint_url,
+        management_mode: profile.management_mode,
+    })
 }
 
 fn allocate_implicit_runtime_port(
@@ -1073,6 +1161,65 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(explicit_endpoint.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_rejects_stopped_model_operation_routes() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let stopped = service
+            .resolve_model_endpoint_for_operation(
+                RuntimeProviderId::Ollama,
+                "llm/test/model",
+                Some(RuntimeProfileId::parse("ollama-default").unwrap()),
+            )
+            .await;
+        assert!(stopped.unwrap_err().to_string().contains("is not running"));
+
+        service
+            .record_profile_lifecycle_status(RuntimeProfileStatus {
+                profile_id: RuntimeProfileId::parse("ollama-default").unwrap(),
+                state: RuntimeLifecycleState::Running,
+                endpoint_url: RuntimeEndpointUrl::parse("http://127.0.0.1:11434").ok(),
+                pid: Some(1234),
+                log_path: None,
+                last_error: None,
+            })
+            .unwrap();
+        let running = service
+            .resolve_model_endpoint_for_operation(
+                RuntimeProviderId::Ollama,
+                "llm/test/model",
+                Some(RuntimeProfileId::parse("ollama-default").unwrap()),
+            )
+            .await
+            .unwrap();
+        assert_eq!(running.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_allows_external_model_operation_routes() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.profile_id = RuntimeProfileId::parse("ollama-external").unwrap();
+        profile.name = "External Ollama".to_string();
+        profile.management_mode = RuntimeManagementMode::External;
+        profile.endpoint_url = RuntimeEndpointUrl::parse("http://192.0.2.10:11434").ok();
+        profile.port = RuntimePort::parse(11434).ok();
+        service.upsert_profile(profile).await.unwrap();
+
+        let endpoint = service
+            .resolve_model_endpoint_for_operation(
+                RuntimeProviderId::Ollama,
+                "llm/test/model",
+                Some(RuntimeProfileId::parse("ollama-external").unwrap()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(endpoint.as_str(), "http://192.0.2.10:11434/");
     }
 
     #[tokio::test]

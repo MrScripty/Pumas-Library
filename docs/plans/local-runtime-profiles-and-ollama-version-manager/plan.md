@@ -356,19 +356,19 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Make Ollama model operations use the backend-owned model route rather than a single page-level endpoint.
 
 **Tasks:**
-- [ ] Add model-route resolution for create/load/unload/delete/list actions.
+- [x] Add model-route resolution for create/load/unload/delete/list actions.
 - [x] Add profile-aware model operations that accept `profile_id`.
 - [ ] Keep `connection_url` accepted only as legacy compatibility input and convert it at the boundary.
 - [ ] Split register/create from load, or make auto-load an explicit per-route setting.
-- [ ] Return clear errors when a route points to a stopped or unhealthy profile.
-- [ ] Keep external endpoint profiles supported.
+- [x] Return clear errors when a route points to a stopped or unhealthy profile.
+- [x] Keep external endpoint profiles supported.
 
 **Verification:**
 - Rust RPC tests for model route resolution.
 - Tests showing `connection_url` compatibility still works.
 - Tests showing model-specific profile routing chooses the expected endpoint.
 
-**Status:** Started. Append-only profile-aware Ollama list/load/create/unload/delete commands exist; model-route resolution, legacy boundary conversion cleanup, stopped/unhealthy profile errors, and auto-load policy remain.
+**Status:** Mostly complete for backend Ollama routing. Legacy `connection_url` boundary conversion cleanup and explicit create-vs-load auto-load policy remain.
 
 **Implementation Notes:**
 - 2026-05-05: Added append-only `ollama_create_model_for_profile`, `ollama_delete_model_for_profile`, and `ollama_unload_model_for_profile` commands through Rust RPC, Electron preload validation, and frontend bridge types. Existing connection-url commands remain unchanged.
@@ -377,6 +377,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated route endpoint resolution with `cargo test -p pumas-library runtime_profile_service_resolves_model_route_endpoint --manifest-path rust/Cargo.toml` and recompiled RPC with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Added optional `model_id` inputs to profile-aware load/unload/delete commands so callers can use saved model routes for model-specific operations. `ollama_list_models_for_profile` remains profile-only because it lists endpoint inventory rather than a model-specific route.
 - 2026-05-05: Validated route-aware load/unload/delete command wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
+- 2026-05-05: Added operation endpoint guards that reject managed profiles unless their backend lifecycle state is `running`, while allowing external profiles because their health is owned outside the managed process lifecycle. Profile-aware Ollama model operations now use this checked endpoint path and return deterministic backend errors before falling through to network failures.
+- 2026-05-05: Validated stopped managed-profile rejection and external endpoint allowance with `cargo test -p pumas-library runtime_profile_service --manifest-path rust/Cargo.toml` and recompiled RPC with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`.
 
 ### Milestone 6: Add llama.cpp Runtime Adapter
 

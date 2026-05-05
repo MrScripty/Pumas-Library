@@ -55,7 +55,7 @@ async fn resolve_ollama_profile_endpoint(
 ) -> pumas_library::Result<pumas_library::models::RuntimeEndpointUrl> {
     state
         .api
-        .resolve_runtime_profile_endpoint(RuntimeProviderId::Ollama, profile_id)
+        .resolve_runtime_profile_endpoint_for_operation(RuntimeProviderId::Ollama, profile_id)
         .await
 }
 
@@ -68,7 +68,7 @@ async fn resolve_ollama_operation_endpoint(
         Some(model_id) if !model_id.trim().is_empty() => {
             state
                 .api
-                .resolve_model_runtime_profile_endpoint(
+                .resolve_model_runtime_profile_endpoint_for_operation(
                     RuntimeProviderId::Ollama,
                     model_id,
                     profile_id,
@@ -77,6 +77,21 @@ async fn resolve_ollama_operation_endpoint(
         }
         _ => resolve_ollama_profile_endpoint(state, profile_id).await,
     }
+}
+
+async fn resolve_ollama_registration_endpoint(
+    state: &AppState,
+    model_id: &str,
+    profile_id: Option<RuntimeProfileId>,
+) -> pumas_library::Result<pumas_library::models::RuntimeEndpointUrl> {
+    state
+        .api
+        .resolve_model_runtime_profile_endpoint_for_operation(
+            RuntimeProviderId::Ollama,
+            model_id,
+            profile_id,
+        )
+        .await
 }
 
 pub async fn ollama_list_models_for_profile(
@@ -165,14 +180,8 @@ pub async fn ollama_create_model_for_profile(
 ) -> pumas_library::Result<Value> {
     let command: OllamaProfileCreateModelParams =
         parse_params("ollama_create_model_for_profile", params)?;
-    let endpoint = state
-        .api
-        .resolve_model_runtime_profile_endpoint(
-            RuntimeProviderId::Ollama,
-            &command.model_id,
-            command.profile_id,
-        )
-        .await?;
+    let endpoint =
+        resolve_ollama_registration_endpoint(state, &command.model_id, command.profile_id).await?;
     create_ollama_model(
         state,
         command.model_id,

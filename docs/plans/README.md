@@ -16,6 +16,7 @@ This directory holds implementation plans for cross-module changes that need exp
 | `cross-platform-desktop-launcher-facade-plan.md` | Plan for moving desktop launcher behavior behind a shared cross-platform core with thin Unix and Windows wrappers plus README contract updates. |
 | `npm-audit-and-desktop-bridge-terminology-remediation-plan.md` | Plan for clearing workspace npm audit findings and renaming the Electron desktop bridge away from legacy PyWebView-first terminology without breaking compatibility. |
 | `workspace-tooling-dependency-ownership-refactor-plan.md` | Plan for removing the root `jsdom` pin by making frontend test tooling resolve from its owning workspace without relying on incidental npm hoisting. |
+| `local-runtime-profiles-and-ollama-version-manager/plan.md` | Plan for stabilizing the Ollama version-manager UI and adding backend-owned local runtime profiles for Ollama and llama.cpp with per-model routing. |
 
 ## Problem
 Large model-library changes touch persisted metadata, reconciliation, runtime resolution, and UI/API contracts at the same time. Without a written plan, it is easy to create competing paths for import, validation, or execution that weaken reliability.

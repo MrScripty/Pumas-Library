@@ -326,6 +326,7 @@ async fn dispatch_method(
             runtime_profiles::clear_model_runtime_route(state, params).await
         }
         "launch_runtime_profile" => runtime_profiles::launch_runtime_profile(state, params).await,
+        "stop_runtime_profile" => runtime_profiles::stop_runtime_profile(state, params).await,
 
         // Version Management
         "get_available_versions" => versions::get_available_versions(state, params).await,

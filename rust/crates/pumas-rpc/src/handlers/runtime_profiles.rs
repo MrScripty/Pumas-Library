@@ -37,6 +37,11 @@ struct LaunchRuntimeProfileParams {
     tag: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct StopRuntimeProfileParams {
+    profile_id: RuntimeProfileId,
+}
+
 pub async fn get_runtime_profiles_snapshot(
     state: &AppState,
     _params: &Value,
@@ -135,4 +140,13 @@ pub async fn launch_runtime_profile(
             .launch_runtime_profile(command.profile_id, &tag, &version_dir)
             .await?,
     )?)
+}
+
+pub async fn stop_runtime_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: StopRuntimeProfileParams = parse_params("stop_runtime_profile", params)?;
+    let stopped = state.api.stop_runtime_profile(command.profile_id).await?;
+    Ok(serde_json::json!({ "success": stopped }))
 }

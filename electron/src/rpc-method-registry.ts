@@ -31,6 +31,7 @@ export const RPC_METHOD_REGISTRY = {
     'set_model_runtime_route',
     'clear_model_runtime_route',
     'launch_runtime_profile',
+    'stop_runtime_profile',
     'get_available_versions',
     'get_installed_versions',
     'get_active_version',
@@ -353,6 +354,11 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
     },
     optional: {
       tag: 'string',
+    },
+  },
+  stop_runtime_profile: {
+    required: {
+      profile_id: 'string',
     },
   },
   ollama_list_models_for_profile: {

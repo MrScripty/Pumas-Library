@@ -127,6 +127,7 @@ export interface DesktopBridgeRuntimeAPI {
   set_model_runtime_route(route: ModelRuntimeRoute): Promise<RuntimeProfileMutationResponse>;
   clear_model_runtime_route(modelId: string): Promise<RuntimeProfileMutationResponse>;
   launch_runtime_profile(profileId: string, tag?: string | null): Promise<LaunchResponse>;
+  stop_runtime_profile(profileId: string): Promise<StopOllamaResponse>;
 
   // Ollama Model Management
   ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;

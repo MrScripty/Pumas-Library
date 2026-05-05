@@ -334,6 +334,8 @@ const electronAPI = {
     apiCall('clear_model_runtime_route', { model_id: modelId }),
   launch_runtime_profile: (profileId: string, tag?: string | null) =>
     apiCall('launch_runtime_profile', { profile_id: profileId, tag }),
+  stop_runtime_profile: (profileId: string) =>
+    apiCall('stop_runtime_profile', { profile_id: profileId }),
 
   // Torch Inference Server
   launch_torch: () => apiCall('launch_torch'),

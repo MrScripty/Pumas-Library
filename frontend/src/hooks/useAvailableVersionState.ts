@@ -7,18 +7,67 @@ import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useAvailableVersionState');
 
-function mapVersionRelease(version: VersionReleaseInfo): VersionRelease {
+type RawVersionRelease = Partial<VersionReleaseInfo> & Partial<VersionRelease> & Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function readString(record: RawVersionRelease, ...keys: string[]): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function readBoolean(record: RawVersionRelease, defaultValue: boolean, ...keys: string[]): boolean {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+  return defaultValue;
+}
+
+function readNumber(record: RawVersionRelease, ...keys: string[]): number | null | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === null) {
+      return null;
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function normalizeVersionReleaseInfo(version: unknown): VersionRelease | null {
+  if (!isRecord(version)) {
+    return null;
+  }
+
+  const record = version as RawVersionRelease;
+  const tagName = readString(record, 'tag_name', 'tagName')?.trim();
+  if (!tagName) {
+    return null;
+  }
+
   return {
-    tagName: version.tag_name,
-    name: version.name,
-    publishedAt: version.published_at,
-    prerelease: version.prerelease,
-    body: version.body,
-    htmlUrl: version.html_url,
-    totalSize: version.total_size,
-    archiveSize: version.archive_size,
-    dependenciesSize: version.dependencies_size,
-    installing: version.installing,
+    tagName,
+    name: readString(record, 'name') || tagName,
+    publishedAt: readString(record, 'published_at', 'publishedAt') || '',
+    prerelease: readBoolean(record, false, 'prerelease'),
+    body: readString(record, 'body'),
+    htmlUrl: readString(record, 'html_url', 'htmlUrl'),
+    totalSize: readNumber(record, 'total_size', 'totalSize'),
+    archiveSize: readNumber(record, 'archive_size', 'archiveSize'),
+    dependenciesSize: readNumber(record, 'dependencies_size', 'dependenciesSize'),
+    installing: readBoolean(record, false, 'installing'),
   };
 }
 
@@ -76,7 +125,16 @@ export function useAvailableVersionState({
       });
 
       if (result.success) {
-        const mapped = result.versions.map(mapVersionRelease);
+        const mapped = result.versions
+          .map(normalizeVersionReleaseInfo)
+          .filter((release): release is VersionRelease => release !== null);
+        const skippedVersions = result.versions.length - mapped.length;
+        if (skippedVersions > 0) {
+          logger.warn('Dropped version releases with missing tag names', {
+            appId: resolvedAppId,
+            skippedVersions,
+          });
+        }
         setAvailableVersions(mapped);
         setIsRateLimited(false);
         setRateLimitRetryAfter(null);

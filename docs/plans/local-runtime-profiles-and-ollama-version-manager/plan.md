@@ -222,18 +222,23 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Make the globe/version-manager path stable without changing Ollama runtime architecture.
 
 **Tasks:**
-- [ ] Capture the thrown React error from the Ollama globe click.
-- [ ] Add a failing frontend regression test for opening the Ollama version manager.
-- [ ] Identify whether the failure is caused by version release mapping, install-dialog assumptions, or an invalid UI control.
-- [ ] Fix the smallest shared version-manager issue without Ollama-specific hard-coding.
-- [ ] Add a localized version-manager error state if a release row cannot render.
+- [x] Capture the likely thrown React error path from the Ollama globe click: `VersionListItemState` assumed `release.tagName` existed and called `.replace()` during render.
+- [x] Add a failing frontend regression test for the version release boundary using mixed snake_case and camelCase provider payloads.
+- [x] Identify whether the failure is caused by version release mapping, install-dialog assumptions, or an invalid UI control.
+- [x] Fix the smallest shared version-manager issue without Ollama-specific hard-coding.
+- [x] Prevent release-row render crashes by filtering invalid releases at the hook boundary and adding defensive display/date fallbacks. A localized row error state was not added because malformed rows are not rendered after normalization; revisit if the backend must expose invalid provider rows to users.
 
 **Verification:**
 - `npm run -w frontend test:run -- <targeted test file>` or the repo-equivalent targeted frontend test command.
 - Existing `InstallDialogContent` and version-list tests still pass.
 - Manual UI check: Ollama page globe button opens version manager without magenta crash.
 
-**Status:** Not started.
+**Status:** Completed for automated coverage. Manual Ollama globe smoke check remains part of release validation.
+
+**Implementation Notes:**
+- 2026-05-05: The frontend version hook accepted the backend `VersionReleaseInfo` contract as snake_case only while the render path consumed normalized camelCase `VersionRelease` rows. A malformed cached/provider row or leaked API row without `tagName` could crash the version dialog before an error state could render.
+- 2026-05-05: Added app-neutral release normalization in `useAvailableVersionState`, including snake_case/camelCase support and invalid-row filtering. Hardened version row display and date formatting so missing optional fields no longer crash render.
+- 2026-05-05: Validated with `npm run -w frontend test:run -- useAvailableVersionState` and `npm run -w frontend check:types`.
 
 ### Milestone 2: Define Backend Contracts for Local Runtime Profiles
 
@@ -459,6 +464,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 ### Completed
 
 - Plan written and validated against local Coding Standards.
+- Milestone 1 automated crash-containment slice implemented and validated.
 
 ### Deviations
 

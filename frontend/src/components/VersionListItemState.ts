@@ -85,6 +85,11 @@ function getDownloadIconStyle(installNetworkStatus: InstallNetworkStatus): CSSPr
   }
 }
 
+function getDisplayTag(release: VersionRelease): string {
+  const rawTag = release.tagName || release.name || 'Unknown version';
+  return rawTag.replace(/^v/i, '') || rawTag;
+}
+
 export function getVersionInstallDisplayState({
   installNetworkStatus,
   isHovered,
@@ -103,7 +108,7 @@ export function getVersionInstallDisplayState({
   const isInstallFailed = installNetworkStatus === 'failed' || Boolean(progress?.error);
 
   return {
-    displayTag: release.tagName.replace(/^v/i, '') || release.tagName,
+    displayTag: getDisplayTag(release),
     downloadIconClass: getDownloadIconClass(installNetworkStatus),
     downloadIconStyle: getDownloadIconStyle(installNetworkStatus),
     isComplete: isInstalled || (isInstalling && Boolean(progress?.success) && Boolean(progress?.completed_at)),

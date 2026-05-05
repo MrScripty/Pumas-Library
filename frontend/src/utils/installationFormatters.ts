@@ -54,8 +54,16 @@ export function formatElapsedTime(startedAt: string): string {
 /**
  * Format date to readable format
  */
-export function formatVersionDate(dateString: string): string {
+export function formatVersionDate(dateString?: string | null): string {
+  if (!dateString) {
+    return 'Unknown date';
+  }
+
   const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) {
+    return 'Unknown date';
+  }
+
   return date.toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',

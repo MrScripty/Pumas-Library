@@ -141,6 +141,67 @@ describe('useAvailableVersionState', () => {
     expect(getAvailableVersionsMock).toHaveBeenCalledWith(false, 'comfyui');
   });
 
+  it('normalizes mixed release payload field names and skips malformed rows', async () => {
+    getAvailableVersionsMock.mockResolvedValue({
+      success: true,
+      versions: [
+        {
+          tagName: 'v0.8.0',
+          name: 'Ollama 0.8.0',
+          publishedAt: '2026-04-13T00:00:00Z',
+          prerelease: false,
+          htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v0.8.0',
+          totalSize: 1024,
+          archiveSize: 512,
+          dependenciesSize: 512,
+          installing: false,
+        },
+        {
+          tag_name: 'v1.0.0',
+          name: 'Ollama 1.0.0',
+          published_at: '2026-04-14T00:00:00Z',
+          prerelease: true,
+          html_url: 'https://github.com/ollama/ollama/releases/tag/v1.0.0',
+          total_size: 2048,
+          archive_size: 1024,
+          dependencies_size: 1024,
+          installing: true,
+        },
+        {
+          name: 'Missing tag',
+          published_at: '2026-04-15T00:00:00Z',
+          prerelease: false,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useAvailableVersionState({
+      isEnabled: true,
+      resolvedAppId: 'ollama',
+      trackAvailableVersions: true,
+    }));
+
+    await act(async () => {
+      await result.current.fetchAvailableVersions(false);
+    });
+
+    expect(result.current.availableVersions).toEqual([
+      expect.objectContaining({
+        tagName: 'v0.8.0',
+        publishedAt: '2026-04-13T00:00:00Z',
+        htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v0.8.0',
+        totalSize: 1024,
+      }),
+      expect.objectContaining({
+        tagName: 'v1.0.0',
+        publishedAt: '2026-04-14T00:00:00Z',
+        htmlUrl: 'https://github.com/ollama/ollama/releases/tag/v1.0.0',
+        totalSize: 2048,
+        installing: true,
+      }),
+    ]);
+  });
+
   it('does not poll background cache state when available-version tracking is disabled', async () => {
     renderHook(() => useAvailableVersionState({
       isEnabled: true,

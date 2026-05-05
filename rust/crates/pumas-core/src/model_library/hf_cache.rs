@@ -28,6 +28,9 @@ const DEFAULT_LAST_MODIFIED_CHECK_SECONDS: u64 = 24 * 60 * 60;
 /// Default rate limit window (5 minutes).
 const DEFAULT_RATE_LIMIT_WINDOW_SECONDS: u64 = 5 * 60;
 
+/// Increment when cached `download_options` semantics change.
+const DOWNLOAD_OPTION_EXTRACTION_VERSION: u32 = 2;
+
 /// Configuration for the HuggingFace cache.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -166,6 +169,7 @@ impl HfSearchCache {
 
         cache.init_schema()?;
         cache.init_config()?;
+        cache.invalidate_stale_extraction_cache()?;
 
         Ok(cache)
     }
@@ -227,6 +231,51 @@ impl HfSearchCache {
             message: format!("Failed to initialize schema: {}", e),
             source: Some(e),
         })?;
+
+        Ok(())
+    }
+
+    fn invalidate_stale_extraction_cache(&self) -> Result<()> {
+        let conn = self.conn.lock().map_err(|e| PumasError::Database {
+            message: format!("Failed to lock database: {}", e),
+            source: None,
+        })?;
+
+        let current: Option<String> = conn
+            .query_row(
+                "SELECT value FROM cache_config WHERE key = ?1",
+                params!["download_option_extraction_version"],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| PumasError::Database {
+                message: format!("Failed to read HF cache extraction version: {}", e),
+                source: Some(e),
+            })?;
+
+        if current.as_deref() != Some(&DOWNLOAD_OPTION_EXTRACTION_VERSION.to_string()) {
+            conn.execute("DELETE FROM search_cache", [])
+                .map_err(|e| PumasError::Database {
+                    message: format!("Failed to clear stale HF search cache: {}", e),
+                    source: Some(e),
+                })?;
+            conn.execute("DELETE FROM repo_details", [])
+                .map_err(|e| PumasError::Database {
+                    message: format!("Failed to clear stale HF repo details cache: {}", e),
+                    source: Some(e),
+                })?;
+            conn.execute(
+                "INSERT OR REPLACE INTO cache_config (key, value) VALUES (?1, ?2)",
+                params![
+                    "download_option_extraction_version",
+                    DOWNLOAD_OPTION_EXTRACTION_VERSION.to_string()
+                ],
+            )
+            .map_err(|e| PumasError::Database {
+                message: format!("Failed to update HF cache extraction version: {}", e),
+                source: Some(e),
+            })?;
+        }
 
         Ok(())
     }

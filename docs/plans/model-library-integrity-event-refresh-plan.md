@@ -444,6 +444,13 @@ Update during implementation:
   identity from restored `DownloadState.files`, and the frontend merge logic
   prefers incomplete local rows for repo-scoped status plus accepts file-group
   or full-repo artifact identities for metadata-light partial rows.
+- 2026-05-04: User validation showed a DavidAU GGUF repo where several
+  standalone model variants share the same quant token, causing HF search to
+  collapse all Q5_1 files into one oversized Q5_1 option. HF quant labels are
+  not unique artifact identities in that repo; extraction now preserves
+  same-quant standalone files as exact file-group options while retaining
+  summed quant behavior for true shard sets. The HF search cache extraction
+  version was bumped so stale collapsed options are regenerated.
 
 ## Commit Cadence Notes
 
@@ -545,6 +552,10 @@ Update during implementation:
   artifact identity from the actual tracked files, and local active-download
   merge logic routes repo-scoped or file-group resume state to the incomplete
   row instead of a same-repo complete row.
+- HF search now treats repeated standalone files with the same quant as
+  distinct downloadable artifacts instead of summing them under one quant label,
+  which keeps repos with variant names and shared quants selectable by exact
+  filename.
 
 ### Deviations
 
@@ -596,6 +607,7 @@ Update during implementation:
 - `git diff --check`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_downloads_scopes_file_group_selected_artifact_from_state_files`
 - `npm run -w frontend test:run -- useModelLibraryActions.test.ts`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library quant_options`
 
 ### Traceability Links
 

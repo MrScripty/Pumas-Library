@@ -464,9 +464,12 @@ impl HuggingFaceClient {
 
     /// Quant-based option extraction for GGUF and precision-variant repos.
     fn extract_quant_based_options(tree: &RepoFileTree, quants: &[String]) -> Vec<DownloadOption> {
-        // Aggregate all matching files per quant so sharded variants report
-        // their total size instead of the first shard's size.
-        let mut quant_sizes: BTreeMap<String, u64> = BTreeMap::new();
+        // Group matching files per quant. A quant token is not always a unique
+        // artifact: some repos publish multiple standalone variants with the
+        // same quant. Those must be exposed as exact file selections instead of
+        // being collapsed into one oversized quant option.
+        let mut quant_files: BTreeMap<String, Vec<crate::model_library::types::LfsFileInfo>> =
+            BTreeMap::new();
         let quant_pattern = quant_token_regex();
 
         for lfs_file in &tree.lfs_files {
@@ -485,23 +488,51 @@ impl HuggingFaceClient {
             });
 
             if let Some(q) = quant {
-                *quant_sizes.entry(q).or_insert(0) += lfs_file.size;
+                quant_files.entry(q).or_default().push(lfs_file.clone());
             } else if quants.iter().any(|q| lfs_file.filename.contains(q)) {
                 for q in quants {
                     if lfs_file.filename.contains(q) {
-                        *quant_sizes.entry(q.clone()).or_insert(0) += lfs_file.size;
+                        quant_files
+                            .entry(q.clone())
+                            .or_default()
+                            .push(lfs_file.clone());
                         break;
                     }
                 }
             }
         }
 
-        quant_sizes
+        let has_ambiguous_quant = quant_files.values().any(|files| {
+            let (groups, _) = group_weight_files(files);
+            files.len() > 1
+                && (groups.len() > 1 || groups.iter().any(|group| group.shard_count == 1))
+        });
+
+        quant_files
             .into_iter()
-            .map(|(quant, size_bytes)| DownloadOption {
-                quant,
-                size_bytes: Some(size_bytes),
-                file_group: None,
+            .flat_map(|(quant, files)| {
+                let (groups, _) = group_weight_files(&files);
+                if has_ambiguous_quant {
+                    return groups
+                        .into_iter()
+                        .map(|group| DownloadOption {
+                            quant: quant.clone(),
+                            size_bytes: Some(group.total_size),
+                            file_group: Some(FileGroup {
+                                filenames: group.filenames,
+                                shard_count: group.shard_count,
+                                label: group.label,
+                            }),
+                        })
+                        .collect::<Vec<_>>();
+                }
+
+                let size_bytes = files.iter().map(|file| file.size).sum();
+                vec![DownloadOption {
+                    quant,
+                    size_bytes: Some(size_bytes),
+                    file_group: None,
+                }]
             })
             .collect()
     }
@@ -740,6 +771,57 @@ mod tests {
         assert_eq!(options[0].size_bytes, Some(41_800_000_000));
         assert_eq!(options[1].quant, "UD-Q3_K_M");
         assert_eq!(options[1].size_bytes, Some(87_210_900_000));
+    }
+
+    #[test]
+    fn test_quant_options_preserve_same_quant_standalone_variants() {
+        let tree = RepoFileTree {
+            repo_id: "DavidAU/OpenAi-GPT-oss-20b-HERETIC-uncensored-NEO-Imatrix-gguf".to_string(),
+            lfs_files: vec![
+                lfs("OpenAI-20B-NEO-Uncensored2-Q5_1.gguf", 15_700_000_000),
+                lfs(
+                    "OpenAI-20B-NEO-CODEPlus-Uncensored-Q5_1.gguf",
+                    15_700_000_000,
+                ),
+                lfs("OpenAI-20B-NEO-HRR-DI-Uncensored-Q5_1.gguf", 16_500_000_000),
+                lfs("OpenAI-20B-NEOPlus-Uncensored-Q8_0.gguf", 22_100_000_000),
+            ],
+            regular_files: vec![],
+            cached_at: "2026-01-01T00:00:00Z".to_string(),
+            last_modified: None,
+            cache_version: crate::model_library::types::REPO_FILE_TREE_VERSION,
+        };
+
+        let options =
+            HuggingFaceClient::extract_quant_based_options(&tree, &["Q5_1".into(), "Q8_0".into()]);
+
+        assert_eq!(options.len(), 4);
+        assert!(options.iter().all(|option| option.file_group.is_some()));
+        assert_eq!(
+            options
+                .iter()
+                .filter(|option| option.quant == "Q5_1")
+                .map(|option| option.size_bytes)
+                .collect::<Vec<_>>(),
+            vec![
+                Some(15_700_000_000),
+                Some(16_500_000_000),
+                Some(15_700_000_000)
+            ]
+        );
+        assert_eq!(
+            options
+                .iter()
+                .filter_map(|option| option.file_group.as_ref())
+                .map(|group| group.label.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "OpenAI-20B-NEO-CODEPlus-Uncensored-Q5_1.gguf",
+                "OpenAI-20B-NEO-HRR-DI-Uncensored-Q5_1.gguf",
+                "OpenAI-20B-NEO-Uncensored2-Q5_1.gguf",
+                "OpenAI-20B-NEOPlus-Uncensored-Q8_0.gguf"
+            ]
+        );
     }
 
     #[test]

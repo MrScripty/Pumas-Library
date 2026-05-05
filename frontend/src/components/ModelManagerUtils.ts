@@ -53,6 +53,19 @@ function getModelArtifactIdentity(model: ModelInfo): string | undefined {
   return normalizeIdentity(model.selectedArtifactId);
 }
 
+function isFileGroupOrRepoArtifactIdentity(artifactIdentity: string): boolean {
+  const normalized = normalizeIdentity(artifactIdentity);
+  const artifactToken = normalizeArtifactToken(artifactIdentity);
+  return Boolean(
+    normalized &&
+      artifactToken &&
+      (normalized.endsWith('__full_repo') ||
+        normalized.includes('__files_') ||
+        artifactToken.endsWith('_full_repo') ||
+        artifactToken.includes('_files_'))
+  );
+}
+
 function artifactIdentityContainsQuant(artifactIdentity: string, quant?: string | null): boolean {
   const quantToken = normalizeArtifactToken(quant);
   if (!quantToken) {
@@ -87,7 +100,8 @@ function downloadMatchesLocalModel(model: ModelInfo, download: ModelInfo): boole
 
   return (
     artifactIdentityContainsQuant(downloadArtifactIdentity, model.selectedArtifactQuant) ||
-    artifactIdentityContainsQuant(downloadArtifactIdentity, model.quant)
+    artifactIdentityContainsQuant(downloadArtifactIdentity, model.quant) ||
+    (Boolean(model.isPartialDownload) && isFileGroupOrRepoArtifactIdentity(downloadArtifactIdentity))
   );
 }
 
@@ -115,11 +129,24 @@ export function mergeLocalModelGroups(
 
   const mergedDownloadKeys = new Set<string>();
   const groupMap = new Map<string, ModelInfo[]>();
+  const repoIdsWithPartialRows = new Set(
+    modelGroups.flatMap((group) =>
+      group.models
+        .filter((model) => model.isPartialDownload)
+        .map((model) => normalizeIdentity(model.repoId))
+        .filter((repoId): repoId is string => Boolean(repoId))
+    )
+  );
 
   modelGroups.forEach((group) => {
     const models = group.models.map((model) => {
       const download = downloadingModels.find((candidate) =>
         !mergedDownloadKeys.has(candidate.downloadKey ?? candidate.id) &&
+        !(
+          !model.isPartialDownload &&
+          !getDownloadArtifactIdentity(candidate) &&
+          repoIdsWithPartialRows.has(normalizeIdentity(model.repoId) ?? '')
+        ) &&
         downloadMatchesLocalModel(model, candidate)
       );
       if (download) {

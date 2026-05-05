@@ -435,6 +435,15 @@ Update during implementation:
   allowing legacy repo fallback, and preserves the artifact-scoped
   `downloadKey` on merged local rows so local pause/resume/cancel actions
   address the correct download.
+- 2026-05-04: User validation showed a multi-file AEON partial download
+  rendered as a separate non-partial active row and left the partial row's
+  resume button inert. The persisted download had selected filenames at the
+  persistence-entry level, while the restored download status derived
+  `selectedArtifactId` only from the original request and reported a repo-wide
+  artifact identity. Backend download progress now derives file-group artifact
+  identity from restored `DownloadState.files`, and the frontend merge logic
+  prefers incomplete local rows for repo-scoped status plus accepts file-group
+  or full-repo artifact identities for metadata-light partial rows.
 
 ## Commit Cadence Notes
 
@@ -532,6 +541,10 @@ Update during implementation:
 - Frontend local/download merge logic now keeps active artifact downloads
   scoped to their selected artifact or quant, preventing same-repo complete
   variants such as Q5_K_M from inheriting a Q4_K_M progress ring.
+- Restored multi-file download progress now reports file-group selected
+  artifact identity from the actual tracked files, and local active-download
+  merge logic routes repo-scoped or file-group resume state to the incomplete
+  row instead of a same-repo complete row.
 
 ### Deviations
 
@@ -581,6 +594,8 @@ Update during implementation:
 - `npm run -w frontend test:run -- ModelManagerUtils.test.ts`
 - `npm run -w frontend test:run -- useModelDownloads.test.ts LocalModelRowState.test.ts`
 - `git diff --check`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_downloads_scopes_file_group_selected_artifact_from_state_files`
+- `npm run -w frontend test:run -- useModelLibraryActions.test.ts`
 
 ### Traceability Links
 

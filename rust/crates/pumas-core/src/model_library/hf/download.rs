@@ -164,9 +164,21 @@ fn retry_exhausted_message(
     )
 }
 
-fn selected_artifact_id_for_request(request: Option<&DownloadRequest>) -> Option<String> {
-    request
-        .map(|request| SelectedArtifactIdentity::from_download_request(request, None).artifact_id)
+fn selected_artifact_id_for_state(state: &DownloadState) -> Option<String> {
+    let request = state.download_request.as_ref()?;
+    let selected_filenames = if state.files.is_empty() {
+        None
+    } else {
+        Some(
+            state
+                .files
+                .iter()
+                .map(|file| file.filename.clone())
+                .collect(),
+        )
+    };
+
+    Some(SelectedArtifactIdentity::from_download_request(request, selected_filenames).artifact_id)
 }
 
 impl HuggingFaceClient {
@@ -1283,9 +1295,7 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
-                selected_artifact_id: selected_artifact_id_for_request(
-                    state.download_request.as_ref(),
-                ),
+                selected_artifact_id: selected_artifact_id_for_state(state),
                 model_name: state
                     .download_request
                     .as_ref()
@@ -1339,9 +1349,7 @@ impl HuggingFaceClient {
             .map(|state| ModelDownloadProgress {
                 download_id: state.download_id.clone(),
                 repo_id: Some(state.repo_id.clone()),
-                selected_artifact_id: selected_artifact_id_for_request(
-                    state.download_request.as_ref(),
-                ),
+                selected_artifact_id: selected_artifact_id_for_state(state),
                 model_name: state
                     .download_request
                     .as_ref()
@@ -1822,6 +1830,83 @@ mod tests {
         assert_eq!(progress.retry_limit, Some(5));
         assert_eq!(progress.retrying, Some(true));
         assert_eq!(progress.next_retry_delay_seconds, Some(4.0));
+    }
+
+    #[tokio::test]
+    async fn test_list_downloads_scopes_file_group_selected_artifact_from_state_files() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let download_id = "dl-file-group-progress".to_string();
+
+        let request = DownloadRequest {
+            repo_id: "owner/multi-file".to_string(),
+            family: "owner".to_string(),
+            official_name: "Multi File".to_string(),
+            model_type: Some("llm".to_string()),
+            quant: None,
+            filename: None,
+            filenames: None,
+            pipeline_tag: Some("text-generation".to_string()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/multi-file".to_string(),
+                    status: DownloadStatus::Paused,
+                    progress: 0.25,
+                    downloaded_bytes: 256,
+                    total_bytes: Some(1024),
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    retry_attempt: 0,
+                    retry_limit: None,
+                    retrying: false,
+                    next_retry_delay_seconds: None,
+                    dest_dir: tmp.path().join("owner-multi-file"),
+                    filename: "config.json".to_string(),
+                    files: vec![
+                        FileToDownload {
+                            filename: "config.json".to_string(),
+                            size: Some(128),
+                            sha256: None,
+                        },
+                        FileToDownload {
+                            filename: "model.safetensors".to_string(),
+                            size: Some(896),
+                            sha256: None,
+                        },
+                    ],
+                    files_completed: 0,
+                    download_request: Some(request),
+                    known_sha256: None,
+                    huggingface_evidence: None,
+                },
+            );
+        }
+
+        let list = client.list_downloads().await;
+        let progress = list
+            .into_iter()
+            .find(|item| item.download_id == download_id)
+            .expect("download progress should be present");
+
+        assert_eq!(progress.repo_id.as_deref(), Some("owner/multi-file"));
+        assert!(progress
+            .selected_artifact_id
+            .as_deref()
+            .is_some_and(|artifact_id| artifact_id.starts_with("owner--multi-file__files_")));
     }
 
     #[tokio::test]

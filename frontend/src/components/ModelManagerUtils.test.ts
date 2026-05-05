@@ -221,6 +221,94 @@ describe('ModelManagerUtils', () => {
     });
   });
 
+  it('prefers an incomplete local row over a complete same-repo row for repo-scoped downloads', () => {
+    const localGroups: ModelCategory[] = [
+      {
+        category: 'llm',
+        models: [
+          createLocalModel({
+            id: 'llm/aeon-7/text-complete',
+            name: 'AEON Text Complete',
+            repoId: 'AEON-7/Qwen3.6-Text',
+          }),
+          createLocalModel({
+            id: 'llm/aeon-7/text-partial',
+            name: 'AEON Text Partial',
+            repoId: 'AEON-7/Qwen3.6-Text',
+            isPartialDownload: true,
+          }),
+        ],
+      },
+    ];
+    const downloadingModels: ModelInfo[] = [
+      {
+        id: 'download:aeon-7/qwen3.6-text',
+        name: 'AEON Text Download',
+        category: 'llm',
+        isDownloading: true,
+        downloadKey: 'aeon-7/qwen3.6-text',
+        downloadRepoId: 'aeon-7/qwen3.6-text',
+        downloadProgress: 0.4,
+      },
+    ];
+
+    const merged = mergeLocalModelGroups(localGroups, downloadingModels);
+
+    expect(merged[0]?.models[0]?.isDownloading).toBeUndefined();
+    expect(merged[0]?.models[1]).toMatchObject({
+      id: 'llm/aeon-7/text-partial',
+      isDownloading: true,
+      downloadKey: 'aeon-7/qwen3.6-text',
+      downloadProgress: 0.4,
+    });
+    expect(merged[0]?.models).toHaveLength(2);
+  });
+
+  it('matches file-group artifact downloads to incomplete same-repo rows without selected metadata', () => {
+    const localGroups: ModelCategory[] = [
+      {
+        category: 'llm',
+        models: [
+          createLocalModel({
+            id: 'llm/aeon-7/text-complete',
+            name: 'AEON Text Complete',
+            repoId: 'AEON-7/Qwen3.6-Text',
+          }),
+          createLocalModel({
+            id: 'llm/aeon-7/text-partial',
+            name: 'AEON Text Partial',
+            repoId: 'AEON-7/Qwen3.6-Text',
+            isPartialDownload: true,
+            quant: 'NVFP4',
+          }),
+        ],
+      },
+    ];
+    const downloadingModels: ModelInfo[] = [
+      {
+        id: 'download:aeon-7--qwen3_6-text__files_abc123',
+        name: 'AEON Text Download',
+        category: 'llm',
+        isDownloading: true,
+        downloadKey: 'aeon-7--qwen3_6-text__files_abc123',
+        downloadRepoId: 'aeon-7/qwen3.6-text',
+        downloadSelectedArtifactId: 'aeon-7--qwen3_6-text__files_abc123',
+        downloadProgress: 0.4,
+      },
+    ];
+
+    const merged = mergeLocalModelGroups(localGroups, downloadingModels);
+
+    expect(merged[0]?.models[0]?.isDownloading).toBeUndefined();
+    expect(merged[0]?.models[1]).toMatchObject({
+      id: 'llm/aeon-7/text-partial',
+      isDownloading: true,
+      downloadKey: 'aeon-7--qwen3_6-text__files_abc123',
+      downloadSelectedArtifactId: 'aeon-7--qwen3_6-text__files_abc123',
+    });
+    expect(merged[0]?.models).toHaveLength(2);
+  });
+
   it('filters local groups by selected category and matches search against model path', () => {
     const groups: ModelCategory[] = [
       {

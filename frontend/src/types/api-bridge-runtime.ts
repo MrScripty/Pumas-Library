@@ -26,6 +26,13 @@ import type {
   SystemResourcesResponse,
 } from './api-system';
 import type {
+  ModelRuntimeRoute,
+  RuntimeProfileConfig,
+  RuntimeProfileMutationResponse,
+  RuntimeProfileUpdateFeedResponse,
+  RuntimeProfilesSnapshotResponse,
+} from './api-runtime-profiles';
+import type {
   CacheStatusResponse,
   CancelInstallationResponse,
   GetActiveVersionResponse,
@@ -106,6 +113,19 @@ export interface DesktopBridgeRuntimeAPI {
   stop_comfyui(): Promise<StopComfyUIResponse>;
   launch_ollama(): Promise<LaunchResponse>;
   stop_ollama(): Promise<StopOllamaResponse>;
+
+  // Local Runtime Profiles
+  get_runtime_profiles_snapshot(): Promise<RuntimeProfilesSnapshotResponse>;
+  list_runtime_profile_updates_since(
+    cursor?: string | null,
+    limit?: number
+  ): Promise<RuntimeProfileUpdateFeedResponse>;
+  upsert_runtime_profile(
+    profile: RuntimeProfileConfig
+  ): Promise<RuntimeProfileMutationResponse>;
+  delete_runtime_profile(profileId: string): Promise<RuntimeProfileMutationResponse>;
+  set_model_runtime_route(route: ModelRuntimeRoute): Promise<RuntimeProfileMutationResponse>;
+  clear_model_runtime_route(modelId: string): Promise<RuntimeProfileMutationResponse>;
 
   // Ollama Model Management
   ollama_list_models(connectionUrl?: string): Promise<OllamaListModelsResponse>;

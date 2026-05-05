@@ -7,6 +7,7 @@ mod models;
 mod ollama;
 mod plugins;
 mod process;
+mod runtime_profiles;
 mod shared;
 mod shortcuts;
 mod status;
@@ -248,6 +249,20 @@ async fn dispatch_method(
         "get_network_status" => status::get_network_status(state, params).await,
         "get_library_status" => status::get_library_status(state, params).await,
         "get_app_status" => status::get_app_status(state, params).await,
+
+        // Local Runtime Profiles
+        "get_runtime_profiles_snapshot" => {
+            runtime_profiles::get_runtime_profiles_snapshot(state, params).await
+        }
+        "list_runtime_profile_updates_since" => {
+            runtime_profiles::list_runtime_profile_updates_since(state, params).await
+        }
+        "upsert_runtime_profile" => runtime_profiles::upsert_runtime_profile(state, params).await,
+        "delete_runtime_profile" => runtime_profiles::delete_runtime_profile(state, params).await,
+        "set_model_runtime_route" => runtime_profiles::set_model_runtime_route(state, params).await,
+        "clear_model_runtime_route" => {
+            runtime_profiles::clear_model_runtime_route(state, params).await
+        }
 
         // Version Management
         "get_available_versions" => versions::get_available_versions(state, params).await,

@@ -8,6 +8,7 @@ export * from './api-mapping';
 export * from './api-conversion';
 export * from './api-versions';
 export * from './api-processes';
+export * from './api-runtime-profiles';
 export * from './api-window';
 export * from './api-bridge';
 export * from './api-plugins';

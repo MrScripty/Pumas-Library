@@ -245,16 +245,16 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Add append-only backend and bridge contracts for provider-neutral runtime profiles and model routes.
 
 **Tasks:**
-- [ ] Define Rust domain types for profile ID, provider ID, endpoint URL, port, device mode, provider mode, lifecycle state, scheduler settings, and model route.
+- [x] Define Rust domain types for profile ID, provider ID, endpoint URL, port, device mode, provider mode, lifecycle state, scheduler settings, and model route.
 - [ ] Define persisted config schema for profiles and per-model routes.
-- [ ] Define the runtime/profile snapshot shape consumed by the frontend.
-- [ ] Define runtime/profile event payloads following the existing backend-pushed update pattern.
-- [ ] Define provider adapter traits for Ollama and llama.cpp.
-- [ ] Define llama.cpp router profile mode and dedicated process profile mode as explicit typed variants.
-- [ ] Add Electron/TypeScript bridge types matching the new RPC responses.
-- [ ] Add RPC registry entries and request validation schemas.
-- [ ] Preserve existing singleton Ollama commands unchanged.
-- [ ] Mark `connection_url` as legacy boundary compatibility and document `profile_id` as the canonical internal routing key.
+- [x] Define the runtime/profile snapshot shape consumed by the frontend.
+- [x] Define runtime/profile event payloads following the existing backend-pushed update pattern.
+- [x] Define provider adapter traits for Ollama and llama.cpp.
+- [x] Define llama.cpp router profile mode and dedicated process profile mode as explicit typed variants.
+- [x] Add Electron/TypeScript bridge types matching the new RPC responses.
+- [x] Add RPC registry entries and request validation schemas.
+- [x] Preserve existing singleton Ollama commands unchanged.
+- [x] Mark `connection_url` as legacy boundary compatibility and document `profile_id` as the canonical internal routing key.
 
 **Verification:**
 - Rust unit tests for config serialization/deserialization and validation.
@@ -263,7 +263,15 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Electron registry validation tests.
 - TypeScript typecheck.
 
-**Status:** Not started.
+**Status:** Partially complete. Contract DTOs, bridge methods, request validation, and placeholder RPC handlers are implemented; durable persistence remains for the next thin slice.
+
+**Implementation Notes:**
+- 2026-05-05: Added Rust runtime profile DTOs under `pumas-core::models`, including typed profile IDs, endpoint URLs, ports, providers, provider modes, lifecycle states, device settings, scheduler settings, model routes, snapshots, update-feed events, and mutation responses.
+- 2026-05-05: Added a provider-neutral `RuntimeProviderAdapter` contract and capability DTO that distinguishes Ollama serve profiles from llama.cpp router and dedicated profiles.
+- 2026-05-05: Added append-only Electron/TypeScript bridge contract methods and request validation schemas for runtime profile snapshots, update feeds, profile mutations, and model-route mutations. Existing singleton Ollama commands remain unchanged.
+- 2026-05-05: Added placeholder RPC handlers that expose read-only empty snapshot/update-feed responses and return structured business failures for mutation calls until the persistence service lands.
+- 2026-05-05: Subagent review confirmed the existing pushed update transport is model-library-specific from Rust SSE through Electron main/preload. A generalized runtime-profile push path must be implemented in a later event-transport slice instead of overloading the model-library stream.
+- 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 3: Implement Thin Default-Profile Vertical Slice
 
@@ -465,6 +473,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 
 - Plan written and validated against local Coding Standards.
 - Milestone 1 automated crash-containment slice implemented and validated.
+- Milestone 2 contract DTO/bridge slice implemented and validated.
 
 ### Deviations
 
@@ -472,7 +481,9 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 
 ### Follow-Ups
 
-- Implement Milestone 1 first with a failing test before applying a fix.
+- Keep the Milestone 1 manual Ollama globe smoke check in release validation even though automated crash-containment coverage is complete.
+- Implement Milestone 2 persistence as the next thin slice: backend-owned profile/route config storage, default-profile seeding, and non-stub mutation handlers.
+- Implement runtime-profile pushed updates as a separate event-transport slice because the existing SSE/preload path is currently hardcoded to model-library notifications.
 - Re-check Ollama and llama.cpp upstream documentation before implementing hardware mode labels, because device-control and router behavior may change across versions.
 
 ### Verification Summary

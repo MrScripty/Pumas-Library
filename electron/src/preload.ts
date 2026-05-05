@@ -297,6 +297,18 @@ const electronAPI = {
   stop_comfyui: () => apiCall('stop_comfyui'),
   launch_ollama: () => apiCall('launch_ollama'),
   stop_ollama: () => apiCall('stop_ollama'),
+  get_runtime_profiles_snapshot: () =>
+    apiCall('get_runtime_profiles_snapshot'),
+  list_runtime_profile_updates_since: (cursor?: string | null, limit?: number) =>
+    apiCall('list_runtime_profile_updates_since', { cursor, limit }),
+  upsert_runtime_profile: (profile: Record<string, unknown>) =>
+    apiCall('upsert_runtime_profile', { profile }),
+  delete_runtime_profile: (profileId: string) =>
+    apiCall('delete_runtime_profile', { profile_id: profileId }),
+  set_model_runtime_route: (route: Record<string, unknown>) =>
+    apiCall('set_model_runtime_route', { route }),
+  clear_model_runtime_route: (modelId: string) =>
+    apiCall('clear_model_runtime_route', { model_id: modelId }),
 
   // Torch Inference Server
   launch_torch: () => apiCall('launch_torch'),

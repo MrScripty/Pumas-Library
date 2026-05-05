@@ -24,6 +24,12 @@ export const RPC_METHOD_REGISTRY = {
     'get_network_status',
     'get_library_status',
     'get_app_status',
+    'get_runtime_profiles_snapshot',
+    'list_runtime_profile_updates_since',
+    'upsert_runtime_profile',
+    'delete_runtime_profile',
+    'set_model_runtime_route',
+    'clear_model_runtime_route',
     'get_available_versions',
     'get_installed_versions',
     'get_active_version',
@@ -181,6 +187,7 @@ export type RpcParamFieldType =
   | 'string'
   | 'string-array'
   | 'string-record'
+  | 'unknown-record'
   | 'unknown-array';
 
 export type RpcRequestSchema = {
@@ -210,6 +217,7 @@ export const RPC_METHOD_PARAM_VALIDATION = {
   launch_torch: 'empty-record',
   stop_torch: 'empty-record',
   get_plugins: 'empty-record',
+  get_runtime_profiles_snapshot: 'empty-record',
 } as const satisfies Partial<Record<RpcMethodName, RpcParamsValidationPolicy>>;
 
 const RPC_METHOD_PARAM_VALIDATION_BY_METHOD: Partial<
@@ -308,6 +316,32 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
     optional: {
       cursor: 'string',
       limit: 'number',
+    },
+  },
+  list_runtime_profile_updates_since: {
+    optional: {
+      cursor: 'string',
+      limit: 'number',
+    },
+  },
+  upsert_runtime_profile: {
+    required: {
+      profile: 'unknown-record',
+    },
+  },
+  delete_runtime_profile: {
+    required: {
+      profile_id: 'string',
+    },
+  },
+  set_model_runtime_route: {
+    required: {
+      route: 'unknown-record',
+    },
+  },
+  clear_model_runtime_route: {
+    required: {
+      model_id: 'string',
     },
   },
   resolve_pumas_model_ref: {

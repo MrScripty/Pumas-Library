@@ -161,6 +161,8 @@ function isValidParamFieldType(value: unknown, fieldType: RpcParamFieldType): bo
       return Array.isArray(value) && value.every((item) => typeof item === 'string');
     case 'string-record':
       return isPlainRecord(value) && Object.values(value).every((item) => typeof item === 'string');
+    case 'unknown-record':
+      return isPlainRecord(value);
     case 'unknown-array':
       return Array.isArray(value);
   }

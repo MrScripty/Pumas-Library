@@ -47,6 +47,7 @@ pub mod platform;
 pub mod plugins;
 pub mod process;
 pub mod registry;
+pub mod runtime_profiles;
 pub mod system;
 
 mod api;
@@ -70,6 +71,7 @@ pub use models::{
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
+pub use runtime_profiles::{RuntimeProviderAdapter, RuntimeProviderCapabilities};
 pub use system::{
     check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,
     ResourceTracker, SystemCheckResult, SystemResourceSnapshot, SystemUtils,

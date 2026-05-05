@@ -19,6 +19,7 @@ one authoritative view of the desktop bridge boundary.
 | `api-conversion.ts` | Model conversion state, progress, and environment contracts. |
 | `api-versions.ts` | Version, installation-progress, cache, and background-fetch contracts. |
 | `api-processes.ts` | Process, Ollama, Torch, shortcut, and launcher-update contracts. |
+| `api-runtime-profiles.ts` | Provider-neutral local runtime profile, route, status, and update-feed contracts. |
 | `api-window.ts` | Renderer utility response contracts for paths, URLs, and window actions. |
 | `api-bridge*.ts` | Domain bridge method interfaces composed into `DesktopBridgeAPI`. |
 | `api-plugins.ts` | Plugin response contracts. |

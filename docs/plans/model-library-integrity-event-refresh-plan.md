@@ -509,6 +509,9 @@ Update during implementation:
   `list_models` projection, preserving true duplicate detection for complete
   rows without treating same-repo partial artifact downloads as library
   integrity issues.
+- Migration execution now emits a backend-owned library-wide refresh event even
+  when no individual index row changes, so read-time integrity projections and
+  stale renderer labels are invalidated after successful maintenance runs.
 
 ### Deviations
 
@@ -547,6 +550,7 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_does_not_mark_partial_downloads_as_duplicate_repo_issues`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_dedupes_duplicate_repo_ids_and_marks_integrity_issue`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_cleanup_duplicate_repo_entries_removes_partial_duplicate_against_complete_copy`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_execute_migration_notifies_model_library_refresh_even_when_no_moves`
 
 ### Traceability Links
 

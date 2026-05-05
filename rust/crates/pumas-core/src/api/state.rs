@@ -883,6 +883,8 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     )
                     .await?;
                 }
+                self.model_library
+                    .notify_model_library_refresh("migration_execution")?;
                 Ok(serde_json::to_value(report)?)
             }
             "list_model_migration_reports" => {

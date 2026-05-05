@@ -280,3 +280,49 @@ async fn test_generate_migration_dry_run_reconciles_before_reporting() {
         .join("shared-resources/models/diffusion/catplusplus/qwen-image-2512-heretic")
         .exists());
 }
+
+#[tokio::test]
+async fn test_execute_migration_notifies_model_library_refresh_even_when_no_moves() {
+    let temp_dir = TempDir::new().unwrap();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+
+    let api = PumasApi::builder(temp_dir.path())
+        .auto_create_dirs(true)
+        .build()
+        .await
+        .unwrap();
+
+    let baseline = api
+        .list_model_library_updates_since(None, 100)
+        .await
+        .unwrap()
+        .cursor;
+
+    let report = api.execute_model_migration().await.unwrap();
+    assert_eq!(report.planned_move_count, 0);
+    assert_eq!(report.error_count, 0, "{:?}", report.results);
+
+    let feed = api
+        .list_model_library_updates_since(Some(&baseline), 100)
+        .await
+        .unwrap();
+    assert_eq!(feed.events.len(), 1, "{:?}", feed.events);
+    let event = &feed.events[0];
+    assert_eq!(event.model_id, "__library__/model-library-refresh");
+    assert_eq!(
+        event.change_kind,
+        crate::models::ModelLibraryChangeKind::MetadataModified
+    );
+    assert_eq!(
+        event.fact_family,
+        crate::models::ModelFactFamily::SearchIndex
+    );
+    assert_eq!(
+        event.refresh_scope,
+        crate::models::ModelLibraryRefreshScope::SummaryAndDetail
+    );
+    assert_eq!(
+        event.producer_revision.as_deref(),
+        Some("migration_execution")
+    );
+}

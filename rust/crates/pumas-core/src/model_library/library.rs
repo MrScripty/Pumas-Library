@@ -36,11 +36,11 @@ use crate::model_library::{
 };
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
-    GenerationDefaultFacts, ModelExecutionDescriptor, ModelPackageDiagnostic,
-    ModelPackageFactsSummaryResult, ModelPackageFactsSummarySnapshot,
-    ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic, PackageArtifactKind,
-    PackageClassReference, PackageFactStatus, ProcessorComponentFacts, ProcessorComponentKind,
-    PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
+    GenerationDefaultFacts, ModelExecutionDescriptor, ModelFactFamily, ModelLibraryChangeKind,
+    ModelLibraryRefreshScope, ModelPackageDiagnostic, ModelPackageFactsSummaryResult,
+    ModelPackageFactsSummarySnapshot, ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic,
+    PackageArtifactKind, PackageClassReference, PackageFactStatus, ProcessorComponentFacts,
+    ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
     ResolvedModelPackageFactsSummary, StorageKind, TaskEvidence, TransformersPackageEvidence,
     PACKAGE_FACTS_CONTRACT_VERSION,
 };
@@ -105,6 +105,7 @@ const INTEGRITY_ISSUE_DUPLICATE_REPO_ID: &str = "integrity_issue_duplicate_repo_
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_COUNT: &str = "integrity_issue_duplicate_repo_id_count";
 /// Indexed metadata key listing alternate model IDs with the same repo_id.
 const INTEGRITY_ISSUE_DUPLICATE_REPO_ID_OTHERS: &str = "integrity_issue_duplicate_repo_id_others";
+const MODEL_LIBRARY_REFRESH_EVENT_MODEL_ID: &str = "__library__/model-library-refresh";
 const PRIMARY_FORMAT_METADATA_KEY: &str = "primary_format";
 const QUANTIZATION_METADATA_KEY: &str = "quantization";
 const KITTENTTS_PROFILE_ID: &str = "kittentts-runtime";
@@ -2457,6 +2458,22 @@ impl ModelLibrary {
         limit: usize,
     ) -> Result<crate::models::ModelLibraryUpdateFeed> {
         self.index.list_model_library_updates_since(cursor, limit)
+    }
+
+    /// Append a library-wide refresh event for consumers with cached model lists.
+    ///
+    /// Some list annotations are computed at read time instead of persisted in
+    /// the model index. Backend maintenance flows call this after completing so
+    /// renderers discard stale projections even when no individual row changed.
+    pub fn notify_model_library_refresh(&self, reason: &str) -> Result<i64> {
+        self.index.append_model_library_update_event(
+            MODEL_LIBRARY_REFRESH_EVENT_MODEL_ID,
+            ModelLibraryChangeKind::MetadataModified,
+            ModelFactFamily::SearchIndex,
+            ModelLibraryRefreshScope::SummaryAndDetail,
+            None,
+            Some(reason.to_string()),
+        )
     }
 
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.

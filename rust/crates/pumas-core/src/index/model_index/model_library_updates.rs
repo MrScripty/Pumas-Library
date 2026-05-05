@@ -163,6 +163,31 @@ impl ModelIndex {
         Ok(conn.last_insert_rowid())
     }
 
+    pub fn append_model_library_update_event(
+        &self,
+        model_id: &str,
+        change_kind: ModelLibraryChangeKind,
+        fact_family: ModelFactFamily,
+        refresh_scope: ModelLibraryRefreshScope,
+        selected_artifact_id: Option<String>,
+        producer_revision: Option<String>,
+    ) -> Result<i64> {
+        let conn = self.conn.lock().map_err(|_| PumasError::Database {
+            message: "Failed to acquire connection lock".to_string(),
+            source: None,
+        })?;
+
+        Self::append_model_library_update_event_with_conn(
+            &conn,
+            model_id,
+            change_kind,
+            fact_family,
+            refresh_scope,
+            selected_artifact_id,
+            producer_revision,
+        )
+    }
+
     pub fn current_model_library_update_cursor(&self) -> Result<String> {
         let conn = self.conn.lock().map_err(|_| PumasError::Database {
             message: "Failed to acquire connection lock".to_string(),

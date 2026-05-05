@@ -136,6 +136,9 @@ impl PumasApi {
             rewrite_migration_execution_report(primary.model_library.clone(), report.clone())
                 .await?;
         }
+        primary
+            .model_library
+            .notify_model_library_refresh("migration_execution")?;
         Ok(report)
     }
 

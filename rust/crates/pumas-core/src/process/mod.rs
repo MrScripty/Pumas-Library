@@ -34,5 +34,5 @@ mod launcher;
 mod manager;
 
 pub use detection::{DetectedProcess, ProcessDetector, ProcessSource};
-pub use launcher::{LaunchConfig, LaunchResult, ProcessLauncher};
+pub use launcher::{BinaryLaunchConfig, LaunchConfig, LaunchResult, ProcessLauncher};
 pub use manager::{ProcessInfo, ProcessManager};

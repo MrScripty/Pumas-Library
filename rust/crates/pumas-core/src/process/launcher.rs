@@ -112,9 +112,34 @@ impl BinaryLaunchConfig {
         self
     }
 
+    /// Set the PID file path.
+    pub fn with_pid_file(mut self, path: impl AsRef<Path>) -> Self {
+        self.pid_file = path.as_ref().to_path_buf();
+        self
+    }
+
+    /// Set the health check URL.
+    pub fn with_health_check_url(mut self, url: impl Into<String>) -> Self {
+        self.health_check_url = Some(url.into());
+        self
+    }
+
     /// Add an environment variable.
     pub fn with_env(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.env_vars.insert(key.into(), value.into());
+        self
+    }
+
+    /// Add environment variables.
+    pub fn with_env_vars<I, K, V>(mut self, env_vars: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (key, value) in env_vars {
+            self.env_vars.insert(key.into(), value.into());
+        }
         self
     }
 }
@@ -534,6 +559,41 @@ mod tests {
         );
         assert_eq!(config.log_file, Some(log_file));
         assert_eq!(config.ready_timeout, Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_binary_launch_config_profile_overrides() {
+        let temp_dir = TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("ollama-v1");
+        let pid_file = temp_dir.path().join("profiles/ollama-gpu/runtime.pid");
+        let log_file = temp_dir.path().join("profiles/ollama-gpu/runtime.log");
+
+        let config = BinaryLaunchConfig::ollama("v1", &version_dir)
+            .with_pid_file(&pid_file)
+            .with_log_file(&log_file)
+            .with_health_check_url("http://127.0.0.1:12000")
+            .with_env_vars([
+                ("OLLAMA_HOST", "127.0.0.1:12000"),
+                ("CUDA_VISIBLE_DEVICES", "0"),
+            ]);
+
+        assert_eq!(config.pid_file, pid_file);
+        assert_eq!(config.log_file, Some(log_file));
+        assert_eq!(
+            config.health_check_url.as_deref(),
+            Some("http://127.0.0.1:12000")
+        );
+        assert_eq!(
+            config.env_vars.get("OLLAMA_HOST").map(String::as_str),
+            Some("127.0.0.1:12000")
+        );
+        assert_eq!(
+            config
+                .env_vars
+                .get("CUDA_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("0")
+        );
     }
 
     #[test]

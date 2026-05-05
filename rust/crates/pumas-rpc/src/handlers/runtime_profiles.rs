@@ -31,6 +31,12 @@ struct ClearModelRuntimeRouteParams {
     model_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct LaunchRuntimeProfileParams {
+    profile_id: RuntimeProfileId,
+    tag: Option<String>,
+}
+
 pub async fn get_runtime_profiles_snapshot(
     state: &AppState,
     _params: &Value,
@@ -93,6 +99,40 @@ pub async fn clear_model_runtime_route(
         state
             .api
             .clear_model_runtime_route(command.model_id)
+            .await?,
+    )?)
+}
+
+pub async fn launch_runtime_profile(
+    state: &AppState,
+    params: &Value,
+) -> pumas_library::Result<Value> {
+    let command: LaunchRuntimeProfileParams = parse_params("launch_runtime_profile", params)?;
+    let Some(version_manager) = super::get_version_manager(state, "ollama").await else {
+        return Ok(serde_json::json!({
+            "success": false,
+            "error": "Version manager not initialized for ollama",
+            "ready": false
+        }));
+    };
+    let tag = match command.tag {
+        Some(tag) => tag,
+        None => match version_manager.get_active_version().await? {
+            Some(tag) => tag,
+            None => {
+                return Ok(serde_json::json!({
+                    "success": false,
+                    "error": "No active Ollama version set",
+                    "ready": false
+                }));
+            }
+        },
+    };
+    let version_dir = version_manager.version_path(&tag);
+    Ok(serde_json::to_value(
+        state
+            .api
+            .launch_runtime_profile(command.profile_id, &tag, &version_dir)
             .await?,
     )?)
 }

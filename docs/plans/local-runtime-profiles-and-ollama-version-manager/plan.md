@@ -341,8 +341,9 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Added a per-profile operation guard inside `RuntimeProfileService` so lifecycle start/stop paths can reject overlapping operations for the same profile without holding config locks across process work. The serialization task remains open until start/stop commands use the guard.
 - 2026-05-05: Validated operation serialization infrastructure with `cargo test -p pumas-library runtime_profile_service_serializes_profile_operations --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Extended the low-level binary launch config with profile-owned PID file, health URL, and bulk environment override builders so future profile lifecycle code can consume launch specs without putting profile policy in the process launcher.
-- 2026-05-05: Added the first managed profile launch path for Ollama profiles. The core API and primary IPC dispatch now launch from a supplied installed-version directory through the backend launch spec, record starting/running/failed status events, and use the per-profile operation guard. Public RPC/frontend command wiring remains a separate slice.
+- 2026-05-05: Added the first managed profile launch path for Ollama profiles. The core API and primary IPC dispatch now launch from a supplied installed-version directory through the backend launch spec, record starting/running/failed status events, and use the per-profile operation guard.
 - 2026-05-05: Validated the launch failure/status path without spawning a process using `cargo test -p pumas-library test_launch_runtime_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Added append-only desktop bridge command wiring for `launch_runtime_profile(profile_id, tag?)`. The RPC handler resolves the active or requested Ollama version through the existing version manager and delegates to the backend-owned launch path; legacy `launch_ollama` remains unchanged.
 
 ### Milestone 5: Route Ollama Model Operations Through Profiles
 

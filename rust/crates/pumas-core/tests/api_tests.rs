@@ -266,6 +266,62 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
 }
 
 #[tokio::test]
+async fn test_launch_llama_cpp_dedicated_profile_requires_model_binding() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+
+    let profile = RuntimeProfileConfig {
+        profile_id: RuntimeProfileId::parse("llama-dedicated-test").unwrap(),
+        provider: RuntimeProviderId::LlamaCpp,
+        provider_mode: RuntimeProviderMode::LlamaCppDedicated,
+        management_mode: RuntimeManagementMode::Managed,
+        name: "llama.cpp Dedicated Test".to_string(),
+        enabled: true,
+        endpoint_url: RuntimeEndpointUrl::parse("http://127.0.0.1:18081").ok(),
+        port: RuntimePort::parse(18081).ok(),
+        device: Default::default(),
+        scheduler: Default::default(),
+    };
+    api.upsert_runtime_profile(profile).await.unwrap();
+
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models/llm/test/dedicated-model");
+    std::fs::create_dir_all(&model_dir).unwrap();
+    let model_path = model_dir.join("dedicated-model.gguf");
+    std::fs::write(&model_path, b"gguf").unwrap();
+
+    let version_dir = temp_dir.path().join("launcher-data").join("llama-cpp");
+    std::fs::create_dir_all(&version_dir).unwrap();
+    let response = api
+        .launch_runtime_profile_for_model(
+            RuntimeProfileId::parse("llama-dedicated-test").unwrap(),
+            "local-build",
+            &version_dir,
+            Some("llm/test/dedicated-model"),
+        )
+        .await
+        .unwrap();
+
+    assert!(!response.success);
+    assert!(response
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("llama-server"));
+
+    let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
+    let status = snapshot
+        .snapshot
+        .statuses
+        .iter()
+        .find(|status| status.profile_id.as_str() == "llama-dedicated-test")
+        .unwrap();
+    assert_eq!(status.state, RuntimeLifecycleState::Failed);
+}
+
+#[tokio::test]
 async fn test_stop_runtime_profile_without_pid_is_profile_scoped() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());

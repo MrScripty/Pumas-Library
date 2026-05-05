@@ -147,6 +147,43 @@ impl BinaryLaunchConfig {
         }
     }
 
+    /// Create a new binary launch config for a dedicated llama.cpp model server.
+    pub fn llama_cpp_dedicated(
+        tag: impl Into<String>,
+        version_dir: impl AsRef<Path>,
+        host: impl Into<String>,
+        port: u16,
+        model_path: impl AsRef<Path>,
+    ) -> Self {
+        let version_dir = version_dir.as_ref().to_path_buf();
+        let host = host.into();
+        let binary_path = version_dir
+            .join("build")
+            .join("bin")
+            .join(executable_name("llama-server"));
+        let pid_file = version_dir.join("llama-server.pid");
+
+        Self {
+            tag: tag.into(),
+            version_dir: version_dir.clone(),
+            binary_path,
+            command: None,
+            extra_args: vec![
+                "--host".to_string(),
+                host.clone(),
+                "--port".to_string(),
+                port.to_string(),
+                "--model".to_string(),
+                model_path.as_ref().to_string_lossy().to_string(),
+            ],
+            env_vars: HashMap::new(),
+            pid_file,
+            log_file: None,
+            ready_timeout: Duration::from_secs(60),
+            health_check_url: Some(format!("http://{host}:{port}")),
+        }
+    }
+
     /// Set extra arguments.
     pub fn with_extra_args(mut self, args: Vec<String>) -> Self {
         self.extra_args = args;
@@ -690,6 +727,44 @@ mod tests {
             Some("http://127.0.0.1:18080")
         );
         assert_eq!(config.ready_timeout, Duration::from_secs(60));
+    }
+
+    #[test]
+    fn test_llama_cpp_dedicated_binary_launch_config() {
+        let temp_dir = TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("launcher-data/llama-cpp");
+        let model_path = temp_dir
+            .path()
+            .join("shared-resources/models/llm/test/model/model.gguf");
+
+        let config = BinaryLaunchConfig::llama_cpp_dedicated(
+            "local-build",
+            &version_dir,
+            "127.0.0.1",
+            18081,
+            &model_path,
+        );
+
+        assert!(config.binary_path.ends_with(
+            Path::new("build")
+                .join("bin")
+                .join(executable_name("llama-server"))
+        ));
+        assert_eq!(
+            config.extra_args,
+            vec![
+                "--host".to_string(),
+                "127.0.0.1".to_string(),
+                "--port".to_string(),
+                "18081".to_string(),
+                "--model".to_string(),
+                model_path.to_string_lossy().to_string(),
+            ]
+        );
+        assert_eq!(
+            config.health_check_url.as_deref(),
+            Some("http://127.0.0.1:18081")
+        );
     }
 
     #[test]

@@ -17,6 +17,7 @@ pub(super) async fn launch_runtime_profile(
     profile_id: RuntimeProfileId,
     tag: &str,
     version_dir: &Path,
+    model_id: Option<String>,
 ) -> std::result::Result<LaunchResponse, PumasError> {
     let _operation_guard = primary
         .runtime_profile_service
@@ -26,21 +27,7 @@ pub(super) async fn launch_runtime_profile(
         .managed_profile_launch_spec(profile_id.clone())
         .await?;
 
-    if spec.provider == RuntimeProviderId::LlamaCpp
-        && spec.provider_mode != RuntimeProviderMode::LlamaCppRouter
-    {
-        return Ok(LaunchResponse {
-            success: false,
-            error: Some(
-                "runtime profile launch currently supports Ollama and llama.cpp router profiles"
-                    .to_string(),
-            ),
-            log_path: None,
-            ready: Some(false),
-        });
-    }
-
-    let spec = prepare_runtime_profile_launch_spec(primary, spec).await?;
+    let spec = prepare_runtime_profile_launch_spec(primary, spec, model_id.as_deref()).await?;
 
     primary
         .runtime_profile_service
@@ -110,12 +97,13 @@ fn runtime_profile_binary_launch_config(
                 launch_spec.port.value(),
                 version_dir,
             ),
-            RuntimeProviderMode::LlamaCppDedicated => {
-                return Err(PumasError::InvalidParams {
-                    message: "managed llama.cpp dedicated launch is not implemented yet"
-                        .to_string(),
-                });
-            }
+            RuntimeProviderMode::LlamaCppDedicated => BinaryLaunchConfig::llama_cpp_dedicated(
+                tag,
+                version_dir,
+                "127.0.0.1",
+                launch_spec.port.value(),
+                version_dir,
+            ),
             RuntimeProviderMode::OllamaServe => {
                 return Err(PumasError::InvalidParams {
                     message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
@@ -135,23 +123,56 @@ fn runtime_profile_binary_launch_config(
 async fn prepare_runtime_profile_launch_spec(
     primary: &PrimaryState,
     mut launch_spec: RuntimeProfileLaunchSpec,
+    model_id: Option<&str>,
 ) -> std::result::Result<RuntimeProfileLaunchSpec, PumasError> {
-    if launch_spec.provider != RuntimeProviderId::LlamaCpp
-        || launch_spec.provider_mode != RuntimeProviderMode::LlamaCppRouter
-    {
+    if launch_spec.provider != RuntimeProviderId::LlamaCpp {
         return Ok(launch_spec);
     }
 
-    let catalog = generate_llama_cpp_router_catalog(primary.model_library.clone()).await?;
-    async_fs::create_dir_all(&launch_spec.runtime_dir)
-        .await
-        .map_err(|err| PumasError::io_with_path(err, &launch_spec.runtime_dir))?;
-    let preset_path = launch_spec.runtime_dir.join("models-preset.ini");
-    async_fs::write(&preset_path, catalog.preset_ini)
-        .await
-        .map_err(|err| PumasError::io_with_path(err, &preset_path))?;
-    launch_spec.extra_args =
-        replace_llama_cpp_models_dir_with_preset(&launch_spec.extra_args, &preset_path);
+    match launch_spec.provider_mode {
+        RuntimeProviderMode::LlamaCppRouter => {
+            let catalog = generate_llama_cpp_router_catalog(primary.model_library.clone()).await?;
+            async_fs::create_dir_all(&launch_spec.runtime_dir)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, &launch_spec.runtime_dir))?;
+            let preset_path = launch_spec.runtime_dir.join("models-preset.ini");
+            async_fs::write(&preset_path, catalog.preset_ini)
+                .await
+                .map_err(|err| PumasError::io_with_path(err, &preset_path))?;
+            launch_spec.extra_args =
+                replace_llama_cpp_models_dir_with_preset(&launch_spec.extra_args, &preset_path);
+        }
+        RuntimeProviderMode::LlamaCppDedicated => {
+            let Some(model_id) = model_id else {
+                return Err(PumasError::InvalidParams {
+                    message: "model_id is required to launch a dedicated llama.cpp profile"
+                        .to_string(),
+                });
+            };
+            let model_path = primary
+                .model_library
+                .get_primary_model_file(model_id)
+                .ok_or_else(|| PumasError::ModelNotFound {
+                    model_id: model_id.to_string(),
+                })?;
+            if model_path
+                .extension()
+                .and_then(|extension| extension.to_str())
+                .map(|extension| !extension.eq_ignore_ascii_case("gguf"))
+                .unwrap_or(true)
+            {
+                return Err(PumasError::InvalidParams {
+                    message: format!(
+                        "dedicated llama.cpp profiles require a GGUF model file: {}",
+                        model_path.display()
+                    ),
+                });
+            }
+            launch_spec.extra_args =
+                append_llama_cpp_model_arg(&launch_spec.extra_args, &model_path);
+        }
+        RuntimeProviderMode::OllamaServe => {}
+    }
 
     Ok(launch_spec)
 }
@@ -176,6 +197,13 @@ fn replace_llama_cpp_models_dir_with_preset(args: &[String], preset_path: &Path)
         output.push("--models-preset".to_string());
         output.push(preset_path);
     }
+    output
+}
+
+fn append_llama_cpp_model_arg(args: &[String], model_path: &Path) -> Vec<String> {
+    let mut output = args.to_vec();
+    output.push("--model".to_string());
+    output.push(model_path.to_string_lossy().to_string());
     output
 }
 

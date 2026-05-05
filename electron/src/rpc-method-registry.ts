@@ -357,6 +357,7 @@ export const RPC_METHOD_REQUEST_SCHEMAS = {
     },
     optional: {
       tag: 'string',
+      model_id: 'string',
     },
   },
   stop_runtime_profile: {

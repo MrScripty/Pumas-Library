@@ -332,8 +332,8 @@ const electronAPI = {
     apiCall('set_model_runtime_route', { route }),
   clear_model_runtime_route: (modelId: string) =>
     apiCall('clear_model_runtime_route', { model_id: modelId }),
-  launch_runtime_profile: (profileId: string, tag?: string | null) =>
-    apiCall('launch_runtime_profile', { profile_id: profileId, tag }),
+  launch_runtime_profile: (profileId: string, tag?: string | null, modelId?: string | null) =>
+    apiCall('launch_runtime_profile', { profile_id: profileId, tag, model_id: modelId }),
   stop_runtime_profile: (profileId: string) =>
     apiCall('stop_runtime_profile', { profile_id: profileId }),
 

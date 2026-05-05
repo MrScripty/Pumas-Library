@@ -228,6 +228,17 @@ impl PumasApi {
         tag: &str,
         version_dir: &Path,
     ) -> Result<LaunchResponse> {
+        self.launch_runtime_profile_for_model(profile_id, tag, version_dir, None)
+            .await
+    }
+
+    pub async fn launch_runtime_profile_for_model(
+        &self,
+        profile_id: RuntimeProfileId,
+        tag: &str,
+        version_dir: &Path,
+        model_id: Option<&str>,
+    ) -> Result<LaunchResponse> {
         if self.try_client().is_some() {
             return self
                 .call_client_method(
@@ -236,6 +247,7 @@ impl PumasApi {
                         "profile_id": profile_id,
                         "tag": tag,
                         "version_dir": version_dir,
+                        "model_id": model_id,
                     }),
                 )
                 .await;
@@ -246,6 +258,7 @@ impl PumasApi {
             profile_id,
             tag,
             version_dir,
+            model_id.map(ToOwned::to_owned),
         )
         .await
     }

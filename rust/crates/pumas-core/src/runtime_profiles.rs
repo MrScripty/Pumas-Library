@@ -1110,21 +1110,24 @@ fn profile_runtime_extra_args(
     match profile.provider {
         RuntimeProviderId::Ollama => Ok(Vec::new()),
         RuntimeProviderId::LlamaCpp => match profile.provider_mode {
-            RuntimeProviderMode::LlamaCppRouter => {
+            RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {
                 let mut args = vec![
                     "--host".to_string(),
                     runtime_host(endpoint_url)?.to_string(),
                     "--port".to_string(),
                     port.value().to_string(),
-                    "--models-dir".to_string(),
-                    llama_cpp_router_models_dir(launcher_root)
-                        .to_string_lossy()
-                        .to_string(),
                 ];
+                if profile.provider_mode == RuntimeProviderMode::LlamaCppRouter {
+                    args.extend([
+                        "--models-dir".to_string(),
+                        llama_cpp_router_models_dir(launcher_root)
+                            .to_string_lossy()
+                            .to_string(),
+                    ]);
+                }
                 apply_llama_cpp_device_args(&mut args, profile);
                 Ok(args)
             }
-            RuntimeProviderMode::LlamaCppDedicated => Ok(Vec::new()),
             RuntimeProviderMode::OllamaServe => Err(PumasError::InvalidParams {
                 message: "llama.cpp runtime profile cannot use ollama_serve mode".to_string(),
             }),

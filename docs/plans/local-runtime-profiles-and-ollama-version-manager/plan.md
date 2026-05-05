@@ -391,11 +391,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Tasks:**
 - [x] Add a llama.cpp provider adapter behind the runtime-profile service.
 - [x] Support managed router profiles using `llama-server` router mode.
-- [ ] Support managed dedicated process profiles using `llama-server -m <model>`.
+- [x] Support managed dedicated process profiles using `llama-server -m <model>`.
 - [x] Generate deterministic model catalog or preset data for router profiles from Pumas library GGUF artifacts.
-- [ ] Represent llama.cpp CPU/GPU settings as typed profile/provider settings, including GPU layers/device/split controls where supported.
-- [ ] Report llama.cpp profile status through the shared runtime snapshot/event path.
-- [ ] Keep provider-specific llama.cpp capabilities behind the provider adapter unless exposed through generic runtime profile fields.
+- [x] Represent llama.cpp CPU/GPU settings as typed profile/provider settings, including GPU layers/device/split controls where supported.
+- [x] Report llama.cpp profile status through the shared runtime snapshot/event path.
+- [x] Keep provider-specific llama.cpp capabilities behind the provider adapter unless exposed through generic runtime profile fields.
 
 **Verification:**
 - Rust tests for llama.cpp provider-mode parsing and config serialization.
@@ -404,7 +404,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Rust tests for dedicated process command construction and profile-scoped PID/log paths.
 - Existing Ollama runtime profile tests still pass.
 
-**Status:** In progress. The llama.cpp provider adapter boundary is implemented; managed router/dedicated launch behavior and catalog generation remain.
+**Status:** Complete for backend command construction, profile lifecycle status, catalog/preset generation, and RPC bridge wiring. Real-process llama.cpp smoke validation remains part of release validation because tests intentionally avoid starting external servers.
 
 **Implementation Notes:**
 - 2026-05-05: Added `LlamaCppRuntimeProviderAdapter` behind the existing `RuntimeProviderAdapter` trait and moved llama.cpp profile validation out of the generic service path. The adapter accepts router and dedicated provider modes, rejects provider/mode mismatches, and keeps external endpoint requirements provider-owned.
@@ -419,6 +419,9 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated deterministic catalog output with `cargo test -p pumas-library llama_cpp_router_catalog --manifest-path rust/Cargo.toml` and re-ran the router launch/spec test filter with `cargo test -p pumas-library llama_cpp_router --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Wired router catalog generation into managed llama.cpp router launch. The core launch path writes a profile-scoped `models-preset.ini` under `launcher-data/runtime-profiles/llama-cpp/{profile_id}/` before process spawn and replaces the provisional `--models-dir` launch arg with `--models-preset`.
 - 2026-05-05: Validated preset writing through the existing profile-scoped missing-binary launch regression with `cargo test -p pumas-library test_launch_llama_cpp_router_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml` and re-ran the router test filter.
+- 2026-05-05: Added managed dedicated llama.cpp launch preparation. Launch commands now accept an optional `model_id`; dedicated profiles require it, resolve the Pumas primary artifact, validate it is GGUF, and append `--model <path>` while preserving the same profile-scoped PID/log/status behavior as router profiles.
+- 2026-05-05: Extended Electron preload, RPC validation, and frontend bridge types so `launch_runtime_profile(profileId, tag?, modelId?)` remains backward compatible while supporting dedicated model-bound launches.
+- 2026-05-05: Validated dedicated command construction and bridge compatibility with `cargo test -p pumas-library llama_cpp_dedicated --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 **Discovered Issues:**
 - 2026-05-05: The desktop/RPC `launch_runtime_profile` path was still coupled to the Ollama version manager before it called core launch. Resolved the same day by resolving the profile provider first and only using the Ollama version manager for Ollama profiles.

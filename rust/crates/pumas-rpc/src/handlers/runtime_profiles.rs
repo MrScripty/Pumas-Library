@@ -37,6 +37,7 @@ struct ClearModelRuntimeRouteParams {
 struct LaunchRuntimeProfileParams {
     profile_id: RuntimeProfileId,
     tag: Option<String>,
+    model_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -163,7 +164,12 @@ pub async fn launch_runtime_profile(
     Ok(serde_json::to_value(
         state
             .api
-            .launch_runtime_profile(command.profile_id, &tag, &version_dir)
+            .launch_runtime_profile_for_model(
+                command.profile_id,
+                &tag,
+                &version_dir,
+                command.model_id.as_deref(),
+            )
             .await?,
     )?)
 }

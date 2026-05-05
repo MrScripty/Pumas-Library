@@ -1381,8 +1381,10 @@ impl ipc::server::IpcDispatch for PrimaryState {
                         })?;
                 let version_dir =
                     validate_local_directory_target_path(version_dir, "version_dir").await?;
+                let model_id = params["model_id"].as_str().map(ToOwned::to_owned);
                 let response =
-                    launch_runtime_profile(self, profile_id, tag, version_dir.as_path()).await?;
+                    launch_runtime_profile(self, profile_id, tag, version_dir.as_path(), model_id)
+                        .await?;
                 Ok(serde_json::to_value(response)?)
             }
             "stop_runtime_profile" => {

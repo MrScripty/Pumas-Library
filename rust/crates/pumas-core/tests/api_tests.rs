@@ -244,6 +244,11 @@ async fn test_launch_llama_cpp_router_profile_reports_profile_scoped_failure() {
         .as_deref()
         .unwrap_or_default()
         .contains("llama-server"));
+    let preset_path = temp_dir
+        .path()
+        .join("launcher-data/runtime-profiles/llama-cpp/llama-router-test/models-preset.ini");
+    let preset = std::fs::read_to_string(&preset_path).unwrap();
+    assert!(preset.contains("[*]\nload-on-startup = false"));
 
     let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
     let status = snapshot

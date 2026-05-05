@@ -7,8 +7,10 @@ use crate::models::{
     RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
+use crate::runtime_profiles::{generate_llama_cpp_router_catalog, RuntimeProfileLaunchSpec};
 use std::fs;
 use std::path::Path;
+use tokio::fs as async_fs;
 
 pub(super) async fn launch_runtime_profile(
     primary: &PrimaryState,
@@ -37,6 +39,8 @@ pub(super) async fn launch_runtime_profile(
             ready: Some(false),
         });
     }
+
+    let spec = prepare_runtime_profile_launch_spec(primary, spec).await?;
 
     primary
         .runtime_profile_service
@@ -94,7 +98,7 @@ pub(super) async fn launch_runtime_profile(
 fn runtime_profile_binary_launch_config(
     tag: &str,
     version_dir: &Path,
-    launch_spec: &crate::runtime_profiles::RuntimeProfileLaunchSpec,
+    launch_spec: &RuntimeProfileLaunchSpec,
 ) -> std::result::Result<BinaryLaunchConfig, PumasError> {
     let config = match launch_spec.provider {
         RuntimeProviderId::Ollama => BinaryLaunchConfig::ollama(tag, version_dir),
@@ -126,6 +130,53 @@ fn runtime_profile_binary_launch_config(
         .with_log_file(&launch_spec.log_file)
         .with_health_check_url(launch_spec.health_check_url.as_str())
         .with_env_vars(launch_spec.env_vars.clone()))
+}
+
+async fn prepare_runtime_profile_launch_spec(
+    primary: &PrimaryState,
+    mut launch_spec: RuntimeProfileLaunchSpec,
+) -> std::result::Result<RuntimeProfileLaunchSpec, PumasError> {
+    if launch_spec.provider != RuntimeProviderId::LlamaCpp
+        || launch_spec.provider_mode != RuntimeProviderMode::LlamaCppRouter
+    {
+        return Ok(launch_spec);
+    }
+
+    let catalog = generate_llama_cpp_router_catalog(primary.model_library.clone()).await?;
+    async_fs::create_dir_all(&launch_spec.runtime_dir)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, &launch_spec.runtime_dir))?;
+    let preset_path = launch_spec.runtime_dir.join("models-preset.ini");
+    async_fs::write(&preset_path, catalog.preset_ini)
+        .await
+        .map_err(|err| PumasError::io_with_path(err, &preset_path))?;
+    launch_spec.extra_args =
+        replace_llama_cpp_models_dir_with_preset(&launch_spec.extra_args, &preset_path);
+
+    Ok(launch_spec)
+}
+
+fn replace_llama_cpp_models_dir_with_preset(args: &[String], preset_path: &Path) -> Vec<String> {
+    let preset_path = preset_path.to_string_lossy().to_string();
+    let mut output = Vec::with_capacity(args.len() + 2);
+    let mut inserted = false;
+    let mut index = 0;
+    while index < args.len() {
+        if args[index] == "--models-dir" {
+            output.push("--models-preset".to_string());
+            output.push(preset_path.clone());
+            inserted = true;
+            index += 2;
+        } else {
+            output.push(args[index].clone());
+            index += 1;
+        }
+    }
+    if !inserted {
+        output.push("--models-preset".to_string());
+        output.push(preset_path);
+    }
+    output
 }
 
 pub(super) async fn stop_runtime_profile(

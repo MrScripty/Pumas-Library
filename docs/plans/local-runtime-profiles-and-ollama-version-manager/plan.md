@@ -417,6 +417,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated provider-aware RPC launch wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and re-ran the core llama.cpp router launch failure regression.
 - 2026-05-05: Added deterministic llama.cpp router catalog generation from the Pumas model library. The generator lists indexed models, keeps only records whose primary artifact is GGUF, sorts entries by model id/path, and emits a `--models-preset` compatible INI payload with `load-on-startup=false` by default.
 - 2026-05-05: Validated deterministic catalog output with `cargo test -p pumas-library llama_cpp_router_catalog --manifest-path rust/Cargo.toml` and re-ran the router launch/spec test filter with `cargo test -p pumas-library llama_cpp_router --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Wired router catalog generation into managed llama.cpp router launch. The core launch path writes a profile-scoped `models-preset.ini` under `launcher-data/runtime-profiles/llama-cpp/{profile_id}/` before process spawn and replaces the provisional `--models-dir` launch arg with `--models-preset`.
+- 2026-05-05: Validated preset writing through the existing profile-scoped missing-binary launch regression with `cargo test -p pumas-library test_launch_llama_cpp_router_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml` and re-ran the router test filter.
 
 **Discovered Issues:**
 - 2026-05-05: The desktop/RPC `launch_runtime_profile` path was still coupled to the Ollama version manager before it called core launch. Resolved the same day by resolving the profile provider first and only using the Ollama version manager for Ollama profiles.

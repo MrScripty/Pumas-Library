@@ -264,6 +264,55 @@ impl RuntimeProfilesSnapshot {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct RuntimeProfilesConfigFile {
+    pub schema_version: u32,
+    pub cursor: String,
+    pub profiles: Vec<RuntimeProfileConfig>,
+    pub routes: Vec<ModelRuntimeRoute>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_profile_id: Option<RuntimeProfileId>,
+}
+
+impl RuntimeProfilesConfigFile {
+    pub fn default_seed() -> Self {
+        let default_profile = RuntimeProfileConfig::default_ollama();
+        Self {
+            schema_version: 1,
+            cursor: RUNTIME_PROFILE_CURSOR_ZERO.to_string(),
+            default_profile_id: Some(default_profile.profile_id.clone()),
+            profiles: vec![default_profile],
+            routes: Vec::new(),
+        }
+    }
+
+    pub fn snapshot(&self) -> RuntimeProfilesSnapshot {
+        RuntimeProfilesSnapshot {
+            schema_version: self.schema_version,
+            cursor: self.cursor.clone(),
+            profiles: self.profiles.clone(),
+            routes: self.routes.clone(),
+            statuses: self
+                .profiles
+                .iter()
+                .map(|profile| RuntimeProfileStatus {
+                    profile_id: profile.profile_id.clone(),
+                    state: match profile.management_mode {
+                        RuntimeManagementMode::Managed => RuntimeLifecycleState::Stopped,
+                        RuntimeManagementMode::External => RuntimeLifecycleState::External,
+                    },
+                    endpoint_url: profile.endpoint_url.clone(),
+                    pid: None,
+                    log_path: None,
+                    last_error: None,
+                })
+                .collect(),
+            default_profile_id: self.default_profile_id.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeProfileEventKind {
@@ -305,6 +354,15 @@ impl RuntimeProfileUpdateFeed {
             events: Vec::new(),
             stale_cursor: false,
             snapshot_required: false,
+        }
+    }
+
+    pub fn snapshot_required(cursor: String) -> Self {
+        Self {
+            cursor,
+            events: Vec::new(),
+            stale_cursor: true,
+            snapshot_required: true,
         }
     }
 }
@@ -349,6 +407,17 @@ pub struct RuntimeProfileMutationResponse {
     pub snapshot_required: bool,
 }
 
+impl RuntimeProfileMutationResponse {
+    pub fn success(profile_id: Option<RuntimeProfileId>) -> Self {
+        Self {
+            success: true,
+            error: None,
+            profile_id,
+            snapshot_required: true,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -390,5 +459,23 @@ mod tests {
         assert!(feed.events.is_empty());
         assert!(!feed.stale_cursor);
         assert!(!feed.snapshot_required);
+    }
+
+    #[test]
+    fn default_runtime_config_seeds_ollama_profile_snapshot() {
+        let config = RuntimeProfilesConfigFile::default_seed();
+        let snapshot = config.snapshot();
+
+        assert_eq!(snapshot.schema_version, 1);
+        assert_eq!(snapshot.profiles.len(), 1);
+        assert_eq!(
+            snapshot
+                .default_profile_id
+                .as_ref()
+                .map(RuntimeProfileId::as_str),
+            Some("ollama-default")
+        );
+        assert_eq!(snapshot.statuses.len(), 1);
+        assert_eq!(snapshot.statuses[0].state, RuntimeLifecycleState::Stopped);
     }
 }

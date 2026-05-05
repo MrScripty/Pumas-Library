@@ -1,77 +1,98 @@
 //! Runtime profile RPC contract handlers.
 
+use super::parse_params;
 use crate::server::AppState;
-use pumas_library::models::{
-    RuntimeProfileMutationResponse, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
-    RuntimeProfilesSnapshotResponse,
-};
-use serde_json::{json, Value};
+use pumas_library::models::{ModelRuntimeRoute, RuntimeProfileConfig, RuntimeProfileId};
+use serde::Deserialize;
+use serde_json::Value;
+
+#[derive(Debug, Deserialize)]
+struct RuntimeProfileUpdateParams {
+    cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UpsertRuntimeProfileParams {
+    profile: RuntimeProfileConfig,
+}
+
+#[derive(Debug, Deserialize)]
+struct DeleteRuntimeProfileParams {
+    profile_id: RuntimeProfileId,
+}
+
+#[derive(Debug, Deserialize)]
+struct SetModelRuntimeRouteParams {
+    route: ModelRuntimeRoute,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClearModelRuntimeRouteParams {
+    model_id: String,
+}
 
 pub async fn get_runtime_profiles_snapshot(
-    _state: &AppState,
+    state: &AppState,
     _params: &Value,
 ) -> pumas_library::Result<Value> {
     Ok(serde_json::to_value(
-        RuntimeProfilesSnapshotResponse::empty_success(),
+        state.api.get_runtime_profiles_snapshot().await?,
     )?)
 }
 
 pub async fn list_runtime_profile_updates_since(
-    _state: &AppState,
+    state: &AppState,
     params: &Value,
 ) -> pumas_library::Result<Value> {
-    let cursor = params.get("cursor").and_then(Value::as_str);
-    Ok(serde_json::to_value(RuntimeProfileUpdateFeedResponse {
-        success: true,
-        error: None,
-        feed: RuntimeProfileUpdateFeed::empty(cursor),
-    })?)
+    let command: RuntimeProfileUpdateParams =
+        parse_params("list_runtime_profile_updates_since", params)?;
+    Ok(serde_json::to_value(
+        state
+            .api
+            .list_runtime_profile_updates_since(command.cursor.as_deref())
+            .await?,
+    )?)
 }
 
 pub async fn upsert_runtime_profile(
-    _state: &AppState,
-    _params: &Value,
+    state: &AppState,
+    params: &Value,
 ) -> pumas_library::Result<Value> {
-    Ok(json!(RuntimeProfileMutationResponse {
-        success: false,
-        error: Some("Runtime profile persistence is not implemented yet".to_string()),
-        profile_id: None,
-        snapshot_required: true,
-    }))
+    let command: UpsertRuntimeProfileParams = parse_params("upsert_runtime_profile", params)?;
+    Ok(serde_json::to_value(
+        state.api.upsert_runtime_profile(command.profile).await?,
+    )?)
 }
 
 pub async fn delete_runtime_profile(
-    _state: &AppState,
-    _params: &Value,
+    state: &AppState,
+    params: &Value,
 ) -> pumas_library::Result<Value> {
-    Ok(json!(RuntimeProfileMutationResponse {
-        success: false,
-        error: Some("Runtime profile persistence is not implemented yet".to_string()),
-        profile_id: None,
-        snapshot_required: true,
-    }))
+    let command: DeleteRuntimeProfileParams = parse_params("delete_runtime_profile", params)?;
+    Ok(serde_json::to_value(
+        state.api.delete_runtime_profile(command.profile_id).await?,
+    )?)
 }
 
 pub async fn set_model_runtime_route(
-    _state: &AppState,
-    _params: &Value,
+    state: &AppState,
+    params: &Value,
 ) -> pumas_library::Result<Value> {
-    Ok(json!(RuntimeProfileMutationResponse {
-        success: false,
-        error: Some("Runtime profile route persistence is not implemented yet".to_string()),
-        profile_id: None,
-        snapshot_required: true,
-    }))
+    let command: SetModelRuntimeRouteParams = parse_params("set_model_runtime_route", params)?;
+    Ok(serde_json::to_value(
+        state.api.set_model_runtime_route(command.route).await?,
+    )?)
 }
 
 pub async fn clear_model_runtime_route(
-    _state: &AppState,
-    _params: &Value,
+    state: &AppState,
+    params: &Value,
 ) -> pumas_library::Result<Value> {
-    Ok(json!(RuntimeProfileMutationResponse {
-        success: false,
-        error: Some("Runtime profile route persistence is not implemented yet".to_string()),
-        profile_id: None,
-        snapshot_required: true,
-    }))
+    let command: ClearModelRuntimeRouteParams = parse_params("clear_model_runtime_route", params)?;
+    Ok(serde_json::to_value(
+        state
+            .api
+            .clear_model_runtime_route(command.model_id)
+            .await?,
+    )?)
 }

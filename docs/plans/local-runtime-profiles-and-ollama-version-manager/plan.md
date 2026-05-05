@@ -246,7 +246,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 **Tasks:**
 - [x] Define Rust domain types for profile ID, provider ID, endpoint URL, port, device mode, provider mode, lifecycle state, scheduler settings, and model route.
-- [ ] Define persisted config schema for profiles and per-model routes.
+- [x] Define persisted config schema for profiles and per-model routes.
 - [x] Define the runtime/profile snapshot shape consumed by the frontend.
 - [x] Define runtime/profile event payloads following the existing backend-pushed update pattern.
 - [x] Define provider adapter traits for Ollama and llama.cpp.
@@ -263,7 +263,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Electron registry validation tests.
 - TypeScript typecheck.
 
-**Status:** Partially complete. Contract DTOs, bridge methods, request validation, and placeholder RPC handlers are implemented; durable persistence remains for the next thin slice.
+**Status:** Complete for backend and bridge contract definition. Runtime lifecycle, provider adapters, model-operation routing, and pushed event transport remain in later milestones.
 
 **Implementation Notes:**
 - 2026-05-05: Added Rust runtime profile DTOs under `pumas-core::models`, including typed profile IDs, endpoint URLs, ports, providers, provider modes, lifecycle states, device settings, scheduler settings, model routes, snapshots, update-feed events, and mutation responses.
@@ -272,6 +272,9 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Added placeholder RPC handlers that expose read-only empty snapshot/update-feed responses and return structured business failures for mutation calls until the persistence service lands.
 - 2026-05-05: Subagent review confirmed the existing pushed update transport is model-library-specific from Rust SSE through Electron main/preload. A generalized runtime-profile push path must be implemented in a later event-transport slice instead of overloading the model-library stream.
 - 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
+- 2026-05-05: Added `RuntimeProfileService` as the backend owner for persisted runtime profile config at `launcher-data/metadata/runtime-profiles.json`, with atomic JSON writes, default Ollama profile seeding, route persistence, snapshot generation, cursor bumping, and non-stub mutation handlers.
+- 2026-05-05: Added `PumasApi` and primary IPC dispatch methods for runtime profile snapshots, update feeds, profile upsert/delete, and route set/clear so secondary API clients do not bypass backend ownership.
+- 2026-05-05: Validated the persistence slice with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml` and `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`.
 
 ### Milestone 3: Implement Thin Default-Profile Vertical Slice
 
@@ -474,6 +477,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 - Plan written and validated against local Coding Standards.
 - Milestone 1 automated crash-containment slice implemented and validated.
 - Milestone 2 contract DTO/bridge slice implemented and validated.
+- Milestone 2 backend persistence slice implemented and validated.
 
 ### Deviations
 
@@ -482,7 +486,7 @@ Forbidden shared files for parallel workers unless explicitly assigned to the in
 ### Follow-Ups
 
 - Keep the Milestone 1 manual Ollama globe smoke check in release validation even though automated crash-containment coverage is complete.
-- Implement Milestone 2 persistence as the next thin slice: backend-owned profile/route config storage, default-profile seeding, and non-stub mutation handlers.
+- Implement Milestone 3 as the next thin slice: default profile resolution for one profile-aware Ollama model operation while preserving legacy `connection_url` behavior.
 - Implement runtime-profile pushed updates as a separate event-transport slice because the existing SSE/preload path is currently hardcoded to model-library notifications.
 - Re-check Ollama and llama.cpp upstream documentation before implementing hardware mode labels, because device-control and router behavior may change across versions.
 

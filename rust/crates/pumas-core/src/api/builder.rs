@@ -569,6 +569,9 @@ impl PumasApiBuilder {
             hf_client,
             model_importer,
             conversion_manager,
+            runtime_profile_service: Arc::new(crate::runtime_profiles::RuntimeProfileService::new(
+                &self.launcher_root,
+            )),
             runtime_tasks: runtime_tasks.clone(),
             reconciliation: Arc::new(ReconciliationCoordinator::new(
                 Duration::from_secs(5),

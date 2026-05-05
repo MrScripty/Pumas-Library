@@ -28,6 +28,7 @@ use crate::models;
 use crate::network;
 use crate::process;
 use crate::registry;
+use crate::runtime_profiles;
 use crate::system;
 use std::io::ErrorKind;
 use std::path::{Component, Path, PathBuf};
@@ -239,6 +240,7 @@ pub(crate) struct PrimaryState {
     pub(crate) hf_client: Option<model_library::HuggingFaceClient>,
     pub(crate) model_importer: model_library::ModelImporter,
     pub(crate) conversion_manager: Arc<conversion::ConversionManager>,
+    pub(crate) runtime_profile_service: Arc<runtime_profiles::RuntimeProfileService>,
     /// Shared owner for primary runtime task handles.
     pub(crate) runtime_tasks: RuntimeTasks,
     /// Internal scheduler for event-driven reconciliation.
@@ -505,6 +507,64 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .list_model_library_updates_since(cursor, limit)
                     .await?;
                 Ok(serde_json::to_value(updates)?)
+            }
+            "get_runtime_profiles_snapshot" => {
+                let snapshot = self.runtime_profile_service.snapshot().await?;
+                Ok(serde_json::to_value(snapshot)?)
+            }
+            "list_runtime_profile_updates_since" => {
+                let cursor = params["cursor"].as_str();
+                let feed = self
+                    .runtime_profile_service
+                    .list_updates_since(cursor)
+                    .await?;
+                Ok(serde_json::to_value(feed)?)
+            }
+            "upsert_runtime_profile" => {
+                let profile: models::RuntimeProfileConfig =
+                    serde_json::from_value(params["profile"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime profile: {e}"),
+                        }
+                    })?;
+                let response = self.runtime_profile_service.upsert_profile(profile).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "delete_runtime_profile" => {
+                let profile_id: models::RuntimeProfileId =
+                    serde_json::from_value(params["profile_id"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime profile id: {e}"),
+                        }
+                    })?;
+                let response = self
+                    .runtime_profile_service
+                    .delete_profile(profile_id)
+                    .await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "set_model_runtime_route" => {
+                let route: models::ModelRuntimeRoute =
+                    serde_json::from_value(params["route"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid model runtime route: {e}"),
+                        }
+                    })?;
+                let response = self.runtime_profile_service.set_model_route(route).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "clear_model_runtime_route" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let response = self
+                    .runtime_profile_service
+                    .clear_model_route(model_id.to_string())
+                    .await?;
+                Ok(serde_json::to_value(response)?)
             }
             "resolve_model_package_facts_summary" => {
                 let model_id =

@@ -306,6 +306,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Added append-only `ollama_load_model_for_profile` RPC/preload/TypeScript bridge method using the same backend `profile_id` endpoint resolution. Existing `ollama_load_model(connection_url)` remains unchanged.
 - 2026-05-05: Added `OllamaRuntimeProviderAdapter` and routed Ollama profile validation through it from `RuntimeProfileService`, keeping provider-specific mode checks out of generic profile mutation flow.
 - 2026-05-05: Added the runtime-profile pushed update transport: Rust SSE route `/events/runtime-profile-updates`, Electron bridge parsing/reconnect/cleanup, main-process forwarding on `runtime-profile:update`, and preload/window typing through `onRuntimeProfileUpdate`. Lifecycle status events still need a real status producer before the default-profile status-change task can be marked complete.
+- 2026-05-05: Added a backend regression test proving default runtime profile snapshot initialization does not redefine app-level aggregate Ollama status; `get_status().ollama_running` still mirrors the existing singleton `is_ollama_running()` command.
 - 2026-05-05: Validated event transport with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 4: Implement Managed Profile Lifecycle Backend

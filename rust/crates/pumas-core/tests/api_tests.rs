@@ -135,6 +135,31 @@ async fn test_get_status() {
 }
 
 #[tokio::test]
+async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+
+    let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
+    assert!(snapshot.success);
+    assert_eq!(snapshot.snapshot.profiles.len(), 1);
+    assert_eq!(
+        snapshot
+            .snapshot
+            .default_profile_id
+            .as_ref()
+            .map(|id| id.as_str()),
+        Some("ollama-default")
+    );
+
+    let singleton_ollama_running = api.is_ollama_running().await;
+    let status = api.get_status().await.unwrap();
+
+    assert!(status.success);
+    assert_eq!(status.ollama_running, singleton_ollama_running);
+}
+
+#[tokio::test]
 async fn test_get_disk_space() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());

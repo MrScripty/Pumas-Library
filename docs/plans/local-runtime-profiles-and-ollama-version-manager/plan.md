@@ -392,7 +392,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - [x] Add a llama.cpp provider adapter behind the runtime-profile service.
 - [x] Support managed router profiles using `llama-server` router mode.
 - [ ] Support managed dedicated process profiles using `llama-server -m <model>`.
-- [ ] Generate deterministic model catalog or preset data for router profiles from Pumas library GGUF artifacts.
+- [x] Generate deterministic model catalog or preset data for router profiles from Pumas library GGUF artifacts.
 - [ ] Represent llama.cpp CPU/GPU settings as typed profile/provider settings, including GPU layers/device/split controls where supported.
 - [ ] Report llama.cpp profile status through the shared runtime snapshot/event path.
 - [ ] Keep provider-specific llama.cpp capabilities behind the provider adapter unless exposed through generic runtime profile fields.
@@ -415,6 +415,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated profile-scoped llama.cpp router launch failure/status behavior with `cargo test -p pumas-library test_launch_llama_cpp_router_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml` and re-ran the existing Ollama launch failure regression with `cargo test -p pumas-library test_launch_runtime_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Made RPC `launch_runtime_profile` provider-aware. Ollama profiles still resolve through the active Ollama version manager, while llama.cpp profiles resolve to the backend-owned `launcher-data/llama-cpp` build directory with a default `local-build` tag unless the caller supplies one.
 - 2026-05-05: Validated provider-aware RPC launch wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and re-ran the core llama.cpp router launch failure regression.
+- 2026-05-05: Added deterministic llama.cpp router catalog generation from the Pumas model library. The generator lists indexed models, keeps only records whose primary artifact is GGUF, sorts entries by model id/path, and emits a `--models-preset` compatible INI payload with `load-on-startup=false` by default.
+- 2026-05-05: Validated deterministic catalog output with `cargo test -p pumas-library llama_cpp_router_catalog --manifest-path rust/Cargo.toml` and re-ran the router launch/spec test filter with `cargo test -p pumas-library llama_cpp_router --manifest-path rust/Cargo.toml`.
 
 **Discovered Issues:**
 - 2026-05-05: The desktop/RPC `launch_runtime_profile` path was still coupled to the Ollama version manager before it called core launch. Resolved the same day by resolving the profile provider first and only using the Ollama version manager for Ollama profiles.

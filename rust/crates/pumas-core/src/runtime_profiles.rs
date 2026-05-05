@@ -7,7 +7,9 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
 
+use crate::index::ModelRecord;
 use crate::metadata::{atomic_read_json, atomic_write_json};
+use crate::model_library::ModelLibrary;
 use crate::models::{
     ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState,
     RuntimeManagementMode, RuntimePort, RuntimeProfileConfig, RuntimeProfileEvent,
@@ -79,6 +81,108 @@ pub trait RuntimeProviderAdapter: Send + Sync {
     fn provider(&self) -> RuntimeProviderId;
     fn capabilities(&self) -> RuntimeProviderCapabilities;
     async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LlamaCppRouterCatalog {
+    pub entries: Vec<LlamaCppRouterCatalogEntry>,
+    pub preset_ini: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct LlamaCppRouterCatalogEntry {
+    pub model_id: String,
+    pub alias: String,
+    pub model_path: PathBuf,
+}
+
+impl LlamaCppRouterCatalog {
+    fn from_entries(mut entries: Vec<LlamaCppRouterCatalogEntry>) -> Self {
+        entries.sort_by(|left, right| {
+            left.model_id
+                .cmp(&right.model_id)
+                .then_with(|| left.model_path.cmp(&right.model_path))
+        });
+        let preset_ini = build_llama_cpp_router_preset_ini(&entries);
+        Self {
+            entries,
+            preset_ini,
+        }
+    }
+}
+
+pub async fn generate_llama_cpp_router_catalog(
+    library: Arc<ModelLibrary>,
+) -> Result<LlamaCppRouterCatalog> {
+    let records = library.list_models().await?;
+    tokio::task::spawn_blocking(move || {
+        let mut entries = Vec::new();
+        for record in records {
+            if let Some(entry) = llama_cpp_router_catalog_entry_for_record(&library, &record) {
+                entries.push(entry);
+            }
+        }
+        Ok(LlamaCppRouterCatalog::from_entries(entries))
+    })
+    .await
+    .map_err(|err| {
+        PumasError::Other(format!(
+            "Failed to join llama.cpp router catalog generation task: {err}"
+        ))
+    })?
+}
+
+fn llama_cpp_router_catalog_entry_for_record(
+    library: &ModelLibrary,
+    record: &ModelRecord,
+) -> Option<LlamaCppRouterCatalogEntry> {
+    let model_path = library.get_primary_model_file(&record.id)?;
+    if model_path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| !extension.eq_ignore_ascii_case("gguf"))
+        .unwrap_or(true)
+    {
+        return None;
+    }
+
+    Some(LlamaCppRouterCatalogEntry {
+        model_id: record.id.clone(),
+        alias: record.id.clone(),
+        model_path,
+    })
+}
+
+fn build_llama_cpp_router_preset_ini(entries: &[LlamaCppRouterCatalogEntry]) -> String {
+    let mut output = String::from("version = 1\n\n[*]\nload-on-startup = false\n\n");
+    for entry in entries {
+        output.push('[');
+        output.push_str(&sanitize_llama_cpp_preset_section(&entry.model_id));
+        output.push_str("]\nmodel = ");
+        output.push_str(&sanitize_llama_cpp_preset_value(
+            entry.model_path.to_string_lossy().as_ref(),
+        ));
+        output.push_str("\nalias = ");
+        output.push_str(&sanitize_llama_cpp_preset_value(&entry.alias));
+        output.push_str("\n\n");
+    }
+    output
+}
+
+fn sanitize_llama_cpp_preset_section(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| match ch {
+            '[' | ']' | '\r' | '\n' => '_',
+            other => other,
+        })
+        .collect()
+}
+
+fn sanitize_llama_cpp_preset_value(value: &str) -> String {
+    value.replace(['\r', '\n'], " ")
 }
 
 pub struct OllamaRuntimeProviderAdapter;
@@ -1254,6 +1358,32 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("endpoint_url"));
+    }
+
+    #[test]
+    fn llama_cpp_router_catalog_sorts_and_writes_preset_entries() {
+        let catalog = LlamaCppRouterCatalog::from_entries(vec![
+            LlamaCppRouterCatalogEntry {
+                model_id: "llm/zeta/model".to_string(),
+                alias: "llm/zeta/model".to_string(),
+                model_path: PathBuf::from("/models/zeta.gguf"),
+            },
+            LlamaCppRouterCatalogEntry {
+                model_id: "llm/alpha/model".to_string(),
+                alias: "llm/alpha/model".to_string(),
+                model_path: PathBuf::from("/models/alpha.gguf"),
+            },
+        ]);
+
+        assert_eq!(catalog.entries[0].model_id, "llm/alpha/model");
+        assert_eq!(catalog.entries[1].model_id, "llm/zeta/model");
+        assert!(catalog.preset_ini.contains("[*]\nload-on-startup = false"));
+        assert!(
+            catalog.preset_ini.find("[llm/alpha/model]").unwrap()
+                < catalog.preset_ini.find("[llm/zeta/model]").unwrap()
+        );
+        assert!(catalog.preset_ini.contains("model = /models/alpha.gguf"));
+        assert!(catalog.preset_ini.contains("alias = llm/zeta/model"));
     }
 
     #[tokio::test]

@@ -2,7 +2,9 @@
 
 use super::parse_params;
 use crate::server::AppState;
-use pumas_library::models::{ModelRuntimeRoute, RuntimeProfileConfig, RuntimeProfileId};
+use pumas_library::models::{
+    ModelRuntimeRoute, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId,
+};
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -113,27 +115,51 @@ pub async fn launch_runtime_profile(
     params: &Value,
 ) -> pumas_library::Result<Value> {
     let command: LaunchRuntimeProfileParams = parse_params("launch_runtime_profile", params)?;
-    let Some(version_manager) = super::get_version_manager(state, "ollama").await else {
+    let snapshot = state.api.get_runtime_profiles_snapshot().await?;
+    let Some(profile) = snapshot
+        .snapshot
+        .profiles
+        .iter()
+        .find(|profile| profile.profile_id == command.profile_id)
+    else {
         return Ok(serde_json::json!({
             "success": false,
-            "error": "Version manager not initialized for ollama",
+            "error": format!("Runtime profile not found: {}", command.profile_id.as_str()),
             "ready": false
         }));
     };
-    let tag = match command.tag {
-        Some(tag) => tag,
-        None => match version_manager.get_active_version().await? {
-            Some(tag) => tag,
-            None => {
+
+    let (tag, version_dir) = match profile.provider {
+        RuntimeProviderId::Ollama => {
+            let Some(version_manager) = super::get_version_manager(state, "ollama").await else {
                 return Ok(serde_json::json!({
                     "success": false,
-                    "error": "No active Ollama version set",
+                    "error": "Version manager not initialized for ollama",
                     "ready": false
                 }));
-            }
-        },
+            };
+            let tag = match command.tag {
+                Some(tag) => tag,
+                None => match version_manager.get_active_version().await? {
+                    Some(tag) => tag,
+                    None => {
+                        return Ok(serde_json::json!({
+                            "success": false,
+                            "error": "No active Ollama version set",
+                            "ready": false
+                        }));
+                    }
+                },
+            };
+            let version_dir = version_manager.version_path(&tag);
+            (tag, version_dir)
+        }
+        RuntimeProviderId::LlamaCpp => {
+            let tag = command.tag.unwrap_or_else(|| "local-build".to_string());
+            let version_dir = state.api.launcher_data_dir().join("llama-cpp");
+            (tag, version_dir)
+        }
     };
-    let version_dir = version_manager.version_path(&tag);
     Ok(serde_json::to_value(
         state
             .api

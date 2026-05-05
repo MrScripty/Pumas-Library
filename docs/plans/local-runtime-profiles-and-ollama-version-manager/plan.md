@@ -390,7 +390,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 **Tasks:**
 - [x] Add a llama.cpp provider adapter behind the runtime-profile service.
-- [ ] Support managed router profiles using `llama-server` router mode.
+- [x] Support managed router profiles using `llama-server` router mode.
 - [ ] Support managed dedicated process profiles using `llama-server -m <model>`.
 - [ ] Generate deterministic model catalog or preset data for router profiles from Pumas library GGUF artifacts.
 - [ ] Represent llama.cpp CPU/GPU settings as typed profile/provider settings, including GPU layers/device/split controls where supported.
@@ -413,9 +413,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated router command construction with `cargo test -p pumas-library llama_cpp_router --manifest-path rust/Cargo.toml` and `cargo test -p pumas-library runtime_profile_service_derives_llama_cpp_router_launch_specs --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Added core API launch support for managed llama.cpp router profiles. The shared runtime profile launch path now branches between Ollama and llama.cpp router binary configs, records the same starting/running/failed lifecycle statuses, and keeps dedicated llama.cpp launch explicitly blocked until model-bound process support is implemented.
 - 2026-05-05: Validated profile-scoped llama.cpp router launch failure/status behavior with `cargo test -p pumas-library test_launch_llama_cpp_router_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml` and re-ran the existing Ollama launch failure regression with `cargo test -p pumas-library test_launch_runtime_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Made RPC `launch_runtime_profile` provider-aware. Ollama profiles still resolve through the active Ollama version manager, while llama.cpp profiles resolve to the backend-owned `launcher-data/llama-cpp` build directory with a default `local-build` tag unless the caller supplies one.
+- 2026-05-05: Validated provider-aware RPC launch wiring with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and re-ran the core llama.cpp router launch failure regression.
 
 **Discovered Issues:**
-- 2026-05-05: The desktop/RPC `launch_runtime_profile` path is still coupled to the Ollama version manager before it calls core launch. Provider-aware runtime launch must split version-dir resolution by provider before llama.cpp router profiles can be launched from the UI or RPC.
+- 2026-05-05: The desktop/RPC `launch_runtime_profile` path was still coupled to the Ollama version manager before it called core launch. Resolved the same day by resolving the profile provider first and only using the Ollama version manager for Ollama profiles.
 
 ### Milestone 7: Add Frontend Local Runtime Profile Settings
 

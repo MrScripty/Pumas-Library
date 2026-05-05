@@ -206,6 +206,22 @@ impl PumasApi {
             .await
     }
 
+    pub async fn model_runtime_route_auto_load(&self, model_id: &str) -> Result<Option<bool>> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "model_runtime_route_auto_load",
+                    serde_json::json!({ "model_id": model_id }),
+                )
+                .await;
+        }
+
+        self.primary()
+            .runtime_profile_service
+            .model_route_auto_load(model_id)
+            .await
+    }
+
     pub async fn launch_runtime_profile(
         &self,
         profile_id: RuntimeProfileId,

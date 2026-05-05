@@ -553,6 +553,35 @@ impl RuntimeProfileService {
         })?
     }
 
+    pub async fn model_route_auto_load(&self, model_id: &str) -> Result<Option<bool>> {
+        let model_id = model_id.trim().to_string();
+        if model_id.is_empty() {
+            return Err(PumasError::InvalidParams {
+                message: "model_id is required".to_string(),
+            });
+        }
+
+        let config_path = self.config_path.clone();
+        let write_lock = self.write_lock.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = write_lock.write().map_err(|_| {
+                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+            })?;
+            let config = load_or_initialize_config(&config_path)?;
+            Ok(config
+                .routes
+                .iter()
+                .find(|route| route.model_id == model_id)
+                .map(|route| route.auto_load))
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join model runtime route auto-load task: {err}"
+            ))
+        })?
+    }
+
     fn ensure_profile_available_for_operation(
         &self,
         resolved: &ResolvedRuntimeProfileEndpoint,
@@ -1161,6 +1190,36 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(explicit_endpoint.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_reads_model_route_auto_load_policy() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        assert_eq!(
+            service
+                .model_route_auto_load("llm/test/model")
+                .await
+                .unwrap(),
+            None
+        );
+        service
+            .set_model_route(ModelRuntimeRoute {
+                model_id: "llm/test/model".to_string(),
+                profile_id: Some(RuntimeProfileId::parse("ollama-default").unwrap()),
+                auto_load: false,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            service
+                .model_route_auto_load("llm/test/model")
+                .await
+                .unwrap(),
+            Some(false)
+        );
     }
 
     #[tokio::test]

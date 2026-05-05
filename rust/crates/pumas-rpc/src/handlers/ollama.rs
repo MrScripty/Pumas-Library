@@ -182,11 +182,17 @@ pub async fn ollama_create_model_for_profile(
         parse_params("ollama_create_model_for_profile", params)?;
     let endpoint =
         resolve_ollama_registration_endpoint(state, &command.model_id, command.profile_id).await?;
+    let auto_load = state
+        .api
+        .model_runtime_route_auto_load(&command.model_id)
+        .await?
+        .unwrap_or(true);
     create_ollama_model(
         state,
         command.model_id,
         command.model_name.as_deref(),
         Some(endpoint.as_str()),
+        auto_load,
     )
     .await
 }
@@ -196,7 +202,7 @@ pub async fn ollama_create_model(state: &AppState, params: &Value) -> pumas_libr
     let model_name = get_str_param(params, "model_name", "modelName");
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    create_ollama_model(state, model_id, model_name, connection_url).await
+    create_ollama_model(state, model_id, model_name, connection_url, true).await
 }
 
 async fn create_ollama_model(
@@ -204,6 +210,7 @@ async fn create_ollama_model(
     model_id: String,
     model_name: Option<&str>,
     connection_url: Option<&str>,
+    auto_load: bool,
 ) -> pumas_library::Result<Value> {
     // Resolve GGUF path from library
     let library = state.api.model_library().clone();
@@ -262,8 +269,9 @@ async fn create_ollama_model(
         .create_model(&ollama_name, &gguf_path, known_sha256.as_deref())
         .await?;
 
-    // Auto-load the model into VRAM/RAM so it's ready for inference.
-    client.load_model(&ollama_name).await?;
+    if auto_load {
+        client.load_model(&ollama_name).await?;
+    }
 
     Ok(json!({
         "success": true,

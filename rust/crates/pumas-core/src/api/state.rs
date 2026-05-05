@@ -683,6 +683,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(endpoint)?)
             }
+            "model_runtime_route_auto_load" => {
+                let model_id =
+                    params["model_id"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "model_id is required".to_string(),
+                        })?;
+                let auto_load = self
+                    .runtime_profile_service
+                    .model_route_auto_load(model_id)
+                    .await?;
+                Ok(serde_json::to_value(auto_load)?)
+            }
             "resolve_model_package_facts_summary" => {
                 let model_id =
                     params["model_id"]

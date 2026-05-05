@@ -52,15 +52,18 @@ interface RPCResponse {
 }
 
 export type ModelLibraryUpdateListener = (payload: unknown) => void;
+export type RuntimeProfileUpdateListener = (payload: unknown) => void;
 
 export interface ParsedSseChunk {
   buffer: string;
   payloads: unknown[];
 }
 
-export function parseModelLibraryUpdateSseChunk(
+function parseNamedSseChunk(
   previousBuffer: string,
-  chunk: string
+  chunk: string,
+  expectedEventName: string,
+  warningLabel: string
 ): ParsedSseChunk {
   const combined = previousBuffer + chunk;
   const blocks = combined.split(/\r?\n\r?\n/);
@@ -80,18 +83,32 @@ export function parseModelLibraryUpdateSseChunk(
       }
     }
 
-    if (eventName !== 'model-library-update' || dataLines.length === 0) {
+    if (eventName !== expectedEventName || dataLines.length === 0) {
       continue;
     }
 
     try {
       payloads.push(JSON.parse(dataLines.join('\n')));
     } catch (error) {
-      log.warn('Ignoring invalid model-library SSE payload', error);
+      log.warn(`Ignoring invalid ${warningLabel} SSE payload`, error);
     }
   }
 
   return { buffer, payloads };
+}
+
+export function parseModelLibraryUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  return parseNamedSseChunk(previousBuffer, chunk, 'model-library-update', 'model-library');
+}
+
+export function parseRuntimeProfileUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  return parseNamedSseChunk(previousBuffer, chunk, 'runtime-profile-update', 'runtime-profile');
 }
 
 export class PythonBridge {
@@ -107,6 +124,10 @@ export class PythonBridge {
   private modelLibraryUpdateBuffer = '';
   private modelLibraryUpdateListener: ModelLibraryUpdateListener | null = null;
   private modelLibraryUpdateReconnectTimer: BridgeTimer | null = null;
+  private runtimeProfileUpdateRequest: http.ClientRequest | null = null;
+  private runtimeProfileUpdateBuffer = '';
+  private runtimeProfileUpdateListener: RuntimeProfileUpdateListener | null = null;
+  private runtimeProfileUpdateReconnectTimer: BridgeTimer | null = null;
 
   constructor(options: PythonBridgeOptions) {
     const { timerController, ...runtimeOptions } = options;
@@ -219,7 +240,9 @@ export class PythonBridge {
       this.process = null;
       this.clearHealthCheckTimer();
       this.clearModelLibraryUpdateReconnectTimer();
+      this.clearRuntimeProfileUpdateReconnectTimer();
       this.closeModelLibraryUpdateStream();
+      this.closeRuntimeProfileUpdateStream();
 
       // Auto-restart if enabled and not shutting down
       if (
@@ -247,6 +270,9 @@ export class PythonBridge {
 
     if (this.modelLibraryUpdateListener) {
       this.openModelLibraryUpdateStream();
+    }
+    if (this.runtimeProfileUpdateListener) {
+      this.openRuntimeProfileUpdateStream();
     }
 
     log.info(`${backendLabel} backend bridge started successfully`);
@@ -317,6 +343,7 @@ export class PythonBridge {
     this.clearHealthCheckTimer();
     this.clearRestartTimer();
     this.stopModelLibraryUpdateStream();
+    this.stopRuntimeProfileUpdateStream();
 
     if (!this.process) {
       return;
@@ -376,6 +403,20 @@ export class PythonBridge {
     this.modelLibraryUpdateListener = null;
     this.closeModelLibraryUpdateStream();
     this.clearModelLibraryUpdateReconnectTimer();
+  }
+
+  startRuntimeProfileUpdateStream(listener: RuntimeProfileUpdateListener): void {
+    this.runtimeProfileUpdateListener = listener;
+    if (!this.process) {
+      throw new Error('Backend bridge not running');
+    }
+    this.openRuntimeProfileUpdateStream();
+  }
+
+  stopRuntimeProfileUpdateStream(): void {
+    this.runtimeProfileUpdateListener = null;
+    this.closeRuntimeProfileUpdateStream();
+    this.clearRuntimeProfileUpdateReconnectTimer();
   }
 
   private openModelLibraryUpdateStream(): void {
@@ -454,6 +495,85 @@ export class PythonBridge {
     if (this.modelLibraryUpdateReconnectTimer) {
       this.timerController.clearTimeout(this.modelLibraryUpdateReconnectTimer);
       this.modelLibraryUpdateReconnectTimer = null;
+    }
+  }
+
+  private openRuntimeProfileUpdateStream(): void {
+    if (!this.process || !this.runtimeProfileUpdateListener) {
+      return;
+    }
+
+    this.closeRuntimeProfileUpdateStream();
+    this.clearRuntimeProfileUpdateReconnectTimer();
+    this.runtimeProfileUpdateBuffer = '';
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: this.port,
+      path: '/events/runtime-profile-updates',
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        const parsed = parseRuntimeProfileUpdateSseChunk(this.runtimeProfileUpdateBuffer, chunk);
+        this.runtimeProfileUpdateBuffer = parsed.buffer;
+        for (const payload of parsed.payloads) {
+          this.runtimeProfileUpdateListener?.(payload);
+        }
+      });
+      res.on('end', () => {
+        this.runtimeProfileUpdateRequest = null;
+        this.runtimeProfileUpdateBuffer = '';
+        if (!this.isShuttingDown) {
+          log.warn('Runtime-profile update stream ended');
+          this.scheduleRuntimeProfileUpdateReconnect();
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      this.runtimeProfileUpdateRequest = null;
+      this.runtimeProfileUpdateBuffer = '';
+      if (!this.isShuttingDown) {
+        log.warn('Runtime-profile update stream failed:', error);
+        this.scheduleRuntimeProfileUpdateReconnect();
+      }
+    });
+
+    this.runtimeProfileUpdateRequest = req;
+  }
+
+  private closeRuntimeProfileUpdateStream(): void {
+    if (this.runtimeProfileUpdateRequest) {
+      this.runtimeProfileUpdateRequest.destroy();
+      this.runtimeProfileUpdateRequest = null;
+    }
+    this.runtimeProfileUpdateBuffer = '';
+  }
+
+  private scheduleRuntimeProfileUpdateReconnect(): void {
+    if (
+      this.isShuttingDown ||
+      !this.process ||
+      !this.runtimeProfileUpdateListener ||
+      this.runtimeProfileUpdateReconnectTimer
+    ) {
+      return;
+    }
+
+    this.runtimeProfileUpdateReconnectTimer = this.timerController.setTimeout(() => {
+      this.runtimeProfileUpdateReconnectTimer = null;
+      this.openRuntimeProfileUpdateStream();
+    }, 1000);
+  }
+
+  private clearRuntimeProfileUpdateReconnectTimer(): void {
+    if (this.runtimeProfileUpdateReconnectTimer) {
+      this.timerController.clearTimeout(this.runtimeProfileUpdateReconnectTimer);
+      this.runtimeProfileUpdateReconnectTimer = null;
     }
   }
 

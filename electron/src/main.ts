@@ -28,6 +28,7 @@ const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
+const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
 
 // Python sidecar bridge
 let pythonBridge: PythonBridge | null = null;
@@ -299,6 +300,21 @@ function startModelLibraryUpdateForwarder(): void {
   });
 }
 
+function startRuntimeProfileUpdateForwarder(): void {
+  if (!pythonBridge) {
+    return;
+  }
+
+  pythonBridge.startRuntimeProfileUpdateStream((payload) => {
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    targetWindow.webContents.send(RUNTIME_PROFILE_UPDATE_CHANNEL, payload);
+  });
+}
+
 /**
  * Initialize the Rust backend sidecar process
  */
@@ -338,6 +354,7 @@ async function initializeBackend(): Promise<void> {
 
     await pythonBridge.start();
     startModelLibraryUpdateForwarder();
+    startRuntimeProfileUpdateForwarder();
     log.info('Backend bridge initialized');
   })();
 

@@ -28,6 +28,12 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | Conversion | `start_model_conversion`, `get_conversion_progress`, `setup_quantization_backend` | `rust/crates/pumas-rpc/src/handlers/conversion.rs` |
 | Plugins and custom nodes | `get_plugins`, `get_custom_nodes`, `install_custom_node` | `rust/crates/pumas-rpc/src/handlers/plugins.rs`, `custom_nodes.rs` |
 
+## Event Channels
+| Channel | Backend SSE Route | Electron Channel | Preload Method |
+| --- | --- | --- | --- |
+| Model library updates | `/events/model-library-updates` | `model-library:update` | `onModelLibraryUpdate` |
+| Runtime profile updates | `/events/runtime-profile-updates` | `runtime-profile:update` | `onRuntimeProfileUpdate` |
+
 ## Contract Rules
 - New method names must be added to `electron/src/rpc-method-registry.ts`.
 - Renderer-visible methods must be exposed through `electron/src/preload.ts` and typed in `frontend/src/types/api.ts`.

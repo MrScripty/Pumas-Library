@@ -26,7 +26,7 @@ use axum::{
     Json,
 };
 use futures::stream::{self, Stream};
-use pumas_library::models::ModelLibraryUpdateNotification;
+use pumas_library::models::{ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::convert::Infallible;
@@ -36,6 +36,7 @@ use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 const MODEL_LIBRARY_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
+const RUNTIME_PROFILE_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
@@ -123,6 +124,19 @@ pub async fn handle_model_library_update_events(
         cursor: None,
     };
     let stream = stream::unfold(stream_state, next_model_library_update_event);
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Server-sent runtime-profile update notification stream.
+pub async fn handle_runtime_profile_update_events(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let stream_state = RuntimeProfileUpdateStreamState {
+        state,
+        cursor: None,
+    };
+    let stream = stream::unfold(stream_state, next_runtime_profile_update_event);
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -219,6 +233,54 @@ fn model_library_update_sse_event(notification: &ModelLibraryUpdateNotification)
         Ok(payload) => Event::default().event("model-library-update").data(payload),
         Err(error) => Event::default()
             .event("model-library-error")
+            .data(json!({ "error": error.to_string() }).to_string()),
+    }
+}
+
+struct RuntimeProfileUpdateStreamState {
+    state: Arc<AppState>,
+    cursor: Option<String>,
+}
+
+async fn next_runtime_profile_update_event(
+    mut state: RuntimeProfileUpdateStreamState,
+) -> Option<(Result<Event, Infallible>, RuntimeProfileUpdateStreamState)> {
+    loop {
+        tokio::time::sleep(RUNTIME_PROFILE_UPDATE_STREAM_POLL).await;
+
+        match state
+            .state
+            .api
+            .list_runtime_profile_updates_since(state.cursor.as_deref())
+            .await
+        {
+            Ok(response) => {
+                state.cursor = Some(response.feed.cursor.clone());
+
+                if response.feed.events.is_empty()
+                    && !response.feed.stale_cursor
+                    && !response.feed.snapshot_required
+                {
+                    continue;
+                }
+
+                let event = runtime_profile_update_sse_event(&response.feed);
+                return Some((Ok(event), state));
+            }
+            Err(error) => {
+                warn!("runtime-profile update stream polling failed: {}", error);
+            }
+        }
+    }
+}
+
+fn runtime_profile_update_sse_event(feed: &RuntimeProfileUpdateFeed) -> Event {
+    match serde_json::to_string(feed) {
+        Ok(payload) => Event::default()
+            .event("runtime-profile-update")
+            .data(payload),
+        Err(error) => Event::default()
+            .event("runtime-profile-error")
             .data(json!({ "error": error.to_string() }).to_string()),
     }
 }

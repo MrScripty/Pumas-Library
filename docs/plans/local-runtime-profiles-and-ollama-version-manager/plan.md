@@ -305,6 +305,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 - 2026-05-05: Added append-only `ollama_load_model_for_profile` RPC/preload/TypeScript bridge method using the same backend `profile_id` endpoint resolution. Existing `ollama_load_model(connection_url)` remains unchanged.
 - 2026-05-05: Added `OllamaRuntimeProviderAdapter` and routed Ollama profile validation through it from `RuntimeProfileService`, keeping provider-specific mode checks out of generic profile mutation flow.
+- 2026-05-05: Added the runtime-profile pushed update transport: Rust SSE route `/events/runtime-profile-updates`, Electron bridge parsing/reconnect/cleanup, main-process forwarding on `runtime-profile:update`, and preload/window typing through `onRuntimeProfileUpdate`. Lifecycle status events still need a real status producer before the default-profile status-change task can be marked complete.
+- 2026-05-05: Validated event transport with `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 
 ### Milestone 4: Implement Managed Profile Lifecycle Backend
 
@@ -374,7 +376,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Expose runtime profiles and per-model routing through accessible, backend-confirmed UI.
 
 **Tasks:**
-- [ ] Add a frontend runtime/profile subscription hook that follows the existing model-library update subscription pattern.
+- [ ] Add a frontend runtime/profile subscription hook that follows the existing model-library update subscription pattern. The bridge event source exists as `onRuntimeProfileUpdate`; the React hook still needs to consume it.
 - [ ] Add snapshot refresh on runtime/profile events.
 - [ ] Add a local runtime profile settings section.
 - [ ] Add profile create/edit controls for provider, provider mode, name, endpoint, port, scheduler settings, and managed/external status.

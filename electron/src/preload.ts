@@ -46,6 +46,13 @@ type ModelLibraryUpdateNotificationPayload = {
   snapshot_required: boolean;
 };
 
+type RuntimeProfileUpdateNotificationPayload = {
+  cursor: string;
+  events?: unknown[];
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+};
+
 const MODEL_LIBRARY_CHANGE_KINDS = new Set([
   'model_added',
   'model_removed',
@@ -104,6 +111,22 @@ function isModelLibraryUpdateNotificationPayload(
     typeof value['snapshot_required'] === 'boolean' &&
     (events === undefined ||
       (Array.isArray(events) && events.every(isModelLibraryUpdateEventPayload)))
+  );
+}
+
+function isRuntimeProfileUpdateNotificationPayload(
+  value: unknown
+): value is RuntimeProfileUpdateNotificationPayload {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const events = value['events'];
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['stale_cursor'] === 'boolean' &&
+    typeof value['snapshot_required'] === 'boolean' &&
+    (events === undefined || Array.isArray(events))
   );
 }
 
@@ -692,6 +715,20 @@ const electronAPI = {
     ipcRenderer.on('model-library:update', listener);
     return () => {
       ipcRenderer.removeListener('model-library:update', listener);
+    };
+  },
+  onRuntimeProfileUpdate: (
+    callback: (notification: RuntimeProfileUpdateNotificationPayload) => void
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isRuntimeProfileUpdateNotificationPayload(payload)) {
+        callback(payload);
+      }
+    };
+
+    ipcRenderer.on('runtime-profile:update', listener);
+    return () => {
+      ipcRenderer.removeListener('runtime-profile:update', listener);
     };
   },
 

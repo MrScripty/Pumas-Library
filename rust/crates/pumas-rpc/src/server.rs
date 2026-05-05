@@ -1,6 +1,9 @@
 //! HTTP server implementation using Axum.
 
-use crate::handlers::{handle_health, handle_model_library_update_events, handle_rpc};
+use crate::handlers::{
+    handle_health, handle_model_library_update_events, handle_rpc,
+    handle_runtime_profile_update_events,
+};
 use crate::shortcut::ShortcutManager;
 use axum::{
     http::{header, HeaderValue, Method},
@@ -121,6 +124,10 @@ pub async fn start_server(
         .route(
             "/events/model-library-updates",
             get(handle_model_library_update_events),
+        )
+        .route(
+            "/events/runtime-profile-updates",
+            get(handle_runtime_profile_update_events),
         )
         .route("/rpc", post(handle_rpc))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))

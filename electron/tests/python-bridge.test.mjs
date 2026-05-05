@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PythonBridge, parseModelLibraryUpdateSseChunk } from '../dist/python-bridge.js';
+import {
+  PythonBridge,
+  parseModelLibraryUpdateSseChunk,
+  parseRuntimeProfileUpdateSseChunk,
+} from '../dist/python-bridge.js';
 
 class FakeTimerController {
   timers = [];
@@ -155,6 +159,31 @@ test('parseModelLibraryUpdateSseChunk ignores unrelated and malformed events', (
   ]);
 });
 
+test('parseRuntimeProfileUpdateSseChunk parses split runtime-profile update events', () => {
+  let parsed = parseRuntimeProfileUpdateSseChunk(
+    '',
+    'event: runtime-profile-update\ndata: {"cursor":"runtime-profiles:1"'
+  );
+
+  assert.deepEqual(parsed.payloads, []);
+  assert.notEqual(parsed.buffer, '');
+
+  parsed = parseRuntimeProfileUpdateSseChunk(
+    parsed.buffer,
+    ',"events":[],"stale_cursor":true,"snapshot_required":true}\n\n'
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'runtime-profiles:1',
+      events: [],
+      stale_cursor: true,
+      snapshot_required: true,
+    },
+  ]);
+});
+
 test('stop clears model-library update stream lifecycle', async () => {
   const timers = new FakeTimerController();
   const bridge = createBridge(timers);
@@ -178,6 +207,32 @@ test('stop clears model-library update stream lifecycle', async () => {
   assert.equal(bridge.modelLibraryUpdateRequest, null);
   assert.equal(bridge.modelLibraryUpdateBuffer, '');
   assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop clears runtime-profile update stream lifecycle', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let destroyed = false;
+  const reconnectTimer = { id: 100 };
+
+  bridge.runtimeProfileUpdateListener = () => {};
+  bridge.runtimeProfileUpdateBuffer = 'partial';
+  bridge.runtimeProfileUpdateRequest = {
+    destroy() {
+      destroyed = true;
+    },
+  };
+  bridge.runtimeProfileUpdateReconnectTimer = reconnectTimer;
+  timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
+
+  await bridge.stop();
+
+  assert.equal(destroyed, true);
+  assert.equal(bridge.runtimeProfileUpdateListener, null);
+  assert.equal(bridge.runtimeProfileUpdateRequest, null);
+  assert.equal(bridge.runtimeProfileUpdateBuffer, '');
+  assert.equal(bridge.runtimeProfileUpdateReconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 

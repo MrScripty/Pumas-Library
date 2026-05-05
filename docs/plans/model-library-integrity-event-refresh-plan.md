@@ -415,6 +415,11 @@ Update during implementation:
   gaps as partial-download state when the expected artifact has a matching
   `.part`, while still flagging unrelated `.part` files outside the expected
   artifact.
+- 2026-05-04: A successful migration still left one duplicate-repo warning for
+  a visible Qwen3.6 partial artifact. The backend list projection now excludes
+  incomplete downloads from duplicate-repo issue annotation, so partial
+  same-repo artifact downloads do not put an `ISSUE` badge on completed or
+  visible model rows while true complete duplicate repo rows are still marked.
 - 2026-05-04: Broader `execute_migration_with_checkpoint` test filtering
   exposed an existing failure in
   `test_execute_migration_with_checkpoint_skips_partial_split_directories`:
@@ -500,6 +505,10 @@ Update during implementation:
 - Interrupted expected-artifact downloads are now counted through projected
   partial-download state instead of failing post-migration integrity validation
   only because expected files are still incomplete.
+- Duplicate repo warnings now ignore incomplete download rows in the
+  `list_models` projection, preserving true duplicate detection for complete
+  rows without treating same-repo partial artifact downloads as library
+  integrity issues.
 
 ### Deviations
 
@@ -535,6 +544,9 @@ Update during implementation:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_ignores_partial_download_rows`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_flags_mixed_artifact_directories`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_validate_post_migration_integrity_ignores_expected_files_for_incomplete_artifacts`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_does_not_mark_partial_downloads_as_duplicate_repo_issues`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_list_models_dedupes_duplicate_repo_ids_and_marks_integrity_issue`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_cleanup_duplicate_repo_entries_removes_partial_duplicate_against_complete_copy`
 
 ### Traceability Links
 

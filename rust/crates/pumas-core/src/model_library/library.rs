@@ -3944,6 +3944,11 @@ fn annotate_and_dedupe_records_by_repo_id(records: &mut Vec<ModelRecord>) {
     let mut passthrough = Vec::new();
 
     for record in records.drain(..) {
+        if record_is_download_incomplete(&record) {
+            passthrough.push(record);
+            continue;
+        }
+
         if let Some(repo_key) = normalized_repo_key_from_value(&record.metadata) {
             by_repo.entry(repo_key).or_default().push(record);
         } else {
@@ -3996,17 +4001,29 @@ fn annotate_and_dedupe_records_by_repo_id(records: &mut Vec<ModelRecord>) {
 fn record_duplicate_preference_score(record: &ModelRecord) -> i64 {
     let path_type = record.id.split('/').next().unwrap_or("unknown");
     let model_type = record.model_type.to_lowercase();
-    let download_incomplete = record
-        .metadata
-        .as_object()
-        .and_then(|obj| obj.get("download_incomplete"))
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let download_incomplete = record_is_download_incomplete(record);
 
     let path_known = usize::from(path_type != "unknown") as i64;
     let type_known = usize::from(model_type != "unknown") as i64;
     let complete_bonus = usize::from(!download_incomplete) as i64;
     (path_known * 10_000) + (type_known * 1_000) + (complete_bonus * 100)
+}
+
+fn record_is_download_incomplete(record: &ModelRecord) -> bool {
+    record
+        .metadata
+        .as_object()
+        .is_some_and(|obj| metadata_object_is_download_incomplete(obj))
+}
+
+fn metadata_object_is_download_incomplete(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("download_incomplete")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || obj
+            .get("match_source")
+            .and_then(Value::as_str)
+            .is_some_and(|source| source == "download_partial")
 }
 
 /// Apply resolver provenance/review fields and report whether resolution metadata changed.
@@ -8408,6 +8425,69 @@ mod tests {
                 .and_then(Value::as_u64),
             Some(2)
         );
+    }
+
+    #[tokio::test]
+    async fn test_list_models_does_not_mark_partial_downloads_as_duplicate_repo_issues() {
+        let (_, library) = setup_library().await;
+
+        let complete_dir = library.build_model_path("vlm", "qwen3_6", "repo-q5");
+        let partial_dir = library.build_model_path("vlm", "qwen3_6", "repo-q4-partial");
+        std::fs::create_dir_all(&complete_dir).unwrap();
+        std::fs::create_dir_all(&partial_dir).unwrap();
+        write_min_safetensors(&complete_dir.join("model-Q5_K_M.gguf"));
+        std::fs::write(partial_dir.join("model-Q4_K_M.gguf.part"), b"partial").unwrap();
+
+        let complete_metadata = ModelMetadata {
+            model_id: Some("vlm/qwen3_6/repo-q5".to_string()),
+            model_type: Some("vlm".to_string()),
+            family: Some("qwen3_6".to_string()),
+            cleaned_name: Some("repo-q5".to_string()),
+            repo_id: Some("example/repo".to_string()),
+            selected_artifact_id: Some("example--repo__q5_k_m".to_string()),
+            selected_artifact_files: Some(vec!["model-Q5_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        let partial_metadata = ModelMetadata {
+            model_id: Some("vlm/qwen3_6/repo-q4-partial".to_string()),
+            model_type: Some("vlm".to_string()),
+            family: Some("qwen3_6".to_string()),
+            cleaned_name: Some("repo-q4-partial".to_string()),
+            repo_id: Some("example/repo".to_string()),
+            match_source: Some("download_partial".to_string()),
+            selected_artifact_id: Some("example--repo__q4_k_m".to_string()),
+            selected_artifact_files: Some(vec!["model-Q4_K_M.gguf".to_string()]),
+            expected_files: Some(vec!["model-Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&complete_dir, &complete_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&partial_dir, &partial_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&complete_dir).await.unwrap();
+        library.index_model_dir(&partial_dir).await.unwrap();
+
+        let models = library.list_models().await.unwrap();
+        assert_eq!(models.len(), 2, "{:?}", models);
+        assert!(models.iter().all(|model| {
+            model
+                .metadata
+                .get(INTEGRITY_ISSUE_DUPLICATE_REPO_ID)
+                .and_then(Value::as_bool)
+                != Some(true)
+        }));
+        assert!(models.iter().any(|model| {
+            model.id == "vlm/qwen3_6/repo-q4-partial"
+                && model
+                    .metadata
+                    .get("download_incomplete")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+        }));
     }
 
     #[tokio::test]

@@ -129,6 +129,7 @@ pub struct RuntimeProfileLaunchSpec {
     pub provider: RuntimeProviderId,
     pub endpoint_url: RuntimeEndpointUrl,
     pub port: RuntimePort,
+    pub env_vars: HashMap<String, String>,
     pub runtime_dir: PathBuf,
     pub pid_file: PathBuf,
     pub log_file: PathBuf,
@@ -650,6 +651,7 @@ fn derive_managed_profile_launch_specs(
             provider: profile.provider,
             endpoint_url: endpoint_url.clone(),
             port,
+            env_vars: profile_runtime_env_vars(profile, &endpoint_url, port)?,
             pid_file: runtime_dir.join("runtime.pid"),
             log_file: runtime_dir.join("runtime.log"),
             health_check_url: endpoint_url,
@@ -708,6 +710,61 @@ fn endpoint_port(endpoint_url: &RuntimeEndpointUrl) -> Option<RuntimePort> {
         .ok()
         .and_then(|url| url.port())
         .and_then(|port| RuntimePort::parse(port).ok())
+}
+
+fn profile_runtime_env_vars(
+    profile: &RuntimeProfileConfig,
+    endpoint_url: &RuntimeEndpointUrl,
+    port: RuntimePort,
+) -> Result<HashMap<String, String>> {
+    let mut env_vars = HashMap::new();
+    env_vars.insert(
+        "PUMAS_RUNTIME_PROFILE_ID".to_string(),
+        profile.profile_id.as_str().to_string(),
+    );
+    match profile.provider {
+        RuntimeProviderId::Ollama => {
+            env_vars.insert(
+                "OLLAMA_HOST".to_string(),
+                runtime_host_port(endpoint_url, port)?,
+            );
+        }
+        RuntimeProviderId::LlamaCpp => {}
+    }
+    apply_device_visibility_env(&mut env_vars, profile);
+    Ok(env_vars)
+}
+
+fn runtime_host_port(endpoint_url: &RuntimeEndpointUrl, port: RuntimePort) -> Result<String> {
+    let parsed =
+        url::Url::parse(endpoint_url.as_str()).map_err(|err| PumasError::InvalidParams {
+            message: format!("invalid runtime endpoint URL: {err}"),
+        })?;
+    let host = parsed.host_str().ok_or_else(|| PumasError::InvalidParams {
+        message: "runtime endpoint URL must include a host".to_string(),
+    })?;
+    Ok(format!("{host}:{}", port.value()))
+}
+
+fn apply_device_visibility_env(
+    env_vars: &mut HashMap<String, String>,
+    profile: &RuntimeProfileConfig,
+) {
+    match profile.device.mode {
+        RuntimeDeviceMode::Cpu => {
+            env_vars.insert("CUDA_VISIBLE_DEVICES".to_string(), String::new());
+            env_vars.insert("HIP_VISIBLE_DEVICES".to_string(), String::new());
+            env_vars.insert("ROCR_VISIBLE_DEVICES".to_string(), String::new());
+        }
+        RuntimeDeviceMode::Gpu | RuntimeDeviceMode::SpecificDevice => {
+            if let Some(device_id) = profile.device.device_id.as_deref() {
+                env_vars.insert("CUDA_VISIBLE_DEVICES".to_string(), device_id.to_string());
+                env_vars.insert("HIP_VISIBLE_DEVICES".to_string(), device_id.to_string());
+                env_vars.insert("ROCR_VISIBLE_DEVICES".to_string(), device_id.to_string());
+            }
+        }
+        RuntimeDeviceMode::Auto | RuntimeDeviceMode::Hybrid => {}
+    }
 }
 
 fn provider_base_port(provider: RuntimeProviderId) -> u16 {
@@ -901,6 +958,8 @@ mod tests {
         gpu_profile.name = "Ollama GPU".to_string();
         gpu_profile.endpoint_url = None;
         gpu_profile.port = None;
+        gpu_profile.device.mode = RuntimeDeviceMode::Gpu;
+        gpu_profile.device.device_id = Some("1".to_string());
         service.upsert_profile(gpu_profile).await.unwrap();
 
         let specs = service.list_managed_profile_launch_specs().await.unwrap();
@@ -914,6 +973,10 @@ mod tests {
         assert_eq!(
             default_spec.endpoint_url.as_str(),
             "http://127.0.0.1:11434/"
+        );
+        assert_eq!(
+            default_spec.env_vars.get("OLLAMA_HOST").map(String::as_str),
+            Some("127.0.0.1:11434")
         );
         assert!(default_spec
             .pid_file
@@ -931,6 +994,20 @@ mod tests {
             gpu_spec.endpoint_url.as_str(),
             format!("http://127.0.0.1:{}/", gpu_spec.port.value())
         );
+        assert_eq!(
+            gpu_spec
+                .env_vars
+                .get("CUDA_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert_eq!(
+            gpu_spec
+                .env_vars
+                .get("PUMAS_RUNTIME_PROFILE_ID")
+                .map(String::as_str),
+            Some("ollama-gpu")
+        );
     }
 
     #[tokio::test]
@@ -944,6 +1021,48 @@ mod tests {
 
         let result = service.upsert_profile(duplicate_port_profile).await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_derives_cpu_visibility_env() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut cpu_profile = RuntimeProfileConfig::default_ollama();
+        cpu_profile.profile_id = RuntimeProfileId::parse("ollama-cpu").unwrap();
+        cpu_profile.name = "Ollama CPU".to_string();
+        cpu_profile.endpoint_url = None;
+        cpu_profile.port = None;
+        cpu_profile.device.mode = RuntimeDeviceMode::Cpu;
+        service.upsert_profile(cpu_profile).await.unwrap();
+
+        let specs = service.list_managed_profile_launch_specs().await.unwrap();
+        let cpu_spec = specs
+            .iter()
+            .find(|spec| spec.profile_id.as_str() == "ollama-cpu")
+            .unwrap();
+
+        assert_eq!(
+            cpu_spec
+                .env_vars
+                .get("CUDA_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            cpu_spec
+                .env_vars
+                .get("HIP_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("")
+        );
+        assert_eq!(
+            cpu_spec
+                .env_vars
+                .get("ROCR_VISIBLE_DEVICES")
+                .map(String::as_str),
+            Some("")
+        );
     }
 
     #[tokio::test]

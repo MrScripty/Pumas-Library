@@ -318,7 +318,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Tasks:**
 - [ ] Add profile-aware process lifecycle through the runtime-profile service.
 - [x] Generate profile-specific ports, health URLs, PID files, and log files.
-- [ ] Apply profile environment variables, including CPU/GPU visibility settings where platform-supported.
+- [x] Apply profile environment variables, including CPU/GPU visibility settings where platform-supported.
 - [ ] Serialize start/stop operations per profile.
 - [ ] Report profile status, last error, endpoint URL, and running state through the snapshot/event path.
 - [ ] Keep broad singleton process cleanup separate from profile-scoped stop operations.
@@ -331,11 +331,13 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Rust tests that profile-scoped stop does not target unrelated Ollama processes.
 - Existing process tests still pass.
 
-**Status:** Started. Profile-scoped launch spec derivation is implemented and validated; process spawning, environment construction, serialized operations, and profile-scoped stop behavior remain.
+**Status:** Started. Profile-scoped launch spec and environment derivation are implemented and validated; process spawning, serialized operations, and profile-scoped stop behavior remain.
 
 **Implementation Notes:**
 - 2026-05-05: Added backend-managed runtime launch specs derived from persisted profiles. Specs resolve deterministic profile runtime directories under `launcher-data/runtime-profiles/{provider}/{profile_id}`, profile-scoped PID/log files, health URLs, explicit or deterministic implicit ports, and managed-port collision validation without touching singleton process launch behavior.
 - 2026-05-05: Validated launch spec derivation and collision handling with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`.
+- 2026-05-05: Added profile environment derivation to launch specs, including `PUMAS_RUNTIME_PROFILE_ID`, Ollama `OLLAMA_HOST`, CPU mode GPU-hiding variables, and GPU/specific-device visibility variables when a device ID is configured.
+- 2026-05-05: Validated CPU/GPU environment derivation with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`.
 
 ### Milestone 5: Route Ollama Model Operations Through Profiles
 

@@ -431,8 +431,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Expose runtime profiles and per-model routing through accessible, backend-confirmed UI.
 
 **Tasks:**
-- [ ] Add a frontend runtime/profile subscription hook that follows the existing model-library update subscription pattern. The bridge event source exists as `onRuntimeProfileUpdate`; the React hook still needs to consume it.
-- [ ] Add snapshot refresh on runtime/profile events.
+- [x] Add a frontend runtime/profile subscription hook that follows the existing model-library update subscription pattern. The bridge event source exists as `onRuntimeProfileUpdate`; the React hook still needs to consume it.
+- [x] Add snapshot refresh on runtime/profile events.
 - [ ] Add a local runtime profile settings section.
 - [ ] Add profile create/edit controls for provider, provider mode, name, endpoint, port, scheduler settings, and managed/external status.
 - [ ] Add per-model route controls for assigning a model to auto/Ollama/llama.cpp/CPU/GPU/external profiles.
@@ -448,7 +448,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Subscription cleanup tests for runtime/profile events.
 - Typecheck and lint.
 
-**Status:** Not started.
+**Status:** In progress. Runtime profile snapshot/subscription state is available to React; settings UI, route controls, and polling cleanup remain.
+
+**Implementation Notes:**
+- 2026-05-05: Added `useRuntimeProfileUpdateSubscription` and `useRuntimeProfiles` so React code can subscribe to backend-pushed runtime/profile update feeds, validate the feed shape, debounce notifications, and refresh the backend-owned runtime profile snapshot without adding component-level polling.
+- 2026-05-05: Validated the hook/type surface with `npm run -w frontend check:types`. A focused `vitest run useRuntimeProfiles api-runtime-profiles` command found no matching tests yet, so subscription cleanup tests remain part of later frontend test work.
 
 ### Milestone 8: Integration, Documentation, and Release Validation
 

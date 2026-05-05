@@ -108,3 +108,17 @@ export interface RuntimeProfileMutationResponse extends BaseResponse {
   profile_id?: string | null;
   snapshot_required: boolean;
 }
+
+export function isRuntimeProfileUpdateFeed(value: unknown): value is RuntimeProfileUpdateFeed {
+  if (!value || typeof value !== 'object') {
+    return false;
+  }
+
+  const candidate = value as Partial<RuntimeProfileUpdateFeed>;
+  return (
+    typeof candidate.cursor === 'string' &&
+    Array.isArray(candidate.events) &&
+    typeof candidate.stale_cursor === 'boolean' &&
+    typeof candidate.snapshot_required === 'boolean'
+  );
+}

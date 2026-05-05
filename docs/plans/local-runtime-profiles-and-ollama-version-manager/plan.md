@@ -282,7 +282,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 **Tasks:**
 - [x] Add `RuntimeProfileService` or equivalent backend service boundary.
-- [ ] Add an Ollama provider adapter behind the service.
+- [x] Add an Ollama provider adapter behind the service.
 - [x] Seed a default Ollama profile that maps to existing singleton Ollama behavior.
 - [x] Add one profile-aware list path using `profile_id`.
 - [x] Add one profile-aware load path using `profile_id`.
@@ -297,13 +297,14 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Tests showing legacy `connection_url` compatibility still works at the boundary.
 - Existing process tests still pass.
 
-**Status:** Partially complete. The default-profile storage, snapshot API, and profile-aware Ollama list/load paths are implemented. Provider adapter extraction, pushed profile events, and aggregate status preservation validation remain.
+**Status:** Partially complete. The default-profile storage, snapshot API, Ollama provider adapter, and profile-aware Ollama list/load paths are implemented. Pushed profile events and aggregate status preservation validation remain.
 
 **Implementation Notes:**
 - 2026-05-05: Added default-profile endpoint resolution to `RuntimeProfileService` and `PumasApi`, including IPC dispatch for secondary clients.
 - 2026-05-05: Added append-only `ollama_list_models_for_profile` RPC/preload/TypeScript bridge method. It resolves `profile_id` through backend-owned runtime profiles and calls the Ollama client with the resolved endpoint; existing `ollama_list_models(connection_url)` remains unchanged.
 - 2026-05-05: Validated with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, `cargo test -p pumas-rpc runtime_profiles --manifest-path rust/Cargo.toml`, `npm run -w frontend check:types`, and `npm run -w electron test`.
 - 2026-05-05: Added append-only `ollama_load_model_for_profile` RPC/preload/TypeScript bridge method using the same backend `profile_id` endpoint resolution. Existing `ollama_load_model(connection_url)` remains unchanged.
+- 2026-05-05: Added `OllamaRuntimeProviderAdapter` and routed Ollama profile validation through it from `RuntimeProfileService`, keeping provider-specific mode checks out of generic profile mutation flow.
 
 ### Milestone 4: Implement Managed Profile Lifecycle Backend
 

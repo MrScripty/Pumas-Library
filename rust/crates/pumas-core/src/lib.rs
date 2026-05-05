@@ -71,7 +71,9 @@ pub use models::{
 };
 pub use plugins::{PluginConfig, PluginLoader};
 pub use process::{ProcessInfo, ProcessManager};
-pub use runtime_profiles::{RuntimeProviderAdapter, RuntimeProviderCapabilities};
+pub use runtime_profiles::{
+    OllamaRuntimeProviderAdapter, RuntimeProviderAdapter, RuntimeProviderCapabilities,
+};
 pub use system::{
     check_brave, check_git, check_setproctitle, GpuInfo, GpuMonitor, ProcessResources,
     ResourceTracker, SystemCheckResult, SystemResourceSnapshot, SystemUtils,

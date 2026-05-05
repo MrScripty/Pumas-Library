@@ -72,6 +72,40 @@ pub trait RuntimeProviderAdapter: Send + Sync {
     async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()>;
 }
 
+pub struct OllamaRuntimeProviderAdapter;
+
+#[async_trait]
+impl RuntimeProviderAdapter for OllamaRuntimeProviderAdapter {
+    fn provider(&self) -> RuntimeProviderId {
+        RuntimeProviderId::Ollama
+    }
+
+    fn capabilities(&self) -> RuntimeProviderCapabilities {
+        RuntimeProviderCapabilities::ollama()
+    }
+
+    async fn validate_profile(&self, profile: &RuntimeProfileConfig) -> Result<()> {
+        if profile.provider != RuntimeProviderId::Ollama {
+            return Err(PumasError::InvalidParams {
+                message: "Ollama adapter received a non-Ollama profile".to_string(),
+            });
+        }
+        if profile.provider_mode != RuntimeProviderMode::OllamaServe {
+            return Err(PumasError::InvalidParams {
+                message: "Ollama profiles must use provider_mode=ollama_serve".to_string(),
+            });
+        }
+        if profile.management_mode == RuntimeManagementMode::External
+            && profile.endpoint_url.is_none()
+        {
+            return Err(PumasError::InvalidParams {
+                message: "external Ollama profiles require endpoint_url".to_string(),
+            });
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct RuntimeProfileService {
     config_path: PathBuf,
@@ -151,7 +185,7 @@ impl RuntimeProfileService {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
-        validate_profile_config(&profile)?;
+        validate_profile_config(&profile).await?;
         let profile_id = profile.profile_id.clone();
         self.mutate_config(move |config| {
             if let Some(existing) = config
@@ -344,32 +378,34 @@ fn bump_cursor(config: &mut RuntimeProfilesConfigFile) {
     config.cursor = format!("runtime-profiles:{next}");
 }
 
-fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
+async fn validate_profile_config(profile: &RuntimeProfileConfig) -> Result<()> {
     if profile.name.trim().is_empty() {
         return Err(PumasError::InvalidParams {
             message: "runtime profile name is required".to_string(),
         });
     }
 
-    match (profile.provider, profile.provider_mode) {
-        (RuntimeProviderId::Ollama, RuntimeProviderMode::OllamaServe)
-        | (RuntimeProviderId::LlamaCpp, RuntimeProviderMode::LlamaCppRouter)
-        | (RuntimeProviderId::LlamaCpp, RuntimeProviderMode::LlamaCppDedicated) => {}
-        _ => {
-            return Err(PumasError::InvalidParams {
-                message: "runtime provider mode does not match provider".to_string(),
-            });
+    match profile.provider {
+        RuntimeProviderId::Ollama => OllamaRuntimeProviderAdapter.validate_profile(profile).await,
+        RuntimeProviderId::LlamaCpp => {
+            match profile.provider_mode {
+                RuntimeProviderMode::LlamaCppRouter | RuntimeProviderMode::LlamaCppDedicated => {}
+                _ => {
+                    return Err(PumasError::InvalidParams {
+                        message: "llama.cpp provider mode does not match provider".to_string(),
+                    });
+                }
+            }
+            if profile.management_mode == RuntimeManagementMode::External
+                && profile.endpoint_url.is_none()
+            {
+                return Err(PumasError::InvalidParams {
+                    message: "external llama.cpp profiles require endpoint_url".to_string(),
+                });
+            }
+            Ok(())
         }
     }
-
-    if profile.management_mode == RuntimeManagementMode::External && profile.endpoint_url.is_none()
-    {
-        return Err(PumasError::InvalidParams {
-            message: "external runtime profiles require endpoint_url".to_string(),
-        });
-    }
-
-    Ok(())
 }
 
 fn validate_model_route(route: &ModelRuntimeRoute) -> Result<()> {
@@ -404,6 +440,18 @@ mod tests {
             .provider_modes
             .contains(&RuntimeProviderMode::LlamaCppDedicated));
         assert!(llama_cpp.supports_dedicated_model_processes);
+    }
+
+    #[tokio::test]
+    async fn ollama_provider_adapter_rejects_invalid_modes() {
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.provider_mode = RuntimeProviderMode::LlamaCppRouter;
+
+        let result = OllamaRuntimeProviderAdapter
+            .validate_profile(&profile)
+            .await;
+
+        assert!(result.is_err());
     }
 
     #[tokio::test]

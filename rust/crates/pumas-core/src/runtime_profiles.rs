@@ -2,22 +2,26 @@
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use crate::metadata::{atomic_read_json, atomic_write_json};
 use crate::models::{
     ModelRuntimeRoute, RuntimeDeviceMode, RuntimeEndpointUrl, RuntimeLifecycleState,
-    RuntimeManagementMode, RuntimeProfileConfig, RuntimeProfileEvent, RuntimeProfileEventKind,
-    RuntimeProfileId, RuntimeProfileMutationResponse, RuntimeProfileStatus,
-    RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse, RuntimeProfilesConfigFile,
-    RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse, RuntimeProviderId,
-    RuntimeProviderMode,
+    RuntimeManagementMode, RuntimePort, RuntimeProfileConfig, RuntimeProfileEvent,
+    RuntimeProfileEventKind, RuntimeProfileId, RuntimeProfileMutationResponse,
+    RuntimeProfileStatus, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
+    RuntimeProfilesConfigFile, RuntimeProfilesSnapshot, RuntimeProfilesSnapshotResponse,
+    RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::{PumasError, Result};
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
+const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
+const OLLAMA_RUNTIME_BASE_PORT: u16 = 11_434;
+const LLAMA_CPP_RUNTIME_BASE_PORT: u16 = 18_080;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -113,19 +117,33 @@ impl RuntimeProviderAdapter for OllamaRuntimeProviderAdapter {
 
 #[derive(Debug, Clone)]
 pub struct RuntimeProfileService {
+    launcher_root: PathBuf,
     config_path: PathBuf,
     write_lock: Arc<RwLock<()>>,
     event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeProfileLaunchSpec {
+    pub profile_id: RuntimeProfileId,
+    pub provider: RuntimeProviderId,
+    pub endpoint_url: RuntimeEndpointUrl,
+    pub port: RuntimePort,
+    pub runtime_dir: PathBuf,
+    pub pid_file: PathBuf,
+    pub log_file: PathBuf,
+    pub health_check_url: RuntimeEndpointUrl,
+}
+
 impl RuntimeProfileService {
     pub fn new(launcher_root: impl AsRef<Path>) -> Self {
+        let launcher_root = launcher_root.as_ref().to_path_buf();
         Self {
             config_path: launcher_root
-                .as_ref()
                 .join("launcher-data")
                 .join("metadata")
                 .join("runtime-profiles.json"),
+            launcher_root,
             write_lock: Arc::new(RwLock::new(())),
             event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
         }
@@ -237,12 +255,32 @@ impl RuntimeProfileService {
         self.record_profile_status(status)
     }
 
+    pub async fn list_managed_profile_launch_specs(&self) -> Result<Vec<RuntimeProfileLaunchSpec>> {
+        let config_path = self.config_path.clone();
+        let write_lock = self.write_lock.clone();
+        let launcher_root = self.launcher_root.clone();
+        tokio::task::spawn_blocking(move || {
+            let _guard = write_lock.write().map_err(|_| {
+                PumasError::Other("Failed to acquire runtime profile config lock".to_string())
+            })?;
+            let config = load_or_initialize_config(&config_path)?;
+            derive_managed_profile_launch_specs(&launcher_root, &config)
+        })
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!(
+                "Failed to join runtime profile launch-spec task: {err}"
+            ))
+        })?
+    }
+
     pub async fn upsert_profile(
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
         validate_profile_config(&profile).await?;
         let profile_id = profile.profile_id.clone();
+        let launcher_root = self.launcher_root.clone();
         self.mutate_config(move |config| {
             if let Some(existing) = config
                 .profiles
@@ -253,6 +291,7 @@ impl RuntimeProfileService {
             } else {
                 config.profiles.push(profile);
             }
+            derive_managed_profile_launch_specs(&launcher_root, config)?;
             Ok(RuntimeProfileMutationResponse::success(Some(profile_id)))
         })
         .await
@@ -558,6 +597,133 @@ impl RuntimeProfileEventJournal {
     }
 }
 
+fn derive_managed_profile_launch_specs(
+    launcher_root: &Path,
+    config: &RuntimeProfilesConfigFile,
+) -> Result<Vec<RuntimeProfileLaunchSpec>> {
+    let mut used_ports = HashSet::new();
+    let mut profiles = config
+        .profiles
+        .iter()
+        .filter(|profile| profile.management_mode == RuntimeManagementMode::Managed)
+        .collect::<Vec<_>>();
+    profiles.sort_by(|left, right| left.profile_id.as_str().cmp(right.profile_id.as_str()));
+
+    let mut specs = Vec::with_capacity(profiles.len());
+    for profile in profiles {
+        let port = match profile.port {
+            Some(port) => {
+                if !used_ports.insert(port.value()) {
+                    return Err(PumasError::InvalidParams {
+                        message: format!("runtime profile port collision: {}", port.value()),
+                    });
+                }
+                port
+            }
+            None => match profile.endpoint_url.as_ref().and_then(endpoint_port) {
+                Some(port) => {
+                    if !used_ports.insert(port.value()) {
+                        return Err(PumasError::InvalidParams {
+                            message: format!(
+                                "runtime profile endpoint port collision: {}",
+                                port.value()
+                            ),
+                        });
+                    }
+                    port
+                }
+                None => allocate_implicit_runtime_port(profile, &mut used_ports)?,
+            },
+        };
+        let endpoint_url = match &profile.endpoint_url {
+            Some(endpoint_url) => endpoint_url.clone(),
+            None => endpoint_url_for_port(port)?,
+        };
+        let runtime_dir = launcher_root
+            .join("launcher-data")
+            .join("runtime-profiles")
+            .join(provider_path_segment(profile.provider))
+            .join(profile.profile_id.as_str());
+
+        specs.push(RuntimeProfileLaunchSpec {
+            profile_id: profile.profile_id.clone(),
+            provider: profile.provider,
+            endpoint_url: endpoint_url.clone(),
+            port,
+            pid_file: runtime_dir.join("runtime.pid"),
+            log_file: runtime_dir.join("runtime.log"),
+            health_check_url: endpoint_url,
+            runtime_dir,
+        });
+    }
+
+    Ok(specs)
+}
+
+fn allocate_implicit_runtime_port(
+    profile: &RuntimeProfileConfig,
+    used_ports: &mut HashSet<u16>,
+) -> Result<RuntimePort> {
+    let base_port = provider_base_port(profile.provider);
+    let start_offset = implicit_port_offset(profile.profile_id.as_str());
+    for step in 0..IMPLICIT_RUNTIME_PORT_SPAN {
+        let offset =
+            ((start_offset as u32 + step as u32) % IMPLICIT_RUNTIME_PORT_SPAN as u32) as u16;
+        let candidate = base_port as u32 + 1 + offset as u32;
+        if candidate > u16::MAX as u32 {
+            continue;
+        }
+        let candidate = candidate as u16;
+        if used_ports.insert(candidate) {
+            return RuntimePort::parse(candidate).map_err(|message| PumasError::InvalidParams {
+                message: format!("invalid implicit runtime port: {message}"),
+            });
+        }
+    }
+
+    Err(PumasError::InvalidParams {
+        message: format!(
+            "no available implicit runtime ports for profile {}",
+            profile.profile_id.as_str()
+        ),
+    })
+}
+
+fn implicit_port_offset(profile_id: &str) -> u16 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    profile_id.hash(&mut hasher);
+    (hasher.finish() % IMPLICIT_RUNTIME_PORT_SPAN as u64) as u16
+}
+
+fn endpoint_url_for_port(port: RuntimePort) -> Result<RuntimeEndpointUrl> {
+    RuntimeEndpointUrl::parse(format!("http://127.0.0.1:{}", port.value())).map_err(|message| {
+        PumasError::InvalidParams {
+            message: format!("invalid runtime endpoint URL: {message}"),
+        }
+    })
+}
+
+fn endpoint_port(endpoint_url: &RuntimeEndpointUrl) -> Option<RuntimePort> {
+    url::Url::parse(endpoint_url.as_str())
+        .ok()
+        .and_then(|url| url.port())
+        .and_then(|port| RuntimePort::parse(port).ok())
+}
+
+fn provider_base_port(provider: RuntimeProviderId) -> u16 {
+    match provider {
+        RuntimeProviderId::Ollama => OLLAMA_RUNTIME_BASE_PORT,
+        RuntimeProviderId::LlamaCpp => LLAMA_CPP_RUNTIME_BASE_PORT,
+    }
+}
+
+fn provider_path_segment(provider: RuntimeProviderId) -> &'static str {
+    match provider {
+        RuntimeProviderId::Ollama => "ollama",
+        RuntimeProviderId::LlamaCpp => "llama-cpp",
+    }
+}
+
 fn load_or_initialize_config(path: &Path) -> Result<RuntimeProfilesConfigFile> {
     match atomic_read_json(path)? {
         Some(config) => Ok(config),
@@ -723,6 +889,61 @@ mod tests {
             .unwrap();
 
         assert_eq!(endpoint.as_str(), "http://127.0.0.1:11434/");
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_derives_managed_launch_specs() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut gpu_profile = RuntimeProfileConfig::default_ollama();
+        gpu_profile.profile_id = RuntimeProfileId::parse("ollama-gpu").unwrap();
+        gpu_profile.name = "Ollama GPU".to_string();
+        gpu_profile.endpoint_url = None;
+        gpu_profile.port = None;
+        service.upsert_profile(gpu_profile).await.unwrap();
+
+        let specs = service.list_managed_profile_launch_specs().await.unwrap();
+        assert_eq!(specs.len(), 2);
+
+        let default_spec = specs
+            .iter()
+            .find(|spec| spec.profile_id.as_str() == "ollama-default")
+            .unwrap();
+        assert_eq!(default_spec.port.value(), 11434);
+        assert_eq!(
+            default_spec.endpoint_url.as_str(),
+            "http://127.0.0.1:11434/"
+        );
+        assert!(default_spec
+            .pid_file
+            .ends_with("runtime-profiles/ollama/ollama-default/runtime.pid"));
+        assert!(default_spec
+            .log_file
+            .ends_with("runtime-profiles/ollama/ollama-default/runtime.log"));
+
+        let gpu_spec = specs
+            .iter()
+            .find(|spec| spec.profile_id.as_str() == "ollama-gpu")
+            .unwrap();
+        assert_ne!(gpu_spec.port.value(), 11434);
+        assert_eq!(
+            gpu_spec.endpoint_url.as_str(),
+            format!("http://127.0.0.1:{}/", gpu_spec.port.value())
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_service_rejects_managed_port_collisions() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+
+        let mut duplicate_port_profile = RuntimeProfileConfig::default_ollama();
+        duplicate_port_profile.profile_id = RuntimeProfileId::parse("ollama-duplicate").unwrap();
+        duplicate_port_profile.name = "Ollama Duplicate".to_string();
+
+        let result = service.upsert_profile(duplicate_port_profile).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

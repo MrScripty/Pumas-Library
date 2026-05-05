@@ -7,6 +7,7 @@ use crate::models::{
     RuntimeProviderId,
 };
 use crate::process::{BinaryLaunchConfig, ProcessLauncher};
+use std::fs;
 use std::path::Path;
 
 pub(super) async fn launch_runtime_profile(
@@ -87,4 +88,85 @@ pub(super) async fn launch_runtime_profile(
             .map(|path| path.to_string_lossy().to_string()),
         ready: Some(launch_result.ready),
     })
+}
+
+pub(super) async fn stop_runtime_profile(
+    primary: &PrimaryState,
+    profile_id: RuntimeProfileId,
+) -> std::result::Result<bool, PumasError> {
+    let _operation_guard = primary
+        .runtime_profile_service
+        .begin_profile_operation(profile_id.clone())?;
+    let spec = primary
+        .runtime_profile_service
+        .managed_profile_launch_spec(profile_id.clone())
+        .await?;
+
+    primary
+        .runtime_profile_service
+        .record_profile_lifecycle_status(RuntimeProfileStatus {
+            profile_id: profile_id.clone(),
+            state: RuntimeLifecycleState::Stopping,
+            endpoint_url: Some(spec.endpoint_url.clone()),
+            pid: None,
+            log_path: Some(spec.log_file.to_string_lossy().to_string()),
+            last_error: None,
+        })?;
+
+    let pid_file = spec.pid_file.clone();
+    let stop_result = tokio::task::spawn_blocking(move || stop_profile_pid_file(&pid_file))
+        .await
+        .map_err(|err| {
+            PumasError::Other(format!("Failed to join runtime profile stop task: {err}"))
+        })?;
+
+    match stop_result {
+        Ok(stopped) => {
+            primary
+                .runtime_profile_service
+                .record_profile_lifecycle_status(RuntimeProfileStatus {
+                    profile_id,
+                    state: RuntimeLifecycleState::Stopped,
+                    endpoint_url: Some(spec.endpoint_url),
+                    pid: None,
+                    log_path: Some(spec.log_file.to_string_lossy().to_string()),
+                    last_error: None,
+                })?;
+            Ok(stopped)
+        }
+        Err(error) => {
+            let error_message = error.to_string();
+            primary
+                .runtime_profile_service
+                .record_profile_lifecycle_status(RuntimeProfileStatus {
+                    profile_id,
+                    state: RuntimeLifecycleState::Failed,
+                    endpoint_url: Some(spec.endpoint_url),
+                    pid: None,
+                    log_path: Some(spec.log_file.to_string_lossy().to_string()),
+                    last_error: Some(error_message),
+                })?;
+            Err(error)
+        }
+    }
+}
+
+fn stop_profile_pid_file(pid_file: &Path) -> std::result::Result<bool, PumasError> {
+    if !pid_file.exists() {
+        return Ok(false);
+    }
+
+    let pid = fs::read_to_string(pid_file)
+        .map_err(|err| PumasError::io_with_path(err, pid_file))?
+        .trim()
+        .parse::<u32>()
+        .map_err(|err| PumasError::InvalidParams {
+            message: format!(
+                "invalid runtime profile PID file {}: {err}",
+                pid_file.display()
+            ),
+        })?;
+    let stopped = ProcessLauncher::stop_process(pid, 5_000)?;
+    ProcessLauncher::remove_pid_file(pid_file)?;
+    Ok(stopped)
 }

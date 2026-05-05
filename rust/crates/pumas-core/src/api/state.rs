@@ -19,7 +19,7 @@ use super::state_process::{
 use super::state_runtime::{
     disk_space_response, network_status_response, status_response, system_resources_response,
 };
-use super::state_runtime_profiles::launch_runtime_profile;
+use super::state_runtime_profiles::{launch_runtime_profile, stop_runtime_profile};
 use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator, RuntimeTasks};
 use crate::conversion;
 use crate::error::PumasError;
@@ -1287,6 +1287,16 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let response =
                     launch_runtime_profile(self, profile_id, tag, version_dir.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
+            }
+            "stop_runtime_profile" => {
+                let profile_id: models::RuntimeProfileId =
+                    serde_json::from_value(params["profile_id"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime profile id: {e}"),
+                        }
+                    })?;
+                let stopped = stop_runtime_profile(self, profile_id).await?;
+                Ok(serde_json::to_value(stopped)?)
             }
             "is_torch_running" => Ok(serde_json::to_value(is_torch_running(self).await)?),
             "stop_torch" => {

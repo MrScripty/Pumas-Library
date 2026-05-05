@@ -344,6 +344,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Added the first managed profile launch path for Ollama profiles. The core API and primary IPC dispatch now launch from a supplied installed-version directory through the backend launch spec, record starting/running/failed status events, and use the per-profile operation guard.
 - 2026-05-05: Validated the launch failure/status path without spawning a process using `cargo test -p pumas-library test_launch_runtime_profile_reports_profile_scoped_failure --manifest-path rust/Cargo.toml`.
 - 2026-05-05: Added append-only desktop bridge command wiring for `launch_runtime_profile(profile_id, tag?)`. The RPC handler resolves the active or requested Ollama version through the existing version manager and delegates to the backend-owned launch path; legacy `launch_ollama` remains unchanged.
+- 2026-05-05: Added the first profile-scoped stop path. Core API and primary IPC dispatch stop only the selected profile PID file, never the legacy broad Ollama cleanup path, and record stopping/stopped/failed lifecycle status through the runtime profile service. Public RPC/frontend stop command wiring remains a separate slice.
+- 2026-05-05: Validated the no-PID profile-scoped stop path without touching real processes using `cargo test -p pumas-library test_stop_runtime_profile_without_pid_is_profile_scoped --manifest-path rust/Cargo.toml`.
 
 ### Milestone 5: Route Ollama Model Operations Through Profiles
 

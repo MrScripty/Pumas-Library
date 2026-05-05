@@ -164,6 +164,19 @@ impl PumasApi {
         .await
     }
 
+    pub async fn stop_runtime_profile(&self, profile_id: RuntimeProfileId) -> Result<bool> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "stop_runtime_profile",
+                    serde_json::json!({ "profile_id": profile_id }),
+                )
+                .await;
+        }
+
+        super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
+    }
+
     async fn refresh_default_ollama_profile_status(&self) -> Result<()> {
         let is_running = self.is_ollama_running().await;
         self.primary()

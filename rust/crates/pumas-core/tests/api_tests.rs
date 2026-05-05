@@ -207,6 +207,36 @@ async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
 }
 
 #[tokio::test]
+async fn test_stop_runtime_profile_without_pid_is_profile_scoped() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+
+    let mut profile = RuntimeProfileConfig::default_ollama();
+    profile.profile_id = RuntimeProfileId::parse("ollama-stop-profile").unwrap();
+    profile.name = "Ollama Stop Profile".to_string();
+    profile.endpoint_url = None;
+    profile.port = RuntimePort::parse(12556).ok();
+    api.upsert_runtime_profile(profile).await.unwrap();
+
+    let stopped = api
+        .stop_runtime_profile(RuntimeProfileId::parse("ollama-stop-profile").unwrap())
+        .await
+        .unwrap();
+
+    assert!(!stopped);
+    let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
+    let status = snapshot
+        .snapshot
+        .statuses
+        .iter()
+        .find(|status| status.profile_id.as_str() == "ollama-stop-profile")
+        .unwrap();
+    assert_eq!(status.state, RuntimeLifecycleState::Stopped);
+    assert!(status.last_error.is_none());
+}
+
+#[tokio::test]
 async fn test_get_disk_space() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());

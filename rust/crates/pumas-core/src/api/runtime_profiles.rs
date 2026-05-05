@@ -1,11 +1,12 @@
 //! Local runtime profile API methods.
 
 use crate::models::{
-    ModelRuntimeRoute, RuntimeEndpointUrl, RuntimeProfileConfig, RuntimeProfileId,
+    LaunchResponse, ModelRuntimeRoute, RuntimeEndpointUrl, RuntimeProfileConfig, RuntimeProfileId,
     RuntimeProfileMutationResponse, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesSnapshotResponse, RuntimeProviderId,
 };
 use crate::{PumasApi, Result};
+use std::path::Path;
 
 impl PumasApi {
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
@@ -133,6 +134,34 @@ impl PumasApi {
             .runtime_profile_service
             .resolve_profile_endpoint(provider, profile_id)
             .await
+    }
+
+    pub async fn launch_runtime_profile(
+        &self,
+        profile_id: RuntimeProfileId,
+        tag: &str,
+        version_dir: &Path,
+    ) -> Result<LaunchResponse> {
+        if self.try_client().is_some() {
+            return self
+                .call_client_method(
+                    "launch_runtime_profile",
+                    serde_json::json!({
+                        "profile_id": profile_id,
+                        "tag": tag,
+                        "version_dir": version_dir,
+                    }),
+                )
+                .await;
+        }
+
+        super::state_runtime_profiles::launch_runtime_profile(
+            self.primary(),
+            profile_id,
+            tag,
+            version_dir,
+        )
+        .await
     }
 
     async fn refresh_default_ollama_profile_status(&self) -> Result<()> {

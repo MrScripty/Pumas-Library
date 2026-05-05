@@ -19,6 +19,7 @@ use super::state_process::{
 use super::state_runtime::{
     disk_space_response, network_status_response, status_response, system_resources_response,
 };
+use super::state_runtime_profiles::launch_runtime_profile;
 use super::{reconcile_on_demand, ReconcileScope, ReconciliationCoordinator, RuntimeTasks};
 use crate::conversion;
 use crate::error::PumasError;
@@ -1261,6 +1262,30 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let version_dir =
                     validate_local_directory_target_path(version_dir, "version_dir").await?;
                 let response = launch_ollama(self, tag, version_dir.as_path()).await?;
+                Ok(serde_json::to_value(response)?)
+            }
+            "launch_runtime_profile" => {
+                let profile_id: models::RuntimeProfileId =
+                    serde_json::from_value(params["profile_id"].clone()).map_err(|e| {
+                        PumasError::InvalidParams {
+                            message: format!("Invalid runtime profile id: {e}"),
+                        }
+                    })?;
+                let tag = params["tag"]
+                    .as_str()
+                    .ok_or_else(|| PumasError::InvalidParams {
+                        message: "tag is required".to_string(),
+                    })?;
+                let version_dir =
+                    params["version_dir"]
+                        .as_str()
+                        .ok_or_else(|| PumasError::InvalidParams {
+                            message: "version_dir is required".to_string(),
+                        })?;
+                let version_dir =
+                    validate_local_directory_target_path(version_dir, "version_dir").await?;
+                let response =
+                    launch_runtime_profile(self, profile_id, tag, version_dir.as_path()).await?;
                 Ok(serde_json::to_value(response)?)
             }
             "is_torch_running" => Ok(serde_json::to_value(is_torch_running(self).await)?),

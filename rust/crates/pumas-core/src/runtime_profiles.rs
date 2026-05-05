@@ -291,6 +291,19 @@ impl RuntimeProfileService {
         })?
     }
 
+    pub async fn managed_profile_launch_spec(
+        &self,
+        profile_id: RuntimeProfileId,
+    ) -> Result<RuntimeProfileLaunchSpec> {
+        let specs = self.list_managed_profile_launch_specs().await?;
+        specs
+            .into_iter()
+            .find(|spec| spec.profile_id == profile_id)
+            .ok_or_else(|| PumasError::InvalidParams {
+                message: format!("managed runtime profile not found: {}", profile_id.as_str()),
+            })
+    }
+
     pub fn begin_profile_operation(
         &self,
         profile_id: RuntimeProfileId,
@@ -310,6 +323,13 @@ impl RuntimeProfileService {
             profile_id,
             operation_locks: self.operation_locks.clone(),
         })
+    }
+
+    pub fn record_profile_lifecycle_status(
+        &self,
+        status: RuntimeProfileStatus,
+    ) -> Result<Option<RuntimeProfileEvent>> {
+        self.record_profile_status(status)
     }
 
     pub async fn upsert_profile(

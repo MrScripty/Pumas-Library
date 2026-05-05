@@ -11,7 +11,8 @@
 
 use pumas_library::models::{
     ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
-    ModelPackageFactsSummaryStatus,
+    ModelPackageFactsSummaryStatus, RuntimeLifecycleState, RuntimePort, RuntimeProfileConfig,
+    RuntimeProfileId,
 };
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
@@ -157,6 +158,52 @@ async fn test_runtime_profile_snapshot_preserves_singleton_ollama_status() {
 
     assert!(status.success);
     assert_eq!(status.ollama_running, singleton_ollama_running);
+}
+
+#[tokio::test]
+async fn test_launch_runtime_profile_reports_profile_scoped_failure() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+
+    let mut profile = RuntimeProfileConfig::default_ollama();
+    profile.profile_id = RuntimeProfileId::parse("ollama-test-profile").unwrap();
+    profile.name = "Ollama Test Profile".to_string();
+    profile.endpoint_url = None;
+    profile.port = RuntimePort::parse(12555).ok();
+    api.upsert_runtime_profile(profile).await.unwrap();
+
+    let version_dir = temp_dir.path().join("ollama-versions").join("missing-bin");
+    std::fs::create_dir_all(&version_dir).unwrap();
+    let response = api
+        .launch_runtime_profile(
+            RuntimeProfileId::parse("ollama-test-profile").unwrap(),
+            "missing-bin",
+            &version_dir,
+        )
+        .await
+        .unwrap();
+
+    assert!(!response.success);
+    assert!(response
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Binary not found"));
+
+    let snapshot = api.get_runtime_profiles_snapshot().await.unwrap();
+    let status = snapshot
+        .snapshot
+        .statuses
+        .iter()
+        .find(|status| status.profile_id.as_str() == "ollama-test-profile")
+        .unwrap();
+    assert_eq!(status.state, RuntimeLifecycleState::Failed);
+    assert!(status
+        .last_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Binary not found"));
 }
 
 #[tokio::test]

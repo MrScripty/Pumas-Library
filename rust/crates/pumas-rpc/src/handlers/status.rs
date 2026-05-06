@@ -5,9 +5,33 @@ use super::{
     sync_version_paths_to_process_manager,
 };
 use crate::server::AppState;
+use pumas_library::models::{
+    StatusResponse, StatusTelemetrySnapshot, StatusTelemetryUpdateNotification,
+};
 use serde_json::{json, Value};
 
 pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
+    let response = enriched_status_response(state).await?;
+    Ok(serde_json::to_value(response)?)
+}
+
+pub(crate) async fn enrich_status_telemetry_notification(
+    state: &AppState,
+    mut notification: StatusTelemetryUpdateNotification,
+) -> pumas_library::Result<StatusTelemetryUpdateNotification> {
+    notification.snapshot = enrich_status_telemetry_snapshot(state, notification.snapshot).await?;
+    Ok(notification)
+}
+
+async fn enrich_status_telemetry_snapshot(
+    state: &AppState,
+    mut snapshot: StatusTelemetrySnapshot,
+) -> pumas_library::Result<StatusTelemetrySnapshot> {
+    snapshot.status = enriched_status_response(state).await?;
+    Ok(snapshot)
+}
+
+async fn enriched_status_response(state: &AppState) -> pumas_library::Result<StatusResponse> {
     // Ensure process manager has current version paths for accurate running detection
     sync_version_paths_to_process_manager(state).await;
     let mut response = state.api.get_status().await?;
@@ -41,7 +65,7 @@ pub async fn get_status(state: &AppState, _params: &Value) -> pumas_library::Res
         }
     }
 
-    Ok(serde_json::to_value(response)?)
+    Ok(response)
 }
 
 pub async fn get_disk_space(state: &AppState, _params: &Value) -> pumas_library::Result<Value> {
@@ -62,6 +86,7 @@ pub async fn get_status_telemetry_snapshot(
     _params: &Value,
 ) -> pumas_library::Result<Value> {
     let snapshot = state.api.refresh_status_telemetry_snapshot().await?;
+    let snapshot = enrich_status_telemetry_snapshot(state, snapshot).await?;
     Ok(serde_json::to_value(snapshot)?)
 }
 

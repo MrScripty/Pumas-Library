@@ -316,11 +316,11 @@ the same subscriber handoff model rather than copying the polling pattern.
   `cargo test --manifest-path rust/Cargo.toml -p pumas-library status_telemetry`,
   `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc status_telemetry`,
   and `git diff --check` passed.
-- 2026-05-06 issue recorded: telemetry snapshots are core-owned and currently
-  use core `status_response`, while the existing `get_status` RPC handler adds
-  ComfyUI version, dependency, patch, and shortcut enrichment. Before frontend
-  migration, move that enrichment behind a backend-owned telemetry/status helper
-  or explicitly preserve the fields another way.
+- 2026-05-06 issue found and resolved: telemetry snapshots are core-owned and
+  initially used core `status_response`, while the existing `get_status` RPC
+  handler adds ComfyUI version, dependency, patch, and shortcut enrichment. The
+  RPC enrichment was moved behind a reusable helper and is now applied to
+  telemetry snapshots before they are returned by RPC or emitted over SSE.
 
 ### Milestone 3 - Electron Bridge Subscription
 - Add Electron bridge stream handling for telemetry updates.

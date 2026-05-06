@@ -362,12 +362,32 @@ async fn next_status_telemetry_update_event(
     mut state: StatusTelemetryUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, StatusTelemetryUpdateStreamState)> {
     if let Some(notification) = state.pending_notification.take() {
+        let notification =
+            match status::enrich_status_telemetry_notification(&state.state, notification).await {
+                Ok(notification) => notification,
+                Err(error) => {
+                    warn!("status telemetry enrichment failed: {}", error);
+                    return None;
+                }
+            };
         let event = status_telemetry_update_sse_event(&notification);
         return Some((Ok(event), state));
     }
 
     match state.receiver.recv().await {
         Ok(notification) => {
+            let notification = match status::enrich_status_telemetry_notification(
+                &state.state,
+                notification,
+            )
+            .await
+            {
+                Ok(notification) => notification,
+                Err(error) => {
+                    warn!("status telemetry enrichment failed: {}", error);
+                    return None;
+                }
+            };
             let event = status_telemetry_update_sse_event(&notification);
             Some((Ok(event), state))
         }
@@ -379,6 +399,18 @@ async fn next_status_telemetry_update_event(
                         snapshot,
                         stale_cursor: true,
                         snapshot_required: true,
+                    };
+                    let notification = match status::enrich_status_telemetry_notification(
+                        &state.state,
+                        notification,
+                    )
+                    .await
+                    {
+                        Ok(notification) => notification,
+                        Err(error) => {
+                            warn!("status telemetry enrichment failed: {}", error);
+                            return None;
+                        }
                     };
                     let event = status_telemetry_update_sse_event(&notification);
                     Some((Ok(event), state))

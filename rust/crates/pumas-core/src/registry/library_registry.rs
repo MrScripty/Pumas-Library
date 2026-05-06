@@ -636,6 +636,24 @@ impl LibraryRegistry {
         Self::read_instance_entry(&conn, &path_str)
     }
 
+    /// List tracked instance rows newest-first.
+    pub fn list_instances(&self) -> Result<Vec<InstanceEntry>> {
+        let conn = self.lock_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT library_path FROM instances ORDER BY started_at DESC")?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+
+        let mut instances = Vec::new();
+        for row in rows {
+            let path_str = row?;
+            if let Some(instance) = Self::read_instance_entry(&conn, &path_str)? {
+                instances.push(instance);
+            }
+        }
+
+        Ok(instances)
+    }
+
     /// Remove stale instance entries (dead PIDs or nonexistent library paths).
     pub fn cleanup_stale(&self) -> Result<usize> {
         let conn = self.lock_conn()?;
@@ -944,6 +962,31 @@ mod tests {
         assert_eq!(instance.endpoint, "127.0.0.1:54321");
         assert!(instance.connection_token.is_some());
         assert_eq!(instance.status, InstanceStatus::Ready);
+    }
+
+    #[test]
+    fn test_list_instances_returns_registered_instance_rows() {
+        let (registry, temp_dir) = create_test_registry();
+        let lib1 = create_library_dir(temp_dir.path(), "lib-one");
+        let lib2 = create_library_dir(temp_dir.path(), "lib-two");
+
+        registry.register(&lib1, "Library One").unwrap();
+        registry.register(&lib2, "Library Two").unwrap();
+        registry
+            .register_instance(&lib1, std::process::id(), 11111)
+            .unwrap();
+        registry
+            .register_instance(&lib2, std::process::id(), 22222)
+            .unwrap();
+
+        let instances = registry.list_instances().unwrap();
+        assert_eq!(instances.len(), 2);
+        assert!(instances
+            .iter()
+            .any(|instance| instance.port == 11111 && instance.endpoint == "127.0.0.1:11111"));
+        assert!(instances
+            .iter()
+            .any(|instance| instance.port == 22222 && instance.endpoint == "127.0.0.1:22222"));
     }
 
     #[test]

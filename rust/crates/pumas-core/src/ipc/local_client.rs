@@ -2,7 +2,7 @@
 
 use super::IpcClient;
 use crate::models::{ModelLibrarySelectorSnapshot, ModelLibrarySelectorSnapshotRequest};
-use crate::registry::{InstanceEntry, InstanceStatus, LocalInstanceTransportKind};
+use crate::registry::{InstanceEntry, InstanceStatus, LibraryRegistry, LocalInstanceTransportKind};
 use crate::{PumasError, Result};
 use std::net::SocketAddr;
 
@@ -14,6 +14,17 @@ pub struct PumasLocalClient {
 }
 
 impl PumasLocalClient {
+    /// Discover ready local instances from the platform registry.
+    pub fn discover_ready_instances() -> Result<Vec<InstanceEntry>> {
+        let registry = LibraryRegistry::open()?;
+        let _ = registry.cleanup_stale()?;
+        Ok(registry
+            .list_instances()?
+            .into_iter()
+            .filter(|instance| instance.status == InstanceStatus::Ready)
+            .collect())
+    }
+
     /// Connect to a ready local instance advertised by the registry.
     pub async fn connect(instance: InstanceEntry) -> Result<Self> {
         if instance.status != InstanceStatus::Ready {
@@ -90,7 +101,34 @@ mod tests {
     use crate::models::ModelLibrarySelectorSnapshot;
     use async_trait::async_trait;
     use std::path::PathBuf;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, OnceLock};
+    use tempfile::TempDir;
+
+    static REGISTRY_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+    struct RegistryOverrideGuard {
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl RegistryOverrideGuard {
+        fn new(root: &std::path::Path) -> Self {
+            let lock = REGISTRY_TEST_LOCK
+                .get_or_init(|| Mutex::new(()))
+                .lock()
+                .expect("registry test lock poisoned");
+            crate::platform::paths::set_test_registry_db_path(Some(
+                root.join("registry-test")
+                    .join(crate::config::RegistryConfig::DB_FILENAME),
+            ));
+            Self { _lock: lock }
+        }
+    }
+
+    impl Drop for RegistryOverrideGuard {
+        fn drop(&mut self) {
+            crate::platform::paths::set_test_registry_db_path(None);
+        }
+    }
 
     struct SelectorSnapshotDispatch;
 
@@ -166,5 +204,32 @@ mod tests {
 
         let err = PumasLocalClient::connect(instance).await.unwrap_err();
         assert!(matches!(err, PumasError::InvalidParams { .. }));
+    }
+
+    #[test]
+    fn local_client_discovers_ready_instances_only() {
+        let temp_dir = TempDir::new().unwrap();
+        let _registry_override = RegistryOverrideGuard::new(temp_dir.path());
+        let ready_root = temp_dir.path().join("ready-library");
+        let claiming_root = temp_dir.path().join("claiming-library");
+        std::fs::create_dir_all(&ready_root).unwrap();
+        std::fs::create_dir_all(&claiming_root).unwrap();
+
+        let registry = LibraryRegistry::open().unwrap();
+        registry.register(&ready_root, "Ready Library").unwrap();
+        registry
+            .register(&claiming_root, "Claiming Library")
+            .unwrap();
+        registry
+            .register_instance(&ready_root, std::process::id(), 34567)
+            .unwrap();
+        let _ = registry
+            .try_claim_instance(&claiming_root, std::process::id())
+            .unwrap();
+
+        let instances = PumasLocalClient::discover_ready_instances().unwrap();
+        assert_eq!(instances.len(), 1);
+        assert_eq!(instances[0].port, 34567);
+        assert_eq!(instances[0].status, InstanceStatus::Ready);
     }
 }

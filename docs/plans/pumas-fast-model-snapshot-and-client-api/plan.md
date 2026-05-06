@@ -525,6 +525,10 @@ Update during implementation:
   `PumasApi` constructors. The client exposes
   `model_library_selector_snapshot` as one IPC request against the owner
   instance. Token enforcement and non-TCP transports remain pending.
+- 2026-05-06: Milestone 6 discovery slice added registry instance listing and
+  `PumasLocalClient::discover_ready_instances()`. Discovery reads the platform
+  registry, cleans stale rows, and returns only ready instances; explicit
+  `connect` remains a separate caller action.
 
 ## Commit Cadence Notes
 
@@ -741,6 +745,10 @@ After each worker wave:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector_snapshot`
+- Milestone 6 local-client discovery verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
 
 ### Traceability Links
 

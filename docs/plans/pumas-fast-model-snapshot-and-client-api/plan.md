@@ -136,7 +136,7 @@ non-transport alias so consumers are not misled about ownership mode.
 | Risk | Impact | Mitigation |
 | ---- | ------ | ---------- |
 | Selector projection lacks a fact Pantograph needs | High | Start with Pantograph's `puma-lib` needs and add contract tests for graph-facing model refs |
-| Snapshot path accidentally calls deep resolution | High | Add tests/tracing guards that fail on metadata JSON loads, filesystem scans, dependency resolution, or per-row IPC |
+| Snapshot path accidentally calls deep resolution | High | Add tests/tracing guards that fail on filesystem metadata JSON loads, filesystem scans, dependency resolution, or per-row IPC |
 | Entry path is used when state is not ready | High | Add tests proving `entry_path` is executable only when entry and artifact states are both `Ready` |
 | Snapshot/subscription race misses updates | High | Implement cursor-based subscription handshake before relying on push updates |
 | Read-only snapshots observe incomplete writes | High | Use SQLite transactions and document read-only consistency semantics |
@@ -158,7 +158,7 @@ non-transport alias so consumers are not misled about ownership mode.
 - Root proposal has been moved into this slugged plan directory with a
   standards-compliant README and implementation plan.
 - Direct/read-only selector snapshots return 50-100 warm indexed rows in
-  `<= 5ms` without filesystem scans, metadata JSON loads, RPC, or deep
+  `<= 5ms` without filesystem scans, filesystem metadata JSON loads, RPC, or deep
   per-model resolution.
 - Selector rows expose `PumasModelRef`, selected artifact identity/path,
   entry path, entry path state, and artifact state.
@@ -173,8 +173,9 @@ non-transport alias so consumers are not misled about ownership mode.
 - Explicit local-client discovery works without hidden `PumasApi` RPC.
 - Local-client snapshot timing is measured against the selected same-device
   transport and avoids per-row calls.
-- Batch hydration and cheap descriptor APIs share loaded facts and preserve
-  selected-model detail completeness.
+- Batch hydration and cheap descriptor APIs avoid public per-model API calls,
+  preserve selected-model detail completeness, and may reuse internal selected
+  model resolvers where that keeps behavior canonical.
 - Each completed logical slice is verified and committed atomically.
 
 ## Milestones
@@ -595,6 +596,8 @@ Update during implementation:
   cheap execution descriptors, and inference settings.
 - Explicit local-client discovery, token validation, and loopback transport
   access are implemented for selector/update/batch calls.
+- `PumasReadOnlyLibrary::open` expects the model-library root that contains
+  `models.db`; consumers should not pass the launcher or source repository root.
 
 ## Verification Summary
 
@@ -619,6 +622,24 @@ Update during implementation:
 - Foreign-language local-client/read-only bindings are not added in this plan;
   the UniFFI owner object was made explicit instead of carrying hidden IPC
   fallback behavior.
+- Selected-model batch hydration avoids public per-row calls and transport
+  round trips, but currently loops canonical internal resolvers for execution
+  descriptors and package-facts summaries. This is acceptable for selected
+  model hydration; optimize only if measured selected-set workloads require it.
+- Selector snapshots use SQLite `json_extract` against indexed
+  `metadata_json`; the completed "no metadata JSON loads" constraint means no
+  filesystem metadata JSON reads or deep model resolution on the selector path.
+
+## Traceability Links
+
+- Proposal:
+  `docs/plans/pumas-fast-model-snapshot-and-client-api/proposal.md`
+- Directory README:
+  `docs/plans/pumas-fast-model-snapshot-and-client-api/README.md`
+- Pantograph-facing selector contract:
+  `docs/plans/pumas-fast-model-snapshot-and-client-api/selector-snapshot-contract.md`
+- Selector timing report:
+  `docs/plans/pumas-fast-model-snapshot-and-client-api/reports/selector-snapshot-performance.md`
 
 ## Discovered Issues
 
@@ -719,154 +740,3 @@ After each worker wave:
   reads and never become a second owner lifecycle.
 - Treat `PumasLocalClient` as a transport adapter over core contracts, not as a
   second API semantics layer.
-
-## Completion Summary
-
-### Completed
-
-- Milestone 0 planning package setup:
-  - moved the proposal into `docs/plans/pumas-fast-model-snapshot-and-client-api/proposal.md`;
-  - added the directory README;
-  - added this standards-compliant implementation plan;
-  - updated plan index and superseded-plan references.
-- Milestone 1 API role inventory and contract freeze:
-  - classified current source, test, example, RPC, UniFFI, and documentation
-    construction references;
-  - documented migration blockers and anti-patterns in `caller-inventory.md`;
-  - updated active docs to frame transparent `PumasApi` convergence as
-    transitional compatibility.
-- Milestone 2 Slice 2.1 selector contract foundation:
-  - added `ModelLibrarySelectorSnapshot`, `ModelLibrarySelectorSnapshotRow`,
-    request DTOs, entry/artifact readiness enums, and detail freshness enum;
-  - extended `PumasModelRef` with `model_ref_contract_version` to clarify that
-    the version is the model-reference contract version, not a model revision;
-  - documented selector invariants in the models module README.
-- Milestone 2 Slice 2.2 selector index projection:
-  - added the first SQLite-backed selector snapshot projection under
-    `ModelIndex`;
-  - joined valid package-facts summaries without regenerating facts;
-  - preserved rows when summaries are missing or invalid;
-  - derived non-ready artifact and entry states from persisted partial,
-    validation, and import metadata.
-- Milestone 2 Slice 2.3 direct owner API:
-  - added `ModelLibrary::model_library_selector_snapshot`;
-  - added a primary-only transitional `PumasApi` method with no hidden IPC
-    fallback;
-  - covered the direct API path and proved it does not regenerate missing
-    package-facts summaries.
-- Milestone 2 Slice 2.4 read-only API:
-  - added `PumasReadOnlyLibrary`;
-  - added `ModelIndex::open_read_only`;
-  - proved read-only selector access works against an existing index and does
-    not create a missing database.
-- Milestone 2 Slice 2.5 timing and consumer fixture:
-  - added a warm 100-row direct/read-only timing test;
-  - recorded timing results in `reports/selector-snapshot-performance.md`;
-  - added `selector-snapshot-contract.md` and
-    `fixtures/selector-snapshot-row.json` for Pantograph-facing lazy selector
-    consumption.
-- Milestone 3 selector lifecycle:
-  - kept selector rows as a live projection over index/cache rows rather than
-    adding a second materialized refresh lifecycle;
-  - added tests proving selector output reflects model row updates and package
-    summary cache updates without a selector-specific refresh job;
-  - changed package-facts summary cache writes to emit model-library update
-    events.
-- Milestone 4 recovery-first subscription handoff:
-  - added `ModelLibraryUpdateSubscription`;
-  - added direct owner/API recovery from a snapshot cursor;
-  - tested the snapshot-gap case and stale cursor behavior;
-  - recorded that the live bus remains pending rather than hiding that gap
-    behind the current polling SSE path.
-- Milestone 4 core update bus:
-  - added a broadcast sender/receiver to `ModelIndex`;
-  - published model-library update events after durable append/commit;
-  - exposed `ModelLibrary::subscribe_model_library_update_events`;
-  - tested live publication for model upsert and transactional model-id
-    replace.
-
-### Deviations
-
-- None yet.
-
-### Follow-Ups
-
-- None yet.
-
-### Verification Summary
-
-- Documentation-only planning slice.
-- Checked against `PLAN-STANDARDS.md`, `DOCUMENTATION-STANDARDS.md`, and
-  `templates/PLAN-TEMPLATE.md`.
-- Milestone 1 verification was documentation/inventory-only; no compile was
-  required because no source behavior changed.
-- Milestone 2 Slice 2.1 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_ref`
-- Milestone 2 Slice 2.2 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
-- Milestone 2 Slice 2.3 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
-- Milestone 2 Slice 2.4 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
-- Milestone 2 Slice 2.5 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot_reports_warm_100_row_timing -- --nocapture`
-- Milestone 3 verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
-- Milestone 4 recovery-first subscription verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_updates_since`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
-- Milestone 4 core update bus verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update_broadcast`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
-- Milestone 4 owner-side stream handoff verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_update_stream_since`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
-- Milestone 5 GUI forwarding verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc model_library_update_event_stream`
-  - `npm run -w electron validate`
-  - `npm run -w electron test`
-  - `npm run -w frontend test:run -- useModels.test.ts ModelManagerIntegrityRefresh.test.ts api-package-facts.test.ts`
-- Milestone 6 registry endpoint contract verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
-- Milestone 6 explicit local-client selector verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector_snapshot`
-- Milestone 6 local-client discovery verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
-- Milestone 6 transport order and selector timing verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_selector_snapshot_reports_transport_timing_target -- --nocapture`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
-- Milestone 6 local-client subscription verification:
-  - `cargo fmt --manifest-path rust/Cargo.toml --all`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_subscribes_to_one_update_stream`
-  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library ipc`
-
-### Traceability Links
-
-- Proposal: `docs/plans/pumas-fast-model-snapshot-and-client-api/proposal.md`
-- Directory README:
-  `docs/plans/pumas-fast-model-snapshot-and-client-api/README.md`
-- Module README updated: N/A until implementation touches source modules.
-- ADR added/updated: N/A.
-- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A until PR
-  creation.

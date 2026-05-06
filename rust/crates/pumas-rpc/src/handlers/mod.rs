@@ -37,6 +37,7 @@ use tracing::{debug, error, warn};
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
 const MODEL_LIBRARY_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
 const RUNTIME_PROFILE_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
+const RUNTIME_PROFILE_UPDATE_UNSUPPORTED_RETRY: Duration = Duration::from_secs(60);
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
@@ -135,6 +136,7 @@ pub async fn handle_runtime_profile_update_events(
     let stream_state = RuntimeProfileUpdateStreamState {
         state,
         cursor: None,
+        update_method_unsupported: false,
     };
     let stream = stream::unfold(stream_state, next_runtime_profile_update_event);
 
@@ -240,13 +242,19 @@ fn model_library_update_sse_event(notification: &ModelLibraryUpdateNotification)
 struct RuntimeProfileUpdateStreamState {
     state: Arc<AppState>,
     cursor: Option<String>,
+    update_method_unsupported: bool,
 }
 
 async fn next_runtime_profile_update_event(
     mut state: RuntimeProfileUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, RuntimeProfileUpdateStreamState)> {
     loop {
-        tokio::time::sleep(RUNTIME_PROFILE_UPDATE_STREAM_POLL).await;
+        let poll_delay = if state.update_method_unsupported {
+            RUNTIME_PROFILE_UPDATE_UNSUPPORTED_RETRY
+        } else {
+            RUNTIME_PROFILE_UPDATE_STREAM_POLL
+        };
+        tokio::time::sleep(poll_delay).await;
 
         match state
             .state
@@ -255,6 +263,7 @@ async fn next_runtime_profile_update_event(
             .await
         {
             Ok(response) => {
+                state.update_method_unsupported = false;
                 state.cursor = Some(response.feed.cursor.clone());
 
                 if response.feed.events.is_empty()
@@ -268,10 +277,34 @@ async fn next_runtime_profile_update_event(
                 return Some((Ok(event), state));
             }
             Err(error) => {
+                if is_runtime_profile_update_method_unsupported(&error) {
+                    if !state.update_method_unsupported {
+                        warn!(
+                            "runtime-profile update stream unavailable because the primary \
+                             backend does not support list_runtime_profile_updates_since; \
+                             backing off until the primary backend is restarted"
+                        );
+                    }
+                    state.update_method_unsupported = true;
+                    continue;
+                }
+                state.update_method_unsupported = false;
                 warn!("runtime-profile update stream polling failed: {}", error);
             }
         }
     }
+}
+
+fn is_runtime_profile_update_method_unsupported(error: &pumas_library::PumasError) -> bool {
+    matches!(
+        error,
+        pumas_library::PumasError::InvalidParams { message }
+            if message.contains("Unknown IPC method: list_runtime_profile_updates_since")
+    ) || matches!(
+        error,
+        pumas_library::PumasError::Other(message)
+            if message.contains("Unknown IPC method: list_runtime_profile_updates_since")
+    )
 }
 
 fn runtime_profile_update_sse_event(feed: &RuntimeProfileUpdateFeed) -> Event {
@@ -582,5 +615,33 @@ mod tests {
         // In normal development, we're not sandboxed
         // This test verifies the function runs without error
         assert!(!is_sandboxed || ["flatpak", "snap", "docker", "appimage"].contains(&sandbox_type));
+    }
+
+    #[test]
+    fn runtime_profile_update_unsupported_detection_matches_legacy_primary_error() {
+        let error = pumas_library::PumasError::InvalidParams {
+            message: "Unknown IPC method: list_runtime_profile_updates_since".to_string(),
+        };
+
+        assert!(is_runtime_profile_update_method_unsupported(&error));
+    }
+
+    #[test]
+    fn runtime_profile_update_unsupported_detection_matches_forwarded_ipc_error() {
+        let error = pumas_library::PumasError::Other(
+            "Invalid parameters: Unknown IPC method: list_runtime_profile_updates_since"
+                .to_string(),
+        );
+
+        assert!(is_runtime_profile_update_method_unsupported(&error));
+    }
+
+    #[test]
+    fn runtime_profile_update_unsupported_detection_ignores_other_errors() {
+        let error = pumas_library::PumasError::InvalidParams {
+            message: "missing required field: cursor".to_string(),
+        };
+
+        assert!(!is_runtime_profile_update_method_unsupported(&error));
     }
 }

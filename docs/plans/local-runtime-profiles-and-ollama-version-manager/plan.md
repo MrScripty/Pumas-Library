@@ -487,6 +487,11 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 
 **Implementation Notes:**
 - 2026-05-05: Updated core, API, models, process, RPC handler, desktop RPC contract, frontend type, hook, and app-panel section docs to describe backend-owned runtime profiles, canonical `profile_id` routing, legacy endpoint boundaries, pushed runtime-profile events, profile-scoped process ownership, and generated llama.cpp router presets.
+- 2026-05-05: Release smoke against an already-running older primary backend exposed a compatibility warning loop: the new runtime-profile SSE stream repeatedly called `list_runtime_profile_updates_since` through a primary instance that did not support the method yet. Added a compatibility backoff so the stream logs the unsupported primary once and retries slowly until the primary backend is restarted.
+
+**Discovered Issues:**
+- 2026-05-05: `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and the plural `runtime_profiles` filter currently match no RPC tests. The full `pumas-rpc` suite covers the registered RPC unit tests, but dedicated runtime-profile handler tests should be added if handler-level behavior expands.
+- 2026-05-05: Release smoke can connect to an already-running primary backend from a previous build. Runtime-profile event compatibility is now throttled for older primaries, but manual verification should restart the app fully before judging new runtime-profile UI behavior.
 
 ## Lifecycle and Concurrency Notes
 

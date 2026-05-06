@@ -29,12 +29,6 @@ impl PumasApi {
         &self,
         _version_tag: Option<&str>,
     ) -> Result<models::LinkHealthResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("get_link_health", serde_json::json!({}))
-                .await;
-        }
-
         let registry = self.primary().model_library.link_registry().read().await;
         let all_links = registry.get_all().await;
 
@@ -76,12 +70,6 @@ impl PumasApi {
     ///
     /// Returns the number of broken links that were removed.
     pub async fn clean_broken_links(&self) -> Result<models::CleanBrokenLinksResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("clean_broken_links", serde_json::json!({}))
-                .await;
-        }
-
         let registry = self.primary().model_library.link_registry().write().await;
         let broken = registry.cleanup_broken().await?;
 
@@ -102,15 +90,6 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::LinksForModelResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "get_links_for_model",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await;
-        }
-
         let registry = self.primary().model_library.link_registry().read().await;
         let links = registry.get_links_for_model(model_id).await;
 
@@ -137,15 +116,6 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<models::DeleteModelResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "delete_model_with_cascade",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .model_library
             .delete_model(model_id, true)
@@ -163,17 +133,6 @@ impl PumasApi {
         app_id: &str,
         excluded: bool,
     ) -> Result<models::BaseResponse> {
-        if self.try_client().is_some() {
-            return self.call_client_method_blocking(
-                "set_model_link_exclusion",
-                serde_json::json!({
-                    "model_id": model_id,
-                    "app_id": app_id,
-                    "excluded": excluded,
-                }),
-            );
-        }
-
         self.primary()
             .model_library
             .index()
@@ -183,13 +142,6 @@ impl PumasApi {
 
     /// Get all model IDs excluded from linking for a given app.
     pub fn get_link_exclusions(&self, app_id: &str) -> Result<models::LinkExclusionsResponse> {
-        if self.try_client().is_some() {
-            return self.call_client_method_blocking(
-                "get_link_exclusions",
-                serde_json::json!({ "app_id": app_id }),
-            );
-        }
-
         let excluded = self
             .primary()
             .model_library

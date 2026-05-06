@@ -551,6 +551,10 @@ Update during implementation:
   connection helper were removed. API and IPC docs now describe `PumasApi` as
   the owning-instance facade and `PumasLocalClient` as the explicit local
   transport role.
+- 2026-05-06: Milestone 7 cleanup slice removed unreachable hidden-client
+  forwarding branches from the owner-side network, link, and conversion API
+  modules. These methods now read directly against primary-owned state instead
+  of carrying dead IPC proxy branches.
 
 ## Discovered Issues
 
@@ -561,10 +565,9 @@ Update during implementation:
   RPC response for operator feedback.
 - 2026-05-06: After removing the hidden `PumasApi` client constructor path,
   many `PumasApi` methods still contain stale `try_client()` forwarding
-  branches. They are unreachable from public constructors now, but they keep
-  transport concerns in the owning-instance facade and should be deleted or
-  moved behind explicit `PumasLocalClient` methods in the next Milestone 7
-  cleanup slice.
+  branches. Network, link, and conversion methods have been cleaned up; the
+  remaining model, system, process, runtime-profile, Hugging Face, mapping, and
+  migration methods should be cleaned in follow-up slices.
 
 ## Commit Cadence Notes
 

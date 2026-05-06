@@ -393,6 +393,23 @@ the same subscriber handoff model rather than copying the polling pattern.
   `pumas-rpc` CPU should average below 5% on the developer workstation and file
   descriptors should not grow into thousands from `/proc` stat scans.
 
+**Implementation Notes:**
+- 2026-05-06 audit: status/resource hooks no longer contain `setInterval`,
+  `pollInterval`, or direct `get_status`, `get_system_resources`,
+  `get_network_status`, or `get_library_status` polling calls.
+- 2026-05-06 audit: remaining frontend intervals are workflow-local
+  installation/download polling, plugin app status polling, short-lived
+  `AppIndicator` UI animation intervals, and mounted app-panel polling for
+  loaded models/stats/Torch state. These are classified as outside the global
+  status/resource CPU bug, but download progress polling remains a good
+  follow-up candidate because it is related to transfer indicators.
+- 2026-05-06 audit: process-table refresh remains isolated to explicit
+  process-resource paths and app-resource aggregation while apps are running;
+  global header resource snapshots no longer call process refresh.
+- 2026-05-06 fix: lowered verbose `aggregate_ollama_resources` per-PID resource
+  logs from info to debug so telemetry sampling while Ollama is running does not
+  create noisy normal-operation logs.
+
 ### Milestone 6 - Release Build And Cross-Layer Verification
 - Run Rust checks/tests for changed crates.
 - Run frontend/electron validation.

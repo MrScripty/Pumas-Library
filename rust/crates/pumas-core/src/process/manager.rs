@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, RwLock};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Process with resource information.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -580,9 +580,9 @@ impl ProcessManager {
     /// Aggregate resources for running Ollama processes.
     pub fn aggregate_ollama_resources(&self) -> Option<ProcessResources> {
         let versions_dir = self.root_dir.join("ollama-versions");
-        info!("aggregate_ollama_resources: checking {:?}", versions_dir);
+        debug!("aggregate_ollama_resources: checking {:?}", versions_dir);
         if !versions_dir.exists() {
-            info!("aggregate_ollama_resources: versions_dir does not exist");
+            debug!("aggregate_ollama_resources: versions_dir does not exist");
             return None;
         }
 
@@ -595,7 +595,7 @@ impl ProcessManager {
         if let Ok(entries) = fs::read_dir(&versions_dir) {
             for entry in entries.flatten() {
                 let pid_file = entry.path().join("ollama.pid");
-                info!(
+                debug!(
                     "aggregate_ollama_resources: checking pid_file {:?}, exists={}",
                     pid_file,
                     pid_file.exists()
@@ -603,14 +603,14 @@ impl ProcessManager {
                 if pid_file.exists() {
                     if let Ok(pid_str) = fs::read_to_string(&pid_file) {
                         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                            info!("aggregate_ollama_resources: found PID {}", pid);
+                            debug!("aggregate_ollama_resources: found PID {}", pid);
                             let alive = crate::platform::is_process_alive(pid);
-                            info!("aggregate_ollama_resources: PID {} alive={}", pid, alive);
+                            debug!("aggregate_ollama_resources: PID {} alive={}", pid, alive);
                             if alive {
                                 // Process is alive, get its resources
                                 match self.resource_tracker.get_process_resources(pid, true) {
                                     Ok(resources) => {
-                                        info!("aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
+                                        debug!("aggregate_ollama_resources: PID {} resources: cpu={}, ram={}, gpu={}",
                                             pid, resources.cpu, resources.ram_memory, resources.gpu_memory);
                                         total_cpu += resources.cpu;
                                         total_ram += resources.ram_memory;
@@ -628,7 +628,7 @@ impl ProcessManager {
             }
         }
 
-        info!(
+        debug!(
             "aggregate_ollama_resources: found_any={}, total_ram={}, total_gpu={}",
             found_any, total_ram, total_gpu
         );

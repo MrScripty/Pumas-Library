@@ -58,6 +58,7 @@ pub use cancel::{CancellationToken, CancelledError};
 pub use config::AppId;
 pub use error::{PumasError, Result};
 pub use index::{ModelIndex, ModelRecord, SearchResult};
+pub use ipc::PumasLocalClient;
 pub use launcher::{LauncherUpdater, PatchManager, UpdateApplyResult, UpdateCheckResult};
 pub use metadata::MetadataManager;
 pub use model_library::sharding::{self, ShardValidation};

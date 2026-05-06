@@ -38,7 +38,9 @@ Maximum frame size: 16 MiB (configurable via `RegistryConfig::MAX_IPC_MESSAGE_SI
 - `protocol.rs` - Frame read/write functions and JSON-RPC type definitions
 - `server.rs` - TCP server with `IpcDispatch` trait for method routing
 - `client.rs` - TCP client with `call()` method used by the legacy proxy path
-  and future explicit local-client transport
+- `local_client.rs` - explicit `PumasLocalClient` role for same-device
+  clients that connect from a registry `InstanceEntry` and perform typed
+  one-request operations such as selector snapshots
 
 ## Thread Safety
 

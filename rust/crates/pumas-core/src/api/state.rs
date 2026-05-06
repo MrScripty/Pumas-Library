@@ -509,6 +509,22 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .await?;
                 Ok(serde_json::to_value(updates)?)
             }
+            "model_library_selector_snapshot" => {
+                let request_value = params
+                    .get("request")
+                    .cloned()
+                    .unwrap_or_else(|| params.clone());
+                let request: crate::models::ModelLibrarySelectorSnapshotRequest =
+                    serde_json::from_value(request_value).map_err(|err| PumasError::Json {
+                        message: format!("Invalid model_library_selector_snapshot request: {err}"),
+                        source: Some(err),
+                    })?;
+                let snapshot = self
+                    .model_library
+                    .model_library_selector_snapshot(request)
+                    .await?;
+                Ok(serde_json::to_value(snapshot)?)
+            }
             "get_runtime_profiles_snapshot" => {
                 let ollama_running = is_ollama_running(self).await;
                 self.runtime_profile_service

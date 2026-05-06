@@ -11,9 +11,11 @@
 //! - **Protocol**: Shared framing and JSON-RPC types used by both
 
 pub mod client;
+pub mod local_client;
 pub mod protocol;
 pub mod server;
 
 pub use client::IpcClient;
+pub use local_client::PumasLocalClient;
 pub use protocol::{IpcRequest, IpcResponse};
-pub use server::{IpcServer, IpcServerHandle};
+pub use server::{IpcDispatch, IpcServer, IpcServerHandle};

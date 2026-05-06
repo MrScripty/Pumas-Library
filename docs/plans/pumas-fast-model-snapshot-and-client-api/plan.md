@@ -338,8 +338,8 @@ Rust API.
 **Tasks:**
 - [x] Define local instance registry endpoint records with pid, root, status,
   transport kind, endpoint, and connection token.
-- [ ] Add explicit `PumasLocalClient::connect`.
-- [ ] Expose local-client selector snapshot as one transport request per
+- [x] Add explicit `PumasLocalClient::connect`.
+- [x] Expose local-client selector snapshot as one transport request per
   snapshot.
 - [ ] Expose local-client subscription as one stream per subscription.
 - [ ] Choose platform transport order: Unix socket on Linux/macOS, named pipe
@@ -519,6 +519,12 @@ Update during implementation:
   rows migrate with `transport_kind = loopback_tcp`, a fallback
   `127.0.0.1:{port}` endpoint, and no client token; newly ready rows receive a
   generated connection token for later transport authentication work.
+- 2026-05-06: Milestone 6 second slice added explicit `PumasLocalClient`.
+  `connect` accepts a registry `InstanceEntry`, rejects non-ready and
+  non-loopback TCP endpoints, and keeps local-client attachment separate from
+  `PumasApi` constructors. The client exposes
+  `model_library_selector_snapshot` as one IPC request against the owner
+  instance. Token enforcement and non-TCP transports remain pending.
 
 ## Commit Cadence Notes
 
@@ -731,6 +737,10 @@ After each worker wave:
 - Milestone 6 registry endpoint contract verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
+- Milestone 6 explicit local-client selector verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector_snapshot`
 
 ### Traceability Links
 

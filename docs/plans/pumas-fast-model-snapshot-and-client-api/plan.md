@@ -1,0 +1,553 @@
+# Plan: Fast Model Snapshot And Explicit Client API
+
+## Objective
+
+Implement a fast, safe Pumas model selector path and explicit local client
+architecture that lets Pantograph consume Pumas model facts without per-model
+hydration or hidden RPC inside the Rust API.
+
+## Scope
+
+### In Scope
+
+- Materialized selector snapshot rows with canonical Pumas model references,
+  selected artifact state, entry path state, and validation/detail state.
+- Direct in-process and read-only Rust snapshot access backed by indexed
+  SQLite/cache state.
+- Core-owned typed model-library update subscription with atomic recovery from
+  a snapshot cursor.
+- Explicit Pumas instance, local client, and read-only reader API roles.
+- Same-device local instance discovery and an explicit local-client transport
+  adapter.
+- Batch hydration and cheap descriptor APIs after the fast selector slice is
+  proven.
+- RPC/SSE/Electron forwarding alignment so GUI paths consume core event
+  contracts.
+
+### Out of Scope
+
+- Distributed or multi-host discovery.
+- Pantograph runtime scheduling, session, queue, graph execution, or diagnostic
+  policy.
+- Replacing SQLite as the local source of indexed and durable model facts.
+- Preserving transparent `PumasApi` auto-client behavior.
+- Making GUI RPC the preferred API for Pantograph or other non-GUI clients.
+
+## Inputs
+
+### Problem
+
+Pantograph currently needs selector and graph-authoring facts that require
+multiple expensive Pumas calls per model. The existing `PumasApi` also blurs
+deployment topology by sometimes acting as a direct primary API and sometimes
+as an IPC-backed client. That design is hard to reason about, slower than
+needed, and unsafe for external consumers that need clear identity and update
+semantics.
+
+### Constraints
+
+- Direct Rust API calls must stay typed and in-process unless the caller
+  explicitly chooses a local client transport.
+- Selector snapshots must not scan model directories, read metadata JSON,
+  regenerate package facts, resolve dependencies, or perform per-row IPC.
+- `indexed_path` is display/debug data only.
+- `entry_path` is executable only when `entry_path_state == Ready` and
+  `artifact_state == Ready`.
+- Snapshot-to-subscription handoff must not miss events committed after the
+  snapshot cursor is produced.
+- Local-client endpoints must remain same-device only and authenticated by a
+  registry token or equivalent local credential.
+- Documentation and implementation must follow the Coding Standards plan,
+  documentation, Rust API, concurrency, testing, and commit standards.
+
+### Assumptions
+
+- Existing model index and metadata/cache state can provide enough facts for a
+  first selector projection without deep package-facts regeneration.
+- SQLite transaction boundaries can provide coherent direct/read-only snapshot
+  semantics.
+- The existing durable model-library update feed can be reused or adapted as
+  the recovery source for subscription handoff.
+- Pantograph can initially consume direct/read-only snapshots before the full
+  local-client transport slice is complete.
+- Legacy transparent `PumasApi` behavior can be broken or deprecated rather
+  than preserved.
+
+### Dependencies
+
+- `rust/crates/pumas-core/src/index/`
+- `rust/crates/pumas-core/src/model_library/`
+- `rust/crates/pumas-core/src/api/`
+- `rust/crates/pumas-core/src/registry/`
+- `rust/crates/pumas-core/src/ipc/`
+- `rust/crates/pumas-rpc/src/server.rs`
+- `electron/src/python-bridge.ts`
+- `electron/src/preload.ts`
+- `frontend/src/hooks/useModelLibraryUpdateSubscription.ts`
+- Pantograph `puma-lib` integration and fixture expectations.
+
+### Affected Structured Contracts
+
+- Rust public entry points currently represented by `PumasApi`.
+- New `PumasLibraryInstance`, `PumasReadOnlyLibrary`, and `PumasLocalClient`
+  surfaces.
+- `ModelLibrarySelectorSnapshotRequest`
+- `ModelLibrarySelectorSnapshot`
+- `ModelLibrarySelectorSnapshotRow`
+- `PumasModelRef`
+- `ModelEntryPathState`
+- `ModelArtifactState`
+- `ModelLibraryUpdateSubscription`
+- `ModelLibraryUpdateFeed`
+- Local instance registry endpoint records.
+- RPC/SSE/Electron update forwarding payloads.
+
+### Affected Persisted Artifacts
+
+- Model index SQLite tables or projections used for selector rows.
+- Durable model-library update feed rows and cursors.
+- Local library registry SQLite instance rows and endpoint records.
+- Existing metadata and package-facts cache rows used as selector inputs.
+
+### Ownership And Lifecycle Note
+
+`PumasLibraryInstance` owns writes, migrations, downloads, reconciliation,
+watchers, update production, and optional local service publication.
+`PumasReadOnlyLibrary` owns no background work and must not mutate state or
+claim the instance registry. `PumasLocalClient` owns only a connection or
+subscription stream to a running instance and must cleanly close streams on
+drop/shutdown.
+
+Subscription startup must use `subscribe_model_library_updates_since(cursor)`.
+The instance must replay recoverable events after the cursor, return the
+cursor after recovery, and then transition the same subscriber to live events.
+Reconnect uses `list_model_library_updates_since(cursor, limit)` and falls
+back to a full snapshot on stale cursor.
+
+### Public Facade Preservation Note
+
+This is an API-breaking cleanup. Transparent `PumasApi` auto-client behavior is
+not preserved as a compatibility requirement. If `PumasApi` remains during the
+transition, it must be explicitly deprecated, narrowed, or converted into a
+non-transport alias so consumers are not misled about ownership mode.
+
+### Risks
+
+| Risk | Impact | Mitigation |
+| ---- | ------ | ---------- |
+| Selector projection lacks a fact Pantograph needs | High | Start with Pantograph's `puma-lib` needs and add contract tests for graph-facing model refs |
+| Snapshot path accidentally calls deep resolution | High | Add tests/tracing guards that fail on metadata JSON loads, filesystem scans, dependency resolution, or per-row IPC |
+| Entry path is used when state is not ready | High | Add tests proving `entry_path` is executable only when entry and artifact states are both `Ready` |
+| Snapshot/subscription race misses updates | High | Implement cursor-based subscription handshake before relying on push updates |
+| Read-only snapshots observe incomplete writes | High | Use SQLite transactions and document read-only consistency semantics |
+| `PumasApi` split touches more callers than expected | High | Inventory callers before source changes and migrate by role in separate commits |
+| Local client transport exposes an unintended network surface | Medium | Prefer platform IPC; restrict loopback TCP to localhost plus registry token |
+| Local-client target depends on transport choice | Medium | Measure selected Unix socket, named pipe, or TCP transport separately from direct SQLite |
+| Batch hydration becomes a loop over slow APIs | Medium | Share internal loaded facts and test that batch paths avoid public per-model loops |
+
+## Clarifying Questions
+
+- None.
+- Reason: Pantograph has accepted the revised direction, and remaining
+  transport choices can be handled inside the relevant implementation slice.
+- Revisit trigger: The selected local-client transport cannot meet security or
+  performance requirements.
+
+## Definition of Done
+
+- Root proposal has been moved into this slugged plan directory with a
+  standards-compliant README and implementation plan.
+- Direct/read-only selector snapshots return 50-100 warm indexed rows in
+  `<= 5ms` without filesystem scans, metadata JSON loads, RPC, or deep
+  per-model resolution.
+- Selector rows expose `PumasModelRef`, selected artifact identity/path,
+  entry path, entry path state, and artifact state.
+- Tests prove `entry_path` is executable only when entry and artifact state are
+  both `Ready`.
+- Pantograph can consume the selector snapshot lazily for `puma-lib` without
+  hydrating every listed model.
+- Core-owned subscriptions accept a snapshot cursor and replay recovered
+  events before live events.
+- GUI RPC/SSE/Electron update forwarding is backed by the same core update
+  contract.
+- Explicit local-client discovery works without hidden `PumasApi` RPC.
+- Local-client snapshot timing is measured against the selected same-device
+  transport and avoids per-row calls.
+- Batch hydration and cheap descriptor APIs share loaded facts and preserve
+  selected-model detail completeness.
+- Each completed logical slice is verified and committed atomically.
+
+## Milestones
+
+### Milestone 0: Plan Package And Traceability
+
+**Goal:** Put the accepted proposal into a standards-compliant plan package.
+
+**Tasks:**
+- [x] Move the Pantograph proposal into a slugged directory.
+- [x] Add a directory README with purpose, constraints, invariants, and
+  consumer contract.
+- [x] Add this implementation plan with thin vertical slices.
+- [x] Update `docs/plans/README.md` and superseded-plan references to the new
+  directory path.
+
+**Verification:**
+- Plan package follows `PLAN-STANDARDS.md` and `DOCUMENTATION-STANDARDS.md`.
+- `git status --short` shows only expected documentation changes.
+
+**Status:** Complete
+
+### Milestone 1: API Role Inventory And Contract Freeze
+
+**Goal:** Freeze the public role names and identify every current caller before
+changing source behavior.
+
+**Tasks:**
+- [ ] Inventory all `PumasApi::new`, `PumasApi::builder`, and `PumasApi::discover`
+  callers.
+- [ ] Classify each caller as owning instance, explicit local client, or
+  read-only consumer.
+- [ ] Add or update architecture docs that define `PumasLibraryInstance`,
+  `PumasReadOnlyLibrary`, and `PumasLocalClient`.
+- [ ] Record the compatibility break and migration path for transparent
+  client-mode behavior.
+
+**Verification:**
+- No caller remains unclassified.
+- Architecture docs state that direct Rust APIs do not secretly use RPC.
+- Compile is not required if this slice is documentation/inventory only.
+
+**Status:** Not started
+
+### Milestone 2: Fast Selector Vertical Slice
+
+**Goal:** Deliver the smallest useful selector path Pantograph can consume
+without broad transport work.
+
+**Tasks:**
+- [ ] Add selector snapshot DTOs and contract tests.
+- [ ] Add materialized selector row storage or a query projection backed by
+  indexed SQLite/cache state.
+- [ ] Populate rows for existing indexed models with `PumasModelRef`,
+  selected artifact identity/path, entry path, entry path state, artifact
+  state, display fields, and detail state.
+- [ ] Add direct in-process `PumasLibraryInstance` selector snapshot access.
+- [ ] Add `PumasReadOnlyLibrary` selector snapshot access with no background
+  work or registry claim.
+- [ ] Add tests proving non-ready entry/artifact states are not executable.
+- [ ] Add benchmark or timing test for 50-100 warm direct/read-only rows.
+- [ ] Update Pantograph-facing docs or fixtures showing lazy `puma-lib`
+  consumption from selector rows.
+
+**Commit Sub-Slices:**
+- Slice 2.1: Add selector DTOs, executable-state contract tests, and
+  documentation for `PumasModelRef` semantics.
+- Slice 2.2: Add SQLite-backed selector projection or storage and populate it
+  for existing indexed models.
+- Slice 2.3: Add direct in-process selector snapshot API and prove it avoids
+  deep resolution.
+- Slice 2.4: Add read-only selector snapshot API with no lifecycle ownership.
+- Slice 2.5: Add performance measurement/report and Pantograph-facing fixture
+  or documentation updates.
+
+**Verification:**
+- Targeted Rust tests for DTO mapping, state semantics, and read-only behavior.
+- Warm direct/read-only selector timing reports `<= 5ms` for common pages.
+- Tests or tracing guards prove no filesystem scan, metadata JSON load, RPC,
+  dependency resolution, or package-facts regeneration on the snapshot path.
+- Correctness tests are gating. The `<= 5ms` target should be recorded through
+  a benchmark or timing report unless stable performance-test infrastructure
+  exists for this crate.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 3: Selector Materialization Lifecycle
+
+**Goal:** Keep selector rows current through model-library state changes.
+
+**Tasks:**
+- [ ] Update import completion to populate/update selector rows.
+- [ ] Update download completion and selected-artifact changes to refresh
+  selector rows.
+- [ ] Update migration/reconciliation paths to refresh selector rows.
+- [ ] Update metadata refresh paths to invalidate or refresh selector rows.
+- [ ] Emit model-library update feed events when selector-visible facts change.
+
+**Verification:**
+- Tests cover import, download completion, metadata refresh, migration, and
+  reconciliation updates.
+- Integrity/problem rows surface explicit stale, missing, partial, ambiguous,
+  or needs-detail states instead of deep-resolving inline.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 4: Core Subscriber With Atomic Handoff
+
+**Goal:** Make model-library updates a core typed subscription with no
+snapshot-to-live race.
+
+**Tasks:**
+- [ ] Move or wrap model-library update publication behind a core event bus.
+- [ ] Add `subscribe_model_library_updates_since(cursor)`.
+- [ ] Make subscription startup replay durable events after the cursor before
+  yielding live events.
+- [ ] Return `cursor_after_recovery` before live event processing.
+- [ ] Preserve `list_model_library_updates_since(cursor, limit)` for reconnect
+  recovery.
+- [ ] Define stale cursor behavior that forces a fresh selector snapshot.
+
+**Verification:**
+- Test commits an update after snapshot cursor creation and before
+  subscription activation; subscriber receives the update.
+- Direct Rust subscription and durable recovery observe the same ordered event
+  sequence.
+- Disconnect/reconnect tests recover missed events or report stale cursor.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 5: GUI Forwarding From Core Events
+
+**Goal:** Make existing GUI push behavior consume the canonical core event
+contract instead of a parallel event path.
+
+**Tasks:**
+- [ ] Update RPC/SSE endpoint implementation to subscribe to the core update
+  bus.
+- [ ] Update Electron forwarding to preserve cursor/recovery semantics.
+- [ ] Update preload/frontend type validation if payload shape changes.
+- [ ] Keep frontend refresh debounced and subscriber-owned, not component-level
+  polling.
+
+**Verification:**
+- Backend/RPC tests cover SSE event payload and recovery behavior.
+- Electron tests cover subscribe/unsubscribe cleanup and invalid payloads.
+- Frontend tests cover debounced refresh from update notifications.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 6: Explicit Local Client Discovery
+
+**Goal:** Support same-device external clients without hidden RPC inside the
+Rust API.
+
+**Tasks:**
+- [ ] Define local instance registry endpoint records with pid, root, status,
+  transport kind, endpoint, and connection token.
+- [ ] Add explicit `PumasLocalClient::connect`.
+- [ ] Expose local-client selector snapshot as one transport request per
+  snapshot.
+- [ ] Expose local-client subscription as one stream per subscription.
+- [ ] Choose platform transport order: Unix socket on Linux/macOS, named pipe
+  on Windows, localhost TCP fallback when needed.
+- [ ] Measure local-client selector latency against the selected transport.
+
+**Verification:**
+- A second process discovers and connects to a running instance explicitly.
+- Direct Rust constructors do not silently become transport clients.
+- Local-client snapshot avoids per-row calls and reports selected-transport
+  timing against the `<= 25ms` initial target.
+- Security tests or assertions cover localhost/token restrictions for TCP
+  fallback.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 7: Public API Split And Compatibility Cleanup
+
+**Goal:** Remove or narrow transparent `PumasApi` behavior after replacement
+entry points exist.
+
+**Tasks:**
+- [ ] Introduce or finalize `PumasLibraryInstance`, `PumasReadOnlyLibrary`, and
+  `PumasLocalClient` exports.
+- [ ] Migrate internal callers from `PumasApi` to explicit roles.
+- [ ] Remove, deprecate, or narrow transparent `ApiInner::Client` dispatch.
+- [ ] Update UniFFI/bindings guidance to use explicit roles.
+- [ ] Update crate docs and examples.
+
+**Verification:**
+- Compile and targeted Rust API tests pass.
+- Public docs no longer describe hidden transparent client behavior as the
+  preferred contract.
+- API break is recorded in docs/release notes if release notes exist for this
+  cycle.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 8: Batch Hydration And Cheap Descriptor Split
+
+**Goal:** Keep selected-model detail access complete while eliminating slow
+multi-model public loops.
+
+**Tasks:**
+- [ ] Add batch package-facts summary resolution backed by shared loaded facts.
+- [ ] Add batch execution descriptor resolution backed by shared loaded facts.
+- [ ] Add batch inference-settings access.
+- [ ] Split cheap execution descriptor fields from dependency resolution.
+- [ ] Keep dependency resolution opt-in for selected models or explicit batch
+  requests.
+- [ ] Update Pantograph integration guidance for optional multi-select
+  hydration.
+
+**Verification:**
+- Batch tests prove per-model failures are represented without failing the
+  whole batch unnecessarily.
+- Tests or tracing guards show batch APIs do not loop over slow public
+  single-model APIs.
+- Selected-model hydration still returns full details, dependencies, and
+  inference settings.
+- Atomic commit after successful verification.
+
+**Status:** Not started
+
+### Milestone 9: Final Standards Pass And Release Build
+
+**Goal:** Close the plan with complete verification and traceability.
+
+**Tasks:**
+- [ ] Run Rust formatting and targeted/full Rust checks appropriate to the
+  changed crates.
+- [ ] Run Electron/frontend type, lint, and test checks for changed surfaces.
+- [ ] Build release binaries and frontend.
+- [ ] Update this plan's execution notes, completion summary, deviations,
+  follow-ups, and verification summary.
+
+**Verification:**
+- `cargo fmt`/Rust checks pass for changed Rust crates.
+- Frontend/Electron checks pass for changed JS/TS surfaces.
+- Release build and frontend build pass.
+- Final commit captures documentation closeout or release artifact updates.
+
+**Status:** Not started
+
+## Execution Notes
+
+Update during implementation:
+- 2026-05-06: Proposal moved into a standards-compliant plan directory and
+  converted into this implementation plan.
+
+## Commit Cadence Notes
+
+- Commit after each milestone's verified logical slice.
+- Keep schema, Rust code, tests, and matching docs together when they are part
+  of the same slice.
+- Keep API compatibility cleanup separate from the first selector slice.
+- Keep local-client transport work separate from direct/read-only snapshot
+  work.
+- Use standard commit format from `COMMIT-STANDARDS.md`.
+
+## Concurrent Worker Plan
+
+Use subagents only after Milestone 1 has classified callers, the integration
+branch is clean, and shared DTO/schema ownership has been assigned. Each worker
+must use an isolated worktree or temporary clone and may commit only inside its
+assigned workspace.
+
+### Worker Wave 1: Independent Read And Event Slices
+
+| Owner/Agent | Assigned Scope | Primary Write Set | Allowed Adjacent Write Set | Read-Only Context | Forbidden/Shared Files | Output Contract | Report Path | Handoff Checkpoint |
+| ----------- | -------------- | ----------------- | -------------------------- | ----------------- | ---------------------- | --------------- | ----------- | ------------------ |
+| Worker A | Selector storage/query and Rust DTO tests | `rust/crates/pumas-core/src/index/`, selector-specific files under `rust/crates/pumas-core/src/model_library/`, focused Rust tests | Module README updates for touched selector/index directories | Existing metadata, package-facts, import, and migration code | Public exports, shared DTO modules, registry schema, lockfiles, generated bindings | Patch and tests for Milestone 2 selector projection without deep resolution | `docs/plans/pumas-fast-model-snapshot-and-client-api/reports/worker-a-selector.md` | Worker tests pass and report lists changed files |
+| Worker B | Core update bus and subscription race tests | Core update-feed/subscription files under `rust/crates/pumas-core/src/api/` and `rust/crates/pumas-core/src/model_library/`, focused Rust tests | Module README updates for touched update-feed directories | Existing SSE/Electron update forwarding and durable feed code | Public exports, shared DTO modules, registry schema, lockfiles, generated bindings | Patch and tests for Milestone 4 atomic cursor handoff | `docs/plans/pumas-fast-model-snapshot-and-client-api/reports/worker-b-subscription.md` | Race test passes and report lists changed files |
+
+### Worker Wave 2: Transport And GUI Forwarding
+
+Start only after Wave 1 has been integrated and verified.
+
+| Owner/Agent | Assigned Scope | Primary Write Set | Allowed Adjacent Write Set | Read-Only Context | Forbidden/Shared Files | Output Contract | Report Path | Handoff Checkpoint |
+| ----------- | -------------- | ----------------- | -------------------------- | ----------------- | ---------------------- | --------------- | ----------- | ------------------ |
+| Worker C | RPC/SSE/Electron/frontend forwarding from core events | `rust/crates/pumas-rpc/src/`, `electron/src/`, `electron/tests/`, `frontend/src/hooks/`, `frontend/src/types/`, focused tests | Frontend hook README updates if touched | Core update bus contracts from integrated Wave 1 | Core DTO definitions unless assigned by integration owner, lockfiles, generated bindings | Patch and tests for Milestone 5 GUI forwarding | `docs/plans/pumas-fast-model-snapshot-and-client-api/reports/worker-c-gui-forwarding.md` | JS/TS focused tests pass and report lists changed files |
+| Worker D | Explicit local client discovery transport | `rust/crates/pumas-core/src/registry/`, `rust/crates/pumas-core/src/ipc/`, new local-client files, focused Rust tests | Module README updates for touched registry/ipc directories | Integrated selector and subscription contracts | Shared DTO exports unless assigned by integration owner, lockfiles, generated bindings | Patch and tests for Milestone 6 explicit attach and selected-transport timing | `docs/plans/pumas-fast-model-snapshot-and-client-api/reports/worker-d-local-client.md` | Explicit attach test passes and report lists changed files |
+
+### Serial Integration Ownership
+
+The integration owner, not parallel workers, owns:
+
+- shared public DTO names and exports;
+- schema migrations that affect more than one worker;
+- crate-level public API re-exports;
+- lockfiles and generated bindings;
+- conflict resolution;
+- plan status, execution notes, and completion summary updates.
+
+### External-Change Escalation Rule
+
+If a worker needs edits outside its primary or allowed adjacent write set, it
+must record the need in its report instead of changing the file. The
+integration owner decides whether to expand the write set, handle the change
+serially, or re-plan.
+
+### Integration Sequence And Cleanup
+
+After each worker wave:
+
+- Read every worker report.
+- Verify changed files match assigned write sets.
+- Integrate worker branches one at a time.
+- Run the wave verification after integration.
+- Commit conflict resolution separately if it is not already owned by one
+  worker.
+- Update this plan with integrated commits, verification, deviations, and
+  follow-ups.
+- Confirm worker workspaces have no uncommitted changes before removing them.
+
+## Re-Plan Triggers
+
+- Pantograph cannot build safe graph-facing references from selector rows.
+- Direct/read-only snapshot cannot meet `<= 5ms` without deep changes to the
+  index schema.
+- Atomic subscription handoff cannot be implemented on the existing durable
+  feed.
+- Splitting `PumasApi` requires a broader crate restructure than expected.
+- Selected platform IPC cannot satisfy same-device security or performance
+  requirements.
+- Existing migrations or download/reconciliation flows cannot update selector
+  rows without risking data loss.
+
+## Recommendations
+
+- Implement Milestone 2 before expanding local-client transport. This proves
+  the immediate Pantograph path and keeps early blast radius low.
+- Keep `PumasReadOnlyLibrary` narrow. It should only expose snapshot-style
+  reads and never become a second owner lifecycle.
+- Treat `PumasLocalClient` as a transport adapter over core contracts, not as a
+  second API semantics layer.
+
+## Completion Summary
+
+### Completed
+
+- Milestone 0 planning package setup:
+  - moved the proposal into `docs/plans/pumas-fast-model-snapshot-and-client-api/proposal.md`;
+  - added the directory README;
+  - added this standards-compliant implementation plan;
+  - updated plan index and superseded-plan references.
+
+### Deviations
+
+- None yet.
+
+### Follow-Ups
+
+- None yet.
+
+### Verification Summary
+
+- Documentation-only planning slice.
+- Checked against `PLAN-STANDARDS.md`, `DOCUMENTATION-STANDARDS.md`, and
+  `templates/PLAN-TEMPLATE.md`.
+
+### Traceability Links
+
+- Proposal: `docs/plans/pumas-fast-model-snapshot-and-client-api/proposal.md`
+- Directory README:
+  `docs/plans/pumas-fast-model-snapshot-and-client-api/README.md`
+- Module README updated: N/A until implementation touches source modules.
+- ADR added/updated: N/A.
+- PR notes completed per `templates/PULL_REQUEST_TEMPLATE.md`: N/A until PR
+  creation.

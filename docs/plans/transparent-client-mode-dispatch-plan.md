@@ -1,10 +1,39 @@
 # Plan: Transparent Client-Mode Dispatch for `PumasApi`
 
+## Status
+
+Superseded for future implementation.
+
+Architecture review found that transparent client-mode dispatch makes the Rust
+API hide whether calls are direct in-process operations or serialized
+cross-process transport calls. That is the wrong long-term contract for Pumas
+Library API consumers such as Pantograph.
+
+Do not continue this plan as written. Future work should use explicit role
+types:
+
+- `PumasLibraryInstance` for a process that owns a library root and starts
+  primary-owned lifecycle work;
+- `PumasLocalClient` for an explicit same-device client connected to a running
+  instance;
+- `PumasReadOnlyLibrary` for direct read-only SQLite-backed snapshot access
+  where no owner lifecycle is required;
+- transport adapters such as RPC/SSE/Electron IPC, Unix sockets, named pipes,
+  or loopback TCP over those core contracts.
+
+The original method-classification work remains useful as an audit input, but
+the constructor target is no longer valid: `PumasApi::new()` should not silently
+return an IPC-backed client.
+
 ## Objective
 
 Implement full IPC-backed client-mode dispatch in `pumas-core` so low-level
 Rust callers receive a usable `PumasApi` handle whether the process becomes the
 primary or attaches to an existing primary for the same launcher root.
+
+**Superseded objective:** replace this with an explicit instance/client API
+split and a canonical core subscriber model. See
+`pumas-fast-model-snapshot-and-client-api/plan.md`.
 
 ## Scope
 
@@ -47,7 +76,9 @@ primary or attaches to an existing primary for the same launcher root.
 
 ### Assumptions
 
-- Transparent client behavior is the intended long-term Rust API contract.
+- ~~Transparent client behavior is the intended long-term Rust API contract.~~
+  Superseded: explicit instance/client/read-only roles are the intended
+  long-term contract.
 - Existing IPC transport is sufficient if missing handlers are added.
 - Some methods may remain intentionally primary-only, but only as explicit,
   documented exceptions.
@@ -149,16 +180,13 @@ primary or attaches to an existing primary for the same launcher root.
 
 ### Constructor Contract Targets
 
-- `PumasApi::new()` must not auto-client until the proxyable method set is
-  implemented and verified.
+- `PumasApi::new()` must not auto-client. Transparent auto-client behavior is
+  superseded by explicit `PumasLibraryInstance`, `PumasLocalClient`, and
+  `PumasReadOnlyLibrary` entry points.
 - During implementation, `PrimaryInstanceBusy` remains acceptable for raw Rust
   callers.
-- After parity is complete, `PumasApi::new()` should:
-  - become primary when claim succeeds
-  - wait and attach as a client when another process owns or is starting the
-    same launcher root
-- Any explicit primary-only constructor, if needed, must be named as such and
-  documented separately.
+- Future implementation should make primary ownership, local-client connection,
+  and read-only access separate named operations.
 
 ## Risks
 
@@ -170,126 +198,23 @@ primary or attaches to an existing primary for the same launcher root.
 | Client-mode refactor causes broad regressions across API modules | Medium | Use shared dispatch helpers and commit module slices atomically after targeted verification |
 | Constructor contract flips too early | Medium | Delay `PumasApi::new()` behavior change until client parity milestones are verified |
 
-## Definition of Done
+## Superseded Implementation Checklist
 
-- `ApiInner::Client` stores a real IPC client and supports transparent dispatch
-  for all supported public `PumasApi` methods.
-- Every public `PumasApi` method is explicitly classified as proxyable or
-  primary-only.
-- Proxyable methods work in both primary and client mode with equivalent
-  behavior and error semantics.
-- Primary-only methods return explicit, documented errors in client mode.
-- `PumasApi::new()` returns a working primary or client-backed handle without
-  split-brain risk.
-- Rust integration tests cover primary attach, client attach, and representative
-  API parity.
-- Architecture and crate docs accurately describe the low-level Rust contract.
+Do not use this file as an active implementation checklist. The transparent
+client-mode milestones below are retained only as an audit snapshot of the old
+direction.
 
-## Milestones
+| Old Milestone | Previous Intent | Current Status |
+| ------------- | --------------- | -------------- |
+| Establish the Client-Parity Contract | Inventory `PumasApi` methods and classify proxyability. | Superseded; use explicit role inventory in `pumas-fast-model-snapshot-and-client-api/plan.md`. |
+| Build Shared Client Dispatch Infrastructure | Make `ApiInner::Client` a real transparent dispatch path. | Superseded; direct Rust APIs must not hide transport. |
+| Deliver Module-by-Module API Parity | Add IPC parity for public `PumasApi` methods. | Superseded; local transport belongs behind explicit `PumasLocalClient`. |
+| Promote Transparent Rust Constructor Behavior | Make `PumasApi::new()` return a client-backed handle. | Superseded; do not implement. |
+| Align Documentation and Usage Guidance | Document transparent dual-mode behavior. | Superseded; document explicit instance/client/read-only roles instead. |
 
-### Milestone 1: Establish the Client-Parity Contract
-
-**Goal:** Define the intended low-level Rust API contract before implementation.
-
-**Tasks:**
-- [ ] Inventory all public `PumasApi` methods across API modules.
-- [ ] Classify each method as `proxyable`, `primary-only`, or `needs decision`.
-- [ ] Record the target Rust constructor behavior and client-mode expectations.
-- [ ] Identify all missing IPC handlers and schema gaps required for parity.
-- [ ] Add the method classification matrix and target contract to this plan.
-
-**Verification:**
-- Method matrix completed with no unclassified public methods.
-- Review against current IPC dispatch coverage in
-  `rust/crates/pumas-core/src/api/state.rs`.
-- Plan artifact conforms to planning/documentation standards.
-
-**Status:** In progress
-
-### Milestone 2: Build Shared Client Dispatch Infrastructure
-
-**Goal:** Make client mode real at the core dispatch layer.
-
-**Tasks:**
-- [ ] Refactor `ApiInner::Client` to hold `Arc<IpcClient>`.
-- [ ] Add shared helpers for local-or-remote dispatch to avoid ad hoc branching.
-- [ ] Add consistent client-side request encoding, response decoding, and error
-  mapping helpers.
-- [ ] Implement or refine constructors/discovery helpers that can create real
-  client-backed `PumasApi` values without changing public behavior yet.
-- [ ] Ensure primary-only helpers fail coherently rather than panicking when
-  invoked from client mode.
-
-**Verification:**
-- Targeted tests for helper behavior and error mapping.
-- Compile/test pass proving a client-backed `PumasApi` can execute a minimal
-  IPC-backed method set.
-- No undocumented `self.primary()` assumptions remain in the infrastructure
-  layer.
-
-**Status:** Not started
-
-### Milestone 3: Deliver Module-by-Module API Parity
-
-**Goal:** Make the public API work in client mode before changing constructor
-behavior.
-
-**Tasks:**
-- [ ] Implement model-library API parity.
-- [ ] Implement HF/download API parity.
-- [ ] Implement process/system/network/conversion parity where appropriate.
-- [ ] Add missing IPC handlers in `rust/crates/pumas-core/src/api/state.rs`.
-- [ ] For intentionally primary-only methods, return explicit client-mode
-  errors and document the exception.
-
-**Verification:**
-- Targeted parity tests for representative methods in each module.
-- Negative-path tests for primary-only methods.
-- Regression check that primary behavior remains unchanged.
-
-**Status:** Not started
-
-### Milestone 4: Promote Transparent Rust Constructor Behavior
-
-**Goal:** Change the low-level Rust constructor only after parity is proven.
-
-**Tasks:**
-- [ ] Update `PumasApi::new()` to return a client-backed handle when another
-  primary already owns or is starting the launcher root.
-- [ ] Decide and document whether `discover()` remains separate or converges on
-  the same behavior.
-- [ ] Reuse the existing strict registry claim lifecycle for wait/attach
-  behavior.
-- [ ] Remove the standard-caller dependency on handling
-  `PrimaryInstanceBusy` manually, except where explicitly retained for a
-  specialized primary-only path.
-
-**Verification:**
-- Integration tests where one process becomes primary and another receives a
-  working client-backed `PumasApi`.
-- Race tests for `claiming` to `ready` attach behavior.
-- Confirmation that no losing constructor starts primary-owned lifecycle work.
-
-**Status:** Not started
-
-### Milestone 5: Align Documentation and Usage Guidance
-
-**Goal:** Make the codebase and docs reflect one coherent contract.
-
-**Tasks:**
-- [ ] Update low-level Rust API docs to describe transparent dual-mode behavior.
-- [ ] Update IPC and architecture docs to reflect Rust parity with wrapper
-  attach behavior.
-- [ ] Document any remaining primary-only operations explicitly.
-- [ ] Add concise troubleshooting guidance for attach failures and
-  shared-instance loss semantics.
-
-**Verification:**
-- Consistency pass across architecture and crate docs.
-- Documentation traceability review against implemented behavior.
-- Final documentation changes satisfy documentation standards.
-
-**Status:** Not started
+The useful artifact preserved from this plan is the earlier method and IPC
+coverage audit. Any future implementation work should copy needed audit facts
+into the active plan before changing source code.
 
 ## Execution Notes
 
@@ -317,13 +242,13 @@ Update during implementation:
 
 ## Recommendations (Only If Better Option Exists)
 
-- Treat this as an API-parity project first and a constructor-behavior change
-  second.
-- Do not flip `PumasApi::new()` to auto-client until module parity is verified.
-- Centralize dual-mode dispatch helpers instead of scattering `match self.inner`
-  across modules.
-- Keep the strict registry claim lifecycle unchanged and build transparent
-  client behavior on top of it.
+- Treat this file as an audit artifact, not an active implementation plan.
+- Move forward with an explicit role split instead of transparent dual-mode
+  dispatch.
+- Keep the strict registry claim lifecycle for owner instances.
+- Keep local transport for explicit cross-process clients only.
+- Promote model-library subscriptions into core so GUI and external clients
+  share one event contract.
 
 ## Completion Summary
 

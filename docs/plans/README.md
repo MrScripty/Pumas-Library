@@ -7,7 +7,8 @@ This directory holds implementation plans for cross-module changes that need exp
 | File/Folder | Description |
 |-------------|-------------|
 | `strict-primary-claim-and-reconciliation-idempotence-plan.md` | Plan for making reconciliation side effects idempotent and enforcing a strict single-primary-per-launcher-root startup contract. |
-| `transparent-client-mode-dispatch-plan.md` | Plan for making raw Rust `PumasApi` callers converge to a real client-backed handle with explicit module-by-module IPC parity. |
+| `transparent-client-mode-dispatch-plan.md` | Superseded audit artifact for transparent `PumasApi` client-mode dispatch; future work should use explicit instance/client/read-only roles instead of hidden RPC. |
+| `pumas-fast-model-snapshot-and-client-api/` | Proposal and implementation plan for fast model selector snapshots, explicit Pumas instance/client/read-only boundaries, and a core-owned subscriber model for Pantograph and other consumers. |
 | `external-reference-diffusers-implementation-plan.md` | Backend-first implementation plan for external-reference diffusers bundles, including schema, validation, execution descriptor, and regression controls. |
 | `directory-import-disambiguation-implementation-plan.md` | Plan for GUI/backend directory import classification so bundle roots and multi-model containers are imported safely and distinctly. |
 | `hf-classification-and-library-repair-remediation-plan.md` | Plan for standards remediation, saved HF/local-library evidence, and non-model-specific fixes for model classification and organization drift. |

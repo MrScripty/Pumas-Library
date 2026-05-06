@@ -371,6 +371,17 @@ pub struct ModelPackageFactsSummaryResult {
     pub summary: Option<ResolvedModelPackageFactsSummary>,
 }
 
+/// Per-model result for batch package-facts summary hydration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelPackageFactsSummaryBatchItem {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<ModelPackageFactsSummaryResult>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// Startup/list snapshot item for host cache population.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

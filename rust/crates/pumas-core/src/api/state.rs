@@ -403,6 +403,26 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 let settings = load_inference_settings(self, model_id).await?;
                 Ok(serde_json::to_value(settings)?)
             }
+            "get_inference_settings_batch" => {
+                validate_local_client_connection_token(self, &params)?;
+                let model_ids = parse_model_ids_param(&params)?;
+                let mut items = Vec::with_capacity(model_ids.len());
+                for model_id in model_ids {
+                    match load_inference_settings(self, &model_id).await {
+                        Ok(settings) => items.push(models::ModelInferenceSettingsBatchItem {
+                            model_id,
+                            settings,
+                            error: None,
+                        }),
+                        Err(err) => items.push(models::ModelInferenceSettingsBatchItem {
+                            model_id,
+                            settings: Vec::new(),
+                            error: Some(err.to_string()),
+                        }),
+                    }
+                }
+                Ok(serde_json::to_value(items)?)
+            }
             "update_inference_settings" => {
                 let model_id =
                     params["model_id"]
@@ -482,6 +502,15 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .resolve_model_execution_descriptor(model_id)
                     .await?;
                 Ok(serde_json::to_value(descriptor)?)
+            }
+            "resolve_model_execution_descriptors_batch" => {
+                validate_local_client_connection_token(self, &params)?;
+                let model_ids = parse_model_ids_param(&params)?;
+                let descriptors = self
+                    .model_library
+                    .resolve_model_execution_descriptors_batch(&model_ids)
+                    .await?;
+                Ok(serde_json::to_value(descriptors)?)
             }
             "resolve_model_package_facts" => {
                 let model_id =
@@ -725,6 +754,15 @@ impl ipc::server::IpcDispatch for PrimaryState {
                     .resolve_model_package_facts_summary(model_id)
                     .await?;
                 Ok(serde_json::to_value(summary)?)
+            }
+            "resolve_model_package_facts_summaries" => {
+                validate_local_client_connection_token(self, &params)?;
+                let model_ids = parse_model_ids_param(&params)?;
+                let summaries = self
+                    .model_library
+                    .resolve_model_package_facts_summaries(&model_ids)
+                    .await?;
+                Ok(serde_json::to_value(summaries)?)
             }
             "model_package_facts_summary_snapshot" => {
                 let limit = params
@@ -1615,6 +1653,14 @@ fn validate_local_client_connection_token(
     params: &serde_json::Value,
 ) -> std::result::Result<(), PumasError> {
     validate_local_client_connection_token_value(primary, params["connection_token"].as_str())
+}
+
+fn parse_model_ids_param(
+    params: &serde_json::Value,
+) -> std::result::Result<Vec<String>, PumasError> {
+    serde_json::from_value(params["model_ids"].clone()).map_err(|err| PumasError::InvalidParams {
+        message: format!("model_ids must be an array of strings: {err}"),
+    })
 }
 
 fn validate_local_client_connection_token_value(

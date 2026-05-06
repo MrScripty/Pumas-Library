@@ -141,6 +141,28 @@ async fn load_model_count(library: Arc<model_library::ModelLibrary>) -> Result<u
         .map_err(|err| PumasError::Other(format!("Failed to join model count task: {}", err)))?
 }
 
+async fn load_inference_settings_for_model(
+    library: Arc<model_library::ModelLibrary>,
+    model_id: String,
+) -> Result<Vec<models::InferenceParamSchema>> {
+    let model_dir = library.library_root().join(&model_id);
+
+    if !path_exists(&model_dir).await? {
+        return Err(crate::error::PumasError::Other(format!(
+            "Model not found: {}",
+            model_id
+        )));
+    }
+
+    let (metadata, file_format) = load_inference_snapshot(library, model_dir, model_id).await?;
+
+    if let Some(settings) = metadata.inference_settings {
+        return Ok(settings);
+    }
+
+    Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
+}
+
 impl PumasApi {
     // ========================================
     // Model Library Methods
@@ -316,24 +338,36 @@ impl PumasApi {
         &self,
         model_id: &str,
     ) -> Result<Vec<models::InferenceParamSchema>> {
+        load_inference_settings_for_model(
+            self.primary().model_library.clone(),
+            model_id.to_string(),
+        )
+        .await
+    }
+
+    /// Get inference settings schemas for multiple models without calling the
+    /// public single-model API per row.
+    pub async fn get_inference_settings_batch(
+        &self,
+        model_ids: Vec<String>,
+    ) -> Result<Vec<models::ModelInferenceSettingsBatchItem>> {
         let library = self.primary().model_library.clone();
-        let model_dir = library.library_root().join(model_id);
-
-        if !path_exists(&model_dir).await? {
-            return Err(crate::error::PumasError::Other(format!(
-                "Model not found: {}",
-                model_id
-            )));
+        let mut items = Vec::with_capacity(model_ids.len());
+        for model_id in model_ids {
+            match load_inference_settings_for_model(library.clone(), model_id.clone()).await {
+                Ok(settings) => items.push(models::ModelInferenceSettingsBatchItem {
+                    model_id,
+                    settings,
+                    error: None,
+                }),
+                Err(err) => items.push(models::ModelInferenceSettingsBatchItem {
+                    model_id,
+                    settings: Vec::new(),
+                    error: Some(err.to_string()),
+                }),
+            }
         }
-
-        let (metadata, file_format) =
-            load_inference_snapshot(library, model_dir, model_id.to_string()).await?;
-
-        if let Some(settings) = metadata.inference_settings {
-            return Ok(settings);
-        }
-
-        Ok(models::resolve_inference_settings(&metadata, &file_format).unwrap_or_default())
+        Ok(items)
     }
 
     /// Replace the inference settings schema for a model.
@@ -435,6 +469,17 @@ impl PumasApi {
             .await
     }
 
+    /// Resolve cheap execution descriptors for multiple models.
+    pub async fn resolve_model_execution_descriptors_batch(
+        &self,
+        model_ids: Vec<String>,
+    ) -> Result<Vec<models::ModelExecutionDescriptorBatchItem>> {
+        self.primary()
+            .model_library
+            .resolve_model_execution_descriptors_batch(&model_ids)
+            .await
+    }
+
     /// Resolve package facts for a model on demand.
     pub async fn resolve_model_package_facts(
         &self,
@@ -488,6 +533,17 @@ impl PumasApi {
         self.primary()
             .model_library
             .resolve_model_package_facts_summary(model_id)
+            .await
+    }
+
+    /// Resolve package-facts summaries for multiple models.
+    pub async fn resolve_model_package_facts_summaries(
+        &self,
+        model_ids: Vec<String>,
+    ) -> Result<Vec<models::ModelPackageFactsSummaryBatchItem>> {
+        self.primary()
+            .model_library
+            .resolve_model_package_facts_summaries(&model_ids)
             .await
     }
 
@@ -683,6 +739,8 @@ impl PumasApi {
 #[cfg(test)]
 mod tests {
     use super::{validate_existing_local_directory_path, validate_existing_local_file_path};
+    use crate::models::ModelMetadata;
+    use crate::PumasApi;
     use tempfile::TempDir;
 
     #[tokio::test]
@@ -708,5 +766,45 @@ mod tests {
                 .unwrap();
 
         assert_eq!(validated, temp_dir.path().canonicalize().unwrap());
+    }
+
+    #[tokio::test]
+    async fn get_inference_settings_batch_reports_per_model_errors() {
+        let temp_dir = TempDir::new().unwrap();
+        let api = PumasApi::builder(temp_dir.path()).build().await.unwrap();
+        let model_id = "llm/batch/inference";
+        let model_dir = api.shared_resources_dir().join("models").join(model_id);
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"GGUF").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            model_type: Some("llm".to_string()),
+            family: Some("batch".to_string()),
+            official_name: Some("inference".to_string()),
+            cleaned_name: Some("inference".to_string()),
+            ..Default::default()
+        };
+        api.primary()
+            .model_library
+            .save_metadata(&model_dir, &metadata)
+            .await
+            .unwrap();
+
+        let items = api
+            .get_inference_settings_batch(vec![
+                model_id.to_string(),
+                "llm/batch/missing".to_string(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].model_id, model_id);
+        assert!(!items[0].settings.is_empty());
+        assert!(items[0].error.is_none());
+        assert!(items[1].settings.is_empty());
+        assert!(items[1].error.is_some());
     }
 }

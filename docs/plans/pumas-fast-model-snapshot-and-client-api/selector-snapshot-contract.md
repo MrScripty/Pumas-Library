@@ -24,7 +24,13 @@ model pickers and graph-facing model references without hydrating every model.
    or use the direct owner API when it owns the Pumas instance.
 2. Request `model_library_selector_snapshot` with the desired page/filter.
 3. Build Pantograph graph-facing references from `row.model_ref`.
-4. Hydrate selected models only when detail state or user action requires it.
+4. Hydrate selected models only when detail state or user action requires it:
+   use `resolve_model_package_facts_summaries(model_ids)` for compact facts,
+   `resolve_model_execution_descriptors_batch(model_ids)` for cheap execution
+   descriptors, and `get_inference_settings_batch(model_ids)` for settings.
+   The execution-descriptor batch intentionally omits dependency resolution;
+   call the explicit dependency-resolution API only for the focused selected
+   model or another deliberate hydration request.
 5. Subscribe from the returned cursor after the subscription milestone lands.
 
 ## Fixture

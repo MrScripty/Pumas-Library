@@ -386,13 +386,13 @@ entry points exist.
 multi-model public loops.
 
 **Tasks:**
-- [ ] Add batch package-facts summary resolution backed by shared loaded facts.
-- [ ] Add batch execution descriptor resolution backed by shared loaded facts.
-- [ ] Add batch inference-settings access.
-- [ ] Split cheap execution descriptor fields from dependency resolution.
-- [ ] Keep dependency resolution opt-in for selected models or explicit batch
+- [x] Add batch package-facts summary resolution backed by shared loaded facts.
+- [x] Add batch execution descriptor resolution backed by shared loaded facts.
+- [x] Add batch inference-settings access.
+- [x] Split cheap execution descriptor fields from dependency resolution.
+- [x] Keep dependency resolution opt-in for selected models or explicit batch
   requests.
-- [ ] Update Pantograph integration guidance for optional multi-select
+- [x] Update Pantograph integration guidance for optional multi-select
   hydration.
 
 **Verification:**
@@ -404,7 +404,7 @@ multi-model public loops.
   inference settings.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 9: Final Standards Pass And Release Build
 
@@ -572,6 +572,12 @@ Update during implementation:
   removed its eager IPC client path. UniFFI and native-binding docs now state
   that foreign-language local-client and read-only access should be exposed as
   separate objects instead of hidden behind the owner object.
+- 2026-05-06: Milestone 8 added selected-model batch hydration APIs for
+  package-facts summaries, cheap execution descriptors, and inference settings.
+  Batch execution descriptors omit dependency resolution; focused dependency
+  resolution remains an explicit selected-model request. `PumasLocalClient`
+  exposes the batch methods as one IPC request per category, and selector
+  contract guidance now documents the multi-select hydration flow.
 
 ## Discovered Issues
 

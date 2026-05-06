@@ -948,6 +948,28 @@ pub struct ModelExecutionDescriptor {
     pub dependency_resolution: Option<serde_json::Value>,
 }
 
+/// Per-model result for cheap batch execution descriptor hydration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelExecutionDescriptorBatchItem {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub descriptor: Option<ModelExecutionDescriptor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+/// Per-model result for batch inference-settings hydration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelInferenceSettingsBatchItem {
+    pub model_id: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<InferenceParamSchema>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 /// FTS5 search result model entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

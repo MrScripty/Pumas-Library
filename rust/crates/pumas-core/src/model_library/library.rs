@@ -36,8 +36,9 @@ use crate::model_library::{
 };
 use crate::models::{
     AssetValidationState, BackendHintFacts, BackendHintLabel, CustomCodeFacts,
-    GenerationDefaultFacts, ModelExecutionDescriptor, ModelFactFamily, ModelLibraryChangeKind,
-    ModelLibraryRefreshScope, ModelPackageDiagnostic, ModelPackageFactsSummaryResult,
+    GenerationDefaultFacts, ModelExecutionDescriptor, ModelExecutionDescriptorBatchItem,
+    ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope, ModelPackageDiagnostic,
+    ModelPackageFactsSummaryBatchItem, ModelPackageFactsSummaryResult,
     ModelPackageFactsSummarySnapshot, ModelPackageFactsSummaryStatus, ModelRefMigrationDiagnostic,
     PackageArtifactKind, PackageClassReference, PackageFactStatus, ProcessorComponentFacts,
     ProcessorComponentKind, PumasModelRef, ResolvedArtifactFacts, ResolvedModelPackageFacts,
@@ -2176,6 +2177,15 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ModelExecutionDescriptor> {
+        self.resolve_model_execution_descriptor_internal(model_id, true)
+            .await
+    }
+
+    async fn resolve_model_execution_descriptor_internal(
+        &self,
+        model_id: &str,
+        include_dependency_resolution: bool,
+    ) -> Result<ModelExecutionDescriptor> {
         self.refresh_external_asset_state(model_id).await?;
 
         let model_dir = self.library_root.join(model_id);
@@ -2243,8 +2253,8 @@ impl ModelLibrary {
         let entry_path = canonicalize_display_path(&entry_path);
 
         let recommended_backend = metadata.recommended_backend.clone();
-        let dependency_resolution = self
-            .resolve_model_dependency_requirements(
+        let dependency_resolution = if include_dependency_resolution {
+            self.resolve_model_dependency_requirements(
                 model_id,
                 crate::platform::current_platform(),
                 recommended_backend.as_deref(),
@@ -2252,7 +2262,10 @@ impl ModelLibrary {
             .await
             .ok()
             .map(|resolution| serde_json::to_value(resolution).unwrap_or(Value::Null))
-            .filter(|value| !value.is_null());
+            .filter(|value| !value.is_null())
+        } else {
+            None
+        };
 
         Ok(ModelExecutionDescriptor {
             execution_contract_version: MODEL_EXECUTION_CONTRACT_VERSION,
@@ -2272,6 +2285,35 @@ impl ModelLibrary {
             validation_state,
             dependency_resolution,
         })
+    }
+
+    /// Resolve cheap execution descriptors for multiple models.
+    ///
+    /// Batch descriptor hydration intentionally omits dependency resolution so
+    /// list and multi-select paths do not trigger expensive runtime-fit work.
+    pub async fn resolve_model_execution_descriptors_batch(
+        &self,
+        model_ids: &[String],
+    ) -> Result<Vec<ModelExecutionDescriptorBatchItem>> {
+        let mut items = Vec::with_capacity(model_ids.len());
+        for model_id in model_ids {
+            match self
+                .resolve_model_execution_descriptor_internal(model_id, false)
+                .await
+            {
+                Ok(descriptor) => items.push(ModelExecutionDescriptorBatchItem {
+                    model_id: model_id.clone(),
+                    descriptor: Some(descriptor),
+                    error: None,
+                }),
+                Err(err) => items.push(ModelExecutionDescriptorBatchItem {
+                    model_id: model_id.clone(),
+                    descriptor: None,
+                    error: Some(err.to_string()),
+                }),
+            }
+        }
+        Ok(items)
     }
 
     /// Resolve versioned package facts for a model without selecting a runtime.
@@ -2467,6 +2509,14 @@ impl ModelLibrary {
         &self,
         model_id: &str,
     ) -> Result<ModelPackageFactsSummaryResult> {
+        self.resolve_model_package_facts_summary_internal(model_id)
+            .await
+    }
+
+    async fn resolve_model_package_facts_summary_internal(
+        &self,
+        model_id: &str,
+    ) -> Result<ModelPackageFactsSummaryResult> {
         let descriptor = self.resolve_model_execution_descriptor(model_id).await?;
         let model_dir = self.library_root.join(model_id);
         let metadata = load_effective_metadata_by_id_async(self.clone(), model_id.to_string())
@@ -2539,6 +2589,32 @@ impl ModelLibrary {
             status: ModelPackageFactsSummaryStatus::Regenerated,
             summary: Some(ResolvedModelPackageFactsSummary::from(&facts)),
         })
+    }
+
+    /// Resolve compact package-facts summaries for multiple models.
+    pub async fn resolve_model_package_facts_summaries(
+        &self,
+        model_ids: &[String],
+    ) -> Result<Vec<ModelPackageFactsSummaryBatchItem>> {
+        let mut items = Vec::with_capacity(model_ids.len());
+        for model_id in model_ids {
+            match self
+                .resolve_model_package_facts_summary_internal(model_id)
+                .await
+            {
+                Ok(result) => items.push(ModelPackageFactsSummaryBatchItem {
+                    model_id: model_id.clone(),
+                    result: Some(result),
+                    error: None,
+                }),
+                Err(err) => items.push(ModelPackageFactsSummaryBatchItem {
+                    model_id: model_id.clone(),
+                    result: None,
+                    error: Some(err.to_string()),
+                }),
+            }
+        }
+        Ok(items)
     }
 
     /// Return a bounded startup snapshot of cached package-facts summaries.
@@ -11871,6 +11947,88 @@ mod tests {
             normalize_path_separators(&canonicalize_display_path(&descriptor.entry_path)),
             normalize_path_separators(&canonicalize_display_path(&model_dir.display().to_string()))
         );
+    }
+
+    #[tokio::test]
+    async fn test_batch_execution_descriptors_omit_dependencies_and_report_errors() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/batch/descriptor";
+        let model_dir = library.build_model_path("llm", "batch", "descriptor");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"GGUF").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("batch".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("descriptor".to_string()),
+            cleaned_name: Some("descriptor".to_string()),
+            task_type_primary: Some("text-generation".to_string()),
+            recommended_backend: Some("llama.cpp".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let items = library
+            .resolve_model_execution_descriptors_batch(&[
+                model_id.to_string(),
+                "llm/batch/missing".to_string(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(items.len(), 2);
+        let descriptor = items[0].descriptor.as_ref().unwrap();
+        assert_eq!(descriptor.model_id, model_id);
+        assert!(descriptor.dependency_resolution.is_none());
+        assert!(items[0].error.is_none());
+        assert!(items[1].descriptor.is_none());
+        assert!(items[1].error.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_batch_package_facts_summaries_report_per_model_errors() {
+        let (_temp_dir, library) = setup_library().await;
+        let model_id = "llm/batch/package-facts";
+        let model_dir = library.build_model_path("llm", "batch", "package-facts");
+        std::fs::create_dir_all(&model_dir).unwrap();
+        std::fs::write(model_dir.join("model.gguf"), b"GGUF").unwrap();
+
+        let metadata = ModelMetadata {
+            schema_version: Some(2),
+            model_id: Some(model_id.to_string()),
+            family: Some("batch".to_string()),
+            model_type: Some("llm".to_string()),
+            official_name: Some("package-facts".to_string()),
+            cleaned_name: Some("package-facts".to_string()),
+            task_type_primary: Some("text-generation".to_string()),
+            ..Default::default()
+        };
+        library.save_metadata(&model_dir, &metadata).await.unwrap();
+        library.index_model_dir(&model_dir).await.unwrap();
+
+        let items = library
+            .resolve_model_package_facts_summaries(&[
+                model_id.to_string(),
+                "llm/batch/missing".to_string(),
+            ])
+            .await
+            .unwrap();
+
+        assert_eq!(items.len(), 2);
+        let result = items[0].result.as_ref().unwrap();
+        assert_eq!(result.model_id, model_id);
+        assert!(matches!(
+            result.status,
+            ModelPackageFactsSummaryStatus::Regenerated
+                | ModelPackageFactsSummaryStatus::Fresh
+                | ModelPackageFactsSummaryStatus::DetailDerived
+        ));
+        assert!(items[0].error.is_none());
+        assert!(items[1].result.is_none());
+        assert!(items[1].error.is_some());
     }
 
     #[tokio::test]

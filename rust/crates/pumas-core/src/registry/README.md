@@ -9,7 +9,9 @@ library roots without user intervention. This module provides a shared SQLite da
 at the platform config directory that stores:
 
 - **Library entries**: registered library paths with metadata
-- **Instance entries**: primary claim or ready-instance rows for each library
+- **Instance entries**: primary claim or ready-instance rows for each library,
+  including PID, lifecycle status, local transport kind, endpoint, and
+  connection token
 
 ## Location
 
@@ -35,8 +37,10 @@ starting watcher, reconciliation, or IPC-owned background work. For a given
 launcher root, only one live process can hold that claim at a time.
 
 **Ready-after-IPC promotion**: Claim rows start as `status='claiming'` with
-`port=0`. The winning process starts IPC first, then promotes the row to
-`status='ready'` with the assigned port. Clients only attach to ready rows.
+`port=0`, `transport_kind='loopback_tcp'`, no endpoint, and no connection
+token. The winning process starts IPC first, then promotes the row to
+`status='ready'` with the assigned port, endpoint, transport kind, and
+connection token. Clients only attach to ready rows.
 
 **Crash recovery**: If a claimed or ready instance row belongs to a dead PID,
 the next starter can replace it. Live claiming rows are treated as startup in
@@ -56,5 +60,5 @@ overwritten.
 - Claim lifecycle:
   - insert or replace `instances` row as `claiming`
   - start IPC server
-  - promote matching claim token to `ready`
+  - promote matching claim token to `ready` with endpoint identity
   - unregister the row on primary shutdown

@@ -2,7 +2,8 @@
 //!
 //! This module provides a SQLite-backed registry that stores:
 //! - **Library entries**: Known library root paths with metadata
-//! - **Instance entries**: Currently running pumas-core instances (PID, port)
+//! - **Instance entries**: Currently running pumas-core instances with PID,
+//!   status, local transport endpoint, and connection token
 //!
 //! The registry enables automatic library path resolution and instance
 //! convergence across multiple host applications.
@@ -18,5 +19,5 @@ pub mod library_registry;
 
 pub use library_registry::{
     InstanceClaimResult, InstanceEntry, InstanceStatus, LibraryEntry, LibraryRegistry,
-    PrimaryInstanceClaim,
+    LocalInstanceTransportKind, PrimaryInstanceClaim,
 };

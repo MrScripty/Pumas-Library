@@ -336,7 +336,7 @@ contract instead of a parallel event path.
 Rust API.
 
 **Tasks:**
-- [ ] Define local instance registry endpoint records with pid, root, status,
+- [x] Define local instance registry endpoint records with pid, root, status,
   transport kind, endpoint, and connection token.
 - [ ] Add explicit `PumasLocalClient::connect`.
 - [ ] Expose local-client selector snapshot as one transport request per
@@ -355,7 +355,7 @@ Rust API.
   fallback.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 7: Public API Split And Compatibility Cleanup
 
@@ -513,6 +513,12 @@ Update during implementation:
   `wrap_response()` treats it like a boolean and reports `success: false`.
   Record this as a follow-up before relying on that RPC method in external
   clients or tests.
+- 2026-05-06: Milestone 6 first slice expanded the local registry instance
+  contract with `LocalInstanceTransportKind`, endpoint, and connection-token
+  fields while preserving the existing loopback TCP port behavior. Existing
+  rows migrate with `transport_kind = loopback_tcp`, a fallback
+  `127.0.0.1:{port}` endpoint, and no client token; newly ready rows receive a
+  generated connection token for later transport authentication work.
 
 ## Commit Cadence Notes
 
@@ -722,6 +728,9 @@ After each worker wave:
   - `npm run -w electron validate`
   - `npm run -w electron test`
   - `npm run -w frontend test:run -- useModels.test.ts ModelManagerIntegrityRefresh.test.ts api-package-facts.test.ts`
+- Milestone 6 registry endpoint contract verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
 
 ### Traceability Links
 

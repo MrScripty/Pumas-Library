@@ -268,12 +268,12 @@ without broad transport work.
 **Goal:** Keep selector rows current through model-library state changes.
 
 **Tasks:**
-- [ ] Update import completion to populate/update selector rows.
-- [ ] Update download completion and selected-artifact changes to refresh
+- [x] Update import completion to populate/update selector rows.
+- [x] Update download completion and selected-artifact changes to refresh
   selector rows.
-- [ ] Update migration/reconciliation paths to refresh selector rows.
-- [ ] Update metadata refresh paths to invalidate or refresh selector rows.
-- [ ] Emit model-library update feed events when selector-visible facts change.
+- [x] Update migration/reconciliation paths to refresh selector rows.
+- [x] Update metadata refresh paths to invalidate or refresh selector rows.
+- [x] Emit model-library update feed events when selector-visible facts change.
 
 **Verification:**
 - Tests cover import, download completion, metadata refresh, migration, and
@@ -282,7 +282,7 @@ without broad transport work.
   or needs-detail states instead of deep-resolving inline.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 4: Core Subscriber With Atomic Handoff
 
@@ -466,6 +466,15 @@ Update during implementation:
   Pantograph-facing selector contract documentation, and a selector snapshot
   fixture. Local debug-test timing reported direct `0.878ms` and read-only
   `0.694ms` for 100 warm rows.
+- 2026-05-06: Milestone 3 implemented selector lifecycle through live
+  projection instead of a materialized selector table. Existing import,
+  download, migration, reconciliation, and metadata-refresh paths already
+  update the underlying model index rows that selector snapshots read. Added
+  lifecycle tests for model-row updates and package-summary cache updates.
+- 2026-05-06: Milestone 3 found and fixed an update-feed gap: changed
+  package-facts summary cache rows affected selector output but did not emit
+  model-library update events. Summary cache changes now emit
+  `PackageFactsModified` events with `refresh_scope = Summary`.
 
 ## Commit Cadence Notes
 
@@ -599,6 +608,13 @@ After each worker wave:
   - added `selector-snapshot-contract.md` and
     `fixtures/selector-snapshot-row.json` for Pantograph-facing lazy selector
     consumption.
+- Milestone 3 selector lifecycle:
+  - kept selector rows as a live projection over index/cache rows rather than
+    adding a second materialized refresh lifecycle;
+  - added tests proving selector output reflects model row updates and package
+    summary cache updates without a selector-specific refresh job;
+  - changed package-facts summary cache writes to emit model-library update
+    events.
 
 ### Deviations
 
@@ -633,6 +649,10 @@ After each worker wave:
 - Milestone 2 Slice 2.5 verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot_reports_warm_100_row_timing -- --nocapture`
+- Milestone 3 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
 
 ### Traceability Links
 

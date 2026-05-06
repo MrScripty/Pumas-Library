@@ -96,13 +96,17 @@ impl ModelIndex {
             ],
         )? > 0;
 
-        if changed && record.cache_scope == ModelPackageFactsCacheScope::Detail {
+        if changed {
+            let refresh_scope = match record.cache_scope {
+                ModelPackageFactsCacheScope::Summary => ModelLibraryRefreshScope::Summary,
+                ModelPackageFactsCacheScope::Detail => ModelLibraryRefreshScope::SummaryAndDetail,
+            };
             Self::append_model_library_update_event_with_conn(
                 &conn,
                 &record.model_id,
                 ModelLibraryChangeKind::PackageFactsModified,
                 ModelFactFamily::PackageFacts,
-                ModelLibraryRefreshScope::SummaryAndDetail,
+                refresh_scope,
                 if record.selected_artifact_id.is_empty() {
                     None
                 } else {

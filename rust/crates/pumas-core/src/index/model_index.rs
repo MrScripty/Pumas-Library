@@ -1205,16 +1205,16 @@ mod tests {
         let feed = index
             .list_model_library_updates_since(Some(&cursor_after_model_add), 100)
             .unwrap();
-        assert_eq!(feed.events.len(), 1);
-        assert_eq!(
-            feed.events[0].change_kind,
-            ModelLibraryChangeKind::PackageFactsModified
-        );
-        assert_eq!(feed.events[0].fact_family, ModelFactFamily::PackageFacts);
-        assert_eq!(
-            feed.events[0].refresh_scope,
-            ModelLibraryRefreshScope::SummaryAndDetail
-        );
+        assert!(feed.events.iter().any(|event| {
+            event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+                && event.fact_family == ModelFactFamily::PackageFacts
+                && event.refresh_scope == ModelLibraryRefreshScope::Summary
+        }));
+        assert!(feed.events.iter().any(|event| {
+            event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+                && event.fact_family == ModelFactFamily::PackageFacts
+                && event.refresh_scope == ModelLibraryRefreshScope::SummaryAndDetail
+        }));
     }
 
     #[test]

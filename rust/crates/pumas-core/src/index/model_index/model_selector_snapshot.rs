@@ -382,8 +382,8 @@ mod tests {
     use super::*;
     use crate::index::{ModelPackageFactsCacheRecord, ModelPackageFactsCacheScope, ModelRecord};
     use crate::models::{
-        BackendHintFacts, PackageArtifactKind, PackageFactStatus, TaskEvidence,
-        PACKAGE_FACTS_CONTRACT_VERSION,
+        BackendHintFacts, ModelFactFamily, ModelLibraryChangeKind, PackageArtifactKind,
+        PackageFactStatus, TaskEvidence, PACKAGE_FACTS_CONTRACT_VERSION,
     };
     use std::collections::HashMap;
     use tempfile::TempDir;
@@ -657,5 +657,105 @@ mod tests {
         assert_eq!(snapshot.total_count, Some(2));
         assert_eq!(snapshot.rows.len(), 1);
         assert_eq!(snapshot.rows[0].model_id, "llm/example/beta");
+    }
+
+    #[test]
+    fn selector_snapshot_reflects_model_row_updates_without_refresh_job() {
+        let (index, _temp) = create_test_index();
+        let model_id = "llm/example/lifecycle";
+        index
+            .upsert(&create_selector_record(
+                model_id,
+                "Lifecycle",
+                "llm",
+                serde_json::json!({
+                    "entry_path": "/models/llm/example/lifecycle/model.gguf",
+                    "validation_state": "valid"
+                }),
+            ))
+            .unwrap();
+
+        let ready = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+        assert_eq!(ready.rows[0].artifact_state, ModelArtifactState::Ready);
+        assert_eq!(ready.rows[0].entry_path_state, ModelEntryPathState::Ready);
+
+        let mut changed = create_selector_record(
+            model_id,
+            "Lifecycle",
+            "llm",
+            serde_json::json!({
+                "entry_path": "/models/llm/example/lifecycle/model.gguf",
+                "validation_state": "valid",
+                "download_incomplete": true
+            }),
+        );
+        changed.updated_at = "2026-05-06T01:00:00Z".to_string();
+        index.upsert(&changed).unwrap();
+
+        let partial = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+        assert_eq!(partial.rows[0].artifact_state, ModelArtifactState::Partial);
+        assert_eq!(
+            partial.rows[0].entry_path_state,
+            ModelEntryPathState::Partial
+        );
+        assert!(!partial.rows[0].is_executable_reference_ready());
+    }
+
+    #[test]
+    fn selector_snapshot_reflects_package_summary_cache_updates() {
+        let (index, _temp) = create_test_index();
+        let model_id = "llm/example/lifecycle-summary";
+        index
+            .upsert(&create_selector_record(
+                model_id,
+                "Lifecycle Summary",
+                "llm",
+                serde_json::json!({"validation_state": "valid"}),
+            ))
+            .unwrap();
+        let cursor = index.current_model_library_update_cursor().unwrap();
+
+        let missing = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+        assert_eq!(
+            missing.rows[0].package_facts_summary_status,
+            ModelPackageFactsSummaryStatus::Missing
+        );
+
+        cache_summary(
+            &index,
+            model_id,
+            serde_json::to_string(&summary_for(
+                model_id,
+                "/models/llm/example/lifecycle-summary/model.gguf",
+            ))
+            .unwrap(),
+        );
+
+        let cached = index
+            .list_model_library_selector_snapshot(&ModelLibrarySelectorSnapshotRequest::default())
+            .unwrap();
+        assert_eq!(
+            cached.rows[0].package_facts_summary_status,
+            ModelPackageFactsSummaryStatus::Cached
+        );
+        assert_eq!(
+            cached.rows[0].detail_state,
+            ModelLibrarySelectorDetailState::Complete
+        );
+
+        let feed = index
+            .list_model_library_updates_since(Some(&cursor), 100)
+            .unwrap();
+        assert!(feed.events.iter().any(|event| {
+            event.model_id == model_id
+                && event.change_kind == ModelLibraryChangeKind::PackageFactsModified
+                && event.fact_family == ModelFactFamily::PackageFacts
+        }));
     }
 }

@@ -341,7 +341,7 @@ Rust API.
 - [x] Add explicit `PumasLocalClient::connect`.
 - [x] Expose local-client selector snapshot as one transport request per
   snapshot.
-- [ ] Expose local-client subscription as one stream per subscription.
+- [x] Expose local-client subscription as one stream per subscription.
 - [x] Choose platform transport order: Unix socket on Linux/macOS, named pipe
   on Windows, localhost TCP fallback when needed.
 - [x] Measure local-client selector latency against the selected transport.
@@ -355,7 +355,7 @@ Rust API.
   fallback.
 - Atomic commit after successful verification.
 
-**Status:** In progress
+**Status:** Complete
 
 ### Milestone 7: Public API Split And Compatibility Cleanup
 
@@ -524,7 +524,7 @@ Update during implementation:
   non-loopback TCP endpoints, and keeps local-client attachment separate from
   `PumasApi` constructors. The client exposes
   `model_library_selector_snapshot` as one IPC request against the owner
-  instance. Token enforcement and non-TCP transports remain pending.
+  instance. Non-TCP transport implementation remained pending at this slice.
 - 2026-05-06: Milestone 6 discovery slice added registry instance listing and
   `PumasLocalClient::discover_ready_instances()`. Discovery reads the platform
   registry, cleans stale rows, and returns only ready instances; explicit
@@ -536,6 +536,14 @@ Update during implementation:
   implemented. The focused local-client selector timing test measured
   `0.410ms` for the one-request loopback TCP snapshot path, below the initial
   `<= 25ms` target.
+- 2026-05-06: Milestone 6 subscription slice extended IPC with a dedicated
+  model-library update stream request. The server sends the durable recovery
+  handshake first, then sends live `ModelLibraryUpdateNotification` frames on
+  the same connection. `PumasLocalClient` exposes this as
+  `subscribe_model_library_update_stream_since(cursor)` with
+  `next_notification()`. Explicit local-client selector and stream requests
+  send the registry connection token, and `PrimaryState` rejects missing or
+  invalid tokens for those local-client-only methods.
 
 ## Commit Cadence Notes
 
@@ -760,6 +768,10 @@ After each worker wave:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_selector_snapshot_reports_transport_timing_target -- --nocapture`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
+- Milestone 6 local-client subscription verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_subscribes_to_one_update_stream`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library ipc`
 
 ### Traceability Links
 

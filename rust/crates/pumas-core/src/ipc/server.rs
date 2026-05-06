@@ -11,10 +11,13 @@
 
 use super::protocol::{read_frame, write_frame, IpcRequest, IpcResponse};
 use crate::config::RegistryConfig;
+use crate::model_library::ModelLibraryUpdateSubscriber;
+use crate::models::ModelLibraryUpdateNotification;
 use crate::{PumasError, Result};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{oneshot, watch};
 use tokio::task::JoinHandle;
@@ -115,6 +118,15 @@ pub trait IpcDispatch: Send + Sync + 'static {
         method: &str,
         params: serde_json::Value,
     ) -> std::result::Result<serde_json::Value, PumasError>;
+
+    /// Optionally open a typed model-library update stream.
+    async fn subscribe_model_library_update_stream_since(
+        &self,
+        _cursor: &str,
+        _connection_token: Option<&str>,
+    ) -> std::result::Result<Option<ModelLibraryUpdateSubscriber>, PumasError> {
+        Ok(None)
+    }
 }
 
 /// IPC server that listens for client connections.
@@ -227,35 +239,64 @@ impl IpcServer {
                 }
             };
 
-            let request_str = String::from_utf8(frame).map_err(|_| PumasError::Validation {
-                field: "ipc_payload".to_string(),
-                message: "Invalid UTF-8 in IPC frame".to_string(),
-            })?;
+            let request = match Self::parse_request_frame(frame) {
+                Ok(request) => request,
+                Err(response) => {
+                    let response_bytes = serde_json::to_vec(&response)?;
+                    write_frame(&mut writer, &response_bytes).await?;
+                    continue;
+                }
+            };
 
-            let response = Self::process_request(&request_str, dispatch).await;
+            if request.method == "subscribe_model_library_update_stream_since" {
+                Self::handle_model_library_update_stream_request(
+                    request,
+                    dispatch,
+                    &mut writer,
+                    shutdown_rx,
+                )
+                .await?;
+                return Ok(());
+            }
+
+            let response = Self::process_request(request, dispatch).await;
 
             let response_bytes = serde_json::to_vec(&response)?;
             write_frame(&mut writer, &response_bytes).await?;
         }
     }
 
-    async fn process_request<D: IpcDispatch>(request_str: &str, dispatch: &D) -> IpcResponse {
-        let request: IpcRequest = match serde_json::from_str(request_str) {
+    fn parse_request_frame(frame: Vec<u8>) -> std::result::Result<IpcRequest, IpcResponse> {
+        let request_str = String::from_utf8(frame).map_err(|_| {
+            IpcResponse::error(
+                None,
+                -32600,
+                "Invalid Request: invalid UTF-8 in IPC frame".to_string(),
+            )
+        })?;
+        let request: IpcRequest = match serde_json::from_str(&request_str) {
             Ok(req) => req,
             Err(e) => {
-                return IpcResponse::error(None, -32700, format!("Parse error: {}", e));
+                return Err(IpcResponse::error(
+                    None,
+                    -32700,
+                    format!("Parse error: {}", e),
+                ));
             }
         };
 
-        // Validate JSON-RPC version
         if request.jsonrpc != "2.0" {
-            return IpcResponse::error(
+            return Err(IpcResponse::error(
                 request.id,
                 -32600,
                 "Invalid Request: expected jsonrpc 2.0".to_string(),
-            );
+            ));
         }
 
+        Ok(request)
+    }
+
+    async fn process_request<D: IpcDispatch>(request: IpcRequest, dispatch: &D) -> IpcResponse {
         let params = request
             .params
             .unwrap_or(serde_json::Value::Object(Default::default()));
@@ -266,6 +307,67 @@ impl IpcServer {
                 let code = e.to_rpc_error_code();
                 IpcResponse::error(request.id, code, e.to_string())
             }
+        }
+    }
+
+    async fn handle_model_library_update_stream_request<D, W>(
+        request: IpcRequest,
+        dispatch: &D,
+        writer: &mut W,
+        shutdown_rx: &mut watch::Receiver<bool>,
+    ) -> Result<()>
+    where
+        D: IpcDispatch,
+        W: AsyncWriteExt + Unpin,
+    {
+        let id = request.id.clone();
+        let params = request
+            .params
+            .unwrap_or(serde_json::Value::Object(Default::default()));
+        let cursor = params["cursor"]
+            .as_str()
+            .ok_or_else(|| PumasError::InvalidParams {
+                message: "cursor is required".to_string(),
+            })?;
+        let connection_token = params["connection_token"].as_str();
+
+        let Some(mut subscriber) = dispatch
+            .subscribe_model_library_update_stream_since(cursor, connection_token)
+            .await?
+        else {
+            let response = IpcResponse::error(
+                id,
+                -32601,
+                "model-library update streaming is not supported".to_string(),
+            );
+            let response_bytes = serde_json::to_vec(&response)?;
+            write_frame(writer, &response_bytes).await?;
+            return Ok(());
+        };
+
+        let handshake = subscriber.handshake().clone();
+        let response = IpcResponse::success(id.clone(), serde_json::to_value(&handshake)?);
+        let response_bytes = serde_json::to_vec(&response)?;
+        write_frame(writer, &response_bytes).await?;
+
+        if !handshake.live_stream_ready {
+            return Ok(());
+        }
+
+        loop {
+            let update = tokio::select! {
+                result = subscriber.next_event() => result?,
+                _ = shutdown_rx.changed() => return Ok(()),
+            };
+            let notification = ModelLibraryUpdateNotification {
+                cursor: update.cursor.clone(),
+                events: vec![update],
+                stale_cursor: false,
+                snapshot_required: false,
+            };
+            let response = IpcResponse::success(id.clone(), serde_json::to_value(notification)?);
+            let response_bytes = serde_json::to_vec(&response)?;
+            write_frame(writer, &response_bytes).await?;
         }
     }
 }

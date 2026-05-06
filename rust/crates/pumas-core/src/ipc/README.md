@@ -40,7 +40,8 @@ Maximum frame size: 16 MiB (configurable via `RegistryConfig::MAX_IPC_MESSAGE_SI
 - `client.rs` - TCP client with `call()` method used by the legacy proxy path
 - `local_client.rs` - explicit `PumasLocalClient` role for same-device
   clients that connect from a registry `InstanceEntry` and perform typed
-  one-request operations such as selector snapshots
+  one-request operations such as selector snapshots plus one-stream update
+  subscriptions
 
 ## Thread Safety
 
@@ -49,6 +50,10 @@ Maximum frame size: 16 MiB (configurable via `RegistryConfig::MAX_IPC_MESSAGE_SI
   aborts any remaining connection tasks after broadcasting shutdown.
 - **Client**: Uses `tokio::Mutex` to serialize access to the TCP stream,
   allowing safe concurrent use from multiple async tasks.
+- **Local update streams**: `PumasLocalClient` opens a dedicated IPC
+  connection for each model-library update subscription. The server sends the
+  recovery handshake as the first response, then sends update notifications on
+  the same connection until the client disconnects or the owner shuts down.
 
 ## Error Handling
 

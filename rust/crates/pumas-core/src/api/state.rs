@@ -510,6 +510,7 @@ impl ipc::server::IpcDispatch for PrimaryState {
                 Ok(serde_json::to_value(updates)?)
             }
             "model_library_selector_snapshot" => {
+                validate_local_client_connection_token(self, &params)?;
                 let request_value = params
                     .get("request")
                     .cloned()
@@ -1578,6 +1579,19 @@ impl ipc::server::IpcDispatch for PrimaryState {
             }),
         }
     }
+
+    async fn subscribe_model_library_update_stream_since(
+        &self,
+        cursor: &str,
+        connection_token: Option<&str>,
+    ) -> std::result::Result<Option<model_library::ModelLibraryUpdateSubscriber>, PumasError> {
+        validate_local_client_connection_token_value(self, connection_token)?;
+        Ok(Some(
+            self.model_library
+                .subscribe_model_library_update_stream_since(cursor)
+                .await?,
+        ))
+    }
 }
 
 /// Internal state for the API.
@@ -1594,6 +1608,40 @@ pub(super) fn launcher_root_from_primary(primary: &PrimaryState) -> PathBuf {
         .and_then(Path::parent)
         .unwrap_or_else(|| primary.model_library.library_root())
         .to_path_buf()
+}
+
+fn validate_local_client_connection_token(
+    primary: &PrimaryState,
+    params: &serde_json::Value,
+) -> std::result::Result<(), PumasError> {
+    validate_local_client_connection_token_value(primary, params["connection_token"].as_str())
+}
+
+fn validate_local_client_connection_token_value(
+    primary: &PrimaryState,
+    provided: Option<&str>,
+) -> std::result::Result<(), PumasError> {
+    let Some(registry) = &primary.registry else {
+        return Err(PumasError::InvalidParams {
+            message: "local client token validation requires a registry-backed instance"
+                .to_string(),
+        });
+    };
+    let expected = registry
+        .get_instance(&launcher_root_from_primary(primary))?
+        .and_then(|instance| instance.connection_token)
+        .ok_or_else(|| PumasError::InvalidParams {
+            message: "running Pumas instance is missing a local client connection token"
+                .to_string(),
+        })?;
+
+    if provided != Some(expected.as_str()) {
+        return Err(PumasError::InvalidParams {
+            message: "invalid local client connection token".to_string(),
+        });
+    }
+
+    Ok(())
 }
 
 async fn load_inference_settings(

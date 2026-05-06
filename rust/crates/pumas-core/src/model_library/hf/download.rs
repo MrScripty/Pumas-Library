@@ -166,7 +166,9 @@ fn retry_exhausted_message(
 
 fn selected_artifact_id_for_state(state: &DownloadState) -> Option<String> {
     let request = state.download_request.as_ref()?;
-    let selected_filenames = if state.files.is_empty() {
+    let request_has_explicit_file_scope =
+        request.filename.is_some() || request.filenames.is_some() || request.quant.is_some();
+    let selected_filenames = if state.files.is_empty() || !request_has_explicit_file_scope {
         None
     } else {
         Some(
@@ -1963,7 +1965,10 @@ mod tests {
             model_type: Some("llm".to_string()),
             quant: None,
             filename: None,
-            filenames: None,
+            filenames: Some(vec![
+                "config.json".to_string(),
+                "model.safetensors".to_string(),
+            ]),
             pipeline_tag: Some("text-generation".to_string()),
             bundle_format: None,
             pipeline_class: None,
@@ -2026,6 +2031,84 @@ mod tests {
             .selected_artifact_id
             .as_deref()
             .is_some_and(|artifact_id| artifact_id.starts_with("owner--multi-file__files_")));
+    }
+
+    #[tokio::test]
+    async fn test_list_downloads_preserves_full_repo_identity_for_repo_scoped_state() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let download_id = "dl-full-repo-progress".to_string();
+
+        let request = DownloadRequest {
+            repo_id: "owner/multi-file".to_string(),
+            family: "owner".to_string(),
+            official_name: "Multi File".to_string(),
+            model_type: Some("llm".to_string()),
+            quant: None,
+            filename: None,
+            filenames: None,
+            pipeline_tag: Some("text-generation".to_string()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/multi-file".to_string(),
+                    status: DownloadStatus::Paused,
+                    progress: 0.25,
+                    downloaded_bytes: 256,
+                    total_bytes: Some(1024),
+                    speed: 0.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    retry_attempt: 0,
+                    retry_limit: None,
+                    retrying: false,
+                    next_retry_delay_seconds: None,
+                    task_registered: false,
+                    dest_dir: tmp.path().join("owner-multi-file"),
+                    filename: "config.json".to_string(),
+                    files: vec![
+                        FileToDownload {
+                            filename: "config.json".to_string(),
+                            size: Some(128),
+                            sha256: None,
+                        },
+                        FileToDownload {
+                            filename: "model.safetensors".to_string(),
+                            size: Some(896),
+                            sha256: None,
+                        },
+                    ],
+                    files_completed: 0,
+                    download_request: Some(request),
+                    known_sha256: None,
+                    huggingface_evidence: None,
+                },
+            );
+        }
+
+        let progress = client
+            .list_downloads()
+            .await
+            .into_iter()
+            .find(|item| item.download_id == download_id)
+            .expect("download progress should be present");
+
+        assert_eq!(
+            progress.selected_artifact_id.as_deref(),
+            Some("owner--multi-file__full_repo")
+        );
     }
 
     #[tokio::test]

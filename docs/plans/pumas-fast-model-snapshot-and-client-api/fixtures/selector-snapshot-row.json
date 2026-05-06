@@ -1,0 +1,36 @@
+{
+  "selector_snapshot_contract_version": 1,
+  "cursor": "model-library-updates:42",
+  "rows": [
+    {
+      "model_id": "llm/example/model-q4",
+      "model_ref": {
+        "model_ref_contract_version": 1,
+        "model_id": "llm/example/model-q4",
+        "revision": "main",
+        "selected_artifact_id": "model-q4.gguf",
+        "selected_artifact_path": "/models/llm/example/model-q4/model-q4.gguf"
+      },
+      "repo_id": "example/model",
+      "selected_artifact_id": "model-q4.gguf",
+      "selected_artifact_path": "/models/llm/example/model-q4/model-q4.gguf",
+      "entry_path": "/models/llm/example/model-q4/model-q4.gguf",
+      "entry_path_state": "ready",
+      "artifact_state": "ready",
+      "display_name": "Example Model Q4",
+      "model_type": "llm",
+      "tags": ["gguf", "selector"],
+      "indexed_path": "llm/example/model-q4",
+      "task_type_primary": "text-generation",
+      "pipeline_tag": "text-generation",
+      "recommended_backend": "llama.cpp",
+      "runtime_engine_hints": ["llama.cpp"],
+      "storage_kind": "library_owned",
+      "validation_state": "valid",
+      "package_facts_summary_status": "cached",
+      "detail_state": "complete",
+      "updated_at": "2026-05-06T00:00:00Z"
+    }
+  ],
+  "total_count": 1
+}

@@ -14,6 +14,9 @@ subscriber model.
 | `caller-inventory.md` | Milestone 1 inventory of current `PumasApi` construction sites, role classification, and migration blockers. |
 | `proposal.md` | Reviewed design proposal and Pantograph feedback resolution. |
 | `plan.md` | Standards-compliant implementation plan with thin vertical slices, risks, verification, and worker boundaries. |
+| `selector-snapshot-contract.md` | Pantograph-facing selector row contract and lazy selection flow. |
+| `fixtures/selector-snapshot-row.json` | Compact selector snapshot fixture. |
+| `reports/selector-snapshot-performance.md` | Slice 2.5 timing record. |
 
 ## Problem
 

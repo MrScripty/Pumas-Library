@@ -43,6 +43,7 @@ mod tests {
     use crate::index::ModelRecord;
     use crate::models::{ModelArtifactState, ModelEntryPathState};
     use std::collections::HashMap;
+    use std::time::Instant;
     use tempfile::TempDir;
 
     fn create_record(id: &str) -> ModelRecord {
@@ -95,5 +96,50 @@ mod tests {
 
         assert!(result.is_err());
         assert!(!temp.path().join(DB_FILENAME).exists());
+    }
+
+    #[test]
+    fn selector_snapshot_reports_warm_100_row_timing() {
+        let temp = TempDir::new().unwrap();
+        let writer = ModelIndex::new(temp.path().join(DB_FILENAME)).unwrap();
+        for index in 0..100 {
+            let id = format!("llm/example/perf-{index:03}");
+            writer.upsert(&create_record(&id)).unwrap();
+        }
+
+        let request = ModelLibrarySelectorSnapshotRequest {
+            limit: Some(100),
+            ..ModelLibrarySelectorSnapshotRequest::default()
+        };
+
+        let direct_warm = writer
+            .list_model_library_selector_snapshot(&request)
+            .unwrap();
+        assert_eq!(direct_warm.rows.len(), 100);
+        let direct_started = Instant::now();
+        let direct_snapshot = writer
+            .list_model_library_selector_snapshot(&request)
+            .unwrap();
+        let direct_elapsed = direct_started.elapsed();
+        assert_eq!(direct_snapshot.rows.len(), 100);
+        drop(writer);
+
+        let read_only = PumasReadOnlyLibrary::open(temp.path()).unwrap();
+        let read_only_warm = read_only
+            .model_library_selector_snapshot(request.clone())
+            .unwrap();
+        assert_eq!(read_only_warm.rows.len(), 100);
+        let read_only_started = Instant::now();
+        let read_only_snapshot = read_only.model_library_selector_snapshot(request).unwrap();
+        let read_only_elapsed = read_only_started.elapsed();
+        assert_eq!(read_only_snapshot.rows.len(), 100);
+
+        eprintln!(
+            "selector_snapshot_100_rows direct_ms={:.3} read_only_ms={:.3}",
+            direct_elapsed.as_secs_f64() * 1000.0,
+            read_only_elapsed.as_secs_f64() * 1000.0
+        );
+        assert!(direct_elapsed.as_millis() < 250);
+        assert!(read_only_elapsed.as_millis() < 250);
     }
 }

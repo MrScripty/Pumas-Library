@@ -235,9 +235,9 @@ without broad transport work.
   surface. Final `PumasLibraryInstance` naming/export remains in Milestone 7.
 - [x] Add `PumasReadOnlyLibrary` selector snapshot access with no background
   work or registry claim.
-- [ ] Add tests proving non-ready entry/artifact states are not executable.
-- [ ] Add benchmark or timing test for 50-100 warm direct/read-only rows.
-- [ ] Update Pantograph-facing docs or fixtures showing lazy `puma-lib`
+- [x] Add tests proving non-ready entry/artifact states are not executable.
+- [x] Add benchmark or timing test for 50-100 warm direct/read-only rows.
+- [x] Update Pantograph-facing docs or fixtures showing lazy `puma-lib`
   consumption from selector rows.
 
 **Commit Sub-Slices:**
@@ -261,7 +261,7 @@ without broad transport work.
   exists for this crate.
 - Atomic commit after successful verification.
 
-**Status:** In progress
+**Status:** Complete
 
 ### Milestone 3: Selector Materialization Lifecycle
 
@@ -462,6 +462,10 @@ Update during implementation:
   `ModelIndex::open_read_only`. It opens an existing `models.db` with SQLite
   read-only flags and `query_only`, exposes only selector snapshots, and does
   not create schema, claim an instance, reconcile, or start watchers.
+- 2026-05-06: Milestone 2 Slice 2.5 added a 100-row warm selector timing test,
+  Pantograph-facing selector contract documentation, and a selector snapshot
+  fixture. Local debug-test timing reported direct `0.878ms` and read-only
+  `0.694ms` for 100 warm rows.
 
 ## Commit Cadence Notes
 
@@ -589,6 +593,12 @@ After each worker wave:
   - added `ModelIndex::open_read_only`;
   - proved read-only selector access works against an existing index and does
     not create a missing database.
+- Milestone 2 Slice 2.5 timing and consumer fixture:
+  - added a warm 100-row direct/read-only timing test;
+  - recorded timing results in `reports/selector-snapshot-performance.md`;
+  - added `selector-snapshot-contract.md` and
+    `fixtures/selector-snapshot-row.json` for Pantograph-facing lazy selector
+    consumption.
 
 ### Deviations
 
@@ -620,6 +630,9 @@ After each worker wave:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
+- Milestone 2 Slice 2.5 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot_reports_warm_100_row_timing -- --nocapture`
 
 ### Traceability Links
 

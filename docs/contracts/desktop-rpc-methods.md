@@ -22,7 +22,7 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | Version management | `get_available_versions`, `install_version`, `switch_version`, `get_installation_progress` | `rust/crates/pumas-rpc/src/handlers/versions/` |
 | Model library | `get_models`, `import_model`, `search_hf_models`, `get_library_model_metadata` | `rust/crates/pumas-rpc/src/handlers/models/` |
 | Process control | `launch_comfyui`, `stop_comfyui`, `open_path`, `open_url` | `rust/crates/pumas-rpc/src/handlers/process.rs` |
-| App integrations | `ollama_list_models`, `ollama_list_models_for_profile`, `ollama_load_model_for_profile`, `torch_list_slots`, `torch_configure` | `rust/crates/pumas-rpc/src/handlers/ollama.rs`, `torch.rs` |
+| App integrations | `ollama_list_models`, `ollama_list_models_for_profile`, `ollama_create_model_for_profile`, `ollama_load_model_for_profile`, `ollama_unload_model_for_profile`, `ollama_delete_model_for_profile`, `torch_list_slots`, `torch_configure` | `rust/crates/pumas-rpc/src/handlers/ollama.rs`, `torch.rs` |
 | Link and mapping | `get_link_health`, `preview_model_mapping`, `sync_with_resolutions` | `rust/crates/pumas-rpc/src/handlers/links.rs` |
 | Shortcuts | `get_version_shortcuts`, `toggle_menu`, `create_desktop_shortcut` | `rust/crates/pumas-rpc/src/handlers/shortcuts.rs` |
 | Conversion | `start_model_conversion`, `get_conversion_progress`, `setup_quantization_backend` | `rust/crates/pumas-rpc/src/handlers/conversion.rs` |
@@ -33,6 +33,19 @@ This pass intentionally enforces method-level allowlisting, not full per-method 
 | --- | --- | --- | --- |
 | Model library updates | `/events/model-library-updates` | `model-library:update` | `onModelLibraryUpdate` |
 | Runtime profile updates | `/events/runtime-profile-updates` | `runtime-profile:update` | `onRuntimeProfileUpdate` |
+
+## Local Runtime Profile Rules
+- `profile_id` is the canonical internal address for local runtime operations.
+- `connection_url` inputs remain available only on legacy Ollama methods and
+  must be validated at the RPC boundary before provider clients are created.
+- Runtime profile mutations, model routes, lifecycle state, and update cursors
+  are backend-owned. Renderer code should refresh a snapshot or consume
+  `onRuntimeProfileUpdate`; it should not infer persisted state from a local
+  optimistic edit.
+- `launch_runtime_profile(profile_id, tag?, model_id?)` is provider-neutral at
+  the bridge boundary. Provider-specific launch arguments, llama.cpp router
+  presets, and dedicated `llama-server -m` model paths are derived in the
+  backend service.
 
 ## Contract Rules
 - New method names must be added to `electron/src/rpc-method-registry.ts`.

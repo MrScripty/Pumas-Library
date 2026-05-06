@@ -14,6 +14,7 @@ and the host-facing API surface consumed by RPC and language bindings.
 | `models/` | Public DTOs and response contracts shared across adapters. |
 | `network/` | Connectivity checks, HTTP integrations, and circuit-breaker state. |
 | `process/` | Process management utilities used by higher-level integrations. |
+| `runtime_profiles.rs` | Backend-owned local runtime profile service, provider adapters, model routes, status journal, and managed launch spec generation. |
 
 ## Problem
 Provide one backend-owned crate that can act as the composition root for
@@ -51,6 +52,10 @@ forcing transport layers to re-implement business workflows.
   runtime work for a launcher root.
 - Transport adapters consume structured contracts from this crate rather than
   re-implementing domain rules.
+- Local model-serving runtimes are addressed internally by `profile_id`.
+  Provider-specific endpoint URLs, ports, CPU/GPU settings, llama.cpp modes,
+  PID paths, generated presets, and status events stay behind the runtime
+  profile service.
 
 ## Revisit Triggers
 - A second app/runtime needs a materially different startup or ownership model.
@@ -95,5 +100,9 @@ if status.success {
   stable for external callers.
 - `model_library/` produces persisted SQLite and `metadata.json` artifacts and
   owns regeneration rules for that state.
+- `runtime_profiles.rs` produces the persisted
+  `launcher-data/metadata/runtime-profiles.json` profile/route contract and
+  profile-scoped runtime artifacts such as generated llama.cpp presets under
+  `launcher-data/runtime-profiles/`.
 - Revisit trigger: additional generated schemas or manifests become
   compatibility-critical and need their own versioned contract module.

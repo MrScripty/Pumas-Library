@@ -14,9 +14,11 @@ Defines the primary API facade (`PumasApi`) methods that orchestrate core subsys
 | `network.rs` | Connectivity and network-status API methods. |
 | `process.rs` | Process lifecycle/status API methods. |
 | `reconciliation.rs` | Reconcile scheduling, watcher routing, and startup freshness rules. |
+| `runtime_profiles.rs` | Runtime profile snapshot, mutation, route, update-feed, and lifecycle API methods. |
 | `state.rs` | Primary-state dispatch and IPC method execution. |
 | `state_hf.rs` | HuggingFace search, download, metadata-refetch, and auth helpers used by primary-state IPC dispatch. |
 | `state_process.rs` | Process lifecycle, launch, and status helpers used by primary-state IPC dispatch. |
+| `state_runtime_profiles.rs` | Primary-state IPC dispatch helpers for runtime profile commands and profile-aware launch/stop requests. |
 | `state_runtime.rs` | Disk, status, system-resource, and network-status helpers used by primary-state IPC dispatch. |
 
 ## Problem
@@ -39,6 +41,9 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
   logic can evolve without further inflating the core dispatch file.
 - Keep runtime status helpers in a dedicated sibling module so system and
   connectivity reporting can evolve without coupling to core dispatch wiring.
+- Keep runtime profile API methods in a dedicated sibling module so provider
+  routing, profile mutation, status feeds, and model-route persistence stay
+  backend-owned while the `PumasApi` facade remains additive.
 - Keep link-registry health/cleanup flows and app mapping flows in separate
   modules so `models.rs` stays centered on model-library metadata and import
   behavior.
@@ -55,6 +60,9 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
   still trigger bounded reconcile work before returning state.
 - Migration report generation and execution must operate on reconciled library
   state rather than stale SQLite projections.
+- Runtime profile callers pass `profile_id` for canonical internal routing.
+  Legacy raw endpoint URLs are accepted only at compatibility boundaries and
+  are validated before they reach provider clients.
 
 ## Revisit Triggers
 - A new host-facing API surface needs different lifecycle guarantees.
@@ -83,10 +91,19 @@ println!("offline={}", net.is_offline);
   library dirty or runtime freshness is unknown.
 - Migration dry-run and execute calls may force a full-library reconcile before
   generating artifacts so the returned report reflects current library state.
+- Runtime profile snapshot, route, launch, stop, and update-feed methods return
+  backend-confirmed state. Consumers should refresh or subscribe to profile
+  events rather than inferring successful persistence from local UI state.
 - Errors are surfaced as backend errors rather than partial transport-specific states.
 - Compatibility policy is facade-first: internal reconcile and startup sequencing may evolve without changing host-facing method shapes unless a documented breaking change is introduced.
 
 ## Structured Producer Contract
-- None identified as of 2026-03-11.
-- Reason: this directory orchestrates facades and lifecycle behavior but does not itself define a persisted structured artifact format.
-- Revisit trigger: API-layer code begins producing machine-consumed manifests, config files, or persisted metadata contracts.
+- Runtime profile APIs produce and mutate the persisted
+  `launcher-data/metadata/runtime-profiles.json` contract through the
+  backend-owned runtime profile service. API-layer callers must not write that
+  file directly.
+- Managed llama.cpp router launch writes profile-scoped preset files derived
+  from backend-indexed GGUF artifacts. Those generated files are runtime
+  artifacts, not user-authored configuration.
+- Revisit trigger: generated schemas replace the hand-maintained runtime
+  profile DTOs or another host needs a versioned compatibility guarantee.

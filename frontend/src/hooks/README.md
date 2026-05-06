@@ -9,6 +9,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useModels.ts` | Model list fetching, backend-pushed model-library refreshes, shared-storage rescans, and stale-while-revalidate FTS search state. |
 | `useModels.test.ts` | Hook coverage for initial fetch, rescan refresh, backend-pushed refreshes, cached FTS revalidation, stale response suppression, and new-results notifications. |
 | `useModelLibraryUpdateSubscription.ts` | Electron preload subscription adapter for debounced backend-owned model-library update notifications. |
+| `useRuntimeProfiles.ts` | Runtime profile snapshot hook and backend-pushed runtime/profile update subscription adapter. |
 | `useDownloadCompletionRefresh.ts` | Delayed model-list refresh scheduling when tracked downloads complete or leave active state. |
 | `useDownloadCompletionRefresh.test.ts` | Hook coverage for completion refreshes, disappeared-download refreshes, initial completed no-op behavior, and timer cleanup on unmount. |
 | `useExistingLibraryChooser.ts` | Existing-library chooser pending state and duplicate-invocation guard. |
@@ -84,6 +85,9 @@ Custom React hooks for backend polling, process status, version/model workflows,
 - Backend-pushed model-library notifications refresh canonical model data
   through `useModels`; integrity labels remain derived from backend projections,
   not directly mutated in display components.
+- Backend-pushed runtime profile notifications refresh canonical runtime
+  profile snapshots through `useRuntimeProfiles`; profile settings and routes
+  remain backend-confirmed rather than optimistic component state.
 - Polling remains hook-owned until the backend exposes a durable event stream.
   Polling hooks must own overlap prevention, cleanup on unmount, and API-unavailable
   fallback behavior in the hook instead of pushing timers into components.
@@ -101,6 +105,11 @@ Event-driven replacement trigger: when the RPC backend exposes a durable app
 event stream for status, installs, downloads, and cache updates, these polling
 owners should move behind one subscription adapter and the per-hook intervals
 should be removed.
+
+Runtime profile status already has a backend event stream. New runtime/profile
+views should use `useRuntimeProfiles` or
+`useRuntimeProfileUpdateSubscription` instead of adding component-owned
+intervals.
 
 ## Download Progress Keys
 - Download state maps are keyed by selected artifact, not by repository, when

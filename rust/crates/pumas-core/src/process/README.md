@@ -22,6 +22,10 @@ instances with log capture and health checks, and stopping/terminating process t
   managed and pre-existing processes.
 - **Detached process spawning**: Processes are launched in their own process group
   (`setsid` on Unix, `CREATE_NEW_PROCESS_GROUP` on Windows) so they survive launcher restarts.
+- **Policy-free launch helpers**: Provider/profile policy is owned by higher
+  runtime services. This module accepts explicit launch config, PID paths,
+  environment, and health URLs; it does not decide model routes, provider
+  capabilities, or CPU/GPU placement.
 
 ## Dependencies
 
@@ -29,6 +33,14 @@ instances with log capture and health checks, and stopping/terminating process t
 - `crate::platform` - Cross-platform process termination and cmdline scanning
 - `crate::system` - `ResourceTracker` for per-process CPU/RAM/GPU monitoring
 - `crate::error` - `PumasError` / `Result`
+
+## Runtime Profile Boundary
+
+Managed local runtime profiles may use this module for profile-scoped process
+spawn/stop mechanics, but profile identity and provider-specific launch
+arguments are derived before this boundary. Broad singleton cleanup remains a
+legacy app-level behavior and must not be reused for profile-scoped stop
+operations.
 
 ### External
 - `sysinfo` - Process table access

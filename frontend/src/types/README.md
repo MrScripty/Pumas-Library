@@ -55,6 +55,9 @@ lifecycle assumptions, and compatibility aliases.
 - `window.electronAPI` remains the canonical renderer bridge.
 - Shared response types describe backend-owned data and are not redefined in
   hooks or components.
+- Runtime profile bridge types use `profileId`/`modelId` at the renderer
+  boundary and map to backend `profile_id`/`model_id` fields. Components
+  should not pass raw endpoint URLs except through legacy compatibility methods.
 
 ## Revisit Triggers
 - The preload bridge stops being the primary renderer/backend boundary.
@@ -88,5 +91,8 @@ import type { DesktopBridgeAPI, LibraryStatusResponse } from './api';
   expected by the renderer and preload bridge.
 - Optional fields remain optional unless a coordinated migration changes them.
 - Global-window declarations remain isolated in `api-electron.ts`.
+- `api-runtime-profiles.ts` is the renderer contract for runtime profiles,
+  model routes, statuses, snapshots, and update-feed events. Add provider
+  fields there before exposing them through profile editors or model-route UI.
 - Revisit trigger: a generated schema or codegen pipeline becomes the producer
   of these contracts.

@@ -15,6 +15,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `responses.rs` | `BaseResponse` and concrete response types matching frontend TypeScript interfaces |
 | `model.rs` | Model-related types: `ModelData`, `HuggingFaceModel`, `ModelMetadata`, external-asset metadata fields, and download/import types |
 | `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
+| `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
 | `github.rs` | GitHub-specific types for release and asset data |
 | `custom_node.rs` | Custom node metadata: `CompatibilityStatus`, `CustomNodeVersionStatus` |
@@ -30,6 +31,9 @@ frontend, ensuring type-compatible serialization across all layers.
 - **Append-only contract growth**: New external-asset fields are added as optional metadata
   extensions so existing file-based models and consumers remain compatible while the model-library
   contract expands.
+- **Backend-owned runtime routing**: Runtime profile DTOs describe Pumas-owned
+  routing and provider settings. They do not claim upstream provider
+  capabilities that are not represented by the selected provider adapter.
 
 ## Dependencies
 
@@ -60,6 +64,10 @@ frontend, ensuring type-compatible serialization across all layers.
     from package files when the artifact signature or package-facts contract version changes.
 - `ModelLibraryUpdateEvent` is a host-agnostic cache-invalidation contract. It identifies model and
   fact-family changes without prescribing consumer cache shape, runtime selection, or scheduling.
+- `RuntimeProfileConfig`, `ModelRuntimeRoute`, `RuntimeProfileStatus`, and
+  `RuntimeProfileUpdateFeed` are the host-facing local runtime contract.
+  Consumers should treat `profile_id` as the stable route key; raw endpoint
+  URLs are compatibility inputs, not durable internal identity.
 - Compatibility policy is append-only for milestone one: new optional fields may appear, but
   existing file-based fields and semantics must remain valid.
 

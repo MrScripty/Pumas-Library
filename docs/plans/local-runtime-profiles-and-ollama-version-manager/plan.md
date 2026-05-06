@@ -469,8 +469,8 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Goal:** Validate the full user flow and update durable module documentation.
 
 **Tasks:**
-- [ ] Update relevant module READMEs for new RPC/profile/process contracts.
-- [ ] Add or update contract docs if profile config becomes a durable interface.
+- [x] Update relevant module READMEs for new RPC/profile/process contracts.
+- [x] Add or update contract docs if profile config becomes a durable interface.
 - [ ] Test default singleton Ollama flow still works.
 - [ ] Test llama.cpp router and dedicated profile flows with fake process/server coverage and one manual smoke path when binaries are available.
 - [ ] Test CPU and GPU profile assignment behavior on available hardware or documented fake-process coverage.
@@ -483,7 +483,10 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Frontend build.
 - Release build/smoke command.
 
-**Status:** Not started.
+**Status:** In progress. Runtime/profile module and bridge contract documentation is updated; integration tests and release build validation remain.
+
+**Implementation Notes:**
+- 2026-05-05: Updated core, API, models, process, RPC handler, desktop RPC contract, frontend type, hook, and app-panel section docs to describe backend-owned runtime profiles, canonical `profile_id` routing, legacy endpoint boundaries, pushed runtime-profile events, profile-scoped process ownership, and generated llama.cpp router presets.
 
 ## Lifecycle and Concurrency Notes
 

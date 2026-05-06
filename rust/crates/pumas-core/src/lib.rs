@@ -83,7 +83,6 @@ pub use system::{
 // Re-export builder from api module
 pub use api::PumasApiBuilder;
 
-use serde::de::DeserializeOwned;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -124,44 +123,11 @@ impl PumasApi {
         Ok(state)
     }
 
-    fn try_client(&self) -> Option<&ipc::IpcClient> {
-        None
-    }
-
     /// Get a reference to the primary state. Panics if in client mode.
     /// Use only for methods that are guaranteed primary-only.
     fn primary(&self) -> &Arc<PrimaryState> {
         let ApiInner::Primary(state) = &self.inner;
         state
-    }
-
-    async fn call_client_method<T>(&self, method: &str, params: serde_json::Value) -> Result<T>
-    where
-        T: DeserializeOwned,
-    {
-        let client = self.try_client().ok_or_else(|| {
-            PumasError::Other(format!(
-                "IPC method {method} requested on a primary instance"
-            ))
-        })?;
-        let value = client.call(method, params).await?;
-        serde_json::from_value(value).map_err(|err| PumasError::Json {
-            message: format!("Failed to decode IPC response for {method}: {err}"),
-            source: Some(err),
-        })
-    }
-
-    async fn call_client_method_or_default<T>(&self, method: &str, params: serde_json::Value) -> T
-    where
-        T: DeserializeOwned + Default,
-    {
-        match self.call_client_method(method, params).await {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!("Client IPC call {} failed: {}", method, err);
-                T::default()
-            }
-        }
     }
 
     /// Returns true if this instance is the primary (owns full state).

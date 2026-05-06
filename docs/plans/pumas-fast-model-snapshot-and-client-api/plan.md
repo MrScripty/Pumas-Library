@@ -365,7 +365,7 @@ entry points exist.
 **Tasks:**
 - [x] Introduce or finalize `PumasLibraryInstance`, `PumasReadOnlyLibrary`, and
   `PumasLocalClient` exports.
-- [ ] Migrate internal callers from `PumasApi` to explicit roles.
+- [x] Migrate internal callers from `PumasApi` to explicit roles.
 - [x] Remove, deprecate, or narrow transparent `ApiInner::Client` dispatch.
 - [ ] Update UniFFI/bindings guidance to use explicit roles.
 - [x] Update crate docs and examples.
@@ -564,6 +564,10 @@ Update during implementation:
   forwarding branches from mapping and migration APIs. These operations now
   stay fully owner-side and keep transport concerns in RPC/local-client
   adapters.
+- 2026-05-06: Milestone 7 cleanup slice removed the remaining unreachable
+  hidden-client forwarding branches from model-library and Hugging Face APIs.
+  `PumasApi` no longer exposes `try_client()` or IPC forwarding helpers; local
+  transport is represented only by explicit IPC/local-client types.
 
 ## Discovered Issues
 
@@ -573,11 +577,10 @@ Update during implementation:
   the fast snapshot/client API slices and should be fixed before relying on the
   RPC response for operator feedback.
 - 2026-05-06: After removing the hidden `PumasApi` client constructor path,
-  many `PumasApi` methods still contain stale `try_client()` forwarding
-  branches. Network, link, and conversion methods have been cleaned up; the
-  system, process, runtime-profile, mapping, and migration methods have been
-  cleaned up; the remaining model and Hugging Face methods should be cleaned in
-  follow-up slices.
+  stale `try_client()` forwarding branches remained across `PumasApi` methods.
+  Milestone 7 cleanup slices removed them from network, link, conversion,
+  system, process, runtime-profile, mapping, migration, model-library, and
+  Hugging Face modules.
 
 ## Commit Cadence Notes
 

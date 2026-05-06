@@ -471,10 +471,10 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 **Tasks:**
 - [x] Update relevant module READMEs for new RPC/profile/process contracts.
 - [x] Add or update contract docs if profile config becomes a durable interface.
-- [ ] Test default singleton Ollama flow still works.
-- [ ] Test llama.cpp router and dedicated profile flows with fake process/server coverage and one manual smoke path when binaries are available.
-- [ ] Test CPU and GPU profile assignment behavior on available hardware or documented fake-process coverage.
-- [ ] Build frontend and release binaries.
+- [x] Test default singleton Ollama flow still works.
+- [x] Test llama.cpp router and dedicated profile flows with fake process/server coverage and one manual smoke path when binaries are available.
+- [x] Test CPU and GPU profile assignment behavior on available hardware or documented fake-process coverage.
+- [x] Build frontend and release binaries.
 
 **Verification:**
 - Full targeted frontend test set.
@@ -483,11 +483,16 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Frontend build.
 - Release build/smoke command.
 
-**Status:** In progress. Runtime/profile module and bridge contract documentation is updated; integration tests and release build validation remain.
+**Status:** Complete for the current implementation wave. Runtime/profile module and bridge contract documentation is updated, automated Rust/Electron/frontend coverage passes, frontend assets build, release binaries compile, and release smoke starts successfully.
 
 **Implementation Notes:**
 - 2026-05-05: Updated core, API, models, process, RPC handler, desktop RPC contract, frontend type, hook, and app-panel section docs to describe backend-owned runtime profiles, canonical `profile_id` routing, legacy endpoint boundaries, pushed runtime-profile events, profile-scoped process ownership, and generated llama.cpp router presets.
 - 2026-05-05: Release smoke against an already-running older primary backend exposed a compatibility warning loop: the new runtime-profile SSE stream repeatedly called `list_runtime_profile_updates_since` through a primary instance that did not support the method yet. Added a compatibility backoff so the stream logs the unsupported primary once and retries slowly until the primary backend is restarted.
+- 2026-05-05: Validated the core runtime profile surface with `cargo test -p pumas-library runtime_profile --manifest-path rust/Cargo.toml`, covering default profile seeding/status preservation, profile route resolution, stopped/external endpoint guards, CPU/GPU environment derivation, llama.cpp provider modes, router launch specs, dedicated launch prep, router catalog sorting, and generated preset writing.
+- 2026-05-05: Validated RPC and Electron surfaces with `cargo test -p pumas-rpc --manifest-path rust/Cargo.toml` and `npm run -w electron test`. The full RPC suite passed with 49 unit tests and 5 active integration tests; 11 integration tests remain intentionally ignored by the existing harness.
+- 2026-05-05: Validated frontend coverage with `npm run -w frontend test:run` after updating the Ollama preview test mock for the new runtime-profile subscription dependency. The suite passed with 99 test files and 410 tests.
+- 2026-05-05: Validated frontend type/build and release artifacts with `npm run -w frontend check:types`, `npm run -w frontend build`, `bash launcher.sh --build-release`, and `bash launcher.sh --release-smoke`.
+- 2026-05-05: No local managed llama.cpp runtime binary was found under `launcher-data/`, so llama.cpp validation stayed on deterministic backend command/catalog/preset tests rather than a real `llama-server` smoke.
 
 **Discovered Issues:**
 - 2026-05-05: `cargo test -p pumas-rpc runtime_profile --manifest-path rust/Cargo.toml` and the plural `runtime_profiles` filter currently match no RPC tests. The full `pumas-rpc` suite covers the registered RPC unit tests, but dedicated runtime-profile handler tests should be added if handler-level behavior expands.

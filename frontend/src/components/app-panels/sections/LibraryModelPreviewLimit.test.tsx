@@ -11,6 +11,7 @@ const { isApiAvailableMock } = vi.hoisted(() => ({
 
 vi.mock('../../../api/adapter', () => ({
   api: {},
+  getElectronAPI: () => undefined,
   isAPIAvailable: isApiAvailableMock,
 }));
 

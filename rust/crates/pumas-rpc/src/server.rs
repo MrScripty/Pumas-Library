@@ -1,8 +1,8 @@
 //! HTTP server implementation using Axum.
 
 use crate::handlers::{
-    handle_health, handle_model_library_update_events, handle_rpc,
-    handle_runtime_profile_update_events, handle_status_telemetry_update_events,
+    handle_health, handle_model_download_update_events, handle_model_library_update_events,
+    handle_rpc, handle_runtime_profile_update_events, handle_status_telemetry_update_events,
 };
 use crate::shortcut::ShortcutManager;
 use axum::{
@@ -124,6 +124,10 @@ pub async fn start_server(
         .route(
             "/events/model-library-updates",
             get(handle_model_library_update_events),
+        )
+        .route(
+            "/events/model-download-updates",
+            get(handle_model_download_update_events),
         )
         .route(
             "/events/runtime-profile-updates",

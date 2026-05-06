@@ -30,7 +30,8 @@ use futures::{
     Stream, StreamExt,
 };
 use pumas_library::models::{
-    ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed, StatusTelemetryUpdateNotification,
+    ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed,
+    StatusTelemetryUpdateNotification,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -151,6 +152,11 @@ pub struct ModelLibraryUpdateStreamQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub struct ModelDownloadUpdateStreamQuery {
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub struct StatusTelemetryUpdateStreamQuery {
     pub cursor: Option<String>,
 }
@@ -192,6 +198,53 @@ async fn build_model_library_update_stream_state(
     Ok(ModelLibraryUpdateStreamState {
         subscriber,
         cursor,
+        pending_notification,
+    })
+}
+
+/// Server-sent model download update notification stream.
+pub async fn handle_model_download_update_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ModelDownloadUpdateStreamQuery>,
+) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let stream: BoxStream<'static, Result<Event, Infallible>> =
+        match build_model_download_update_stream_state(state, query.cursor).await {
+            Ok(stream_state) => {
+                stream::unfold(stream_state, next_model_download_update_event).boxed()
+            }
+            Err(error) => {
+                warn!("model download update stream startup failed: {}", error);
+                stream::once(async move {
+                    Ok(Event::default()
+                        .event("model-download-error")
+                        .data(json!({ "error": error.to_string() }).to_string()))
+                })
+                .boxed()
+            }
+        };
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn build_model_download_update_stream_state(
+    state: Arc<AppState>,
+    cursor: Option<String>,
+) -> pumas_library::Result<ModelDownloadUpdateStreamState> {
+    let receiver = state.api.subscribe_hf_download_updates().ok_or_else(|| {
+        pumas_library::PumasError::Config {
+            message: "HuggingFace client not initialized".to_string(),
+        }
+    })?;
+    let pending_notification = Some(
+        state
+            .api
+            .hf_download_notification_since(cursor.as_deref())
+            .await,
+    );
+
+    Ok(ModelDownloadUpdateStreamState {
+        state,
+        receiver,
         pending_notification,
     })
 }
@@ -289,6 +342,12 @@ struct ModelLibraryUpdateStreamState {
     pending_notification: Option<ModelLibraryUpdateNotification>,
 }
 
+struct ModelDownloadUpdateStreamState {
+    state: Arc<AppState>,
+    receiver: broadcast::Receiver<ModelDownloadUpdateNotification>,
+    pending_notification: Option<ModelDownloadUpdateNotification>,
+}
+
 async fn next_model_library_update_event(
     mut state: ModelLibraryUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, ModelLibraryUpdateStreamState)> {
@@ -325,6 +384,39 @@ fn model_library_update_sse_event(notification: &ModelLibraryUpdateNotification)
         Ok(payload) => Event::default().event("model-library-update").data(payload),
         Err(error) => Event::default()
             .event("model-library-error")
+            .data(json!({ "error": error.to_string() }).to_string()),
+    }
+}
+
+async fn next_model_download_update_event(
+    mut state: ModelDownloadUpdateStreamState,
+) -> Option<(Result<Event, Infallible>, ModelDownloadUpdateStreamState)> {
+    if let Some(notification) = state.pending_notification.take() {
+        let event = model_download_update_sse_event(&notification);
+        return Some((Ok(event), state));
+    }
+
+    match state.receiver.recv().await {
+        Ok(notification) => {
+            let event = model_download_update_sse_event(&notification);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Lagged(_)) => {
+            let notification = state.state.api.hf_download_notification_since(None).await;
+            let event = model_download_update_sse_event(&notification);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Closed) => None,
+    }
+}
+
+fn model_download_update_sse_event(notification: &ModelDownloadUpdateNotification) -> Event {
+    match serde_json::to_string(notification) {
+        Ok(payload) => Event::default()
+            .event("model-download-update")
+            .data(payload),
+        Err(error) => Event::default()
+            .event("model-download-error")
             .data(json!({ "error": error.to_string() }).to_string()),
     }
 }

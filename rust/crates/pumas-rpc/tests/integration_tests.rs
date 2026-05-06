@@ -678,6 +678,45 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_model_download_update_event_stream_emits_initial_snapshot() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "http://127.0.0.1:{}/events/model-download-updates",
+                port
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        assert!(response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.starts_with("text/event-stream")));
+        let mut stream = response.bytes_stream();
+
+        let body = read_stream_until_contains(
+            &mut stream,
+            "model-download-update",
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+        assert!(body.contains("event: model-download-update"));
+        assert!(body.contains("\"snapshot\""));
+        assert!(body.contains("\"downloads\""));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
     async fn test_migration_report_prune_rejects_negative_keep_latest() {
         if !can_bind_local_tcp_for_tests() {
             return;

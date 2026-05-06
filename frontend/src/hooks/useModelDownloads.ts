@@ -1,12 +1,13 @@
 /**
  * Model Downloads Hook
  *
- * Manages model download state and polling.
+ * Manages model download state from backend snapshots and pushed updates.
  * Supports parallel downloads, pause/resume, and startup recovery.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
+import { api, getElectronAPI, isAPIAvailable } from '../api/adapter';
+import type { ModelDownloadSnapshotEntry } from '../types/api';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
 import {
@@ -28,66 +29,51 @@ export function useModelDownloads() {
   const [downloadStatusByRepo, setDownloadStatusByRepo] = useState<Record<string, DownloadStatus>>({});
   const [downloadErrors, setDownloadErrors] = useState<Record<string, string>>({});
 
-  // Refs for stable polling (avoids effect teardown/recreation)
+  // Ref keeps command handlers independent from render timing.
   const downloadStatusRef = useRef(downloadStatusByRepo);
-  const hasActiveRef = useRef(false);
 
-  // Keep refs in sync with state
   useEffect(() => {
     downloadStatusRef.current = downloadStatusByRepo;
-    hasActiveRef.current = Object.values(downloadStatusByRepo).some((s) => isActiveStatus(s.status));
   }, [downloadStatusByRepo]);
 
-  // Startup recovery: restore any active/paused downloads from backend
+  const applyDownloadSnapshot = useCallback((
+    downloads: ModelDownloadSnapshotEntry[],
+    options: { preserveExisting?: boolean } = {}
+  ) => {
+    const { statuses, errors } = selectDownloadsByRepo(downloads);
+    setDownloadStatusByRepo((prev) => (
+      options.preserveExisting ? { ...statuses, ...prev } : statuses
+    ));
+    setDownloadErrors(errors);
+  }, []);
+
+  // Startup recovery plus backend-owned pushed updates.
   useEffect(() => {
+    let cancelled = false;
+
     const restoreDownloads = async () => {
       if (!isAPIAvailable()) return;
       try {
         const result = await api.list_model_downloads();
-        if (!result.success) return;
-        const { statuses, errors } = selectDownloadsByRepo(result.downloads);
-        setDownloadStatusByRepo((prev) => ({ ...statuses, ...prev }));
-        if (Object.keys(errors).length > 0) {
-          setDownloadErrors((prev) => ({ ...prev, ...errors }));
+        if (!cancelled && result.success) {
+          applyDownloadSnapshot(result.downloads, { preserveExisting: true });
         }
       } catch (error) {
         logger.warn('Failed to restore downloads on startup', { error });
       }
     };
+
     void restoreDownloads();
-  }, []);
 
-  // Stable polling interval -- created once, never torn down by state changes
-  useEffect(() => {
-    const intervalId = window.setInterval(async () => {
-      if (!isAPIAvailable()) return;
-      if (!hasActiveRef.current && Object.keys(downloadStatusRef.current).length === 0) return;
+    const unsubscribe = getElectronAPI()?.onModelDownloadUpdate?.((notification) => {
+      applyDownloadSnapshot(notification.snapshot.downloads);
+    });
 
-      try {
-        const result = await api.list_model_downloads();
-        if (!result.success) return;
-
-        const { statuses, errors } = selectDownloadsByRepo(result.downloads);
-        setDownloadStatusByRepo(statuses);
-
-        setDownloadErrors((prev) => {
-          const next = { ...prev };
-          for (const repoId of Object.keys(statuses)) {
-            if (errors[repoId]) {
-              next[repoId] = errors[repoId];
-            } else if (next[repoId]) {
-              delete next[repoId];
-            }
-          }
-          return next;
-        });
-      } catch (error) {
-        logger.warn('Transient error fetching download list', { error: error instanceof Error ? error.message : error });
-      }
-    }, 800);
-
-    return () => window.clearInterval(intervalId);
-  }, []); // Empty deps -- interval is stable for component lifetime
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [applyDownloadSnapshot]);
 
   const startDownload = useCallback((
     downloadKey: string,

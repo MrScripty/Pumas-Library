@@ -17,9 +17,9 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | `useHfAuthPrompt.ts` | Hugging Face auth prompt visibility and auto-open behavior for new auth-required download errors. |
 | `useHfAuthPrompt.test.ts` | Hook coverage for new auth errors, repeated existing errors, non-auth errors, and explicit open/close actions. |
 | `useModelDownloads.ts` | Download state and operation controls. |
-| `useModelDownloads.test.ts` | Hook coverage for startup download recovery, active polling updates, duplicate-start protection, and pause/cancel/resume transitions. |
-| `useActiveModelDownload.ts` | Top-level polling for the most relevant active model download and active download count. |
-| `useActiveModelDownload.test.ts` | Hook coverage for active download prioritization, polling refreshes, API-unavailable resets, and empty-download clearing. |
+| `useModelDownloads.test.ts` | Hook coverage for startup download recovery, pushed backend updates, duplicate-start protection, and pause/cancel/resume transitions. |
+| `useActiveModelDownload.ts` | Top-level selector for the most relevant active model download and active download count from backend-owned download updates. |
+| `useActiveModelDownload.test.ts` | Hook coverage for active download prioritization, pushed refreshes, subscription cleanup, and empty-download clearing. |
 | `useModelManagerFilters.ts` | Model manager local/remote search, category, kind, and download-mode filter state. |
 | `useModelManagerFilters.test.ts` | Hook coverage for local filters, remote kind filters, mode switching, and developer search. |
 | `useModelImportPicker.ts` | Model manager file-picker import dialog state and selected import paths. |
@@ -97,7 +97,7 @@ Custom React hooks for backend polling, process status, version/model workflows,
 | ------------- | -------------- | ------------------ |
 | `useNetworkStatus.ts` | Network counters and circuit-breaker state are sampled backend status today. | Prevent overlapping polls and clear the interval on unmount. |
 | `useStatus.ts` | Launcher/app status has no subscribed event stream yet. | Clear API-wait and polling timers on unmount. |
-| `useActiveModelDownload.ts` and `useModelDownloads.ts` | Download progress is backend-owned and currently exposed through polling APIs. | Keep polling in hooks, dedupe startup recovery, and clear intervals on unmount. |
+| `useActiveModelDownload.ts` and `useModelDownloads.ts` | Download progress is backend-owned and exposed through model-download update subscriptions. | Load one startup snapshot, subscribe through Electron, and unsubscribe on unmount. |
 | `useInstallationManager.ts` and `useInstallationProgress.ts` | Installation progress can outlive a single dialog render and still lacks a push channel. | Stop polling on completion/cancel and clear completion-delay timers. |
 | `useAvailableVersionState.ts` | Background fetch status is backend-owned cache state without push notifications. | Clear wait, interval, and follow-up refresh timers together. |
 

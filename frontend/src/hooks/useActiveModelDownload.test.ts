@@ -2,9 +2,11 @@ import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  getElectronAPIMock,
   isApiAvailableMock,
   listModelDownloadsMock,
 } = vi.hoisted(() => ({
+  getElectronAPIMock: vi.fn(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   listModelDownloadsMock: vi.fn(),
 }));
@@ -13,9 +15,11 @@ vi.mock('../api/adapter', () => ({
   api: {
     list_model_downloads: listModelDownloadsMock,
   },
+  getElectronAPI: getElectronAPIMock,
   isAPIAvailable: isApiAvailableMock,
 }));
 
+import type { ModelDownloadUpdateNotification } from '../types/api';
 import { useActiveModelDownload } from './useActiveModelDownload';
 
 async function flushMicrotasks() {
@@ -25,10 +29,21 @@ async function flushMicrotasks() {
 }
 
 describe('useActiveModelDownload', () => {
+  let downloadUpdateCallback: ((notification: ModelDownloadUpdateNotification) => void) | null;
+  let unsubscribeMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    downloadUpdateCallback = null;
+    unsubscribeMock = vi.fn();
     isApiAvailableMock.mockReturnValue(true);
+    getElectronAPIMock.mockReturnValue({
+      onModelDownloadUpdate: vi.fn((callback) => {
+        downloadUpdateCallback = callback;
+        return unsubscribeMock;
+      }),
+    });
     listModelDownloadsMock.mockResolvedValue({
       success: true,
       downloads: [],
@@ -129,40 +144,18 @@ describe('useActiveModelDownload', () => {
     expect(result.current.activeDownload?.speed).toBe(96);
   });
 
-  it('refreshes the active download on the polling interval', async () => {
-    listModelDownloadsMock
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [
-          {
-            repoId: 'repo-a',
-            downloadId: 'dl-a',
-            status: 'queued',
-            progress: 10,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [
-          {
-            repoId: 'repo-b',
-            downloadId: 'dl-b',
-            status: 'downloading',
-            progress: 60,
-            downloadedBytes: 600,
-            totalBytes: 1000,
-            speed: 128,
-            etaSeconds: 5,
-          },
-          {
-            repoId: 'repo-a',
-            downloadId: 'dl-a',
-            status: 'queued',
-            progress: 10,
-          },
-        ],
-      });
+  it('refreshes the active download from pushed snapshots', async () => {
+    listModelDownloadsMock.mockResolvedValueOnce({
+      success: true,
+      downloads: [
+        {
+          repoId: 'repo-a',
+          downloadId: 'dl-a',
+          status: 'queued',
+          progress: 10,
+        },
+      ],
+    });
 
     const { result } = renderHook(() => useActiveModelDownload());
 
@@ -180,11 +173,36 @@ describe('useActiveModelDownload', () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(1000);
-      await Promise.resolve();
+      downloadUpdateCallback?.({
+        cursor: 'download:2',
+        snapshot: {
+          cursor: 'download:2',
+          revision: 2,
+          downloads: [
+            {
+              repoId: 'repo-b',
+              downloadId: 'dl-b',
+              status: 'downloading',
+              progress: 60,
+              downloadedBytes: 600,
+              totalBytes: 1000,
+              speed: 128,
+              etaSeconds: 5,
+            },
+            {
+              repoId: 'repo-a',
+              downloadId: 'dl-a',
+              status: 'queued',
+              progress: 10,
+            },
+          ],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
     });
 
-    expect(listModelDownloadsMock).toHaveBeenCalledTimes(2);
+    expect(listModelDownloadsMock).toHaveBeenCalledTimes(1);
     expect(result.current.activeDownloadCount).toBe(2);
     expect(result.current.activeDownload).toEqual({
       downloadId: 'dl-b',
@@ -198,7 +216,7 @@ describe('useActiveModelDownload', () => {
     });
   });
 
-  it('clears active download state when the API becomes unavailable', async () => {
+  it('clears active download state when pushed snapshot is empty', async () => {
     listModelDownloadsMock.mockResolvedValueOnce({
       success: true,
       downloads: [
@@ -218,45 +236,35 @@ describe('useActiveModelDownload', () => {
     expect(result.current.activeDownloadCount).toBe(1);
     expect(result.current.activeDownload).not.toBeNull();
 
-    isApiAvailableMock.mockReturnValue(false);
-
     await act(async () => {
-      vi.advanceTimersByTime(1000);
-      await Promise.resolve();
+      downloadUpdateCallback?.({
+        cursor: 'download:2',
+        snapshot: {
+          cursor: 'download:2',
+          revision: 2,
+          downloads: [],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
     });
 
     expect(result.current.activeDownloadCount).toBe(0);
     expect(result.current.activeDownload).toBeNull();
   });
 
-  it('clears the active selection when backend polling reports no active downloads', async () => {
-    listModelDownloadsMock
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [
-          {
-            repoId: 'repo-a',
-            downloadId: 'dl-a',
-            status: 'downloading',
-            progress: 35,
-          },
-        ],
-      })
-      .mockResolvedValueOnce({
-        success: false,
-        downloads: [],
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [
-          {
-            repoId: 'repo-a',
-            downloadId: 'dl-done',
-            status: 'completed',
-            progress: 100,
-          },
-        ],
-      });
+  it('clears the active selection when pushed snapshot has no active downloads', async () => {
+    listModelDownloadsMock.mockResolvedValueOnce({
+      success: true,
+      downloads: [
+        {
+          repoId: 'repo-a',
+          downloadId: 'dl-a',
+          status: 'downloading',
+          progress: 35,
+        },
+      ],
+    });
 
     const { result } = renderHook(() => useActiveModelDownload());
 
@@ -265,19 +273,39 @@ describe('useActiveModelDownload', () => {
     expect(result.current.activeDownloadCount).toBe(1);
 
     await act(async () => {
-      vi.advanceTimersByTime(1000);
-      await Promise.resolve();
+      downloadUpdateCallback?.({
+        cursor: 'download:2',
+        snapshot: {
+          cursor: 'download:2',
+          revision: 2,
+          downloads: [
+            {
+              repoId: 'repo-a',
+              downloadId: 'dl-done',
+              status: 'completed',
+              progress: 100,
+            },
+          ],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
     });
 
     expect(result.current.activeDownloadCount).toBe(0);
     expect(result.current.activeDownload).toBeNull();
+  });
 
-    await act(async () => {
-      vi.advanceTimersByTime(1000);
-      await Promise.resolve();
-    });
+  it('does not install a polling interval and unsubscribes on unmount', async () => {
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const { unmount } = renderHook(() => useActiveModelDownload());
 
-    expect(result.current.activeDownloadCount).toBe(0);
-    expect(result.current.activeDownload).toBeNull();
+    await flushMicrotasks();
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+    setIntervalSpy.mockRestore();
   });
 });

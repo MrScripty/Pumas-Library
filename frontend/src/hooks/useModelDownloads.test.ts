@@ -3,12 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   cancelModelDownloadMock,
+  getElectronAPIMock,
   isApiAvailableMock,
   listModelDownloadsMock,
   pauseModelDownloadMock,
   resumeModelDownloadMock,
 } = vi.hoisted(() => ({
   cancelModelDownloadMock: vi.fn(),
+  getElectronAPIMock: vi.fn(),
   isApiAvailableMock: vi.fn<() => boolean>(),
   listModelDownloadsMock: vi.fn(),
   pauseModelDownloadMock: vi.fn(),
@@ -22,9 +24,11 @@ vi.mock('../api/adapter', () => ({
     pause_model_download: pauseModelDownloadMock,
     resume_model_download: resumeModelDownloadMock,
   },
+  getElectronAPI: getElectronAPIMock,
   isAPIAvailable: isApiAvailableMock,
 }));
 
+import type { ModelDownloadUpdateNotification } from '../types/api';
 import { useModelDownloads } from './useModelDownloads';
 
 async function flushMicrotasks() {
@@ -34,10 +38,21 @@ async function flushMicrotasks() {
 }
 
 describe('useModelDownloads', () => {
+  let downloadUpdateCallback: ((notification: ModelDownloadUpdateNotification) => void) | null;
+  let unsubscribeMock: ReturnType<typeof vi.fn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
+    downloadUpdateCallback = null;
+    unsubscribeMock = vi.fn();
     isApiAvailableMock.mockReturnValue(true);
+    getElectronAPIMock.mockReturnValue({
+      onModelDownloadUpdate: vi.fn((callback) => {
+        downloadUpdateCallback = callback;
+        return unsubscribeMock;
+      }),
+    });
     listModelDownloadsMock.mockResolvedValue({
       success: true,
       downloads: [],
@@ -128,28 +143,11 @@ describe('useModelDownloads', () => {
     expect(result.current.hasActiveDownloads).toBe(false);
   });
 
-  it('starts polling after a local download begins and applies backend progress updates', async () => {
-    listModelDownloadsMock
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [],
-      })
-      .mockResolvedValueOnce({
-        success: true,
-        downloads: [
-          {
-            repoId: 'repo-a',
-            artifactId: 'repo-a::Q4',
-            downloadId: 'dl-1',
-            status: 'downloading',
-            progress: 55,
-            downloadedBytes: 550,
-            totalBytes: 1000,
-            speed: 32,
-            etaSeconds: 14,
-          },
-        ],
-      });
+  it('applies pushed backend progress updates after a local download begins', async () => {
+    listModelDownloadsMock.mockResolvedValueOnce({
+      success: true,
+      downloads: [],
+    });
 
     const { result } = renderHook(() => useModelDownloads());
 
@@ -174,11 +172,31 @@ describe('useModelDownloads', () => {
     });
 
     await act(async () => {
-      vi.advanceTimersByTime(800);
-      await Promise.resolve();
+      downloadUpdateCallback?.({
+        cursor: 'download:2',
+        snapshot: {
+          cursor: 'download:2',
+          revision: 2,
+          downloads: [
+            {
+              repoId: 'repo-a',
+              artifactId: 'repo-a::Q4',
+              downloadId: 'dl-1',
+              status: 'downloading',
+              progress: 55,
+              downloadedBytes: 550,
+              totalBytes: 1000,
+              speed: 32,
+              etaSeconds: 14,
+            },
+          ],
+        },
+        stale_cursor: false,
+        snapshot_required: false,
+      });
     });
 
-    expect(listModelDownloadsMock).toHaveBeenCalledTimes(2);
+    expect(listModelDownloadsMock).toHaveBeenCalledTimes(1);
     expect(result.current.downloadStatusByRepo['repo-a::Q4']).toEqual(
       expect.objectContaining({
         downloadId: 'dl-1',
@@ -193,6 +211,19 @@ describe('useModelDownloads', () => {
       })
     );
     expect(result.current.hasActiveDownloads).toBe(true);
+  });
+
+  it('does not install a polling interval and unsubscribes on unmount', async () => {
+    const setIntervalSpy = vi.spyOn(global, 'setInterval');
+    const { unmount } = renderHook(() => useModelDownloads());
+
+    await flushMicrotasks();
+
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    unmount();
+    expect(unsubscribeMock).toHaveBeenCalledTimes(1);
+    setIntervalSpy.mockRestore();
   });
 
   it('tracks same-repo artifact downloads independently and blocks duplicate same-artifact starts', async () => {

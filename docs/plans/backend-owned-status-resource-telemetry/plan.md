@@ -836,7 +836,7 @@ Verification completed:
 
 #### R3 - Frontend Download Poll Removal
 
-Status: Planned.
+Status: Completed on 2026-05-06.
 
 - Replace `useModelDownloads.ts` interval polling with initial snapshot plus
   pushed download events.
@@ -853,6 +853,21 @@ Verification:
   recovery cases.
 - Manual UI check confirms the header transfer indicator does not show activity
   when all downloads are paused or complete.
+
+Implementation notes:
+
+- `useModelDownloads` now loads one startup snapshot and subscribes to
+  `onModelDownloadUpdate`.
+- `useActiveModelDownload` now derives the active header indicator from the
+  same pushed snapshot contract.
+- The hook README now documents download update subscriptions instead of
+  download polling.
+
+Verification completed:
+
+- `npm run -w frontend test:run -- useModelDownloads useActiveModelDownload`
+- `npm run -w frontend check:types`
+- `rg -n "setInterval|list_model_downloads|poll" frontend/src/hooks/useModelDownloads.ts frontend/src/hooks/useActiveModelDownload.ts frontend/src/hooks/README.md`
 
 #### R4 - Runtime-Profile Push Updates
 

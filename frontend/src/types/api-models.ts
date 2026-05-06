@@ -178,10 +178,14 @@ export interface ListModelDownloadsResponse extends BaseResponse {
   downloads: ModelDownloadStatusResponse[];
 }
 
+export type ModelDownloadSnapshotEntry = Omit<ModelDownloadStatusResponse, 'success'> & {
+  success?: boolean;
+};
+
 export interface ModelDownloadSnapshot {
   cursor: string;
   revision: number;
-  downloads: ModelDownloadStatusResponse[];
+  downloads: ModelDownloadSnapshotEntry[];
 }
 
 export interface ModelDownloadUpdateNotification {

@@ -14,8 +14,8 @@ This contract classifies the current UniFFI export surface by support tier and d
 | Export | Tier | Owner | Notes |
 | --- | --- | --- | --- |
 | `version` | Stable | `pumas-uniffi` | Binding/native version identity. |
-| `FfiPumasApi::new` | Stable | `pumas-uniffi` | Validates `launcher_root` before primary or IPC-backed construction. |
-| `FfiPumasApi::with_config` | Stable | `pumas-uniffi` | Validates `FfiApiConfig.launcher_root`; other flags are configuration booleans. |
+| `FfiPumasApi::new` | Transitional | `pumas-uniffi` | Validates `launcher_root` before current primary or IPC-backed construction. Future bindings should expose explicit owner/local-client/read-only roles. |
+| `FfiPumasApi::with_config` | Transitional | `pumas-uniffi` | Validates `FfiApiConfig.launcher_root`; other flags are configuration booleans. Future bindings should not hide ownership mode behind one constructor. |
 | `list_models`, `get_model`, `search_models` | Stable | `pumas-core` via adapter | Read-only model catalog surface. |
 | `import_model`, `import_models_batch` | Preview | `pumas-core` via adapter | Validates import path, family, and official name in the adapter. |
 | `delete_model` | Preview | `pumas-core` via adapter | Destructive operation; keep compatibility notes when changing semantics. |

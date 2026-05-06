@@ -203,13 +203,13 @@ non-transport alias so consumers are not misled about ownership mode.
 changing source behavior.
 
 **Tasks:**
-- [ ] Inventory all `PumasApi::new`, `PumasApi::builder`, and `PumasApi::discover`
+- [x] Inventory all `PumasApi::new`, `PumasApi::builder`, and `PumasApi::discover`
   callers.
-- [ ] Classify each caller as owning instance, explicit local client, or
+- [x] Classify each caller as owning instance, explicit local client, or
   read-only consumer.
-- [ ] Add or update architecture docs that define `PumasLibraryInstance`,
+- [x] Add or update architecture docs that define `PumasLibraryInstance`,
   `PumasReadOnlyLibrary`, and `PumasLocalClient`.
-- [ ] Record the compatibility break and migration path for transparent
+- [x] Record the compatibility break and migration path for transparent
   client-mode behavior.
 
 **Verification:**
@@ -217,7 +217,7 @@ changing source behavior.
 - Architecture docs state that direct Rust APIs do not secretly use RPC.
 - Compile is not required if this slice is documentation/inventory only.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 2: Fast Selector Vertical Slice
 
@@ -430,6 +430,10 @@ multi-model public loops.
 Update during implementation:
 - 2026-05-06: Proposal moved into a standards-compliant plan directory and
   converted into this implementation plan.
+- 2026-05-06: Milestone 1 caller inventory recorded in `caller-inventory.md`.
+  Architecture, core, IPC, UniFFI, and native-binding docs now describe hidden
+  `PumasApi` convergence as transitional compatibility rather than the target
+  API contract.
 
 ## Commit Cadence Notes
 
@@ -527,6 +531,12 @@ After each worker wave:
   - added the directory README;
   - added this standards-compliant implementation plan;
   - updated plan index and superseded-plan references.
+- Milestone 1 API role inventory and contract freeze:
+  - classified current source, test, example, RPC, UniFFI, and documentation
+    construction references;
+  - documented migration blockers and anti-patterns in `caller-inventory.md`;
+  - updated active docs to frame transparent `PumasApi` convergence as
+    transitional compatibility.
 
 ### Deviations
 
@@ -541,6 +551,8 @@ After each worker wave:
 - Documentation-only planning slice.
 - Checked against `PLAN-STANDARDS.md`, `DOCUMENTATION-STANDARDS.md`, and
   `templates/PLAN-TEMPLATE.md`.
+- Milestone 1 verification was documentation/inventory-only; no compile was
+  required because no source behavior changed.
 
 ### Traceability Links
 

@@ -11,6 +11,7 @@ subscriber model.
 
 | File | Description |
 | ---- | ----------- |
+| `caller-inventory.md` | Milestone 1 inventory of current `PumasApi` construction sites, role classification, and migration blockers. |
 | `proposal.md` | Reviewed design proposal and Pantograph feedback resolution. |
 | `plan.md` | Standards-compliant implementation plan with thin vertical slices, risks, verification, and worker boundaries. |
 

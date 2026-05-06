@@ -40,6 +40,12 @@ let api = PumasApi::builder("/path/to/root")
     .await?;
 ```
 
+`PumasApi` and its builder are the current legacy construction surfaces. They
+may own the launcher root or attach to an existing local primary depending on
+registry state. New API work is splitting that behavior into explicit
+`PumasLibraryInstance`, `PumasLocalClient`, and `PumasReadOnlyLibrary` roles so
+callers choose ownership and transport behavior directly.
+
 ## Feature Flags
 
 | Feature | Default | Description |

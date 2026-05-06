@@ -1,13 +1,16 @@
 # IPC Module
 
-Local TCP IPC for transparent instance convergence between pumas-core hosts.
+Local TCP IPC for same-device communication between a Pumas owner instance and
+explicit local clients.
 
 ## Purpose
 
 When multiple host applications need the same library, only the first instance
-becomes the **Primary** (running all subsystems locally). Subsequent instances
-become **Clients** that connect via TCP and proxy calls transparently. This
-avoids resource contention and ensures consistent state.
+becomes the **Primary** (running all subsystems locally). Current legacy startup
+paths let subsequent `PumasApi` constructors attach as clients and proxy calls
+over TCP. That transparent facade behavior is transitional compatibility
+behavior; new APIs should expose this module through an explicit
+`PumasLocalClient` role rather than hiding transport behind direct Rust calls.
 
 IPC startup is coordinated by the registry claim flow:
 
@@ -34,7 +37,8 @@ Maximum frame size: 16 MiB (configurable via `RegistryConfig::MAX_IPC_MESSAGE_SI
 - `mod.rs` - Module exports
 - `protocol.rs` - Frame read/write functions and JSON-RPC type definitions
 - `server.rs` - TCP server with `IpcDispatch` trait for method routing
-- `client.rs` - TCP client with `call()` method for transparent proxying
+- `client.rs` - TCP client with `call()` method used by the legacy proxy path
+  and future explicit local-client transport
 
 ## Thread Safety
 

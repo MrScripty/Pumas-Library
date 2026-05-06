@@ -46,7 +46,9 @@ forcing transport layers to re-implement business workflows.
   startup, registry, reconcile, and adapter coordination.
 
 ## Invariants
-- `PumasApi` remains the host-facing facade for crate consumers.
+- `PumasApi` is the current legacy host-facing facade for crate consumers.
+  Active fast-snapshot/client-API work is replacing hidden primary/client
+  convergence with explicit owner, local-client, and read-only roles.
 - SQLite-backed model-library state remains canonical for queryable model data.
 - Only a primary instance may own watcher, reconcile, and other background
   runtime work for a launcher root.
@@ -83,15 +85,19 @@ if status.success {
 ```
 
 ## API Consumer Contract
-- Consumers construct or discover `PumasApi` and use it as the stable facade for
-  library, process, network, and migration operations.
+- Current consumers construct or discover `PumasApi` and use it as the legacy
+  facade for library, process, network, and migration operations.
+- New direct Rust API surfaces must not hide transport attachment. Consumers
+  should be classified as an owning library instance, an explicit same-device
+  local client, or a read-only library snapshot reader before new construction
+  paths are added.
 - Read paths may trigger bounded backend-owned reconcile work before returning
   data when runtime freshness is unknown.
 - Errors are returned as structured backend errors rather than transport-local
   partial states.
-- Compatibility is facade-first: internal module extraction may change, but
-  host-facing method signatures and result contracts should remain additive
-  unless a documented breaking change is introduced.
+- Compatibility for the legacy facade is transitional. Breaking changes that
+  split explicit owner/client/read-only roles must be documented in the active
+  implementation plan and release notes when shipped.
 
 ## Structured Producer Contract
 - This crate produces machine-consumed DTOs and persisted model metadata/index

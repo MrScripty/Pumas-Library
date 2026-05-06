@@ -47,12 +47,19 @@ Supported model families include text, diffusion, embedding, audio, and vision w
 
 ## Architecture At A Glance
 
-The Rust API runs in one of two transparent modes:
+Pumas currently enforces a single primary process per launcher root through a
+local registry and IPC. The legacy Rust `PumasApi` facade can still converge
+automatically: it owns the library when it wins the primary claim, or it
+attaches to the existing primary when another process already owns that root.
 
-- `Primary`: owns the local state, runs the IPC server, and manages the library directly
-- `Client`: discovers an existing primary instance and proxies requests to it
+That transparent behavior is transitional compatibility behavior. New Rust API
+work is moving to explicit roles:
 
-That design lets multiple processes share one library safely while presenting the same public API either way.
+- `PumasLibraryInstance`: owns local state, writes, background work, and local
+  service publication.
+- `PumasLocalClient`: explicitly connects to a same-device running instance.
+- `PumasReadOnlyLibrary`: reads indexed snapshots without owning lifecycle
+  work.
 
 Key implementation pieces:
 
@@ -135,7 +142,10 @@ async fn main() -> pumas_library::Result<()> {
 }
 ```
 
-Alternative initialization styles are also available through `PumasApi::builder(...)` and `PumasApi::discover()`.
+`PumasApi`, `PumasApi::builder(...)`, and `PumasApi::discover()` are the current
+legacy construction surfaces. New integrations should choose the explicit
+owner, local-client, or read-only role once those APIs are available instead of
+depending on hidden primary/client convergence.
 
 ## Repairing a Drifted Library
 

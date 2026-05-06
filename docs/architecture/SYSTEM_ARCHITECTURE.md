@@ -46,8 +46,18 @@ Renderer code does not access Node APIs directly.
 
 Primary ownership is now enforced per launcher root through the registry.
 
-- `PumasApi::new()` and `PumasApi::builder(...).build()` now converge automatically: they claim primary ownership when possible, otherwise they attach as clients to the existing primary for that launcher root.
-- UniFFI constructors keep the same convergence behavior, with an eager client fast-path before falling back to the shared Rust startup path.
+- Current legacy `PumasApi::new()` and `PumasApi::builder(...).build()` calls
+  converge automatically: they claim primary ownership when possible,
+  otherwise they attach as clients to the existing primary for that launcher
+  root.
+- This convergence behavior is transitional compatibility behavior, not the
+  target contract for new Rust API consumers. New direct Rust surfaces should
+  use explicit roles: an owning `PumasLibraryInstance`, an explicit
+  same-device `PumasLocalClient`, or a read-only `PumasReadOnlyLibrary`.
+- UniFFI constructors currently keep the same convergence behavior, with an
+  eager client fast-path before falling back to the shared Rust startup path.
+  Future binding work should expose the same explicit role distinction instead
+  of hiding ownership mode behind one constructor.
 - Watcher startup, reconciliation startup, and download-recovery startup occur only after the winning primary has started IPC and promoted its claim row to `ready`.
 
 This keeps a strict single-primary process model without allowing concurrent startup races to create multiple owners for the same `shared-resources/models` database.

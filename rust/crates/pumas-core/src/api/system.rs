@@ -45,12 +45,6 @@ impl PumasApi {
     /// Note: This returns basic status. Version-specific status (shortcuts, active version)
     /// should be obtained through pumas-app-manager in the RPC layer.
     pub async fn get_status(&self) -> Result<models::StatusResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("get_status_response", serde_json::json!({}))
-                .await;
-        }
-
         // Get actual running status
         let comfyui_running = self.is_comfyui_running().await;
         let ollama_running = self.is_ollama_running().await;
@@ -141,12 +135,6 @@ impl PumasApi {
 
     /// Get disk space information.
     pub async fn get_disk_space(&self) -> Result<models::DiskSpaceResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("get_disk_space", serde_json::json!({}))
-                .await;
-        }
-
         let launcher_root = self.launcher_root.clone();
         tokio::task::spawn_blocking(move || {
             use sysinfo::Disks;
@@ -208,12 +196,6 @@ impl PumasApi {
 
     /// Get system resources (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<models::SystemResourcesResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("get_system_resources", serde_json::json!({}))
-                .await;
-        }
-
         let process_manager = {
             let mgr_lock = self.primary().process_manager.read().await;
             mgr_lock.clone()
@@ -360,15 +342,6 @@ impl PumasApi {
 
     /// Check if background fetch has completed.
     pub async fn has_background_fetch_completed(&self) -> bool {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method_or_default(
-                    "has_background_fetch_completed",
-                    serde_json::json!({}),
-                )
-                .await;
-        }
-
         self.primary()
             ._state
             .read()
@@ -378,19 +351,6 @@ impl PumasApi {
 
     /// Reset the background fetch flag.
     pub async fn reset_background_fetch_flag(&self) {
-        if self.try_client().is_some() {
-            let result: Result<serde_json::Value> = self
-                .call_client_method("reset_background_fetch_flag", serde_json::json!({}))
-                .await;
-            if let Err(err) = result {
-                tracing::warn!(
-                    "Failed to proxy reset_background_fetch_flag over IPC: {}",
-                    err
-                );
-            }
-            return;
-        }
-
         self.primary()
             ._state
             .write()
@@ -404,13 +364,6 @@ impl PumasApi {
 
     /// Get launcher version information.
     pub async fn get_launcher_version(&self) -> serde_json::Value {
-        if self.try_client().is_some() {
-            return self.call_client_method_blocking_or_default(
-                "get_launcher_version",
-                serde_json::json!({}),
-            );
-        }
-
         let launcher_root = self.launcher_root.clone();
         match tokio::task::spawn_blocking(move || {
             let updater = launcher::LauncherUpdater::new(&launcher_root);
@@ -428,49 +381,12 @@ impl PumasApi {
 
     /// Check for launcher updates via GitHub.
     pub async fn check_launcher_updates(&self, force_refresh: bool) -> launcher::UpdateCheckResult {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "check_launcher_updates",
-                    serde_json::json!({ "force_refresh": force_refresh }),
-                )
-                .await
-                .unwrap_or_else(|err| launcher::UpdateCheckResult {
-                    has_update: false,
-                    current_commit: String::new(),
-                    latest_commit: String::new(),
-                    commits_behind: 0,
-                    commits: vec![],
-                    branch: String::new(),
-                    current_version: env!("CARGO_PKG_VERSION").to_string(),
-                    latest_version: None,
-                    release_name: None,
-                    release_url: None,
-                    download_url: None,
-                    published_at: None,
-                    error: Some(err.to_string()),
-                });
-        }
-
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.check_for_updates(force_refresh).await
     }
 
     /// Apply launcher update by pulling latest changes and rebuilding.
     pub async fn apply_launcher_update(&self) -> launcher::UpdateApplyResult {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("apply_launcher_update", serde_json::json!({}))
-                .await
-                .unwrap_or_else(|err| launcher::UpdateApplyResult {
-                    success: false,
-                    message: None,
-                    new_commit: None,
-                    previous_commit: None,
-                    error: Some(err.to_string()),
-                });
-        }
-
         let updater = launcher::LauncherUpdater::new(&self.launcher_root);
         updater.apply_update().await
     }

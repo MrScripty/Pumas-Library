@@ -10,12 +10,6 @@ use std::path::Path;
 
 impl PumasApi {
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("get_runtime_profiles_snapshot", serde_json::json!({}))
-                .await;
-        }
-
         self.refresh_default_ollama_profile_status().await?;
         self.primary().runtime_profile_service.snapshot().await
     }
@@ -24,15 +18,6 @@ impl PumasApi {
         &self,
         cursor: Option<&str>,
     ) -> Result<RuntimeProfileUpdateFeedResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "list_runtime_profile_updates_since",
-                    serde_json::json!({ "cursor": cursor }),
-                )
-                .await;
-        }
-
         self.refresh_default_ollama_profile_status().await?;
         self.primary()
             .runtime_profile_service
@@ -44,15 +29,6 @@ impl PumasApi {
         &self,
         profile: RuntimeProfileConfig,
     ) -> Result<RuntimeProfileMutationResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "upsert_runtime_profile",
-                    serde_json::json!({ "profile": profile }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .upsert_profile(profile)
@@ -63,15 +39,6 @@ impl PumasApi {
         &self,
         profile_id: RuntimeProfileId,
     ) -> Result<RuntimeProfileMutationResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "delete_runtime_profile",
-                    serde_json::json!({ "profile_id": profile_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .delete_profile(profile_id)
@@ -82,15 +49,6 @@ impl PumasApi {
         &self,
         route: ModelRuntimeRoute,
     ) -> Result<RuntimeProfileMutationResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "set_model_runtime_route",
-                    serde_json::json!({ "route": route }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .set_model_route(route)
@@ -101,15 +59,6 @@ impl PumasApi {
         &self,
         model_id: String,
     ) -> Result<RuntimeProfileMutationResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "clear_model_runtime_route",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .clear_model_route(model_id)
@@ -121,15 +70,6 @@ impl PumasApi {
         provider: RuntimeProviderId,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "resolve_runtime_profile_endpoint",
-                    serde_json::json!({ "provider": provider, "profile_id": profile_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .resolve_profile_endpoint(provider, profile_id)
@@ -141,15 +81,6 @@ impl PumasApi {
         provider: RuntimeProviderId,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "resolve_runtime_profile_endpoint_for_operation",
-                    serde_json::json!({ "provider": provider, "profile_id": profile_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .resolve_profile_endpoint_for_operation(provider, profile_id)
@@ -162,19 +93,6 @@ impl PumasApi {
         model_id: &str,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "resolve_model_runtime_profile_endpoint",
-                    serde_json::json!({
-                        "provider": provider,
-                        "model_id": model_id,
-                        "profile_id": profile_id
-                    }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .resolve_model_endpoint(provider, model_id, profile_id)
@@ -187,19 +105,6 @@ impl PumasApi {
         model_id: &str,
         profile_id: Option<RuntimeProfileId>,
     ) -> Result<RuntimeEndpointUrl> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "resolve_model_runtime_profile_endpoint_for_operation",
-                    serde_json::json!({
-                        "provider": provider,
-                        "model_id": model_id,
-                        "profile_id": profile_id
-                    }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .resolve_model_endpoint_for_operation(provider, model_id, profile_id)
@@ -207,15 +112,6 @@ impl PumasApi {
     }
 
     pub async fn model_runtime_route_auto_load(&self, model_id: &str) -> Result<Option<bool>> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "model_runtime_route_auto_load",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await;
-        }
-
         self.primary()
             .runtime_profile_service
             .model_route_auto_load(model_id)
@@ -239,20 +135,6 @@ impl PumasApi {
         version_dir: &Path,
         model_id: Option<&str>,
     ) -> Result<LaunchResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "launch_runtime_profile",
-                    serde_json::json!({
-                        "profile_id": profile_id,
-                        "tag": tag,
-                        "version_dir": version_dir,
-                        "model_id": model_id,
-                    }),
-                )
-                .await;
-        }
-
         super::state_runtime_profiles::launch_runtime_profile(
             self.primary(),
             profile_id,
@@ -264,15 +146,6 @@ impl PumasApi {
     }
 
     pub async fn stop_runtime_profile(&self, profile_id: RuntimeProfileId) -> Result<bool> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "stop_runtime_profile",
-                    serde_json::json!({ "profile_id": profile_id }),
-                )
-                .await;
-        }
-
         super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
     }
 

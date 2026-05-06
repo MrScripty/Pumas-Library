@@ -164,39 +164,6 @@ impl PumasApi {
         }
     }
 
-    fn call_client_method_blocking<T>(&self, method: &str, params: serde_json::Value) -> Result<T>
-    where
-        T: DeserializeOwned + Send + 'static,
-    {
-        let client = self.try_client().ok_or_else(|| {
-            PumasError::Other(format!(
-                "Blocking IPC method {method} requested on a primary instance"
-            ))
-        })?;
-        let value = client.call_blocking(method, params)?;
-        serde_json::from_value(value).map_err(|err| PumasError::Json {
-            message: format!("Failed to decode IPC response for {method}: {err}"),
-            source: Some(err),
-        })
-    }
-
-    fn call_client_method_blocking_or_default<T>(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> T
-    where
-        T: DeserializeOwned + Default + Send + 'static,
-    {
-        match self.call_client_method_blocking(method, params) {
-            Ok(value) => value,
-            Err(err) => {
-                tracing::warn!("Blocking client IPC call {} failed: {}", method, err);
-                T::default()
-            }
-        }
-    }
-
     /// Returns true if this instance is the primary (owns full state).
     pub fn is_primary(&self) -> bool {
         true

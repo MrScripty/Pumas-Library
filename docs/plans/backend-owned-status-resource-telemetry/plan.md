@@ -425,6 +425,14 @@ the same subscriber handoff model rather than copying the polling pattern.
 - `npm run -w electron validate`
 - `bash launcher.sh --build-release`
 
+**Implementation Notes:**
+- 2026-05-06 final verification passed:
+  `cargo check --manifest-path rust/Cargo.toml`,
+  `npm run -w frontend test:run`, `npm run -w electron test`,
+  `npm run -w frontend build`, and `bash launcher.sh --build-release`.
+- 2026-05-06 release build completed successfully, including release
+  `pumas-rpc`, frontend assets, and Electron main-process build.
+
 ## Ownership And Lifecycle
 - `StatusTelemetryService` is owned by the primary backend instance, not by the
   frontend, Electron bridge, or RPC handler.
@@ -544,10 +552,42 @@ the same subscriber handoff model rather than copying the polling pattern.
   a third resource DTO.
 
 ## Completion Summary
-Not started.
+Completed on 2026-05-06.
+
+The implementation replaced the high-frequency frontend status/resource polling
+path with backend-owned status telemetry. System resource requests now use a
+primary-owned cached `ResourceTracker`, global header resource reads no longer
+refresh the process table, the Rust RPC backend exposes a status telemetry SSE
+stream, Electron forwards that stream only while renderer subscribers exist, and
+React status/network hooks consume telemetry snapshots plus pushed updates.
+
+Remaining polling surfaces were audited and classified. Installation/download
+workflow polling, plugin app-status polling, short-lived app indicator
+animation timers, and mounted app-panel polling remain outside this bug fix.
+Download progress polling remains the strongest follow-up candidate because it
+is related to transfer indicators.
 
 ### Deviations
-None yet.
+- The backend telemetry service samples status while subscribers exist rather
+  than being fully event-triggered for every status source. This is intentional
+  for the first validated slice because it centralizes cadence in the backend,
+  gates work by subscribers, and removes frontend-owned polling. Future work can
+  convert more individual status sources to direct event producers.
+- Runtime-profile SSE still uses its pre-existing backend polling loop. It was
+  recorded as standards debt and was not copied for status telemetry.
 
 ### Verification Summary
-Not run yet.
+- `cargo check --manifest-path rust/Cargo.toml`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library system_resources`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library resource_snapshot`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library status_telemetry`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc status_telemetry`
+- `npm run -w electron test`
+- `npm run -w frontend test:run`
+- `npm run -w frontend test:run -- useStatus useNetworkStatus`
+- `npm run -w frontend check:types`
+- `npm run -w frontend build`
+- `bash launcher.sh --build-release`
+- `git diff --check`

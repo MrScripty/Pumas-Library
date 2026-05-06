@@ -68,6 +68,9 @@ Provide a single backend-owned model registry that can import, classify, validat
 - **Package facts as read-only projection**: `resolve_model_package_facts`
   exposes bounded package evidence from existing metadata and package files
   without adding runtime selection policy or a new persisted source of truth.
+- **Selector snapshots as indexed projections**: `model_library_selector_snapshot`
+  exposes fast list rows from SQLite model records and cached package-facts
+  summaries without scanning model directories or regenerating package facts.
 - **Recovery helper split**: Filesystem repair and recovery scans stay in `importer/` child
   modules so the main importer keeps the copy/hash/metadata pipeline readable without widening
   `ModelImporter` visibility.
@@ -88,6 +91,9 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Package-fact resolution must stay read-only until lazy package-fact
   persistence is explicitly introduced. It may parse bounded package metadata
   files, but it must not execute Python or load Transformers classes.
+- Selector snapshots must stay index/cache-only and expose missing, invalid,
+  partial, or needs-detail state instead of performing targeted repair or
+  package-fact regeneration inline.
 
 ## Revisit Triggers
 - A second persisted source of truth is introduced for model-state queries.
@@ -125,6 +131,9 @@ Provide a single backend-owned model registry that can import, classify, validat
   data owned by the backend classifier, not as a UI-authored override.
 - External directory-root assets must be consumed through a dedicated execution descriptor rather
   than `primary_file`-style path resolution.
+- Selector rows are safe list references. `indexed_path` is display/debug data,
+  and `entry_path` is executable only when entry and artifact state are both
+  `ready`.
 
 ## Structured Producer Contract
 

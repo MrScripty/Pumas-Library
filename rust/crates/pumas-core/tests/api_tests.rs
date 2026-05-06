@@ -10,10 +10,10 @@
 #![warn(unsafe_code)]
 
 use pumas_library::models::{
-    ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope,
-    ModelPackageFactsSummaryStatus, RuntimeEndpointUrl, RuntimeLifecycleState,
-    RuntimeManagementMode, RuntimePort, RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId,
-    RuntimeProviderMode,
+    ModelArtifactState, ModelEntryPathState, ModelFactFamily, ModelLibraryChangeKind,
+    ModelLibraryRefreshScope, ModelLibrarySelectorSnapshotRequest, ModelPackageFactsSummaryStatus,
+    RuntimeEndpointUrl, RuntimeLifecycleState, RuntimeManagementMode, RuntimePort,
+    RuntimeProfileConfig, RuntimeProfileId, RuntimeProviderId, RuntimeProviderMode,
 };
 use pumas_library::{AppId, PumasApi};
 use std::path::Path;
@@ -742,6 +742,85 @@ async fn test_model_library_update_feed_api_surface() {
         .expect("model should appear in summary snapshot");
     assert_eq!(item.status, ModelPackageFactsSummaryStatus::Cached);
     assert!(item.summary.is_some());
+}
+
+#[tokio::test]
+async fn test_model_library_selector_snapshot_is_direct_and_does_not_regenerate_facts() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let model_id = "llm/test/selector-direct";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    let entry_path = model_dir.join("model.safetensors");
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#).unwrap();
+    std::fs::write(&entry_path, b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": "Selector Direct",
+            "cleaned_name": "selector-direct",
+            "repo_id": "example/selector-direct",
+            "selected_artifact_id": "model.safetensors",
+            "entry_path": entry_path.display().to_string(),
+            "storage_kind": "library_owned",
+            "validation_state": "valid",
+            "task_type_primary": "text-generation",
+            "runtime_engine_hints": ["transformers"],
+            "files": [{"name": "model.safetensors"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let selector = api
+        .model_library_selector_snapshot(ModelLibrarySelectorSnapshotRequest {
+            limit: Some(100),
+            ..ModelLibrarySelectorSnapshotRequest::default()
+        })
+        .await
+        .unwrap();
+    let row = selector
+        .rows
+        .iter()
+        .find(|row| row.model_id == model_id)
+        .expect("model should appear in selector snapshot");
+
+    assert_eq!(row.repo_id.as_deref(), Some("example/selector-direct"));
+    assert_eq!(
+        row.selected_artifact_id.as_deref(),
+        Some("model.safetensors")
+    );
+    assert_eq!(row.entry_path_state, ModelEntryPathState::Ready);
+    assert_eq!(row.artifact_state, ModelArtifactState::Ready);
+    assert!(row.is_executable_reference_ready());
+    assert_eq!(
+        row.package_facts_summary_status,
+        ModelPackageFactsSummaryStatus::Missing
+    );
+
+    let package_snapshot = api
+        .model_package_facts_summary_snapshot(100, 0)
+        .await
+        .unwrap();
+    let package_item = package_snapshot
+        .items
+        .iter()
+        .find(|item| item.model_id == model_id)
+        .expect("model should remain visible in package-facts snapshot");
+    assert_eq!(package_item.status, ModelPackageFactsSummaryStatus::Missing);
 }
 
 #[tokio::test]

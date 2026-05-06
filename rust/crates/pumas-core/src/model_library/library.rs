@@ -2527,6 +2527,19 @@ impl ModelLibrary {
             .list_model_package_facts_summary_snapshot(limit, offset)
     }
 
+    /// Return a fast selector snapshot from indexed model/cache state.
+    ///
+    /// This method does not scan model directories, regenerate package facts,
+    /// resolve dependencies, or hydrate per-model details. Missing and invalid
+    /// cache facts are represented in each row so consumers can decide whether
+    /// to hydrate a selected model.
+    pub async fn model_library_selector_snapshot(
+        &self,
+        request: crate::models::ModelLibrarySelectorSnapshotRequest,
+    ) -> Result<crate::models::ModelLibrarySelectorSnapshot> {
+        self.index.list_model_library_selector_snapshot(&request)
+    }
+
     /// List model-library update events after a producer cursor.
     pub async fn list_model_library_updates_since(
         &self,

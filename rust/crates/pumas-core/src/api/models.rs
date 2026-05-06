@@ -604,6 +604,20 @@ impl PumasApi {
             .await
     }
 
+    /// Return a direct in-process model-library selector snapshot.
+    ///
+    /// This intentionally does not proxy through transparent IPC. External
+    /// local-client transport will be exposed through an explicit client API.
+    pub async fn model_library_selector_snapshot(
+        &self,
+        request: models::ModelLibrarySelectorSnapshotRequest,
+    ) -> Result<models::ModelLibrarySelectorSnapshot> {
+        self.try_primary()?
+            .model_library
+            .model_library_selector_snapshot(request)
+            .await
+    }
+
     /// Resolve a canonical model id or legacy local path into a Pumas model ref.
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<models::PumasModelRef> {
         if self.try_client().is_some() {

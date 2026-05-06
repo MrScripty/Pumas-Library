@@ -231,7 +231,8 @@ without broad transport work.
 - [x] Populate rows for existing indexed models with `PumasModelRef`,
   selected artifact identity/path, entry path, entry path state, artifact
   state, display fields, and detail state.
-- [ ] Add direct in-process `PumasLibraryInstance` selector snapshot access.
+- [x] Add direct in-process selector snapshot access through the current owner
+  surface. Final `PumasLibraryInstance` naming/export remains in Milestone 7.
 - [ ] Add `PumasReadOnlyLibrary` selector snapshot access with no background
   work or registry claim.
 - [ ] Add tests proving non-ready entry/artifact states are not executable.
@@ -452,6 +453,11 @@ Update during implementation:
   existing empty selected-artifact cache rows. Partial download flags,
   validation state, and import state now produce non-executable selector
   artifact/entry states without filesystem inspection.
+- 2026-05-06: Milestone 2 Slice 2.3 exposed selector snapshots through
+  `ModelLibrary::model_library_selector_snapshot` and a primary-only
+  transitional `PumasApi::model_library_selector_snapshot`. This direct surface
+  intentionally does not add RPC/client dispatch; explicit local-client
+  transport remains in Milestone 6 and final role naming remains in Milestone 7.
 
 ## Commit Cadence Notes
 
@@ -568,6 +574,12 @@ After each worker wave:
   - preserved rows when summaries are missing or invalid;
   - derived non-ready artifact and entry states from persisted partial,
     validation, and import metadata.
+- Milestone 2 Slice 2.3 direct owner API:
+  - added `ModelLibrary::model_library_selector_snapshot`;
+  - added a primary-only transitional `PumasApi` method with no hidden IPC
+    fallback;
+  - covered the direct API path and proved it does not regenerate missing
+    package-facts summaries.
 
 ### Deviations
 
@@ -590,6 +602,9 @@ After each worker wave:
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_ref`
 - Milestone 2 Slice 2.2 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
+- Milestone 2 Slice 2.3 verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
 

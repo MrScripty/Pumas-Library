@@ -94,6 +94,9 @@ println!("offline={}", net.is_offline);
 - New consumers must choose an explicit role: owner instance, same-device local
   client, or read-only snapshot reader. Direct Rust owner/read-only APIs must
   not secretly route through RPC or IPC.
+- `model_library_selector_snapshot` is a direct primary-only selector surface
+  during the transition. It reads indexed SQLite/cache state and intentionally
+  does not proxy through transparent IPC.
 - Startup ordering is backend-owned: callers construct the API, then use methods; they do not manually start watcher or reconcile loops.
 - Read paths may trigger bounded on-demand reconcile when the backend marks the
   library dirty or runtime freshness is unknown.

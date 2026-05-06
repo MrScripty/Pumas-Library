@@ -411,11 +411,11 @@ multi-model public loops.
 **Goal:** Close the plan with complete verification and traceability.
 
 **Tasks:**
-- [ ] Run Rust formatting and targeted/full Rust checks appropriate to the
+- [x] Run Rust formatting and targeted/full Rust checks appropriate to the
   changed crates.
-- [ ] Run Electron/frontend type, lint, and test checks for changed surfaces.
-- [ ] Build release binaries and frontend.
-- [ ] Update this plan's execution notes, completion summary, deviations,
+- [x] Run Electron/frontend type, lint, and test checks for changed surfaces.
+- [x] Build release binaries and frontend.
+- [x] Update this plan's execution notes, completion summary, deviations,
   follow-ups, and verification summary.
 
 **Verification:**
@@ -424,7 +424,7 @@ multi-model public loops.
 - Release build and frontend build pass.
 - Final commit captures documentation closeout or release artifact updates.
 
-**Status:** Not started
+**Status:** Complete
 
 ## Execution Notes
 
@@ -578,6 +578,46 @@ Update during implementation:
   resolution remains an explicit selected-model request. `PumasLocalClient`
   exposes the batch methods as one IPC request per category, and selector
   contract guidance now documents the multi-select hydration flow.
+- 2026-05-06: Milestone 9 final verification completed. Rust format check,
+  `pumas-rpc` check, release backend build, frontend production build, and
+  Electron validation/build all passed.
+
+## Completion Summary
+
+- Fast selector snapshots are available through direct owner, read-only, and
+  explicit local-client surfaces.
+- Model-library update subscriptions use an atomic cursor handoff and expose a
+  local-client stream.
+- `PumasApi` and `FfiPumasApi` are owner-only surfaces; hidden local IPC
+  fallback paths were removed.
+- Selected-model batch hydration is available for package-facts summaries,
+  cheap execution descriptors, and inference settings.
+- Explicit local-client discovery, token validation, and loopback transport
+  access are implemented for selector/update/batch calls.
+
+## Verification Summary
+
+- `cargo fmt --manifest-path rust/Cargo.toml --all -- --check`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-uniffi`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library batch`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library ipc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-uniffi`
+- `npm run -w frontend build`
+- `bash launcher.sh --build-release`
+
+## Deviations
+
+- Selector rows remain live SQLite projections rather than a materialized
+  selector table because the measured direct/read-only snapshot timings met the
+  target without additional schema.
+- Local-client transport currently uses loopback TCP with per-instance tokens;
+  Unix sockets/named pipes remain a transport-hardening follow-up.
+- Foreign-language local-client/read-only bindings are not added in this plan;
+  the UniFFI owner object was made explicit instead of carrying hidden IPC
+  fallback behavior.
 
 ## Discovered Issues
 

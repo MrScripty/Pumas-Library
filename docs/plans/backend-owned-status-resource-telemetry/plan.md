@@ -871,7 +871,7 @@ Verification completed:
 
 #### R4 - Runtime-Profile Push Updates
 
-Status: Planned.
+Status: Completed on 2026-05-06.
 
 - Replace the `next_runtime_profile_update_event` one-second loop with a
   runtime-profile update broadcaster owned by core state.
@@ -886,6 +886,25 @@ Verification:
 - Code search confirms the runtime-profile SSE path no longer sleeps in a loop.
 - Tests or instrumentation confirm runtime-profile update reads do not call
   process-table scans.
+
+Implementation notes:
+
+- `RuntimeProfileService` now owns a broadcast channel for update feeds.
+- Runtime-profile status changes publish event feeds directly.
+- Runtime-profile config mutations publish `snapshot_required` feeds so clients
+  can refresh after profile/route shape changes without polling.
+- `/events/runtime-profile-updates` now performs one startup recovery read from
+  `list_runtime_profile_updates_since(cursor)` and then waits on the broadcast
+  receiver.
+- Snapshot and update-feed reads no longer refresh the default Ollama process
+  status, including the legacy IPC dispatch path.
+
+Verification completed:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library runtime_profile_status_changes_emit_update_events -- --nocapture`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library runtime_profile_config_mutations_push_snapshot_required_update -- --nocapture`
+- `rg -n "RUNTIME_PROFILE_UPDATE_STREAM_POLL|tokio::time::sleep\\(|setInterval\\(|list_runtime_profile_updates_since\\(|refresh_default_ollama_profile_status" rust/crates/pumas-rpc/src/handlers/mod.rs rust/crates/pumas-core/src/api/runtime_profiles.rs rust/crates/pumas-core/src/api/state.rs frontend/src`
 
 #### R5 - Process Status Ownership
 

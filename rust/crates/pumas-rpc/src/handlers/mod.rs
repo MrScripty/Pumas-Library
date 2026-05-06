@@ -27,7 +27,7 @@ use axum::{
 };
 use futures::{
     stream::{self, BoxStream},
-    Stream, StreamExt,
+    StreamExt,
 };
 use pumas_library::models::{
     ModelDownloadUpdateNotification, ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed,
@@ -37,13 +37,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
-const RUNTIME_PROFILE_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
-const RUNTIME_PROFILE_UPDATE_UNSUPPORTED_RETRY: Duration = Duration::from_secs(60);
 
 pub(crate) use shared::{
     detect_sandbox_environment, extract_safetensors_header, get_bool_param, get_i64_param,
@@ -157,6 +154,11 @@ pub struct ModelDownloadUpdateStreamQuery {
 }
 
 #[derive(Debug, Default, Deserialize)]
+pub struct RuntimeProfileUpdateStreamQuery {
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
 pub struct StatusTelemetryUpdateStreamQuery {
     pub cursor: Option<String>,
 }
@@ -252,15 +254,47 @@ async fn build_model_download_update_stream_state(
 /// Server-sent runtime-profile update notification stream.
 pub async fn handle_runtime_profile_update_events(
     State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream_state = RuntimeProfileUpdateStreamState {
-        state,
-        cursor: None,
-        update_method_unsupported: false,
-    };
-    let stream = stream::unfold(stream_state, next_runtime_profile_update_event);
+    Query(query): Query<RuntimeProfileUpdateStreamQuery>,
+) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let stream_state = build_runtime_profile_update_stream_state(state, query.cursor).await;
+    let stream = stream::unfold(stream_state, next_runtime_profile_update_event).boxed();
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+async fn build_runtime_profile_update_stream_state(
+    state: Arc<AppState>,
+    cursor: Option<String>,
+) -> RuntimeProfileUpdateStreamState {
+    let receiver = state.api.subscribe_runtime_profile_updates();
+    let pending_feed = match state
+        .api
+        .list_runtime_profile_updates_since(cursor.as_deref())
+        .await
+    {
+        Ok(response)
+            if !response.feed.events.is_empty()
+                || response.feed.stale_cursor
+                || response.feed.snapshot_required =>
+        {
+            Some(response.feed)
+        }
+        Ok(_) => None,
+        Err(error) => {
+            warn!(
+                "runtime-profile update stream startup recovery failed: {}",
+                error
+            );
+            Some(RuntimeProfileUpdateFeed::snapshot_required(
+                "runtime-profiles:0".to_string(),
+            ))
+        }
+    };
+
+    RuntimeProfileUpdateStreamState {
+        receiver,
+        pending_feed,
+    }
 }
 
 /// Server-sent status/resource telemetry update stream.
@@ -422,9 +456,8 @@ fn model_download_update_sse_event(notification: &ModelDownloadUpdateNotificatio
 }
 
 struct RuntimeProfileUpdateStreamState {
-    state: Arc<AppState>,
-    cursor: Option<String>,
-    update_method_unsupported: bool,
+    receiver: broadcast::Receiver<RuntimeProfileUpdateFeed>,
+    pending_feed: Option<RuntimeProfileUpdateFeed>,
 }
 
 struct StatusTelemetryUpdateStreamState {
@@ -531,63 +564,24 @@ fn status_telemetry_update_sse_event(notification: &StatusTelemetryUpdateNotific
 async fn next_runtime_profile_update_event(
     mut state: RuntimeProfileUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, RuntimeProfileUpdateStreamState)> {
-    loop {
-        let poll_delay = if state.update_method_unsupported {
-            RUNTIME_PROFILE_UPDATE_UNSUPPORTED_RETRY
-        } else {
-            RUNTIME_PROFILE_UPDATE_STREAM_POLL
-        };
-        tokio::time::sleep(poll_delay).await;
-
-        match state
-            .state
-            .api
-            .list_runtime_profile_updates_since(state.cursor.as_deref())
-            .await
-        {
-            Ok(response) => {
-                state.update_method_unsupported = false;
-                state.cursor = Some(response.feed.cursor.clone());
-
-                if response.feed.events.is_empty()
-                    && !response.feed.stale_cursor
-                    && !response.feed.snapshot_required
-                {
-                    continue;
-                }
-
-                let event = runtime_profile_update_sse_event(&response.feed);
-                return Some((Ok(event), state));
-            }
-            Err(error) => {
-                if is_runtime_profile_update_method_unsupported(&error) {
-                    if !state.update_method_unsupported {
-                        warn!(
-                            "runtime-profile update stream unavailable because the primary \
-                             backend does not support list_runtime_profile_updates_since; \
-                             backing off until the primary backend is restarted"
-                        );
-                    }
-                    state.update_method_unsupported = true;
-                    continue;
-                }
-                state.update_method_unsupported = false;
-                warn!("runtime-profile update stream polling failed: {}", error);
-            }
-        }
+    if let Some(feed) = state.pending_feed.take() {
+        let event = runtime_profile_update_sse_event(&feed);
+        return Some((Ok(event), state));
     }
-}
 
-fn is_runtime_profile_update_method_unsupported(error: &pumas_library::PumasError) -> bool {
-    matches!(
-        error,
-        pumas_library::PumasError::InvalidParams { message }
-            if message.contains("Unknown IPC method: list_runtime_profile_updates_since")
-    ) || matches!(
-        error,
-        pumas_library::PumasError::Other(message)
-            if message.contains("Unknown IPC method: list_runtime_profile_updates_since")
-    )
+    match state.receiver.recv().await {
+        Ok(feed) => {
+            let event = runtime_profile_update_sse_event(&feed);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Lagged(_)) => {
+            let feed =
+                RuntimeProfileUpdateFeed::snapshot_required("runtime-profiles:0".to_string());
+            let event = runtime_profile_update_sse_event(&feed);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Closed) => None,
+    }
 }
 
 fn runtime_profile_update_sse_event(feed: &RuntimeProfileUpdateFeed) -> Event {

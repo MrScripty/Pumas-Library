@@ -2,7 +2,7 @@
 
 use crate::models::{
     LaunchResponse, ModelRuntimeRoute, RuntimeEndpointUrl, RuntimeProfileConfig, RuntimeProfileId,
-    RuntimeProfileMutationResponse, RuntimeProfileUpdateFeedResponse,
+    RuntimeProfileMutationResponse, RuntimeProfileUpdateFeed, RuntimeProfileUpdateFeedResponse,
     RuntimeProfilesSnapshotResponse, RuntimeProviderId,
 };
 use crate::{PumasApi, Result};
@@ -10,7 +10,6 @@ use std::path::Path;
 
 impl PumasApi {
     pub async fn get_runtime_profiles_snapshot(&self) -> Result<RuntimeProfilesSnapshotResponse> {
-        self.refresh_default_ollama_profile_status().await?;
         self.primary().runtime_profile_service.snapshot().await
     }
 
@@ -18,11 +17,16 @@ impl PumasApi {
         &self,
         cursor: Option<&str>,
     ) -> Result<RuntimeProfileUpdateFeedResponse> {
-        self.refresh_default_ollama_profile_status().await?;
         self.primary()
             .runtime_profile_service
             .list_updates_since(cursor)
             .await
+    }
+
+    pub fn subscribe_runtime_profile_updates(
+        &self,
+    ) -> tokio::sync::broadcast::Receiver<RuntimeProfileUpdateFeed> {
+        self.primary().runtime_profile_service.subscribe_updates()
     }
 
     pub async fn upsert_runtime_profile(
@@ -149,7 +153,7 @@ impl PumasApi {
         super::state_runtime_profiles::stop_runtime_profile(self.primary(), profile_id).await
     }
 
-    async fn refresh_default_ollama_profile_status(&self) -> Result<()> {
+    pub async fn refresh_default_ollama_profile_status(&self) -> Result<()> {
         let is_running = self.is_ollama_running().await;
         self.primary()
             .runtime_profile_service

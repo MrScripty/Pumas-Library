@@ -19,8 +19,10 @@ use crate::models::{
     RuntimeProviderId, RuntimeProviderMode,
 };
 use crate::{PumasError, Result};
+use tokio::sync::broadcast;
 
 const RUNTIME_PROFILE_EVENT_RETAIN_LIMIT: usize = 256;
+const RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY: usize = 64;
 const IMPLICIT_RUNTIME_PORT_SPAN: u16 = 10_000;
 const OLLAMA_RUNTIME_BASE_PORT: u16 = 11_434;
 const LLAMA_CPP_RUNTIME_BASE_PORT: u16 = 18_080;
@@ -262,6 +264,7 @@ pub struct RuntimeProfileService {
     config_path: PathBuf,
     write_lock: Arc<RwLock<()>>,
     event_journal: Arc<RwLock<RuntimeProfileEventJournal>>,
+    updates: broadcast::Sender<RuntimeProfileUpdateFeed>,
     operation_locks: Arc<Mutex<HashSet<RuntimeProfileId>>>,
 }
 
@@ -312,6 +315,7 @@ impl RuntimeProfileService {
             launcher_root,
             write_lock: Arc::new(RwLock::new(())),
             event_journal: Arc::new(RwLock::new(RuntimeProfileEventJournal::default())),
+            updates: broadcast::channel(RUNTIME_PROFILE_UPDATE_CHANNEL_CAPACITY).0,
             operation_locks: Arc::new(Mutex::new(HashSet::new())),
         }
     }
@@ -368,6 +372,10 @@ impl RuntimeProfileService {
             error: None,
             feed,
         })
+    }
+
+    pub fn subscribe_updates(&self) -> broadcast::Receiver<RuntimeProfileUpdateFeed> {
+        self.updates.subscribe()
     }
 
     pub async fn record_default_ollama_status(
@@ -761,22 +769,25 @@ impl RuntimeProfileService {
     {
         let config_path = self.config_path.clone();
         let write_lock = self.write_lock.clone();
-        tokio::task::spawn_blocking(move || {
+        let (response, cursor) = tokio::task::spawn_blocking(move || {
             let _guard = write_lock.write().map_err(|_| {
                 PumasError::Other("Failed to acquire runtime profile config lock".to_string())
             })?;
             let mut config = load_or_initialize_config(&config_path)?;
             let response = mutate(&mut config)?;
             bump_cursor(&mut config);
+            let cursor = config.cursor.clone();
             atomic_write_json(&config_path, &config, true)?;
-            Ok(response)
+            Ok::<_, PumasError>((response, cursor))
         })
         .await
         .map_err(|err| {
             PumasError::Other(format!(
                 "Failed to join runtime profile mutation task: {err}"
             ))
-        })?
+        })??;
+        self.publish_feed(RuntimeProfileUpdateFeed::snapshot_required(cursor));
+        Ok(response)
     }
 
     fn apply_runtime_statuses(
@@ -847,7 +858,20 @@ impl RuntimeProfileService {
         let mut journal = self.event_journal.write().map_err(|_| {
             PumasError::Other("Failed to acquire runtime profile event journal lock".to_string())
         })?;
-        Ok(journal.record_status(status))
+        let event = journal.record_status(status);
+        if let Some(event) = event.clone() {
+            self.publish_feed(RuntimeProfileUpdateFeed {
+                cursor: event.cursor.clone(),
+                events: vec![event],
+                stale_cursor: false,
+                snapshot_required: false,
+            });
+        }
+        Ok(event)
+    }
+
+    fn publish_feed(&self, feed: RuntimeProfileUpdateFeed) {
+        let _ = self.updates.send(feed);
     }
 }
 
@@ -1274,6 +1298,7 @@ fn validate_model_route(route: &ModelRuntimeRoute) -> Result<()> {
 mod tests {
     use super::*;
     use crate::models::{RuntimeDeviceSettings, RuntimeSchedulerSettings};
+    use std::time::Duration;
 
     #[test]
     fn provider_capabilities_separate_ollama_and_llama_cpp_modes() {
@@ -1765,6 +1790,7 @@ mod tests {
     async fn runtime_profile_status_changes_emit_update_events() {
         let temp_dir = tempfile::TempDir::new().unwrap();
         let service = RuntimeProfileService::new(temp_dir.path());
+        let mut updates = service.subscribe_updates();
         let snapshot = service.snapshot().await.unwrap();
         let cursor = snapshot.snapshot.cursor.clone();
 
@@ -1775,6 +1801,15 @@ mod tests {
         assert_eq!(
             running_event.as_ref().map(|event| event.event_kind),
             Some(RuntimeProfileEventKind::StatusChanged)
+        );
+        let pushed_feed = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+            .await
+            .expect("runtime profile update should be pushed")
+            .expect("runtime profile update channel should remain open");
+        assert_eq!(pushed_feed.events.len(), 1);
+        assert_eq!(
+            pushed_feed.events[0].event_kind,
+            RuntimeProfileEventKind::StatusChanged
         );
 
         let feed = service
@@ -1798,5 +1833,27 @@ mod tests {
             RuntimeLifecycleState::Running
         );
         assert_eq!(snapshot.snapshot.cursor, feed.feed.cursor);
+    }
+
+    #[tokio::test]
+    async fn runtime_profile_config_mutations_push_snapshot_required_update() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let service = RuntimeProfileService::new(temp_dir.path());
+        let mut updates = service.subscribe_updates();
+        let mut profile = RuntimeProfileConfig::default_ollama();
+        profile.profile_id = RuntimeProfileId::parse("ollama-extra").unwrap();
+        profile.name = "Ollama Extra".to_string();
+        profile.endpoint_url = None;
+        profile.port = None;
+
+        service.upsert_profile(profile).await.unwrap();
+
+        let pushed_feed = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+            .await
+            .expect("runtime profile mutation should push an update")
+            .expect("runtime profile update channel should remain open");
+        assert!(pushed_feed.snapshot_required);
+        assert!(pushed_feed.stale_cursor);
+        assert!(pushed_feed.events.is_empty());
     }
 }

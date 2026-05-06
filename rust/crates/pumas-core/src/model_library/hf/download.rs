@@ -212,6 +212,85 @@ impl HuggingFaceClient {
         tasks.retain(|_, handle| !handle.is_finished());
     }
 
+    async fn mark_download_task_registered(&self, download_id: &str) {
+        let mut downloads = self.downloads.write().await;
+        if let Some(state) = downloads.get_mut(download_id) {
+            state.task_registered = true;
+        }
+    }
+
+    async fn reconcile_inactive_active_downloads(&self) {
+        self.prune_finished_download_tasks();
+
+        let missing_registered_tasks = {
+            let running_task_ids = self
+                .download_tasks
+                .lock()
+                .expect("HF download task lock poisoned")
+                .keys()
+                .cloned()
+                .collect::<HashSet<_>>();
+            let downloads = self.downloads.read().await;
+
+            downloads
+                .iter()
+                .filter_map(|(download_id, state)| {
+                    let is_active = matches!(
+                        state.status,
+                        DownloadStatus::Queued
+                            | DownloadStatus::Downloading
+                            | DownloadStatus::Pausing
+                    );
+                    let has_running_task = running_task_ids.contains(download_id);
+
+                    if is_active && state.task_registered && !has_running_task {
+                        Some(download_id.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+
+        if missing_registered_tasks.is_empty() {
+            return;
+        }
+
+        {
+            let mut downloads = self.downloads.write().await;
+            for download_id in &missing_registered_tasks {
+                if let Some(state) = downloads.get_mut(download_id) {
+                    if matches!(
+                        state.status,
+                        DownloadStatus::Queued
+                            | DownloadStatus::Downloading
+                            | DownloadStatus::Pausing
+                    ) {
+                        warn!(
+                            "Marking inactive download {} as paused because no task is running",
+                            download_id
+                        );
+                        state.status = DownloadStatus::Paused;
+                        state.speed = 0.0;
+                        state.retrying = false;
+                        state.next_retry_delay_seconds = None;
+                    }
+                }
+            }
+        }
+
+        if let Some(ref persistence) = self.persistence {
+            for download_id in missing_registered_tasks {
+                Self::persist_status_update(
+                    persistence.clone(),
+                    download_id,
+                    DownloadStatus::Paused,
+                )
+                .await;
+            }
+        }
+    }
+
     /// Restore persisted downloads from disk.
     ///
     /// Called during startup to recover paused/errored downloads from a previous session.
@@ -537,6 +616,7 @@ impl HuggingFaceClient {
             retry_limit: None,
             retrying: false,
             next_retry_delay_seconds: None,
+            task_registered: false,
             dest_dir: dest_dir.to_path_buf(),
             filename: first_filename.clone(),
             files: files.clone(),
@@ -677,6 +757,7 @@ impl HuggingFaceClient {
             }
         });
         self.store_download_task(download_id.clone(), task_handle);
+        self.mark_download_task_registered(&download_id).await;
 
         Ok(download_id)
     }
@@ -687,6 +768,37 @@ impl HuggingFaceClient {
             .entry(dest_dir.to_path_buf())
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
+    }
+
+    async fn remove_stale_part_for_completed_file(dest_path: &Path, part_path: &Path) {
+        let final_exists = tokio::fs::try_exists(dest_path).await.unwrap_or(false);
+        let part_exists = tokio::fs::try_exists(part_path).await.unwrap_or(false);
+        if final_exists && part_exists {
+            match tokio::fs::remove_file(part_path).await {
+                Ok(()) => info!(
+                    "Removed stale partial file {} because final file exists",
+                    part_path.display()
+                ),
+                Err(err) => warn!(
+                    "Failed to remove stale partial file {}: {}",
+                    part_path.display(),
+                    err
+                ),
+            }
+        }
+    }
+
+    async fn remove_download_marker(dest_dir: &Path) {
+        let marker_path = dest_dir.join(".pumas_download");
+        if let Err(err) = tokio::fs::remove_file(&marker_path).await {
+            if err.kind() != std::io::ErrorKind::NotFound {
+                warn!(
+                    "Failed to remove completed download marker {}: {}",
+                    marker_path.display(),
+                    err
+                );
+            }
+        }
     }
 
     /// Run the download in the background with retry and resume support.
@@ -749,6 +861,7 @@ impl HuggingFaceClient {
 
             // Skip files that already exist (completed from previous run)
             if tokio::fs::try_exists(&dest_path).await.unwrap_or(false) {
+                Self::remove_stale_part_for_completed_file(&dest_path, &part_path).await;
                 let existing_size = tokio::fs::metadata(&dest_path)
                     .await
                     .map(|m| m.len())
@@ -1076,6 +1189,7 @@ impl HuggingFaceClient {
         if let Some(ref persistence) = persistence {
             Self::remove_persisted_download(persistence.clone(), download_id.to_string()).await;
         }
+        Self::remove_download_marker(dest_dir).await;
 
         Ok(())
     }
@@ -1289,6 +1403,7 @@ impl HuggingFaceClient {
 
     /// Get download progress.
     pub async fn get_download_progress(&self, download_id: &str) -> Option<ModelDownloadProgress> {
+        self.reconcile_inactive_active_downloads().await;
         let downloads = self.downloads.read().await;
         downloads
             .get(download_id)
@@ -1342,7 +1457,7 @@ impl HuggingFaceClient {
 
     /// List all downloads (active, paused, completed, etc.).
     pub async fn list_downloads(&self) -> Vec<ModelDownloadProgress> {
-        self.prune_finished_download_tasks();
+        self.reconcile_inactive_active_downloads().await;
         let downloads = self.downloads.read().await;
         downloads
             .values()
@@ -1552,6 +1667,7 @@ impl HuggingFaceClient {
             }
         });
         self.store_download_task(download_id.to_string(), task_handle);
+        self.mark_download_task_registered(download_id).await;
 
         Ok(true)
     }
@@ -1719,6 +1835,7 @@ mod tests {
                     retry_limit: None,
                     retrying: false,
                     next_retry_delay_seconds: None,
+                    task_registered: false,
                     dest_dir: old_dest.clone(),
                     filename: "model.safetensors".to_string(),
                     files: vec![FileToDownload {
@@ -1804,6 +1921,7 @@ mod tests {
                     retry_limit: Some(5),
                     retrying: true,
                     next_retry_delay_seconds: Some(4.0),
+                    task_registered: false,
                     dest_dir: tmp.path().join("owner-model"),
                     filename: "model.safetensors".to_string(),
                     files: vec![FileToDownload {
@@ -1874,6 +1992,7 @@ mod tests {
                     retry_limit: None,
                     retrying: false,
                     next_retry_delay_seconds: None,
+                    task_registered: false,
                     dest_dir: tmp.path().join("owner-multi-file"),
                     filename: "config.json".to_string(),
                     files: vec![
@@ -1907,6 +2026,114 @@ mod tests {
             .selected_artifact_id
             .as_deref()
             .is_some_and(|artifact_id| artifact_id.starts_with("owner--multi-file__files_")));
+    }
+
+    #[tokio::test]
+    async fn test_list_downloads_pauses_registered_active_state_without_task() {
+        let tmp = TempDir::new().unwrap();
+        let mut client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let persistence = Arc::new(DownloadPersistence::new(tmp.path()));
+        client.set_persistence(persistence.clone());
+
+        let download_id = "dl-stale-active".to_string();
+        let request = DownloadRequest {
+            repo_id: "owner/model".to_string(),
+            family: "owner".to_string(),
+            official_name: "Model".to_string(),
+            model_type: Some("llm".to_string()),
+            quant: Some("Q4_K_M".to_string()),
+            filename: None,
+            filenames: None,
+            pipeline_tag: Some("text-generation".to_string()),
+            bundle_format: None,
+            pipeline_class: None,
+            release_date: None,
+            download_url: None,
+            model_card_json: None,
+            license_status: None,
+        };
+
+        persistence
+            .save(&PersistedDownload {
+                download_id: download_id.clone(),
+                repo_id: "owner/model".to_string(),
+                filename: "model.Q4_K_M.gguf".to_string(),
+                filenames: vec!["model.Q4_K_M.gguf".to_string()],
+                dest_dir: tmp.path().join("owner-model"),
+                total_bytes: Some(1024),
+                status: DownloadStatus::Downloading,
+                download_request: request.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                known_sha256: None,
+                huggingface_evidence: None,
+            })
+            .unwrap();
+
+        {
+            let mut downloads = client.downloads.write().await;
+            downloads.insert(
+                download_id.clone(),
+                DownloadState {
+                    download_id: download_id.clone(),
+                    repo_id: "owner/model".to_string(),
+                    status: DownloadStatus::Downloading,
+                    progress: 0.5,
+                    downloaded_bytes: 512,
+                    total_bytes: Some(1024),
+                    speed: 1024.0,
+                    cancel_flag: Arc::new(AtomicBool::new(false)),
+                    pause_flag: Arc::new(AtomicBool::new(false)),
+                    error: None,
+                    retry_attempt: 0,
+                    retry_limit: None,
+                    retrying: true,
+                    next_retry_delay_seconds: Some(1.0),
+                    task_registered: true,
+                    dest_dir: tmp.path().join("owner-model"),
+                    filename: "model.Q4_K_M.gguf".to_string(),
+                    files: vec![FileToDownload {
+                        filename: "model.Q4_K_M.gguf".to_string(),
+                        size: Some(1024),
+                        sha256: None,
+                    }],
+                    files_completed: 0,
+                    download_request: Some(request),
+                    known_sha256: None,
+                    huggingface_evidence: None,
+                },
+            );
+        }
+
+        let progress = client
+            .list_downloads()
+            .await
+            .into_iter()
+            .find(|progress| progress.download_id == download_id)
+            .expect("download should remain listed");
+
+        assert_eq!(progress.status, DownloadStatus::Paused);
+        assert_eq!(progress.speed, Some(0.0));
+        assert_eq!(progress.retrying, Some(false));
+        assert_eq!(progress.next_retry_delay_seconds, None);
+        assert_eq!(persistence.load_all()[0].status, DownloadStatus::Paused);
+    }
+
+    #[tokio::test]
+    async fn test_remove_stale_part_for_completed_file_only_removes_matching_part() {
+        let tmp = TempDir::new().unwrap();
+        let final_path = tmp.path().join("model.gguf");
+        let part_path = tmp.path().join("model.gguf.part");
+        let other_part_path = tmp.path().join("other.gguf.part");
+
+        tokio::fs::write(&final_path, b"done").await.unwrap();
+        tokio::fs::write(&part_path, b"stale").await.unwrap();
+        tokio::fs::write(&other_part_path, b"keep").await.unwrap();
+
+        HuggingFaceClient::remove_stale_part_for_completed_file(&final_path, &part_path).await;
+
+        assert!(tokio::fs::try_exists(&final_path).await.unwrap());
+        assert!(!tokio::fs::try_exists(&part_path).await.unwrap());
+        assert!(tokio::fs::try_exists(&other_part_path).await.unwrap());
     }
 
     #[tokio::test]
@@ -1950,6 +2177,7 @@ mod tests {
                     retry_limit: None,
                     retrying: false,
                     next_retry_delay_seconds: None,
+                    task_registered: true,
                     dest_dir: tmp.path().join("owner-model"),
                     filename: "model.safetensors".to_string(),
                     files: vec![FileToDownload {

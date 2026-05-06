@@ -340,6 +340,26 @@ pub(super) async fn recover_download(
         .and_then(|c| c.as_os_str().to_str())
         .map(String::from);
 
+    let metadata =
+        load_model_metadata_or_default(primary.model_library.clone(), dest.clone()).await?;
+    let recovery_filenames = metadata
+        .selected_artifact_files
+        .clone()
+        .filter(|files| !files.is_empty())
+        .or_else(|| {
+            metadata
+                .expected_files
+                .clone()
+                .filter(|files| !files.is_empty())
+        });
+    if recovery_filenames.is_some() {
+        tracing::info!(
+            "Recovering partial download for {} using artifact file metadata from {}",
+            repo_id,
+            dest.display()
+        );
+    }
+
     let request = model_library::DownloadRequest {
         repo_id: repo_id.to_string(),
         family: parts[0].to_string(),
@@ -347,7 +367,7 @@ pub(super) async fn recover_download(
         model_type,
         quant: None,
         filename: None,
-        filenames: None,
+        filenames: recovery_filenames,
         pipeline_tag: None,
         bundle_format: None,
         pipeline_class: None,

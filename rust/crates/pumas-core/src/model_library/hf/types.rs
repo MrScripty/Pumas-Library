@@ -104,6 +104,8 @@ pub(crate) struct DownloadState {
     pub retrying: bool,
     /// Delay (seconds) until the next retry, when `retrying` is true.
     pub next_retry_delay_seconds: Option<f64>,
+    /// Whether a Tokio task was registered for this in-memory download.
+    pub task_registered: bool,
     /// Destination directory (needed for resume after restart)
     pub dest_dir: PathBuf,
     /// Current filename being downloaded
@@ -184,6 +186,7 @@ impl DownloadState {
             retry_limit: None,
             retrying: false,
             next_retry_delay_seconds: None,
+            task_registered: false,
             dest_dir: entry.dest_dir.clone(),
             filename: entry.filename.clone(),
             files,

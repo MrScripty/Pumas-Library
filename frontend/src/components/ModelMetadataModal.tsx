@@ -273,6 +273,7 @@ export const ModelMetadataModal: React.FC<ModelMetadataModalProps> = ({
               executionFactsLoading={executionFactsLoading}
               expandedFieldKeys={expandedFieldKeys}
               inferenceSettings={inferenceSettings}
+              modelId={modelId}
               newParam={newParam}
               notesDirty={notesDirty}
               notesDraft={notesDraft}

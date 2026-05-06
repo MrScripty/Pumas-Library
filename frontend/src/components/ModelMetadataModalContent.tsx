@@ -1,4 +1,4 @@
-import { ActivitySquare, Database, FileText, PencilLine, Settings } from 'lucide-react';
+import { ActivitySquare, Database, FileText, PencilLine, Route, Settings } from 'lucide-react';
 import type {
   BundleComponentManifestEntry,
   InferenceParamSchema,
@@ -16,6 +16,7 @@ import { ModelBundleManifestPanel } from './ModelBundleManifestPanel';
 import { ModelInferenceSettingsEditor } from './ModelInferenceSettingsEditor';
 import { ModelMetadataGrid } from './ModelMetadataGrid';
 import { ModelNotesEditor } from './ModelNotesEditor';
+import { ModelRuntimeRouteEditor } from './ModelRuntimeRouteEditor';
 
 interface ModelMetadataModalContentProps {
   activeSource: MetadataSource;
@@ -29,6 +30,7 @@ interface ModelMetadataModalContentProps {
   executionFactsLoading: boolean;
   expandedFieldKeys: Set<string>;
   inferenceSettings: InferenceParamSchema[];
+  modelId: string;
   newParam: {
     key: string;
     label: string;
@@ -89,6 +91,7 @@ export function ModelMetadataModalContent({
   executionFactsLoading,
   expandedFieldKeys,
   inferenceSettings,
+  modelId,
   newParam,
   notesDirty,
   notesDraft,
@@ -174,6 +177,17 @@ export function ModelMetadataModalContent({
         >
           <ActivitySquare className="w-4 h-4" />
           Execution Facts
+        </button>
+        <button
+          onClick={() => onActiveSourceChange('runtime')}
+          className={`flex items-center gap-2 px-3 py-1.5 rounded text-sm ${
+            activeSource === 'runtime'
+              ? 'bg-[hsl(var(--launcher-accent-primary)/0.2)] text-[hsl(var(--text-primary))]'
+              : 'bg-[hsl(var(--surface-high))] hover:bg-[hsl(var(--surface-mid))] text-[hsl(var(--text-secondary))]'
+          }`}
+        >
+          <Route className="w-4 h-4" />
+          Runtime Route
         </button>
         <button
           onClick={() => onActiveSourceChange('notes')}
@@ -268,6 +282,8 @@ export function ModelMetadataModalContent({
             No execution facts available
           </div>
         )
+      ) : activeSource === 'runtime' ? (
+        <ModelRuntimeRouteEditor modelId={modelId} />
       ) : activeSource === 'notes' ? (
         <ModelNotesEditor
           notesDraft={notesDraft}

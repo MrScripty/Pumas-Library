@@ -282,6 +282,31 @@ pub struct LibraryStatusResponse {
     pub deep_scan_progress: Option<DeepScanProgress>,
 }
 
+/// Backend-owned status/resource telemetry snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct StatusTelemetrySnapshot {
+    pub cursor: String,
+    pub revision: u64,
+    pub sampled_at: String,
+    pub source_state: String,
+    pub status: StatusResponse,
+    pub resources: SystemResources,
+    pub network: NetworkStatusResponse,
+    pub library: LibraryStatusResponse,
+    pub model_library_loaded: bool,
+}
+
+/// Status/resource telemetry notification delivered to local GUI clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct StatusTelemetryUpdateNotification {
+    pub cursor: String,
+    pub snapshot: StatusTelemetrySnapshot,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+}
+
 /// File type validation response.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -88,6 +88,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         "get_status"
         | "get_disk_space"
         | "get_system_resources"
+        | "get_status_telemetry_snapshot"
         | "get_launcher_version"
         | "check_launcher_updates"
         | "apply_launcher_update"

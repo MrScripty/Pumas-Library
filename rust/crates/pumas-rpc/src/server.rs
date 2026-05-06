@@ -2,7 +2,7 @@
 
 use crate::handlers::{
     handle_health, handle_model_library_update_events, handle_rpc,
-    handle_runtime_profile_update_events,
+    handle_runtime_profile_update_events, handle_status_telemetry_update_events,
 };
 use crate::shortcut::ShortcutManager;
 use axum::{
@@ -128,6 +128,10 @@ pub async fn start_server(
         .route(
             "/events/runtime-profile-updates",
             get(handle_runtime_profile_update_events),
+        )
+        .route(
+            "/events/status-telemetry-updates",
+            get(handle_status_telemetry_update_events),
         )
         .route("/rpc", post(handle_rpc))
         .layer(ConcurrencyLimitLayer::new(MAX_IN_FLIGHT_RPC_REQUESTS))

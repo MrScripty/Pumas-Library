@@ -305,6 +305,23 @@ the same subscriber handoff model rather than copying the polling pattern.
 - Rust test proves dropping the stream releases subscriber state.
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc status_telemetry`
 
+**Implementation Notes:**
+- 2026-05-06: Added core `StatusTelemetrySnapshot` and
+  `StatusTelemetryUpdateNotification` DTOs, a primary-owned telemetry service,
+  a subscriber-gated sampler task, cached snapshot RPC access, and
+  `/events/status-telemetry-updates` SSE.
+- 2026-05-06 verification for backend stream slice:
+  `cargo check --manifest-path rust/Cargo.toml -p pumas-library`,
+  `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`,
+  `cargo test --manifest-path rust/Cargo.toml -p pumas-library status_telemetry`,
+  `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc status_telemetry`,
+  and `git diff --check` passed.
+- 2026-05-06 issue recorded: telemetry snapshots are core-owned and currently
+  use core `status_response`, while the existing `get_status` RPC handler adds
+  ComfyUI version, dependency, patch, and shortcut enrichment. Before frontend
+  migration, move that enrichment behind a backend-owned telemetry/status helper
+  or explicitly preserve the fields another way.
+
 ### Milestone 3 - Electron Bridge Subscription
 - Add Electron bridge stream handling for telemetry updates.
 - Add main-process forwarding and preload `onStatusTelemetryUpdate`.

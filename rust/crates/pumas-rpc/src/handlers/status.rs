@@ -57,6 +57,14 @@ pub async fn get_system_resources(
     Ok(serde_json::to_value(response)?)
 }
 
+pub async fn get_status_telemetry_snapshot(
+    state: &AppState,
+    _params: &Value,
+) -> pumas_library::Result<Value> {
+    let snapshot = state.api.refresh_status_telemetry_snapshot().await?;
+    Ok(serde_json::to_value(snapshot)?)
+}
+
 pub async fn get_launcher_version(
     state: &AppState,
     _params: &Value,

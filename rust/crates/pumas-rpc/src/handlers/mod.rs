@@ -29,12 +29,15 @@ use futures::{
     stream::{self, BoxStream},
     Stream, StreamExt,
 };
-use pumas_library::models::{ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed};
+use pumas_library::models::{
+    ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed, StatusTelemetryUpdateNotification,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::convert::Infallible;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
@@ -147,6 +150,11 @@ pub struct ModelLibraryUpdateStreamQuery {
     pub cursor: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+pub struct StatusTelemetryUpdateStreamQuery {
+    pub cursor: Option<String>,
+}
+
 async fn build_model_library_update_stream_state(
     state: Arc<AppState>,
     cursor: Option<String>,
@@ -198,6 +206,30 @@ pub async fn handle_runtime_profile_update_events(
         update_method_unsupported: false,
     };
     let stream = stream::unfold(stream_state, next_runtime_profile_update_event);
+
+    Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+/// Server-sent status/resource telemetry update stream.
+pub async fn handle_status_telemetry_update_events(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<StatusTelemetryUpdateStreamQuery>,
+) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let stream: BoxStream<'static, Result<Event, Infallible>> =
+        match build_status_telemetry_update_stream_state(state, query.cursor).await {
+            Ok(stream_state) => {
+                stream::unfold(stream_state, next_status_telemetry_update_event).boxed()
+            }
+            Err(error) => {
+                warn!("status telemetry update stream startup failed: {}", error);
+                stream::once(async move {
+                    Ok(Event::default()
+                        .event("status-telemetry-error")
+                        .data(json!({ "error": error.to_string() }).to_string()))
+                })
+                .boxed()
+            }
+        };
 
     Sse::new(stream).keep_alive(KeepAlive::default())
 }
@@ -303,6 +335,75 @@ struct RuntimeProfileUpdateStreamState {
     update_method_unsupported: bool,
 }
 
+struct StatusTelemetryUpdateStreamState {
+    state: Arc<AppState>,
+    receiver: broadcast::Receiver<StatusTelemetryUpdateNotification>,
+    pending_notification: Option<StatusTelemetryUpdateNotification>,
+}
+
+async fn build_status_telemetry_update_stream_state(
+    state: Arc<AppState>,
+    cursor: Option<String>,
+) -> pumas_library::Result<StatusTelemetryUpdateStreamState> {
+    let receiver = state.api.subscribe_status_telemetry_updates();
+    let snapshot = state.api.get_status_telemetry_snapshot().await?;
+    let pending_notification = state
+        .api
+        .status_telemetry_notification_since(cursor.as_deref(), snapshot);
+
+    Ok(StatusTelemetryUpdateStreamState {
+        state,
+        receiver,
+        pending_notification,
+    })
+}
+
+async fn next_status_telemetry_update_event(
+    mut state: StatusTelemetryUpdateStreamState,
+) -> Option<(Result<Event, Infallible>, StatusTelemetryUpdateStreamState)> {
+    if let Some(notification) = state.pending_notification.take() {
+        let event = status_telemetry_update_sse_event(&notification);
+        return Some((Ok(event), state));
+    }
+
+    match state.receiver.recv().await {
+        Ok(notification) => {
+            let event = status_telemetry_update_sse_event(&notification);
+            Some((Ok(event), state))
+        }
+        Err(broadcast::error::RecvError::Lagged(_)) => {
+            match state.state.api.refresh_status_telemetry_snapshot().await {
+                Ok(snapshot) => {
+                    let notification = StatusTelemetryUpdateNotification {
+                        cursor: snapshot.cursor.clone(),
+                        snapshot,
+                        stale_cursor: true,
+                        snapshot_required: true,
+                    };
+                    let event = status_telemetry_update_sse_event(&notification);
+                    Some((Ok(event), state))
+                }
+                Err(error) => {
+                    warn!("status telemetry refresh after lag failed: {}", error);
+                    None
+                }
+            }
+        }
+        Err(broadcast::error::RecvError::Closed) => None,
+    }
+}
+
+fn status_telemetry_update_sse_event(notification: &StatusTelemetryUpdateNotification) -> Event {
+    match serde_json::to_string(notification) {
+        Ok(payload) => Event::default()
+            .event("status-telemetry-update")
+            .data(payload),
+        Err(error) => Event::default()
+            .event("status-telemetry-error")
+            .data(json!({ "error": error.to_string() }).to_string()),
+    }
+}
+
 async fn next_runtime_profile_update_event(
     mut state: RuntimeProfileUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, RuntimeProfileUpdateStreamState)> {
@@ -391,6 +492,9 @@ async fn dispatch_method(
         "get_status" => status::get_status(state, params).await,
         "get_disk_space" => status::get_disk_space(state, params).await,
         "get_system_resources" => status::get_system_resources(state, params).await,
+        "get_status_telemetry_snapshot" => {
+            status::get_status_telemetry_snapshot(state, params).await
+        }
         "get_launcher_version" => status::get_launcher_version(state, params).await,
         "check_launcher_updates" => status::check_launcher_updates(state, params).await,
         "apply_launcher_update" => status::apply_launcher_update(state, params).await,

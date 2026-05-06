@@ -8,6 +8,7 @@ use tokio::fs;
 use tokio::sync::RwLock;
 
 use crate::api::state::{ApiState, PrimaryState};
+use crate::api::status_telemetry::{start_status_telemetry_sampler, StatusTelemetryService};
 use crate::api::RuntimeTasks;
 use crate::error::{PumasError, Result};
 use crate::{config, conversion, model_library, network, process, registry, system};
@@ -387,6 +388,7 @@ impl PumasApiBuilder {
         };
 
         let resource_tracker = Arc::new(system::ResourceTracker::default());
+        let status_telemetry = Arc::new(StatusTelemetryService::default());
 
         // Initialize system utilities
         let system_utils = Arc::new(system::SystemUtils::new(&self.launcher_root));
@@ -568,6 +570,7 @@ impl PumasApiBuilder {
             network_manager,
             process_manager,
             resource_tracker,
+            status_telemetry,
             system_utils,
             model_library,
             model_mapper,
@@ -595,6 +598,7 @@ impl PumasApiBuilder {
             model_watcher: None,
             runtime_tasks: runtime_tasks.clone(),
         };
+        start_status_telemetry_sampler(api.primary().clone());
         api.start_ipc_server().await?;
         api.model_watcher = start_primary_background_work(
             api.primary().clone(),

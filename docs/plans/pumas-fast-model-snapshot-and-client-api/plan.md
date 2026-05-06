@@ -511,8 +511,9 @@ Update during implementation:
 - 2026-05-06: Milestone 5 testing found an unrelated RPC wrapper mismatch:
   `refresh_model_index` returns an object from its handler, but
   `wrap_response()` treats it like a boolean and reports `success: false`.
-  Record this as a follow-up before relying on that RPC method in external
-  clients or tests.
+  Resolved in the follow-up RPC wrapper slice by classifying
+  `refresh_model_index` with structured passthrough handlers and adding a
+  regression test.
 - 2026-05-06: Milestone 6 first slice expanded the local registry instance
   contract with `LocalInstanceTransportKind`, endpoint, and connection-token
   fields while preserving the existing loopback TCP port behavior. Existing
@@ -621,11 +622,11 @@ Update during implementation:
 
 ## Discovered Issues
 
-- 2026-05-06: The RPC `refresh_model_index` handler returns a structured
+- 2026-05-06: Resolved. The RPC `refresh_model_index` handler returns a structured
   object, but the generic `wrap_response()` path treats it as a boolean and can
   report `success:false` even when refresh work succeeds. This is separate from
-  the fast snapshot/client API slices and should be fixed before relying on the
-  RPC response for operator feedback.
+  the fast snapshot/client API slices. The wrapper now preserves the handler
+  object and test coverage locks that contract.
 - 2026-05-06: After removing the hidden `PumasApi` client constructor path,
   stale `try_client()` forwarding branches remained across `PumasApi` methods.
   Milestone 7 cleanup slices removed them from network, link, conversion,

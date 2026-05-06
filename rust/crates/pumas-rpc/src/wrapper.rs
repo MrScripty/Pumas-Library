@@ -114,6 +114,7 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "lookup_hf_metadata_for_bundle_directory"
         | "detect_sharded_sets"
         | "validate_file_type"
+        | "refresh_model_index"
         | "refresh_model_mappings"
         | "get_file_link_count"
         | "check_files_writable"
@@ -174,7 +175,6 @@ pub fn wrap_response(method: &str, result: Value) -> Value {
         | "toggle_patch"
         | "toggle_menu"
         | "toggle_desktop"
-        | "refresh_model_index"
         | "set_default_version" => {
             json!({
                 "success": result.as_bool().unwrap_or(false)
@@ -306,6 +306,16 @@ mod tests {
             "error": "No active version set for comfyui"
         });
         let wrapped = wrap_response("refresh_model_mappings", data.clone());
+        assert_eq!(wrapped, data);
+    }
+
+    #[test]
+    fn test_refresh_model_index_passthrough() {
+        let data = json!({
+            "success": true,
+            "indexed_count": 48
+        });
+        let wrapped = wrap_response("refresh_model_index", data.clone());
         assert_eq!(wrapped, data);
     }
 

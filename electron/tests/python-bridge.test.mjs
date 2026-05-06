@@ -192,6 +192,7 @@ test('stop clears model-library update stream lifecycle', async () => {
 
   bridge.modelLibraryUpdateListener = () => {};
   bridge.modelLibraryUpdateBuffer = 'partial';
+  bridge.modelLibraryUpdateCursor = 'model-library-updates:42';
   bridge.modelLibraryUpdateRequest = {
     destroy() {
       destroyed = true;
@@ -206,6 +207,7 @@ test('stop clears model-library update stream lifecycle', async () => {
   assert.equal(bridge.modelLibraryUpdateListener, null);
   assert.equal(bridge.modelLibraryUpdateRequest, null);
   assert.equal(bridge.modelLibraryUpdateBuffer, '');
+  assert.equal(bridge.modelLibraryUpdateCursor, null);
   assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });

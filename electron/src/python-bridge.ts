@@ -122,6 +122,7 @@ export class PythonBridge {
   private restartTimer: BridgeTimer | null = null;
   private modelLibraryUpdateRequest: http.ClientRequest | null = null;
   private modelLibraryUpdateBuffer = '';
+  private modelLibraryUpdateCursor: string | null = null;
   private modelLibraryUpdateListener: ModelLibraryUpdateListener | null = null;
   private modelLibraryUpdateReconnectTimer: BridgeTimer | null = null;
   private runtimeProfileUpdateRequest: http.ClientRequest | null = null;
@@ -393,6 +394,7 @@ export class PythonBridge {
 
   startModelLibraryUpdateStream(listener: ModelLibraryUpdateListener): void {
     this.modelLibraryUpdateListener = listener;
+    this.modelLibraryUpdateCursor = null;
     if (!this.process) {
       throw new Error('Backend bridge not running');
     }
@@ -401,6 +403,7 @@ export class PythonBridge {
 
   stopModelLibraryUpdateStream(): void {
     this.modelLibraryUpdateListener = null;
+    this.modelLibraryUpdateCursor = null;
     this.closeModelLibraryUpdateStream();
     this.clearModelLibraryUpdateReconnectTimer();
   }
@@ -427,11 +430,14 @@ export class PythonBridge {
     this.closeModelLibraryUpdateStream();
     this.clearModelLibraryUpdateReconnectTimer();
     this.modelLibraryUpdateBuffer = '';
+    const cursorQuery = this.modelLibraryUpdateCursor
+      ? `?cursor=${encodeURIComponent(this.modelLibraryUpdateCursor)}`
+      : '';
 
     const req = http.get({
       hostname: '127.0.0.1',
       port: this.port,
-      path: '/events/model-library-updates',
+      path: `/events/model-library-updates${cursorQuery}`,
       method: 'GET',
       headers: {
         Accept: 'text/event-stream',
@@ -442,6 +448,13 @@ export class PythonBridge {
         const parsed = parseModelLibraryUpdateSseChunk(this.modelLibraryUpdateBuffer, chunk);
         this.modelLibraryUpdateBuffer = parsed.buffer;
         for (const payload of parsed.payloads) {
+          if (
+            payload &&
+            typeof payload === 'object' &&
+            typeof (payload as { cursor?: unknown }).cursor === 'string'
+          ) {
+            this.modelLibraryUpdateCursor = (payload as { cursor: string }).cursor;
+          }
           this.modelLibraryUpdateListener?.(payload);
         }
       });

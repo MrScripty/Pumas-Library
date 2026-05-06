@@ -26,6 +26,31 @@ fn create_test_env() -> TempDir {
     temp_dir
 }
 
+fn create_indexable_test_model(root: &std::path::Path, model_id: &str, official_name: &str) {
+    let model_dir = root.join("shared-resources/models").join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(
+        model_dir.join("config.json"),
+        r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
+    )
+    .unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "llama",
+            "model_type": "llm",
+            "official_name": official_name,
+            "cleaned_name": official_name.to_ascii_lowercase().replace(' ', "-"),
+            "files": [{"name": "model.safetensors"}],
+            "runtime_engine_hints": ["transformers"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 /// Make an RPC call to the server.
 async fn rpc_call(port: u16, method: &str, params: Value) -> Result<Value, String> {
     let json = rpc_call_raw(port, method, params).await?;
@@ -585,28 +610,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(1200)).await;
 
         let model_id = "llm/llama/sse-reconcile-feed";
-        let model_dir = env.path().join("shared-resources/models").join(model_id);
-        std::fs::create_dir_all(&model_dir).unwrap();
-        std::fs::write(
-            model_dir.join("config.json"),
-            r#"{"model_type":"llama","architectures":["LlamaForCausalLM"]}"#,
-        )
-        .unwrap();
-        std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
-        std::fs::write(
-            model_dir.join("metadata.json"),
-            serde_json::to_string_pretty(&serde_json::json!({
-                "model_id": model_id,
-                "family": "llama",
-                "model_type": "llm",
-                "official_name": "SSE Reconcile Feed",
-                "cleaned_name": "sse-reconcile-feed",
-                "files": [{"name": "model.safetensors"}],
-                "runtime_engine_hints": ["transformers"]
-            }))
-            .unwrap(),
-        )
-        .unwrap();
+        create_indexable_test_model(env.path(), model_id, "SSE Reconcile Feed");
 
         let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
         assert!(listed
@@ -618,6 +622,57 @@ mod tests {
         let body = body.unwrap();
         assert!(body.contains("event: model-library-update"));
         assert!(body.contains("\"change_kind\":\"model_added\""));
+
+        server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn test_model_library_update_event_stream_recovers_from_cursor() {
+        if !can_bind_local_tcp_for_tests() {
+            return;
+        }
+        let env = create_test_env();
+        let server = start_rpc_server(env.path()).await.unwrap();
+        let port = server.port;
+
+        let initial_feed = rpc_call(
+            port,
+            "list_model_library_updates_since",
+            json!({"cursor": null, "limit": 100}),
+        )
+        .await
+        .unwrap();
+        let cursor = initial_feed
+            .get("cursor")
+            .and_then(|value| value.as_str())
+            .expect("initial update cursor missing")
+            .to_string();
+
+        let model_id = "llm/llama/sse-recovered-feed";
+        create_indexable_test_model(env.path(), model_id, "SSE Recovered Feed");
+        let listed = rpc_call(port, "get_models", json!({})).await.unwrap();
+        assert!(listed
+            .get("models")
+            .and_then(|value| value.as_object())
+            .is_some_and(|models| models.contains_key(model_id)));
+
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!(
+                "http://127.0.0.1:{}/events/model-library-updates?cursor={}",
+                port, cursor
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert!(response.status().is_success());
+        let mut stream = response.bytes_stream();
+
+        let body = read_stream_until_contains(&mut stream, model_id, Duration::from_secs(10)).await;
+        let body = body.unwrap();
+        assert!(body.contains("event: model-library-update"));
+        assert!(body.contains("\"change_kind\":\"model_added\""));
+        assert!(body.contains("\"snapshot_required\":false"));
 
         server.stop().await;
     }

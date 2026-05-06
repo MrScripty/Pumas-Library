@@ -315,11 +315,11 @@ snapshot-to-live race.
 contract instead of a parallel event path.
 
 **Tasks:**
-- [ ] Update RPC/SSE endpoint implementation to subscribe to the core update
+- [x] Update RPC/SSE endpoint implementation to subscribe to the core update
   bus.
-- [ ] Update Electron forwarding to preserve cursor/recovery semantics.
-- [ ] Update preload/frontend type validation if payload shape changes.
-- [ ] Keep frontend refresh debounced and subscriber-owned, not component-level
+- [x] Update Electron forwarding to preserve cursor/recovery semantics.
+- [x] Update preload/frontend type validation if payload shape changes.
+- [x] Keep frontend refresh debounced and subscriber-owned, not component-level
   polling.
 
 **Verification:**
@@ -328,7 +328,7 @@ contract instead of a parallel event path.
 - Frontend tests cover debounced refresh from update notifications.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** Complete
 
 ### Milestone 6: Explicit Local Client Discovery
 
@@ -501,6 +501,18 @@ Update during implementation:
   dirty-state owner model but is relevant for future filesystem watcher and
   service-discovery tests that create files outside normal import/download
   flows.
+- 2026-05-06: Milestone 5 changed the RPC model-library SSE endpoint from
+  durable-feed polling to the core owner-side subscriber. The endpoint accepts
+  an optional `cursor` query parameter, emits recovered events before live
+  events, and preserves the existing `ModelLibraryUpdateNotification` payload
+  shape. Electron now retains the latest notification cursor for reconnects and
+  resets it when the update stream is explicitly stopped. Frontend validation
+  did not require changes because the notification payload shape stayed stable.
+- 2026-05-06: Milestone 5 testing found an unrelated RPC wrapper mismatch:
+  `refresh_model_index` returns an object from its handler, but
+  `wrap_response()` treats it like a boolean and reports `success: false`.
+  Record this as a follow-up before relying on that RPC method in external
+  clients or tests.
 
 ## Commit Cadence Notes
 
@@ -703,6 +715,13 @@ After each worker wave:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_update_stream_since`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
+- Milestone 5 GUI forwarding verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc model_library_update_event_stream`
+  - `npm run -w electron validate`
+  - `npm run -w electron test`
+  - `npm run -w frontend test:run -- useModels.test.ts ModelManagerIntegrityRefresh.test.ts api-package-facts.test.ts`
 
 ### Traceability Links
 

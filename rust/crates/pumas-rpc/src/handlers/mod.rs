@@ -17,7 +17,7 @@ mod versions;
 use crate::server::AppState;
 use crate::wrapper::wrap_response;
 use axum::{
-    extract::State,
+    extract::{Query, State},
     http::StatusCode,
     response::{
         sse::{Event, KeepAlive, Sse},
@@ -25,7 +25,10 @@ use axum::{
     },
     Json,
 };
-use futures::stream::{self, Stream};
+use futures::{
+    stream::{self, BoxStream},
+    Stream, StreamExt,
+};
 use pumas_library::models::{ModelLibraryUpdateNotification, RuntimeProfileUpdateFeed};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -35,7 +38,6 @@ use std::time::Duration;
 use tracing::{debug, error, warn};
 
 const MODEL_LIBRARY_UPDATE_STREAM_LIMIT: usize = 250;
-const MODEL_LIBRARY_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
 const RUNTIME_PROFILE_UPDATE_STREAM_POLL: Duration = Duration::from_secs(1);
 const RUNTIME_PROFILE_UPDATE_UNSUPPORTED_RETRY: Duration = Duration::from_secs(60);
 
@@ -119,14 +121,71 @@ pub async fn handle_health() -> impl IntoResponse {
 /// Server-sent model-library update notification stream.
 pub async fn handle_model_library_update_events(
     State(state): State<Arc<AppState>>,
-) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    let stream_state = ModelLibraryUpdateStreamState {
-        state,
-        cursor: None,
-    };
-    let stream = stream::unfold(stream_state, next_model_library_update_event);
+    Query(query): Query<ModelLibraryUpdateStreamQuery>,
+) -> Sse<BoxStream<'static, Result<Event, Infallible>>> {
+    let stream: BoxStream<'static, Result<Event, Infallible>> =
+        match build_model_library_update_stream_state(state, query.cursor).await {
+            Ok(stream_state) => {
+                stream::unfold(stream_state, next_model_library_update_event).boxed()
+            }
+            Err(error) => {
+                warn!("model-library update stream startup failed: {}", error);
+                stream::once(async move {
+                    Ok(Event::default()
+                        .event("model-library-error")
+                        .data(json!({ "error": error.to_string() }).to_string()))
+                })
+                .boxed()
+            }
+        };
 
     Sse::new(stream).keep_alive(KeepAlive::default())
+}
+
+#[derive(Debug, Default, Deserialize)]
+pub struct ModelLibraryUpdateStreamQuery {
+    pub cursor: Option<String>,
+}
+
+async fn build_model_library_update_stream_state(
+    state: Arc<AppState>,
+    cursor: Option<String>,
+) -> pumas_library::Result<ModelLibraryUpdateStreamState> {
+    let requested_cursor = match cursor {
+        Some(cursor) if !cursor.trim().is_empty() => cursor,
+        _ => {
+            state
+                .api
+                .list_model_library_updates_since(None, MODEL_LIBRARY_UPDATE_STREAM_LIMIT)
+                .await?
+                .cursor
+        }
+    };
+    let subscriber = state
+        .api
+        .subscribe_model_library_update_stream_since(&requested_cursor)
+        .await?;
+    let handshake = subscriber.handshake().clone();
+    let cursor = handshake.cursor_after_recovery.clone();
+    let pending_notification = if handshake.recovered_events.is_empty()
+        && !handshake.stale_cursor
+        && !handshake.snapshot_required
+    {
+        None
+    } else {
+        Some(ModelLibraryUpdateNotification {
+            cursor: handshake.cursor_after_recovery,
+            events: handshake.recovered_events,
+            stale_cursor: handshake.stale_cursor,
+            snapshot_required: handshake.snapshot_required,
+        })
+    };
+
+    Ok(ModelLibraryUpdateStreamState {
+        subscriber,
+        cursor,
+        pending_notification,
+    })
 }
 
 /// Server-sent runtime-profile update notification stream.
@@ -193,39 +252,38 @@ pub async fn handle_rpc(
 }
 
 struct ModelLibraryUpdateStreamState {
-    state: Arc<AppState>,
-    cursor: Option<String>,
+    subscriber: pumas_library::model_library::ModelLibraryUpdateSubscriber,
+    cursor: String,
+    pending_notification: Option<ModelLibraryUpdateNotification>,
 }
 
 async fn next_model_library_update_event(
     mut state: ModelLibraryUpdateStreamState,
 ) -> Option<(Result<Event, Infallible>, ModelLibraryUpdateStreamState)> {
-    loop {
-        tokio::time::sleep(MODEL_LIBRARY_UPDATE_STREAM_POLL).await;
+    if let Some(notification) = state.pending_notification.take() {
+        let event = model_library_update_sse_event(&notification);
+        return Some((Ok(event), state));
+    }
 
-        match state
-            .state
-            .api
-            .list_model_library_updates_since(
-                state.cursor.as_deref(),
-                MODEL_LIBRARY_UPDATE_STREAM_LIMIT,
-            )
-            .await
-        {
-            Ok(feed) => {
-                state.cursor = Some(feed.cursor.clone());
-
-                if feed.events.is_empty() && !feed.stale_cursor && !feed.snapshot_required {
-                    continue;
-                }
-
-                let notification = ModelLibraryUpdateNotification::from(feed);
-                let event = model_library_update_sse_event(&notification);
-                return Some((Ok(event), state));
-            }
-            Err(error) => {
-                warn!("model-library update stream polling failed: {}", error);
-            }
+    match state.subscriber.next_event().await {
+        Ok(update) => {
+            state.cursor = update.cursor.clone();
+            let notification = ModelLibraryUpdateNotification {
+                cursor: update.cursor.clone(),
+                events: vec![update],
+                stale_cursor: false,
+                snapshot_required: false,
+            };
+            let event = model_library_update_sse_event(&notification);
+            Some((Ok(event), state))
+        }
+        Err(error) => {
+            warn!(
+                cursor = %state.cursor,
+                "model-library update stream ended: {}",
+                error
+            );
+            None
         }
     }
 }

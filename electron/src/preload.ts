@@ -53,6 +53,13 @@ type RuntimeProfileUpdateNotificationPayload = {
   snapshot_required: boolean;
 };
 
+type StatusTelemetryUpdateNotificationPayload = {
+  cursor: string;
+  snapshot: unknown;
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+};
+
 const MODEL_LIBRARY_CHANGE_KINDS = new Set([
   'model_added',
   'model_removed',
@@ -127,6 +134,23 @@ function isRuntimeProfileUpdateNotificationPayload(
     typeof value['stale_cursor'] === 'boolean' &&
     typeof value['snapshot_required'] === 'boolean' &&
     (events === undefined || Array.isArray(events))
+  );
+}
+
+function isStatusTelemetryUpdateNotificationPayload(
+  value: unknown
+): value is StatusTelemetryUpdateNotificationPayload {
+  if (!isRecord(value) || !isRecord(value['snapshot'])) {
+    return false;
+  }
+
+  const snapshot = value['snapshot'];
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['stale_cursor'] === 'boolean' &&
+    typeof value['snapshot_required'] === 'boolean' &&
+    typeof snapshot['cursor'] === 'string' &&
+    typeof snapshot['revision'] === 'number'
   );
 }
 
@@ -752,6 +776,22 @@ const electronAPI = {
     ipcRenderer.on('runtime-profile:update', listener);
     return () => {
       ipcRenderer.removeListener('runtime-profile:update', listener);
+    };
+  },
+  onStatusTelemetryUpdate: (
+    callback: (notification: StatusTelemetryUpdateNotificationPayload) => void
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isStatusTelemetryUpdateNotificationPayload(payload)) {
+        callback(payload);
+      }
+    };
+
+    ipcRenderer.on('status-telemetry:update', listener);
+    void ipcRenderer.invoke('status-telemetry:subscribe');
+    return () => {
+      ipcRenderer.removeListener('status-telemetry:update', listener);
+      void ipcRenderer.invoke('status-telemetry:unsubscribe');
     };
   },
 

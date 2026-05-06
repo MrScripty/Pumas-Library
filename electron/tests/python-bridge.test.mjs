@@ -4,6 +4,7 @@ import {
   PythonBridge,
   parseModelLibraryUpdateSseChunk,
   parseRuntimeProfileUpdateSseChunk,
+  parseStatusTelemetryUpdateSseChunk,
 } from '../dist/python-bridge.js';
 
 class FakeTimerController {
@@ -184,6 +185,65 @@ test('parseRuntimeProfileUpdateSseChunk parses split runtime-profile update even
   ]);
 });
 
+test('parseStatusTelemetryUpdateSseChunk parses split status telemetry update events', () => {
+  let parsed = parseStatusTelemetryUpdateSseChunk(
+    '',
+    'event: status-telemetry-update\ndata: {"cursor":"status-telemetry:1"'
+  );
+
+  assert.deepEqual(parsed.payloads, []);
+  assert.notEqual(parsed.buffer, '');
+
+  parsed = parseStatusTelemetryUpdateSseChunk(
+    parsed.buffer,
+    ',"snapshot":{"cursor":"status-telemetry:1","revision":1},"stale_cursor":false,"snapshot_required":true}\n\n'
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'status-telemetry:1',
+      snapshot: {
+        cursor: 'status-telemetry:1',
+        revision: 1,
+      },
+      stale_cursor: false,
+      snapshot_required: true,
+    },
+  ]);
+});
+
+test('parseStatusTelemetryUpdateSseChunk ignores unrelated and malformed events', () => {
+  const parsed = parseStatusTelemetryUpdateSseChunk(
+    '',
+    [
+      'event: message',
+      'data: {"cursor":"ignored"}',
+      '',
+      'event: status-telemetry-update',
+      'data: not-json',
+      '',
+      'event: status-telemetry-update',
+      'data: {"cursor":"status-telemetry:2","snapshot":{"cursor":"status-telemetry:2","revision":2},"stale_cursor":false,"snapshot_required":true}',
+      '',
+      '',
+    ].join('\n')
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'status-telemetry:2',
+      snapshot: {
+        cursor: 'status-telemetry:2',
+        revision: 2,
+      },
+      stale_cursor: false,
+      snapshot_required: true,
+    },
+  ]);
+});
+
 test('stop clears model-library update stream lifecycle', async () => {
   const timers = new FakeTimerController();
   const bridge = createBridge(timers);
@@ -235,6 +295,34 @@ test('stop clears runtime-profile update stream lifecycle', async () => {
   assert.equal(bridge.runtimeProfileUpdateRequest, null);
   assert.equal(bridge.runtimeProfileUpdateBuffer, '');
   assert.equal(bridge.runtimeProfileUpdateReconnectTimer, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop clears status telemetry update stream lifecycle', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let destroyed = false;
+  const reconnectTimer = { id: 101 };
+
+  bridge.statusTelemetryUpdateListener = () => {};
+  bridge.statusTelemetryUpdateBuffer = 'partial';
+  bridge.statusTelemetryUpdateCursor = 'status-telemetry:42';
+  bridge.statusTelemetryUpdateRequest = {
+    destroy() {
+      destroyed = true;
+    },
+  };
+  bridge.statusTelemetryUpdateReconnectTimer = reconnectTimer;
+  timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
+
+  await bridge.stop();
+
+  assert.equal(destroyed, true);
+  assert.equal(bridge.statusTelemetryUpdateListener, null);
+  assert.equal(bridge.statusTelemetryUpdateRequest, null);
+  assert.equal(bridge.statusTelemetryUpdateBuffer, '');
+  assert.equal(bridge.statusTelemetryUpdateCursor, null);
+  assert.equal(bridge.statusTelemetryUpdateReconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 

@@ -29,11 +29,15 @@ const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
+const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
+const STATUS_TELEMETRY_SUBSCRIBE_CHANNEL = 'status-telemetry:subscribe';
+const STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL = 'status-telemetry:unsubscribe';
 
 // Python sidecar bridge
 let pythonBridge: PythonBridge | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendInitializationPromise: Promise<void> | null = null;
+let statusTelemetryRendererSubscriptions = 0;
 
 function isReleaseSmokeMode(): boolean {
   return process.env.PUMAS_RELEASE_SMOKE === '1';
@@ -178,6 +182,8 @@ async function createWindow(): Promise<void> {
 
   // Handle window closed
   mainWindow.on('closed', () => {
+    statusTelemetryRendererSubscriptions = 0;
+    pythonBridge?.stopStatusTelemetryUpdateStream();
     mainWindow = null;
   });
 
@@ -282,6 +288,20 @@ function registerIPCHandlers(): void {
     return nativeTheme.shouldUseDarkColors ? 'dark' : 'light';
   });
 
+  ipcMain.handle(STATUS_TELEMETRY_SUBSCRIBE_CHANNEL, async () => {
+    statusTelemetryRendererSubscriptions += 1;
+    if (statusTelemetryRendererSubscriptions === 1) {
+      startStatusTelemetryUpdateForwarder();
+    }
+  });
+
+  ipcMain.handle(STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL, async () => {
+    statusTelemetryRendererSubscriptions = Math.max(0, statusTelemetryRendererSubscriptions - 1);
+    if (statusTelemetryRendererSubscriptions === 0) {
+      pythonBridge?.stopStatusTelemetryUpdateStream();
+    }
+  });
+
   log.info('IPC handlers registered');
 }
 
@@ -312,6 +332,21 @@ function startRuntimeProfileUpdateForwarder(): void {
     }
 
     targetWindow.webContents.send(RUNTIME_PROFILE_UPDATE_CHANNEL, payload);
+  });
+}
+
+function startStatusTelemetryUpdateForwarder(): void {
+  if (!pythonBridge || statusTelemetryRendererSubscriptions === 0) {
+    return;
+  }
+
+  pythonBridge.startStatusTelemetryUpdateStream((payload) => {
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    targetWindow.webContents.send(STATUS_TELEMETRY_UPDATE_CHANNEL, payload);
   });
 }
 
@@ -355,6 +390,7 @@ async function initializeBackend(): Promise<void> {
     await pythonBridge.start();
     startModelLibraryUpdateForwarder();
     startRuntimeProfileUpdateForwarder();
+    startStatusTelemetryUpdateForwarder();
     log.info('Backend bridge initialized');
   })();
 

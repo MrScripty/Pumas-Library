@@ -334,6 +334,17 @@ the same subscriber handoff model rather than copying the polling pattern.
 - `npm run -w electron validate`
 - Code review confirms no unowned renderer timer is introduced.
 
+**Implementation Notes:**
+- 2026-05-06: Added Electron status telemetry SSE parsing, bridge lifecycle,
+  main-process forwarding, preload subscription API, cached snapshot RPC
+  registry entries, and frontend TypeScript DTOs.
+- 2026-05-06: The new status telemetry forwarder is subscriber-aware: preload
+  subscribe/unsubscribe IPC starts the bridge stream for the first renderer
+  subscriber and stops it when the last subscriber unsubscribes.
+- 2026-05-06 verification:
+  `npm run -w electron test`, `npm run -w frontend check:types`, and
+  `git diff --check` passed.
+
 ### Milestone 4 - Frontend Status Hook Migration
 - Replace `useStatus` polling with initial cached snapshot plus
   `onStatusTelemetryUpdate`.

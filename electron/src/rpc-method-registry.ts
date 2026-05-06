@@ -11,6 +11,7 @@ export const RPC_METHOD_REGISTRY = {
     'health_check',
     'shutdown',
     'get_status',
+    'get_status_telemetry_snapshot',
     'get_disk_space',
     'get_system_resources',
     'get_launcher_version',
@@ -206,6 +207,7 @@ export type RpcRequestSchema = {
 
 export const RPC_METHOD_PARAM_VALIDATION = {
   get_status: 'empty-record',
+  get_status_telemetry_snapshot: 'empty-record',
   get_disk_space: 'empty-record',
   get_system_resources: 'empty-record',
   get_all_shortcut_states: 'empty-record',

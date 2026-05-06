@@ -53,6 +53,7 @@ interface RPCResponse {
 
 export type ModelLibraryUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
+export type StatusTelemetryUpdateListener = (payload: unknown) => void;
 
 export interface ParsedSseChunk {
   buffer: string;
@@ -111,6 +112,13 @@ export function parseRuntimeProfileUpdateSseChunk(
   return parseNamedSseChunk(previousBuffer, chunk, 'runtime-profile-update', 'runtime-profile');
 }
 
+export function parseStatusTelemetryUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  return parseNamedSseChunk(previousBuffer, chunk, 'status-telemetry-update', 'status telemetry');
+}
+
 export class PythonBridge {
   private options: Required<Omit<PythonBridgeOptions, 'timerController'>>;
   private timerController: PythonBridgeTimerController;
@@ -129,6 +137,11 @@ export class PythonBridge {
   private runtimeProfileUpdateBuffer = '';
   private runtimeProfileUpdateListener: RuntimeProfileUpdateListener | null = null;
   private runtimeProfileUpdateReconnectTimer: BridgeTimer | null = null;
+  private statusTelemetryUpdateRequest: http.ClientRequest | null = null;
+  private statusTelemetryUpdateBuffer = '';
+  private statusTelemetryUpdateCursor: string | null = null;
+  private statusTelemetryUpdateListener: StatusTelemetryUpdateListener | null = null;
+  private statusTelemetryUpdateReconnectTimer: BridgeTimer | null = null;
 
   constructor(options: PythonBridgeOptions) {
     const { timerController, ...runtimeOptions } = options;
@@ -275,6 +288,9 @@ export class PythonBridge {
     if (this.runtimeProfileUpdateListener) {
       this.openRuntimeProfileUpdateStream();
     }
+    if (this.statusTelemetryUpdateListener) {
+      this.openStatusTelemetryUpdateStream();
+    }
 
     log.info(`${backendLabel} backend bridge started successfully`);
   }
@@ -345,6 +361,7 @@ export class PythonBridge {
     this.clearRestartTimer();
     this.stopModelLibraryUpdateStream();
     this.stopRuntimeProfileUpdateStream();
+    this.stopStatusTelemetryUpdateStream();
 
     if (!this.process) {
       return;
@@ -420,6 +437,21 @@ export class PythonBridge {
     this.runtimeProfileUpdateListener = null;
     this.closeRuntimeProfileUpdateStream();
     this.clearRuntimeProfileUpdateReconnectTimer();
+  }
+
+  startStatusTelemetryUpdateStream(listener: StatusTelemetryUpdateListener): void {
+    this.statusTelemetryUpdateListener = listener;
+    if (!this.process) {
+      throw new Error('Backend bridge not running');
+    }
+    this.openStatusTelemetryUpdateStream();
+  }
+
+  stopStatusTelemetryUpdateStream(): void {
+    this.statusTelemetryUpdateListener = null;
+    this.statusTelemetryUpdateCursor = null;
+    this.closeStatusTelemetryUpdateStream();
+    this.clearStatusTelemetryUpdateReconnectTimer();
   }
 
   private openModelLibraryUpdateStream(): void {
@@ -587,6 +619,95 @@ export class PythonBridge {
     if (this.runtimeProfileUpdateReconnectTimer) {
       this.timerController.clearTimeout(this.runtimeProfileUpdateReconnectTimer);
       this.runtimeProfileUpdateReconnectTimer = null;
+    }
+  }
+
+  private openStatusTelemetryUpdateStream(): void {
+    if (!this.process || !this.statusTelemetryUpdateListener) {
+      return;
+    }
+
+    this.closeStatusTelemetryUpdateStream();
+    this.clearStatusTelemetryUpdateReconnectTimer();
+    this.statusTelemetryUpdateBuffer = '';
+    const cursorQuery = this.statusTelemetryUpdateCursor
+      ? `?cursor=${encodeURIComponent(this.statusTelemetryUpdateCursor)}`
+      : '';
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: this.port,
+      path: `/events/status-telemetry-updates${cursorQuery}`,
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        const parsed = parseStatusTelemetryUpdateSseChunk(this.statusTelemetryUpdateBuffer, chunk);
+        this.statusTelemetryUpdateBuffer = parsed.buffer;
+        for (const payload of parsed.payloads) {
+          if (
+            payload &&
+            typeof payload === 'object' &&
+            typeof (payload as { cursor?: unknown }).cursor === 'string'
+          ) {
+            this.statusTelemetryUpdateCursor = (payload as { cursor: string }).cursor;
+          }
+          this.statusTelemetryUpdateListener?.(payload);
+        }
+      });
+      res.on('end', () => {
+        this.statusTelemetryUpdateRequest = null;
+        this.statusTelemetryUpdateBuffer = '';
+        if (!this.isShuttingDown) {
+          log.warn('Status telemetry update stream ended');
+          this.scheduleStatusTelemetryUpdateReconnect();
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      this.statusTelemetryUpdateRequest = null;
+      this.statusTelemetryUpdateBuffer = '';
+      if (!this.isShuttingDown) {
+        log.warn('Status telemetry update stream failed:', error);
+        this.scheduleStatusTelemetryUpdateReconnect();
+      }
+    });
+
+    this.statusTelemetryUpdateRequest = req;
+  }
+
+  private closeStatusTelemetryUpdateStream(): void {
+    if (this.statusTelemetryUpdateRequest) {
+      this.statusTelemetryUpdateRequest.destroy();
+      this.statusTelemetryUpdateRequest = null;
+    }
+    this.statusTelemetryUpdateBuffer = '';
+  }
+
+  private scheduleStatusTelemetryUpdateReconnect(): void {
+    if (
+      this.isShuttingDown ||
+      !this.process ||
+      !this.statusTelemetryUpdateListener ||
+      this.statusTelemetryUpdateReconnectTimer
+    ) {
+      return;
+    }
+
+    this.statusTelemetryUpdateReconnectTimer = this.timerController.setTimeout(() => {
+      this.statusTelemetryUpdateReconnectTimer = null;
+      this.openStatusTelemetryUpdateStream();
+    }, 1000);
+  }
+
+  private clearStatusTelemetryUpdateReconnectTimer(): void {
+    if (this.statusTelemetryUpdateReconnectTimer) {
+      this.timerController.clearTimeout(this.statusTelemetryUpdateReconnectTimer);
+      this.statusTelemetryUpdateReconnectTimer = null;
     }
   }
 

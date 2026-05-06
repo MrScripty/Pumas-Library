@@ -23,6 +23,7 @@ import type {
 import type {
   DiskSpaceResponse,
   StatusResponse,
+  StatusTelemetrySnapshot,
   SystemResourcesResponse,
 } from './api-system';
 import type {
@@ -55,6 +56,7 @@ export interface DesktopBridgeRuntimeAPI {
   get_status(): Promise<StatusResponse>;
   get_disk_space(): Promise<DiskSpaceResponse>;
   get_system_resources(): Promise<SystemResourcesResponse>;
+  get_status_telemetry_snapshot(): Promise<StatusTelemetrySnapshot>;
 
   // ========================================
   // Dependencies

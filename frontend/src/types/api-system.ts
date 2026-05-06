@@ -1,4 +1,5 @@
 import type { BaseResponse } from './api-common';
+import type { GetLibraryStatusResponse, NetworkStatusResponse } from './api-import';
 
 // ============================================================================
 // System & Status Types
@@ -58,4 +59,25 @@ export interface SystemResourcesResponse extends BaseResponse {
       free: number;
     };
   };
+}
+
+export type SystemResources = SystemResourcesResponse['resources'];
+
+export interface StatusTelemetrySnapshot {
+  cursor: string;
+  revision: number;
+  sampled_at: string;
+  source_state: string;
+  status: StatusResponse;
+  resources: SystemResources;
+  network: NetworkStatusResponse;
+  library: GetLibraryStatusResponse;
+  model_library_loaded: boolean;
+}
+
+export interface StatusTelemetryUpdateNotification {
+  cursor: string;
+  snapshot: StatusTelemetrySnapshot;
+  stale_cursor: boolean;
+  snapshot_required: boolean;
 }

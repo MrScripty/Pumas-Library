@@ -591,3 +591,391 @@ is related to transfer indicators.
 - `npm run -w frontend build`
 - `bash launcher.sh --build-release`
 - `git diff --check`
+
+## Post-Completion Idle CPU Remediation
+
+Added on 2026-05-06 after a second runtime trace showed the first telemetry
+slice removed the global status/resource poll, but did not bring the idle app
+to the expected near-zero CPU baseline.
+
+### Trace Evidence
+
+- Running GUI backend: `pumas-rpc` PID `2517866`.
+- `pidstat -p 2517866 -t 1 10` showed process average CPU around `122%`.
+- CPU was spread across many `tokio-runtime-worker` threads, each consuming
+  small but persistent CPU.
+- The backend process had about `164` threads while idle.
+- `notify-rs` threads were present, but disk utilization was low and did not
+  look like the primary bottleneck.
+- Four established Electron-to-backend localhost connections were present.
+- `list_model_downloads` returned five paused downloads with `speed: 0.0`.
+- Deeper host tracing was blocked by current Linux permissions:
+  `ptrace` denied, `/proc/<pid>/task/<tid>/stack` denied, and
+  `perf_event_paranoid = 4`.
+
+### Identified Problems
+
+1. Download state still has frontend polling.
+   `frontend/src/hooks/useModelDownloads.ts` polls every `800ms` and keeps
+   polling when retained paused/partial statuses remain. This can keep the GUI
+   and backend active even when no transfer is moving.
+
+2. The header download indicator has duplicate polling.
+   `frontend/src/hooks/useActiveModelDownload.ts` polls `list_model_downloads`
+   every second while mounted. This duplicates the model-download hook and can
+   show stale or mismatched progress when duplicate/partial download records
+   exist.
+
+3. Runtime-profile updates still use a backend polling stream.
+   `rust/crates/pumas-rpc/src/handlers/mod.rs` polls every second in
+   `next_runtime_profile_update_event`, then calls
+   `list_runtime_profile_updates_since`.
+
+4. Runtime-profile update reads refresh process status.
+   `rust/crates/pumas-core/src/api/runtime_profiles.rs` refreshes the default
+   Ollama profile status during update reads. That can call
+   `is_ollama_running`, which can enter `spawn_blocking` and scan the process
+   table through `ps -eo pid=,args=`.
+
+5. The backend runtime is too broad for an idle desktop process.
+   The default multi-thread Tokio runtime and blocking pool make the app look
+   like it is prepared to multithread everything. Pumas needs concurrency for
+   GUI responsiveness, API clients, downloads, indexing, and runtime processes,
+   but idle status, paused downloads, and page-mounted displays must not keep
+   large worker pools busy.
+
+### Remediation Objective
+
+Bring idle Pumas Library CPU back under the documented target by removing the
+remaining global and backend-loop polling paths, making download and
+runtime-profile updates canonical push streams, and bounding backend runtime
+concurrency at the process composition root.
+
+### Remediation Scope
+
+In scope:
+
+- Replace download progress polling with a backend-owned download update
+  stream that supports snapshot plus cursor handoff.
+- Move the header download indicator and model-library download badges onto the
+  same download state subscription.
+- Remove the runtime-profile SSE polling loop and expose a core-owned
+  runtime-profile update subscription.
+- Stop runtime-profile update reads from refreshing process status as a side
+  effect.
+- Gate or cache process table scans so they are not part of idle update-feed
+  reads.
+- Configure `pumas-rpc` with an explicit Tokio runtime worker count and bounded
+  blocking pool at the composition root.
+- Add tests and runtime checks that prove no idle frontend interval or backend
+  update loop remains for these domains.
+
+Out of scope:
+
+- Changing the model-library selector snapshot API.
+- Redesigning every app-panel or plugin-specific status check unless idle CPU
+  remains high after this remediation.
+- Requiring host kernel tracing permission changes as part of normal
+  verification.
+- Preserving obsolete GUI RPC surfaces if the replacement subscription contract
+  is complete. The Rust client API must still use explicit typed contracts and
+  avoid hidden internal RPC.
+
+### Remediation Blast Radius
+
+Rust core:
+
+- `rust/crates/pumas-core/src/model_library/hf/download.rs`: source of truth
+  for download state, retained statuses, progress, completion, pause, and
+  resume events.
+- `rust/crates/pumas-core/src/api/hf.rs` and
+  `rust/crates/pumas-core/src/api/state_hf.rs`: public download commands,
+  download listing, and any new download event snapshot/stream functions.
+- `rust/crates/pumas-core/src/api/runtime_profiles.rs`: runtime-profile update
+  reads and status refresh side effects.
+- `rust/crates/pumas-core/src/api/state.rs`: legacy IPC dispatch paths for
+  runtime-profile update reads and Ollama-running status enrichment must follow
+  the same no-idle-refresh rule until the legacy route is removed.
+- `rust/crates/pumas-core/src/api/state_process.rs`,
+  `rust/crates/pumas-core/src/process/manager.rs`, and
+  `rust/crates/pumas-core/src/platform/process.rs`: process status refresh,
+  process-table scans, and cached process facts.
+- `rust/crates/pumas-core/src/api/builder.rs` and
+  `rust/crates/pumas-core/src/api/runtime_tasks.rs`: lifecycle ownership for
+  new broadcasters, cancellation handles, and bounded task ownership.
+
+Rust RPC:
+
+- `rust/crates/pumas-rpc/src/main.rs`: explicit Tokio runtime configuration.
+- `rust/crates/pumas-rpc/src/server.rs`: stream lifecycle and shutdown
+  behavior.
+- `rust/crates/pumas-rpc/src/handlers/mod.rs`: runtime-profile SSE loop
+  removal.
+- `rust/crates/pumas-rpc/src/handlers/models/downloads.rs`: download stream
+  endpoint and snapshot/recovery semantics.
+- `rust/crates/pumas-rpc/src/handlers/status.rs`: only revisit if status
+  telemetry or runtime-status enrichment remains a measured CPU source after
+  the download/runtime-profile fixes.
+
+Electron bridge:
+
+- `electron/src/python-bridge.ts`, `electron/src/main.ts`,
+  `electron/src/preload.ts`, and `electron/src/rpc-method-registry.ts`: replace
+  download and runtime-profile polling consumers with subscription setup,
+  unsubscribe cleanup, and renderer fanout.
+
+Frontend:
+
+- `frontend/src/hooks/useModelDownloads.ts`: replace interval polling with
+  snapshot plus download-event subscription.
+- `frontend/src/hooks/useActiveModelDownload.ts`: remove separate polling and
+  derive active/retained state from the canonical download subscription.
+- Model-library rows, HF search download actions, and header transfer displays:
+  refresh from backend-owned pushed state and do not infer transfer truth from
+  local timers.
+- Existing tests for download badges, header transfer indicators, and hook
+  cleanup must be updated to assert subscription behavior and absence of idle
+  intervals.
+- `frontend/src/hooks/README.md`: replace current guidance that accepts
+  download polling with the new subscription contract and lifecycle rule.
+
+Documentation and plans:
+
+- This plan remains the controlling remediation record.
+- Add implementation notes and deviations here after each vertical slice.
+- Update plan index text if remediation becomes a separate follow-up plan.
+
+### Remediation Milestones
+
+#### R0 - Baseline And Guardrails
+
+Status: Planned.
+
+- Record the measured idle CPU, thread count, socket count, and retained
+  download state before implementation.
+- Add a lightweight manual trace checklist to this plan so future verification
+  can be repeated without privileged tracing.
+- Run `rg` checks for `setInterval`, `pollInterval`, `list_model_downloads`,
+  `next_runtime_profile_update_event`, `spawn_blocking`, and process-table
+  scans in the affected paths.
+
+Verification:
+
+- Existing test suite still passes before code edits.
+- Plan records exact baseline commands and known permission limits.
+
+#### R1 - Backend Download Event Contract
+
+Status: Planned.
+
+- Add a core-owned download update snapshot and subscription contract with a
+  monotonic cursor.
+- The contract must carry enough identity for every UI consumer to distinguish
+  repository, selected artifact, quant/variant, partial state, and transfer
+  status without path guessing.
+- Initial subscription must support recovery from a cursor and then transition
+  to live events without a handoff race.
+- Paused, completed, failed, and partial states must emit terminal or retained
+  events that do not require frontend polling to discover stability.
+
+Verification:
+
+- Rust unit tests for cursor ordering, paused/completed events, and artifact
+  identity.
+- Rust integration test showing snapshot plus subscribe-since does not miss an
+  update inserted between snapshot and subscription setup.
+
+#### R2 - Download Stream Through RPC And Electron
+
+Status: Planned.
+
+- Expose the backend download subscription through the existing RPC/SSE
+  transport.
+- Bridge it through Electron with subscriber-aware lifecycle and explicit
+  unsubscribe cleanup.
+- Avoid opening backend streams when no renderer has subscribed.
+
+Verification:
+
+- RPC tests for stream startup, recovery from cursor, and shutdown.
+- Electron tests for one backend stream shared by multiple renderer
+  subscribers and closed after the last unsubscribe.
+
+#### R3 - Frontend Download Poll Removal
+
+Status: Planned.
+
+- Replace `useModelDownloads.ts` interval polling with initial snapshot plus
+  pushed download events.
+- Replace `useActiveModelDownload.ts` with a selector over the same canonical
+  download store.
+- Ensure paused full-repo partial records do not keep a polling loop alive.
+- Ensure completed selected artifacts clear active transfer indicators and
+  retain only accurate partial/problem badges.
+
+Verification:
+
+- Frontend tests prove no production `setInterval` is used for download state.
+- Hook tests cover paused, completed, failed, duplicate artifact, and reconnect
+  recovery cases.
+- Manual UI check confirms the header transfer indicator does not show activity
+  when all downloads are paused or complete.
+
+#### R4 - Runtime-Profile Push Updates
+
+Status: Planned.
+
+- Replace the `next_runtime_profile_update_event` one-second loop with a
+  runtime-profile update broadcaster owned by core state.
+- Update callers so `list_runtime_profile_updates_since` is a history/recovery
+  read, not an idle refresh trigger.
+- Prevent update-feed reads from refreshing Ollama or llama.cpp process status
+  as a side effect.
+
+Verification:
+
+- Rust tests for subscribe-since handoff and no missed runtime-profile update.
+- Code search confirms the runtime-profile SSE path no longer sleeps in a loop.
+- Tests or instrumentation confirm runtime-profile update reads do not call
+  process-table scans.
+
+#### R5 - Process Status Ownership
+
+Status: Planned.
+
+- Move Ollama/llama.cpp process liveness into an explicit process-status owner
+  with cached facts and a clear refresh trigger.
+- Refresh can occur on explicit user action, child-process lifecycle events, or
+  a low-frequency backend-owned monitor with subscribers. It must not occur
+  because a UI page is mounted or an update feed is idle.
+- Process-table fallback scans must be rate-limited and observable.
+
+Verification:
+
+- Unit tests for cache TTL/rate limiting if a TTL is used.
+- Integration tests for runtime-profile display using cached status.
+- `rg` confirms `find_processes_by_cmdline` is not reachable from idle
+  update-stream loops.
+
+#### R6 - Runtime And Thread Budget
+
+Status: Planned.
+
+- Replace the default `#[tokio::main]` runtime setup in `pumas-rpc` with an
+  explicit runtime builder at the composition root.
+- Set a conservative worker-thread count and bounded blocking pool sized for
+  desktop GUI responsiveness and API client access.
+- Heavy categories such as downloads, hashing, indexing, extraction, and model
+  runtime management must use explicit owned services, semaphores, or queues
+  rather than relying on an oversized generic runtime.
+- Document any intentionally long-lived threads, such as file watchers or
+  runtime child-process monitors.
+
+Verification:
+
+- Rust checks and RPC tests pass under the explicit runtime.
+- Release smoke test confirms downloads and API calls do not starve.
+- Idle thread count is measured and recorded. The target is fewer than `64`
+  backend threads while idle unless a higher count is justified in this plan.
+
+#### R7 - Release Verification And Completion
+
+Status: Planned.
+
+- Build release binaries and frontend after all remediation slices.
+- Run the GUI idle for at least 60 seconds after startup settle with no active
+  downloads, installs, migrations, or runtime launches.
+- Measure CPU with `pidstat -p <pumas-rpc-pid> -t 1 30`.
+- Record backend thread count, socket count, and active stream count.
+
+Acceptance:
+
+- Idle `pumas-rpc` CPU averages below `5%` on the developer workstation.
+- No frontend production hook globally polls download state, status resources,
+  network status, or runtime-profile updates.
+- Runtime-profile and download update streams use snapshot plus cursor handoff.
+- Paused and completed downloads do not produce continuous backend RPC traffic.
+- No idle path calls `ps -eo pid=,args=` once per second.
+
+### Concurrency And Runtime Requirements
+
+- Runtime creation belongs only at process composition roots.
+- Library code must not create hidden Tokio runtimes.
+- Every spawned background task must have a named owner, cancellation path, and
+  shutdown behavior.
+- `spawn_blocking` is allowed for real blocking work, but not as a way to hide
+  repeated status refreshes caused by idle UI loops.
+- Shared state updates should use message passing or owned services before
+  ad-hoc shared mutable state.
+- Frontend state for backend-owned domains must be snapshot plus pushed events,
+  not optimistic timers.
+- Subscriber streams must clean up when the last consumer disconnects.
+
+### Parallel Implementation Plan
+
+Parallel work is feasible after the download and runtime-profile event
+contracts are frozen.
+
+- Main integrator owns contracts, plan updates, runtime/thread budget, and final
+  release verification.
+- Worker A can implement core download event history and tests.
+- Worker B can implement Electron/frontend download subscription replacement
+  after Worker A's DTO contract is available.
+- Worker C can implement runtime-profile broadcaster and process-status cache
+  work after the core event-owner pattern is clear.
+
+Workers must not edit the same contract files concurrently. Any discovered
+standards issue, stub, or unexpected coupling must be recorded in this plan
+before broadening implementation scope.
+
+### Standards Re-Iteration Notes
+
+Reviewed standards on 2026-05-06:
+
+- `PLAN-STANDARDS.md`: this addendum adds objective, scope, blast radius,
+  milestone-level verification, risks through re-plan triggers, acceptance
+  criteria, and concurrency lifecycle ownership for the remediation work.
+- `ARCHITECTURE-PATTERNS.md`: the remediation keeps backend-owned download and
+  runtime-profile data in the backend and pushes updates to the frontend.
+- `FRONTEND-STANDARDS.md`: the plan removes high-frequency frontend polling for
+  backend-owned download state and prevents retained paused state from keeping
+  intervals alive.
+- `CONCURRENCY-STANDARDS.md`: the plan replaces serial polling loops with
+  owner-published events and requires bounded task ownership.
+- `languages/rust/RUST-ASYNC-STANDARDS.md`: runtime creation moves to the
+  composition root, spawned tasks require cancellation, and blocking work must
+  be isolated behind owned services or bounded queues.
+- `TESTING-STANDARDS.md`: each slice has vertical verification from Rust core
+  through RPC/Electron/frontend where applicable, plus runtime acceptance.
+- `DOCUMENTATION-STANDARDS.md`: deviations, trace limitations, and implementation
+  discoveries must be recorded in this plan.
+
+Standards findings to enforce during implementation:
+
+- The existing frontend download hooks are standards-noncompliant for
+  backend-owned state because they poll globally while paused retained rows
+  exist.
+- The runtime-profile SSE loop is standards-noncompliant because it polls the
+  backend every second and refreshes process status as part of an update-feed
+  read.
+- Process-table scans are acceptable only behind explicit process-status
+  ownership, cache/rate limits, or direct user action.
+- A large default runtime is not itself a correctness bug, but it hides
+  ownership boundaries and makes idle behavior harder to reason about. The
+  implementation must make thread and blocking budgets explicit.
+- The previous status telemetry sampler remains acceptable only if it is
+  subscriber-gated and not the dominant CPU source after the new remediation
+  slices. If it remains a measured source, this plan must be reopened before
+  declaring completion.
+
+### Additional Re-Plan Triggers
+
+- Idle CPU remains above `5%` after download and runtime-profile polling are
+  removed.
+- Explicit Tokio runtime sizing causes download, API, or model-runtime
+  starvation under normal use.
+- The download event contract cannot represent artifact identity well enough to
+  distinguish repo variants and quant files.
+- Runtime-profile process status cannot be cached without making UI status
+  materially misleading.
+- A privileged trace later identifies a different dominant CPU source.

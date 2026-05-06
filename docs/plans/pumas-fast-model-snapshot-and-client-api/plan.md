@@ -307,7 +307,7 @@ snapshot-to-live race.
 - Disconnect/reconnect tests recover missed events or report stale cursor.
 - Atomic commit after successful verification.
 
-**Status:** In progress
+**Status:** Complete
 
 ### Milestone 5: GUI Forwarding From Core Events
 
@@ -487,6 +487,20 @@ Update during implementation:
   authoritative; update events publish only after append success, and
   transactional paths publish only after commit. Tests cover direct model row
   publication and transactional replace publication.
+- 2026-05-06: Milestone 4 third slice added an owner-side direct Rust
+  `ModelLibraryUpdateSubscriber` and
+  `PumasApi::subscribe_model_library_update_stream_since(cursor)`. The handle
+  attaches to the live bus before durable recovery, returns the recovered
+  handshake first, drains duplicate live events already covered by
+  `cursor_after_recovery`, and then yields live events through `next_event()`.
+  GUI/SSE transport adaptation remains intentionally out of scope for this
+  slice.
+- 2026-05-06: Milestone 4 testing found that after a clean reconciliation,
+  manually adding a test model directory is not visible to `list_models()`
+  unless reconciliation is explicitly marked dirty or rebuilt. This matches the
+  dirty-state owner model but is relevant for future filesystem watcher and
+  service-discovery tests that create files outside normal import/download
+  flows.
 
 ## Commit Cadence Notes
 
@@ -684,6 +698,10 @@ After each worker wave:
 - Milestone 4 core update bus verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update_broadcast`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
+- Milestone 4 owner-side stream handoff verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_update_stream_since`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
 
 ### Traceability Links

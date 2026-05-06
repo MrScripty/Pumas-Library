@@ -74,6 +74,26 @@ fn create_test_env() -> TempDir {
     temp_dir
 }
 
+fn create_indexable_test_model(root: &Path, model_id: &str, official_name: &str) {
+    let model_dir = root.join("shared-resources/models").join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#).unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": official_name,
+            "cleaned_name": official_name.to_ascii_lowercase().replace(' ', "-"),
+            "files": [{"name": "model.safetensors"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+}
+
 #[tokio::test]
 async fn test_api_creation_succeeds() {
     let temp_dir = create_test_env();
@@ -905,6 +925,97 @@ async fn test_subscribe_model_library_updates_since_reports_stale_cursor() {
     assert!(subscription.snapshot_required);
     assert!(subscription.recovered_events.is_empty());
     assert_eq!(subscription.requested_cursor, "not-a-valid-cursor");
+}
+
+#[tokio::test]
+async fn test_subscribe_model_library_update_stream_since_recovers_then_delivers_live_events() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let selector = api
+        .model_library_selector_snapshot(ModelLibrarySelectorSnapshotRequest::default())
+        .await
+        .unwrap();
+
+    let recovered_model_id = "llm/test/stream-recovered";
+    create_indexable_test_model(temp_dir.path(), recovered_model_id, "Stream Recovered");
+    api.rebuild_model_index().await.unwrap();
+    assert!(api
+        .list_models()
+        .await
+        .unwrap()
+        .iter()
+        .any(|model| model.id == recovered_model_id));
+
+    let mut subscriber = api
+        .subscribe_model_library_update_stream_since(&selector.cursor)
+        .await
+        .unwrap();
+
+    assert!(!subscriber.handshake().stale_cursor);
+    assert!(!subscriber.handshake().snapshot_required);
+    assert!(subscriber.handshake().live_stream_ready);
+    assert!(subscriber
+        .handshake()
+        .recovered_events
+        .iter()
+        .any(|event| event.model_id == recovered_model_id
+            && event.change_kind == ModelLibraryChangeKind::ModelAdded));
+
+    let live_model_id = "llm/test/stream-live";
+    create_indexable_test_model(temp_dir.path(), live_model_id, "Stream Live");
+    api.rebuild_model_index().await.unwrap();
+    assert!(api
+        .list_models()
+        .await
+        .unwrap()
+        .iter()
+        .any(|model| model.id == live_model_id));
+
+    let mut saw_live_model = false;
+    for _ in 0..5 {
+        let event =
+            tokio::time::timeout(std::time::Duration::from_secs(1), subscriber.next_event())
+                .await
+                .unwrap()
+                .unwrap();
+        if event.model_id == live_model_id
+            && event.change_kind == ModelLibraryChangeKind::ModelAdded
+        {
+            saw_live_model = true;
+            break;
+        }
+    }
+
+    assert!(saw_live_model);
+}
+
+#[tokio::test]
+async fn test_subscribe_model_library_update_stream_since_reports_stale_cursor() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let subscriber = api
+        .subscribe_model_library_update_stream_since("not-a-valid-cursor")
+        .await
+        .unwrap();
+
+    assert!(subscriber.handshake().stale_cursor);
+    assert!(subscriber.handshake().snapshot_required);
+    assert!(!subscriber.handshake().live_stream_ready);
+    assert!(subscriber.handshake().recovered_events.is_empty());
 }
 
 #[tokio::test]

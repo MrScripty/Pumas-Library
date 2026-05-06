@@ -46,7 +46,7 @@ use crate::models::{
 };
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::io::{BufReader, Read};
 use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
@@ -68,6 +68,33 @@ use projection::{
     project_display_fields_for_record,
 };
 pub use projection::{MetadataProjectionCleanupDryRunItem, MetadataProjectionCleanupDryRunReport};
+
+pub struct ModelLibraryUpdateSubscriber {
+    handshake: crate::models::ModelLibraryUpdateSubscription,
+    buffered_events: VecDeque<crate::models::ModelLibraryUpdateEvent>,
+    receiver: broadcast::Receiver<crate::models::ModelLibraryUpdateEvent>,
+}
+
+impl ModelLibraryUpdateSubscriber {
+    pub fn handshake(&self) -> &crate::models::ModelLibraryUpdateSubscription {
+        &self.handshake
+    }
+
+    pub fn into_handshake(self) -> crate::models::ModelLibraryUpdateSubscription {
+        self.handshake
+    }
+
+    pub async fn next_event(&mut self) -> Result<crate::models::ModelLibraryUpdateEvent> {
+        if let Some(event) = self.buffered_events.pop_front() {
+            return Ok(event);
+        }
+
+        self.receiver
+            .recv()
+            .await
+            .map_err(|err| PumasError::Other(format!("model-library update stream closed: {err}")))
+    }
+}
 
 fn parse_model_card_json(model_card_json: Option<&str>) -> Option<HashMap<String, Value>> {
     let raw = model_card_json?.trim();
@@ -2602,6 +2629,54 @@ impl ModelLibrary {
         &self,
     ) -> broadcast::Receiver<crate::models::ModelLibraryUpdateEvent> {
         self.index.subscribe_model_library_update_events()
+    }
+
+    /// Subscribe to live model-library updates with durable cursor recovery.
+    ///
+    /// The receiver attaches before durable recovery starts. Events already
+    /// covered by recovery are drained from the live receiver before the handle
+    /// is returned, so consumers can process `handshake.recovered_events` first
+    /// and then call `next_event()` without duplicate cursors.
+    pub async fn subscribe_model_library_update_stream_since(
+        &self,
+        cursor: &str,
+    ) -> Result<ModelLibraryUpdateSubscriber> {
+        let mut receiver = self.index.subscribe_model_library_update_events();
+        let mut handshake = self.subscribe_model_library_updates_since(cursor).await?;
+        let recovered_cursor =
+            ModelIndex::parse_model_library_update_cursor(&handshake.cursor_after_recovery)
+                .unwrap_or_default();
+        let mut buffered_events = VecDeque::new();
+
+        loop {
+            match receiver.try_recv() {
+                Ok(event) => {
+                    let event_cursor = ModelIndex::parse_model_library_update_cursor(&event.cursor)
+                        .unwrap_or_default();
+                    if event_cursor > recovered_cursor {
+                        buffered_events.push_back(event);
+                    }
+                }
+                Err(broadcast::error::TryRecvError::Empty) => break,
+                Err(broadcast::error::TryRecvError::Lagged(_)) => {
+                    handshake.snapshot_required = true;
+                    handshake.stale_cursor = true;
+                    break;
+                }
+                Err(broadcast::error::TryRecvError::Closed) => {
+                    return Err(PumasError::Other(
+                        "model-library update stream closed before handoff".to_string(),
+                    ));
+                }
+            }
+        }
+        handshake.live_stream_ready = !handshake.snapshot_required;
+
+        Ok(ModelLibraryUpdateSubscriber {
+            handshake,
+            buffered_events,
+            receiver,
+        })
     }
 
     /// Append a library-wide refresh event for consumers with cached model lists.

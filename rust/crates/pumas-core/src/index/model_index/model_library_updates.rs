@@ -197,6 +197,10 @@ impl ModelIndex {
         self.update_tx.subscribe()
     }
 
+    pub fn parse_model_library_update_cursor(cursor: &str) -> Option<i64> {
+        parse_model_library_update_cursor(cursor)
+    }
+
     pub(super) fn publish_model_library_update_event_with_conn(
         &self,
         conn: &Connection,

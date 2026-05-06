@@ -574,6 +574,17 @@ impl PumasApi {
             .await
     }
 
+    /// Subscribe to model-library updates from a snapshot cursor on the owning instance.
+    pub async fn subscribe_model_library_update_stream_since(
+        &self,
+        cursor: &str,
+    ) -> Result<model_library::ModelLibraryUpdateSubscriber> {
+        self.try_primary()?
+            .model_library
+            .subscribe_model_library_update_stream_since(cursor)
+            .await
+    }
+
     /// Resolve a compact package-facts summary for a single model.
     pub async fn resolve_model_package_facts_summary(
         &self,

@@ -225,7 +225,7 @@ changing source behavior.
 without broad transport work.
 
 **Tasks:**
-- [ ] Add selector snapshot DTOs and contract tests.
+- [x] Add selector snapshot DTOs and contract tests.
 - [ ] Add materialized selector row storage or a query projection backed by
   indexed SQLite/cache state.
 - [ ] Populate rows for existing indexed models with `PumasModelRef`,
@@ -260,7 +260,7 @@ without broad transport work.
   exists for this crate.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 3: Selector Materialization Lifecycle
 
@@ -434,6 +434,17 @@ Update during implementation:
   Architecture, core, IPC, UniFFI, and native-binding docs now describe hidden
   `PumasApi` convergence as transitional compatibility rather than the target
   API contract.
+- 2026-05-06: Milestone 2 Slice 2.1 added fast selector snapshot DTOs,
+  selector entry/artifact readiness states, detail freshness state, and
+  `PumasModelRef.model_ref_contract_version`. Contract tests now prove
+  selector snapshots use snake_case wire labels and `entry_path` is executable
+  only when both entry and artifact states are `ready`.
+- 2026-05-06: Slice 2.2 codebase inspection found that the first selector
+  projection can be implemented as a single `ModelIndex` SQLite query over
+  `models` plus `model_package_facts_cache`, using metadata JSON fallbacks for
+  selected artifact identity and cached summary JSON when valid. Materialized
+  selector columns remain a performance follow-up if JSON extraction cannot
+  meet the direct/read-only timing target.
 
 ## Commit Cadence Notes
 
@@ -537,6 +548,12 @@ After each worker wave:
   - documented migration blockers and anti-patterns in `caller-inventory.md`;
   - updated active docs to frame transparent `PumasApi` convergence as
     transitional compatibility.
+- Milestone 2 Slice 2.1 selector contract foundation:
+  - added `ModelLibrarySelectorSnapshot`, `ModelLibrarySelectorSnapshotRow`,
+    request DTOs, entry/artifact readiness enums, and detail freshness enum;
+  - extended `PumasModelRef` with `model_ref_contract_version` to clarify that
+    the version is the model-reference contract version, not a model revision;
+  - documented selector invariants in the models module README.
 
 ### Deviations
 
@@ -553,6 +570,11 @@ After each worker wave:
   `templates/PLAN-TEMPLATE.md`.
 - Milestone 1 verification was documentation/inventory-only; no compile was
   required because no source behavior changed.
+- Milestone 2 Slice 2.1 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_ref`
 
 ### Traceability Links
 

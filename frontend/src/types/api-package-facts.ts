@@ -53,6 +53,7 @@ export interface ModelRefMigrationDiagnostic {
 }
 
 export interface PumasModelRef {
+  model_ref_contract_version?: number;
   model_id: string;
   revision?: string | null;
   selected_artifact_id?: string | null;

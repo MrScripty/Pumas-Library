@@ -2323,6 +2323,7 @@ impl ModelLibrary {
         let facts = ResolvedModelPackageFacts {
             package_facts_contract_version: PACKAGE_FACTS_CONTRACT_VERSION,
             model_ref: PumasModelRef {
+                model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
                 model_id: model_id.to_string(),
                 revision: None,
                 selected_artifact_id: None,
@@ -2558,6 +2559,7 @@ impl ModelLibrary {
     pub async fn resolve_pumas_model_ref(&self, input: &str) -> Result<PumasModelRef> {
         if self.index.get(input)?.is_some() {
             return Ok(PumasModelRef {
+                model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
                 model_id: input.to_string(),
                 revision: None,
                 selected_artifact_id: None,
@@ -2603,6 +2605,7 @@ impl ModelLibrary {
             };
             if canonical_input == record_path || canonical_input.starts_with(&record_path) {
                 return Ok(PumasModelRef {
+                    model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
                     model_id,
                     revision: None,
                     selected_artifact_id: None,
@@ -5742,6 +5745,7 @@ fn update_package_facts_hash_part(hasher: &mut Sha256, label: &str, value: &str)
 
 fn unresolved_model_ref(input: &str, code: &str, message: &str) -> PumasModelRef {
     PumasModelRef {
+        model_ref_contract_version: crate::models::PUMAS_MODEL_REF_CONTRACT_VERSION,
         model_id: String::new(),
         revision: None,
         selected_artifact_id: None,

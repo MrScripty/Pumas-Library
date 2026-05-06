@@ -11,10 +11,19 @@ use super::{AssetValidationError, AssetValidationState, StorageKind};
 /// Current producer contract version for resolved package facts.
 pub const PACKAGE_FACTS_CONTRACT_VERSION: u32 = 1;
 
+/// Current stable contract version for `PumasModelRef`.
+pub const PUMAS_MODEL_REF_CONTRACT_VERSION: u32 = 1;
+
+pub(crate) fn default_pumas_model_ref_contract_version() -> u32 {
+    PUMAS_MODEL_REF_CONTRACT_VERSION
+}
+
 /// Stable reference to a Pumas model and optional selected artifact.
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PumasModelRef {
+    #[serde(default = "default_pumas_model_ref_contract_version")]
+    pub model_ref_contract_version: u32,
     pub model_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
@@ -24,6 +33,19 @@ pub struct PumasModelRef {
     pub selected_artifact_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub migration_diagnostics: Vec<ModelRefMigrationDiagnostic>,
+}
+
+impl Default for PumasModelRef {
+    fn default() -> Self {
+        Self {
+            model_ref_contract_version: PUMAS_MODEL_REF_CONTRACT_VERSION,
+            model_id: String::new(),
+            revision: None,
+            selected_artifact_id: None,
+            selected_artifact_path: None,
+            migration_diagnostics: Vec::new(),
+        }
+    }
 }
 
 /// Diagnostic produced while converting legacy references to Pumas refs.

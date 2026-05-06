@@ -14,6 +14,7 @@ frontend, ensuring type-compatible serialization across all layers.
 | `api_response.rs` | `ApiResponse<T>` - Generic response wrapper with `success`/`error` fields and flattened data |
 | `responses.rs` | `BaseResponse` and concrete response types matching frontend TypeScript interfaces |
 | `model.rs` | Model-related types: `ModelData`, `HuggingFaceModel`, `ModelMetadata`, external-asset metadata fields, and download/import types |
+| `model_library_selector.rs` | Fast model-library selector snapshot DTOs with canonical model refs, selected artifact identity, entry-path state, artifact state, and detail freshness |
 | `package_facts.rs` | Versioned model package-fact DTOs for artifact, component, task, backend-hint, generation-default, and custom-code evidence |
 | `runtime_profile.rs` | Local runtime profile, provider settings, model-route, status, snapshot, and update-feed DTOs shared with RPC/Electron/frontend consumers. |
 | `version.rs` | `VersionInfo`, `VersionsMetadata` - Version tracking and metadata persistence types |
@@ -64,6 +65,10 @@ frontend, ensuring type-compatible serialization across all layers.
     from package files when the artifact signature or package-facts contract version changes.
 - `ModelLibraryUpdateEvent` is a host-agnostic cache-invalidation contract. It identifies model and
   fact-family changes without prescribing consumer cache shape, runtime selection, or scheduling.
+- `ModelLibrarySelectorSnapshot` is the fast list/selector contract. It carries `PumasModelRef`,
+  selected artifact identity, entry path readiness, artifact readiness, and compact display facts.
+  `indexed_path` is display/debug data only, and `entry_path` is executable only when both
+  `entry_path_state` and `artifact_state` are `ready`.
 - `RuntimeProfileConfig`, `ModelRuntimeRoute`, `RuntimeProfileStatus`, and
   `RuntimeProfileUpdateFeed` are the host-facing local runtime contract.
   Consumers should treat `profile_id` as the stable route key; raw endpoint
@@ -85,6 +90,8 @@ Required wire-shape rules:
   consumers before assuming field semantics.
 - `model_ref.model_id` is the stable Pumas identity. Legacy paths are inputs to
   resolution only and are not saved consumer identity.
+- `model_ref.model_ref_contract_version` is the Pumas model-reference contract version, not a model
+  revision. Model revision remains `model_ref.revision`.
 - `model_ref.selected_artifact_id` is optional until selected-artifact identity
   is available. Consumers must tolerate it being absent.
 - `artifact` carries executable-entry and validation facts; it does not select

@@ -15,14 +15,75 @@ export function filterVersions(
   showPreReleases: boolean,
   showInstalled: boolean
 ): VersionRelease[] {
-  return availableVersions.filter((release) => {
+  const prereleaseFiltered = availableVersions.filter((release) => {
     if (!showPreReleases && release.prerelease) {
       return false;
     }
+    return true;
+  });
+
+  return filterLatestPatchVersions(prereleaseFiltered).filter((release) => {
     if (!showInstalled && installedVersions.includes(release.tagName)) {
       return false;
     }
     return true;
+  });
+}
+
+interface ParsedVersionTag {
+  major: number;
+  minor: number;
+  patch: number;
+}
+
+function parseVersionTag(tag: string): ParsedVersionTag | null {
+  const match = tag.trim().match(/^v?(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/i);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  };
+}
+
+function compareParsedVersion(a: ParsedVersionTag, b: ParsedVersionTag): number {
+  if (a.major !== b.major) return a.major - b.major;
+  if (a.minor !== b.minor) return a.minor - b.minor;
+  return a.patch - b.patch;
+}
+
+function filterLatestPatchVersions(availableVersions: VersionRelease[]): VersionRelease[] {
+  const latestByRelease = new Map<string, VersionRelease>();
+
+  for (const release of availableVersions) {
+    const parsed = parseVersionTag(release.tagName);
+    if (!parsed) {
+      continue;
+    }
+
+    const releaseKey = `${parsed.major}.${parsed.minor}`;
+    const current = latestByRelease.get(releaseKey);
+    if (!current) {
+      latestByRelease.set(releaseKey, release);
+      continue;
+    }
+
+    const currentParsed = parseVersionTag(current.tagName);
+    if (!currentParsed || compareParsedVersion(parsed, currentParsed) > 0) {
+      latestByRelease.set(releaseKey, release);
+    }
+  }
+
+  return availableVersions.filter((release) => {
+    const parsed = parseVersionTag(release.tagName);
+    if (!parsed) {
+      return true;
+    }
+
+    return latestByRelease.get(`${parsed.major}.${parsed.minor}`)?.tagName === release.tagName;
   });
 }
 

@@ -49,8 +49,8 @@ export function InstallDialogFrame({
   }
 
   const containerClasses = isPageMode
-    ? 'w-full h-full flex flex-col'
-    : 'w-full max-w-3xl max-h-[80vh] flex flex-col';
+    ? 'w-full h-full min-h-0 flex flex-col'
+    : 'w-full max-w-3xl max-h-[80vh] min-h-0 flex flex-col';
 
   const dialogContent = (
     <div
@@ -85,7 +85,7 @@ export function InstallDialogFrame({
 
   if (isPageMode) {
     return (
-      <div className="w-full h-full flex flex-col">
+      <div className="w-full h-full min-h-0 flex flex-col">
         {dialogContent}
       </div>
     );

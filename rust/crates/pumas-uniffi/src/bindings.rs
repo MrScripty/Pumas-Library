@@ -1,9 +1,6 @@
 // Private imports — core types used in From impls, not exposed in API signatures
-use pumas_library::ipc::IpcClient;
 use pumas_library::PumasApi;
-use serde::de::DeserializeOwned;
 use std::io::ErrorKind;
-use std::path::Path;
 use std::sync::Arc;
 
 mod api_hf;
@@ -318,18 +315,11 @@ pub struct FfiPumasApi {
 
 enum FfiApiInner {
     Primary(Arc<PumasApi>),
-    Client(Arc<IpcClient>),
 }
 
 impl FfiPumasApi {
     async fn new_with_default_root(launcher_root: String) -> Result<Arc<Self>, FfiError> {
         let launcher_root = validate_path_string(launcher_root, "launcher_root")?;
-        if let Some(client) = Self::try_connect_client(&launcher_root).await? {
-            return Ok(Arc::new(Self {
-                inner: FfiApiInner::Client(client),
-            }));
-        }
-
         let api = PumasApi::new(&launcher_root)
             .await
             .map_err(FfiError::from)?;
@@ -340,12 +330,6 @@ impl FfiPumasApi {
 
     async fn new_with_configured_root(config: FfiApiConfig) -> Result<Arc<Self>, FfiError> {
         let launcher_root = validate_path_string(config.launcher_root, "launcher_root")?;
-        if let Some(client) = Self::try_connect_client(&launcher_root).await? {
-            return Ok(Arc::new(Self {
-                inner: FfiApiInner::Client(client),
-            }));
-        }
-
         let api = PumasApi::builder(&launcher_root)
             .auto_create_dirs(config.auto_create_dirs)
             .with_hf_client(config.enable_hf)
@@ -358,85 +342,9 @@ impl FfiPumasApi {
         }))
     }
 
-    async fn try_connect_client(launcher_root: &str) -> Result<Option<Arc<IpcClient>>, FfiError> {
-        let registry = match pumas_library::registry::LibraryRegistry::open() {
-            Ok(registry) => registry,
-            Err(_) => return Ok(None),
-        };
-
-        let _ = registry.cleanup_stale();
-        let Some(instance) = registry
-            .get_instance(Path::new(launcher_root))
-            .map_err(FfiError::from)?
-        else {
-            return Ok(None);
-        };
-
-        if !pumas_library::platform::is_process_alive(instance.pid) {
-            let _ = registry.unregister_instance(Path::new(launcher_root));
-            return Ok(None);
-        }
-
-        if instance.status == pumas_library::registry::InstanceStatus::Claiming {
-            return Ok(None);
-        }
-
-        let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
-        match IpcClient::connect(addr, instance.pid).await {
-            Ok(client) => Ok(Some(Arc::new(client))),
-            Err(_) => {
-                let _ = registry.unregister_instance(Path::new(launcher_root));
-                Ok(None)
-            }
-        }
-    }
-
-    async fn call_client_method<T: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<T, FfiError> {
-        let FfiApiInner::Client(client) = &self.inner else {
-            return Err(FfiError::Other(format!(
-                "IPC method {method} requested on a primary instance"
-            )));
-        };
-
-        let value = client.call(method, params).await.map_err(FfiError::from)?;
-        serde_json::from_value(value).map_err(|err| {
-            FfiError::Other(format!("Failed to decode IPC response for {method}: {err}"))
-        })
-    }
-
-    fn call_client_method_blocking<T: DeserializeOwned>(
-        &self,
-        method: &str,
-        params: serde_json::Value,
-    ) -> Result<T, FfiError> {
-        let FfiApiInner::Client(client) = &self.inner else {
-            return Err(FfiError::Other(format!(
-                "Blocking IPC method {method} requested on a primary instance"
-            )));
-        };
-
-        let client = client.clone();
-        let method_name = method.to_string();
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|err| FfiError::Other(format!("Failed to create IPC runtime: {err}")))?
-            .block_on(async move {
-                let value = client
-                    .call(&method_name, params)
-                    .await
-                    .map_err(FfiError::from)?;
-                serde_json::from_value(value).map_err(|err| {
-                    FfiError::Other(format!(
-                        "Failed to decode IPC response for {}: {}",
-                        method_name, err
-                    ))
-                })
-            })
+    fn primary(&self) -> &Arc<PumasApi> {
+        let FfiApiInner::Primary(api) = &self.inner;
+        api
     }
 }
 

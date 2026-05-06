@@ -1,5 +1,5 @@
 use super::{
-    canonicalize_existing_local_path_string, FfiApiInner, FfiDeleteModelResponse, FfiError,
+    canonicalize_existing_local_path_string, FfiDeleteModelResponse, FfiError,
     FfiInferenceParamSchema, FfiModelImportResult, FfiModelImportSpec, FfiModelRecord, FfiPumasApi,
     FfiReclassifyResult, FfiSearchResult,
 };
@@ -8,25 +8,17 @@ use super::{
 impl FfiPumasApi {
     /// List all models in the library.
     pub async fn list_models(&self) -> Result<Vec<FfiModelRecord>, FfiError> {
-        let models = match &self.inner {
-            FfiApiInner::Primary(api) => api.list_models().await.map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method("list_models", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let models = self.primary().list_models().await.map_err(FfiError::from)?;
         Ok(models.into_iter().map(FfiModelRecord::from).collect())
     }
 
     /// Get a single model by its ID.
     pub async fn get_model(&self, model_id: String) -> Result<Option<FfiModelRecord>, FfiError> {
-        let model = match &self.inner {
-            FfiApiInner::Primary(api) => api.get_model(&model_id).await.map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method("get_model", serde_json::json!({ "model_id": model_id }))
-                    .await?
-            }
-        };
+        let model = self
+            .primary()
+            .get_model(&model_id)
+            .await
+            .map_err(FfiError::from)?;
         Ok(model.map(FfiModelRecord::from))
     }
 
@@ -37,41 +29,21 @@ impl FfiPumasApi {
         limit: u64,
         offset: u64,
     ) -> Result<FfiSearchResult, FfiError> {
-        let result = match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .search_models(&query, limit as usize, offset as usize)
-                .await
-                .map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method(
-                    "search_models",
-                    serde_json::json!({
-                        "query": query,
-                        "limit": limit,
-                        "offset": offset,
-                    }),
-                )
-                .await?
-            }
-        };
+        let result = self
+            .primary()
+            .search_models(&query, limit as usize, offset as usize)
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiSearchResult::from(result))
     }
 
     /// Delete a model and all its links.
     pub async fn delete_model(&self, model_id: String) -> Result<FfiDeleteModelResponse, FfiError> {
-        let resp = match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .delete_model_with_cascade(&model_id)
-                .await
-                .map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method(
-                    "delete_model_with_cascade",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await?
-            }
-        };
+        let resp = self
+            .primary()
+            .delete_model_with_cascade(&model_id)
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiDeleteModelResponse::from(resp))
     }
 
@@ -82,15 +54,11 @@ impl FfiPumasApi {
     ) -> Result<FfiModelImportResult, FfiError> {
         let mut core_spec = spec.into_core()?;
         core_spec.path = canonicalize_existing_local_path_string(core_spec.path, "path").await?;
-        let result = match &self.inner {
-            FfiApiInner::Primary(api) => {
-                api.import_model(&core_spec).await.map_err(FfiError::from)?
-            }
-            FfiApiInner::Client(_) => {
-                self.call_client_method("import_model", serde_json::json!({ "spec": core_spec }))
-                    .await?
-            }
-        };
+        let result = self
+            .primary()
+            .import_model(&core_spec)
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiModelImportResult::from(result))
     }
 
@@ -130,52 +98,21 @@ impl FfiPumasApi {
                 }
             }
         }
-        match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .import_models_batch(core_specs)
-                .await
-                .into_iter()
-                .map(FfiModelImportResult::from)
-                .collect(),
-            FfiApiInner::Client(_) => match self
-                .call_client_method::<Vec<pumas_library::model_library::ModelImportResult>>(
-                    "import_models_batch",
-                    serde_json::json!({ "specs": core_specs.clone() }),
-                )
-                .await
-            {
-                Ok(results) => results
-                    .into_iter()
-                    .map(FfiModelImportResult::from)
-                    .collect(),
-                Err(err) => core_specs
-                    .into_iter()
-                    .map(|spec| {
-                        FfiModelImportResult::from(
-                            pumas_library::model_library::ModelImportResult {
-                                path: spec.path,
-                                success: false,
-                                model_id: None,
-                                model_path: None,
-                                error: Some(err.to_string()),
-                                security_tier: None,
-                            },
-                        )
-                    })
-                    .collect(),
-            },
-        }
+        self.primary()
+            .import_models_batch(core_specs)
+            .await
+            .into_iter()
+            .map(FfiModelImportResult::from)
+            .collect()
     }
 
     /// Rebuild the full-text search index for all models.
     pub async fn rebuild_model_index(&self) -> Result<u64, FfiError> {
-        let count: usize = match &self.inner {
-            FfiApiInner::Primary(api) => api.rebuild_model_index().await.map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method("rebuild_model_index", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let count = self
+            .primary()
+            .rebuild_model_index()
+            .await
+            .map_err(FfiError::from)?;
         Ok(count as u64)
     }
 
@@ -183,19 +120,10 @@ impl FfiPumasApi {
     ///
     /// Returns the new model_id if the model was reclassified, None if unchanged.
     pub async fn reclassify_model(&self, model_id: String) -> Result<Option<String>, FfiError> {
-        match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .reclassify_model(&model_id)
-                .await
-                .map_err(FfiError::from),
-            FfiApiInner::Client(_) => {
-                self.call_client_method(
-                    "reclassify_model",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await
-            }
-        }
+        self.primary()
+            .reclassify_model(&model_id)
+            .await
+            .map_err(FfiError::from)
     }
 
     /// Re-detect and reclassify all models in the library.
@@ -203,15 +131,11 @@ impl FfiPumasApi {
     /// Scans every model, re-detects its type from file content, and moves
     /// any misclassified models to the correct directory.
     pub async fn reclassify_all_models(&self) -> Result<FfiReclassifyResult, FfiError> {
-        let result = match &self.inner {
-            FfiApiInner::Primary(api) => {
-                api.reclassify_all_models().await.map_err(FfiError::from)?
-            }
-            FfiApiInner::Client(_) => {
-                self.call_client_method("reclassify_all_models", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let result = self
+            .primary()
+            .reclassify_all_models()
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiReclassifyResult::from(result))
     }
 
@@ -223,19 +147,11 @@ impl FfiPumasApi {
         &self,
         model_id: String,
     ) -> Result<Vec<FfiInferenceParamSchema>, FfiError> {
-        let settings = match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .get_inference_settings(&model_id)
-                .await
-                .map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method(
-                    "get_inference_settings",
-                    serde_json::json!({ "model_id": model_id }),
-                )
-                .await?
-            }
-        };
+        let settings = self
+            .primary()
+            .get_inference_settings(&model_id)
+            .await
+            .map_err(FfiError::from)?;
         Ok(settings
             .into_iter()
             .map(FfiInferenceParamSchema::from)
@@ -250,23 +166,9 @@ impl FfiPumasApi {
     ) -> Result<(), FfiError> {
         let core_settings: Vec<pumas_library::models::InferenceParamSchema> =
             settings.into_iter().map(Into::into).collect();
-        match &self.inner {
-            FfiApiInner::Primary(api) => api
-                .update_inference_settings(&model_id, core_settings)
-                .await
-                .map_err(FfiError::from),
-            FfiApiInner::Client(_) => {
-                let _: serde_json::Value = self
-                    .call_client_method(
-                        "update_inference_settings",
-                        serde_json::json!({
-                            "model_id": model_id,
-                            "settings": core_settings,
-                        }),
-                    )
-                    .await?;
-                Ok(())
-            }
-        }
+        self.primary()
+            .update_inference_settings(&model_id, core_settings)
+            .await
+            .map_err(FfiError::from)
     }
 }

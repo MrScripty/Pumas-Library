@@ -75,13 +75,12 @@ cargo run --manifest-path rust/Cargo.toml -p pumas-uniffi --bin pumas-uniffi-bin
 ```
 
 ## API Consumer Contract
-- `FfiPumasApi` is the primary foreign-language object surface.
-- Constructors currently return either a primary in-process API or an
-  IPC-backed client depending on launcher-root state. This is transitional
-  compatibility behavior inherited from the legacy `PumasApi` facade.
-- Future binding work should expose explicit owner, same-device local-client,
-  and read-only roles instead of requiring foreign-language callers to infer
-  ownership mode from one constructor.
+- `FfiPumasApi` is an owning-instance foreign-language object surface.
+- Constructors attempt to create an owner for the launcher root and return a
+  busy-instance error when another process already owns that root.
+- Future binding work should add explicit same-device local-client and
+  read-only roles as separate exported objects instead of hiding ownership mode
+  behind one constructor.
 - Async UniFFI methods return flattened `FfiError` variants rather than rich
   Rust error chains.
 - Foreign-language consumers must keep generated bindings matched to the native

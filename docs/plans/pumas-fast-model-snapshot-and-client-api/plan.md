@@ -367,7 +367,7 @@ entry points exist.
   `PumasLocalClient` exports.
 - [x] Migrate internal callers from `PumasApi` to explicit roles.
 - [x] Remove, deprecate, or narrow transparent `ApiInner::Client` dispatch.
-- [ ] Update UniFFI/bindings guidance to use explicit roles.
+- [x] Update UniFFI/bindings guidance to use explicit roles.
 - [x] Update crate docs and examples.
 
 **Verification:**
@@ -378,7 +378,7 @@ entry points exist.
   cycle.
 - Atomic commit after successful verification.
 
-**Status:** In progress
+**Status:** Complete
 
 ### Milestone 8: Batch Hydration And Cheap Descriptor Split
 
@@ -568,6 +568,10 @@ Update during implementation:
   hidden-client forwarding branches from model-library and Hugging Face APIs.
   `PumasApi` no longer exposes `try_client()` or IPC forwarding helpers; local
   transport is represented only by explicit IPC/local-client types.
+- 2026-05-06: Milestone 7 binding slice made `FfiPumasApi` owner-only and
+  removed its eager IPC client path. UniFFI and native-binding docs now state
+  that foreign-language local-client and read-only access should be exposed as
+  separate objects instead of hidden behind the owner object.
 
 ## Discovered Issues
 

@@ -1,5 +1,5 @@
 use super::{
-    FfiApiConfig, FfiApiInner, FfiDiskSpaceResponse, FfiError, FfiPumasApi, FfiStatusResponse,
+    FfiApiConfig, FfiDiskSpaceResponse, FfiError, FfiPumasApi, FfiStatusResponse,
     FfiSystemResourcesResponse,
 };
 use std::sync::Arc;
@@ -20,71 +20,42 @@ impl FfiPumasApi {
 
     /// Check if the network is currently online.
     pub fn is_online(&self) -> bool {
-        match &self.inner {
-            FfiApiInner::Primary(api) => api.is_online(),
-            FfiApiInner::Client(_) => self
-                .call_client_method_blocking("is_online", serde_json::json!({}))
-                .unwrap_or(false),
-        }
+        self.primary().is_online()
     }
 
     /// Get disk space information for the launcher root.
     pub async fn get_disk_space(&self) -> Result<FfiDiskSpaceResponse, FfiError> {
-        let resp = match &self.inner {
-            FfiApiInner::Primary(api) => api.get_disk_space().await.map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method("get_disk_space", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let resp = self
+            .primary()
+            .get_disk_space()
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiDiskSpaceResponse::from(resp))
     }
 
     /// Get overall system status including running processes and resources.
     pub async fn get_status(&self) -> Result<FfiStatusResponse, FfiError> {
-        let resp = match &self.inner {
-            FfiApiInner::Primary(api) => api.get_status().await.map_err(FfiError::from)?,
-            FfiApiInner::Client(_) => {
-                self.call_client_method("get_status_response", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let resp = self.primary().get_status().await.map_err(FfiError::from)?;
         Ok(FfiStatusResponse::from(resp))
     }
 
     /// Get current system resource usage (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<FfiSystemResourcesResponse, FfiError> {
-        let resp = match &self.inner {
-            FfiApiInner::Primary(api) => {
-                api.get_system_resources().await.map_err(FfiError::from)?
-            }
-            FfiApiInner::Client(_) => {
-                self.call_client_method("get_system_resources", serde_json::json!({}))
-                    .await?
-            }
-        };
+        let resp = self
+            .primary()
+            .get_system_resources()
+            .await
+            .map_err(FfiError::from)?;
         Ok(FfiSystemResourcesResponse::from(resp))
     }
 
     /// Check if the Torch inference server is running.
     pub async fn is_torch_running(&self) -> bool {
-        match &self.inner {
-            FfiApiInner::Primary(api) => api.is_torch_running().await,
-            FfiApiInner::Client(_) => self
-                .call_client_method("is_torch_running", serde_json::json!({}))
-                .await
-                .unwrap_or(false),
-        }
+        self.primary().is_torch_running().await
     }
 
     /// Stop the Torch inference server.
     pub async fn torch_stop(&self) -> Result<bool, FfiError> {
-        match &self.inner {
-            FfiApiInner::Primary(api) => api.stop_torch().await.map_err(FfiError::from),
-            FfiApiInner::Client(_) => {
-                self.call_client_method("stop_torch", serde_json::json!({}))
-                    .await
-            }
-        }
+        self.primary().stop_torch().await.map_err(FfiError::from)
     }
 }

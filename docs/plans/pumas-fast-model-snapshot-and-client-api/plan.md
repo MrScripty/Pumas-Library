@@ -560,6 +560,10 @@ Update during implementation:
   The now-unused blocking IPC helper methods were removed from `PumasApi`, so
   the crate stays warning-free while the remaining async-only stale branches are
   cleaned up.
+- 2026-05-06: Milestone 7 cleanup slice removed unreachable hidden-client
+  forwarding branches from mapping and migration APIs. These operations now
+  stay fully owner-side and keep transport concerns in RPC/local-client
+  adapters.
 
 ## Discovered Issues
 
@@ -571,9 +575,9 @@ Update during implementation:
 - 2026-05-06: After removing the hidden `PumasApi` client constructor path,
   many `PumasApi` methods still contain stale `try_client()` forwarding
   branches. Network, link, and conversion methods have been cleaned up; the
-  system, process, and runtime-profile methods have been cleaned up; the
-  remaining model, Hugging Face, mapping, and migration methods should be
-  cleaned in follow-up slices.
+  system, process, runtime-profile, mapping, and migration methods have been
+  cleaned up; the remaining model and Hugging Face methods should be cleaned in
+  follow-up slices.
 
 ## Commit Cadence Notes
 

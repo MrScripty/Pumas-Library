@@ -94,18 +94,6 @@ impl PumasApi {
         version_tag: &str,
         models_path: &Path,
     ) -> Result<models::MappingPreviewResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "preview_model_mapping",
-                    serde_json::json!({
-                        "version_tag": version_tag,
-                        "models_path": models_path,
-                    }),
-                )
-                .await;
-        }
-
         if !path_exists(models_path).await? {
             return Ok(models::MappingPreviewResponse {
                 success: false,
@@ -179,18 +167,6 @@ impl PumasApi {
         version_tag: &str,
         models_path: &Path,
     ) -> Result<models::MappingApplyResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "apply_model_mapping",
-                    serde_json::json!({
-                        "version_tag": version_tag,
-                        "models_path": models_path,
-                    }),
-                )
-                .await;
-        }
-
         if !path_exists(models_path).await? {
             fs::create_dir_all(models_path)
                 .await
@@ -225,18 +201,6 @@ impl PumasApi {
         version_tag: &str,
         models_path: &Path,
     ) -> Result<models::SyncModelsResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "sync_models_incremental",
-                    serde_json::json!({
-                        "version_tag": version_tag,
-                        "models_path": models_path,
-                    }),
-                )
-                .await;
-        }
-
         let result = self.apply_model_mapping(version_tag, models_path).await?;
 
         Ok(models::SyncModelsResponse {
@@ -254,19 +218,6 @@ impl PumasApi {
         models_path: &Path,
         resolutions: HashMap<String, model_library::ConflictResolution>,
     ) -> Result<models::SyncWithResolutionsResponse> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "sync_with_resolutions",
-                    serde_json::json!({
-                        "version_tag": version_tag,
-                        "models_path": models_path,
-                        "resolutions": resolutions,
-                    }),
-                )
-                .await;
-        }
-
         if !path_exists(models_path).await? {
             fs::create_dir_all(models_path)
                 .await

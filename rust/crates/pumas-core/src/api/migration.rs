@@ -95,15 +95,6 @@ impl PumasApi {
     pub async fn generate_model_migration_dry_run_report(
         &self,
     ) -> Result<model_library::MigrationDryRunReport> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "generate_model_migration_dry_run_report",
-                    serde_json::json!({}),
-                )
-                .await;
-        }
-
         let primary = self.primary();
         reconcile_all_models_for_migration(
             primary.as_ref(),
@@ -116,12 +107,6 @@ impl PumasApi {
 
     /// Execute checkpointed metadata v2 migration moves.
     pub async fn execute_model_migration(&self) -> Result<model_library::MigrationExecutionReport> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("execute_model_migration", serde_json::json!({}))
-                .await;
-        }
-
         let primary = self.primary();
         reconcile_all_models_for_migration(primary.as_ref(), "api-execute-model-migration").await?;
 
@@ -146,25 +131,11 @@ impl PumasApi {
     pub async fn list_model_migration_reports(
         &self,
     ) -> Result<Vec<model_library::MigrationReportArtifact>> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method("list_model_migration_reports", serde_json::json!({}))
-                .await;
-        }
-
         list_migration_reports(self.primary().model_library.clone()).await
     }
 
     /// Delete a migration report artifact pair (JSON + Markdown) and index entry.
     pub async fn delete_model_migration_report(&self, report_path: &str) -> Result<bool> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "delete_model_migration_report",
-                    serde_json::json!({ "report_path": report_path }),
-                )
-                .await;
-        }
         let normalized = normalize_migration_report_path(
             self.primary().model_library.library_root(),
             report_path,
@@ -179,15 +150,6 @@ impl PumasApi {
 
     /// Prune migration report history to `keep_latest` entries.
     pub async fn prune_model_migration_reports(&self, keep_latest: usize) -> Result<usize> {
-        if self.try_client().is_some() {
-            return self
-                .call_client_method(
-                    "prune_model_migration_reports",
-                    serde_json::json!({ "keep_latest": keep_latest }),
-                )
-                .await;
-        }
-
         prune_migration_reports(self.primary().model_library.clone(), keep_latest).await
     }
 }

@@ -292,6 +292,81 @@ impl ModelLibrary {
         )
     }
 
+    /// Return the destination for a selected artifact download, moving an
+    /// earlier unknown partial entry into the resolved artifact path when safe.
+    pub fn prepare_artifact_download_destination(
+        &self,
+        model_type: &str,
+        family: &str,
+        artifact_id: &str,
+    ) -> Result<PathBuf> {
+        let target_dir = self.build_artifact_model_path(model_type, family, artifact_id);
+        if target_dir.exists() || normalize_name(model_type) == "unknown" {
+            return Ok(target_dir);
+        }
+
+        let artifact_key = artifact_id.trim().to_lowercase();
+        if artifact_key.is_empty() {
+            return Ok(target_dir);
+        }
+
+        let model_dirs: Vec<PathBuf> = self.model_dirs().collect();
+        for source_dir in model_dirs {
+            if source_dir == target_dir {
+                continue;
+            }
+            let Some(mut metadata) = self.load_metadata(&source_dir)? else {
+                continue;
+            };
+            if metadata
+                .selected_artifact_id
+                .as_deref()
+                .map(str::trim)
+                .map(str::to_lowercase)
+                .as_deref()
+                != Some(artifact_key.as_str())
+            {
+                continue;
+            }
+            if metadata.match_source.as_deref() != Some("download_partial") {
+                continue;
+            }
+            let Some(source_model_id) = self.get_model_id(&source_dir) else {
+                continue;
+            };
+            if source_model_id.split('/').next() != Some("unknown") {
+                continue;
+            }
+
+            if let Some(parent) = target_dir.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::rename(&source_dir, &target_dir)?;
+            cleanup_empty_parent_dirs_after_move(&source_dir, &self.library_root);
+
+            let target_model_id = self.build_artifact_model_id(model_type, family, artifact_id);
+            metadata.model_id = Some(target_model_id.clone());
+            metadata.model_type = Some(normalize_name(model_type));
+            metadata.family = Some(normalize_name(family));
+            metadata.architecture_family = Some(normalize_name(family));
+            metadata.cleaned_name = Some(normalize_artifact_path_slug(artifact_id));
+            metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+            self.write_metadata_projection(&target_dir.join(METADATA_FILENAME), &metadata)?;
+
+            let record = metadata_to_record(&target_model_id, &target_dir, &metadata);
+            if self.index.get(&source_model_id)?.is_some() {
+                let _ = self
+                    .index
+                    .replace_model_id_preserving_references(&source_model_id, &record)?;
+            } else {
+                let _ = self.index.upsert(&record)?;
+            }
+            return Ok(target_dir);
+        }
+
+        Ok(target_dir)
+    }
+
     /// Iterate over all model directories in the library.
     ///
     /// Yields paths to model directories (directories containing metadata.json).
@@ -2850,8 +2925,10 @@ impl ModelLibrary {
                 continue;
             };
             let payload_file_count = count_payload_files_in_model_dir(&model_dir);
+            let payload_size_bytes = payload_size_bytes_in_model_dir(&model_dir);
             let download_incomplete = metadata.match_source.as_deref() == Some("download_partial")
                 || download_projection_status(&model_dir, &metadata).0;
+            let artifact_key = duplicate_artifact_key_from_metadata(&metadata);
 
             by_repo
                 .entry(repo_key)
@@ -2866,80 +2943,102 @@ impl ModelLibrary {
                         .unwrap_or("unknown")
                         .to_string(),
                     metadata_type: metadata.model_type.unwrap_or_else(|| "unknown".to_string()),
+                    artifact_key,
                     payload_file_count,
+                    payload_size_bytes,
                     download_incomplete,
                 });
         }
 
-        for entries in by_repo.values_mut() {
-            if entries.len() <= 1 {
-                continue;
-            }
-            report.duplicate_repo_groups += 1;
-
-            entries.sort_by(|a, b| {
-                duplicate_preference_score(b)
-                    .cmp(&duplicate_preference_score(a))
-                    .then_with(|| a.model_id.cmp(&b.model_id))
-            });
-
-            let Some(preferred) = entries.first().cloned() else {
-                continue;
-            };
-            let mut unresolved = false;
-
-            for duplicate in entries.iter().skip(1) {
-                if !duplicate.model_dir.exists() {
-                    mutated |= self.index.delete(&duplicate.model_id)?;
+        for repo_entries in by_repo.values() {
+            for mut entries in duplicate_entry_groups(repo_entries) {
+                if entries.len() <= 1 {
                     continue;
                 }
+                report.duplicate_repo_groups += 1;
 
-                let removable = if duplicate.payload_file_count == 0
-                    || (duplicate.download_incomplete && !preferred.download_incomplete)
-                {
-                    true
-                } else if preferred.payload_file_count == 0 {
-                    // Preferred candidate should normally be payload-bearing due score ordering.
-                    false
-                } else {
-                    directories_have_identical_contents(&duplicate.model_dir, &preferred.model_dir)?
+                entries.sort_by(|a, b| {
+                    duplicate_preference_score(b)
+                        .cmp(&duplicate_preference_score(a))
+                        .then_with(|| a.model_id.cmp(&b.model_id))
+                });
+
+                let Some(preferred) = entries.first().cloned() else {
+                    continue;
                 };
+                let mut unresolved = false;
 
-                if removable {
-                    mutated |= self.index.delete(&duplicate.model_id)?;
-                    std::fs::remove_dir_all(&duplicate.model_dir)?;
-                    cleanup_empty_parent_dirs_after_move(&duplicate.model_dir, &self.library_root);
-                    report.removed_duplicate_dirs += 1;
-                } else {
-                    unresolved = true;
-                    report.unresolved_duplicate_dirs += 1;
-                }
-            }
-
-            if preferred.model_dir.exists() {
-                if let Some(mut preferred_metadata) = self.load_metadata(&preferred.model_dir)? {
-                    let preferred_model_id = self
-                        .get_model_id(&preferred.model_dir)
-                        .unwrap_or_else(|| preferred.model_id.clone());
-                    if preferred_metadata.model_id.as_deref() != Some(&preferred_model_id) {
-                        preferred_metadata.model_id = Some(preferred_model_id.clone());
-                        preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
-                        let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
-                        self.write_metadata_projection(&metadata_path, &preferred_metadata)?;
-                        mutated = true;
-                        report.normalized_metadata_ids += 1;
+                for duplicate in entries.iter().skip(1) {
+                    if !duplicate.model_dir.exists() {
+                        mutated |= self.index.delete(&duplicate.model_id)?;
+                        continue;
                     }
-                    let record = metadata_to_record(
-                        &preferred_model_id,
-                        &preferred.model_dir,
-                        &preferred_metadata,
-                    );
-                    mutated |= self.index.upsert(&record)?;
-                }
-            }
 
-            if unresolved {
-                report.unresolved_duplicate_groups += 1;
+                    let same_artifact = preferred.artifact_key.is_some()
+                        && preferred.artifact_key == duplicate.artifact_key;
+                    if same_artifact
+                        && preferred.download_incomplete
+                        && duplicate.download_incomplete
+                    {
+                        merge_partial_payload_files(&duplicate.model_dir, &preferred.model_dir)?;
+                    }
+
+                    let removable = if duplicate.payload_file_count == 0
+                        || (duplicate.download_incomplete && !preferred.download_incomplete)
+                        || (same_artifact && duplicate.download_incomplete)
+                    {
+                        true
+                    } else if preferred.payload_file_count == 0 {
+                        // Preferred candidate should normally be payload-bearing due score ordering.
+                        false
+                    } else {
+                        directories_have_identical_contents(
+                            &duplicate.model_dir,
+                            &preferred.model_dir,
+                        )?
+                    };
+
+                    if removable {
+                        mutated |= self.index.delete(&duplicate.model_id)?;
+                        std::fs::remove_dir_all(&duplicate.model_dir)?;
+                        cleanup_empty_parent_dirs_after_move(
+                            &duplicate.model_dir,
+                            &self.library_root,
+                        );
+                        report.removed_duplicate_dirs += 1;
+                    } else {
+                        unresolved = true;
+                        report.unresolved_duplicate_dirs += 1;
+                    }
+                }
+
+                if preferred.model_dir.exists() {
+                    if let Some(mut preferred_metadata) =
+                        self.load_metadata(&preferred.model_dir)?
+                    {
+                        let preferred_model_id = self
+                            .get_model_id(&preferred.model_dir)
+                            .unwrap_or_else(|| preferred.model_id.clone());
+                        if preferred_metadata.model_id.as_deref() != Some(&preferred_model_id) {
+                            preferred_metadata.model_id = Some(preferred_model_id.clone());
+                            preferred_metadata.updated_date = Some(chrono::Utc::now().to_rfc3339());
+                            let metadata_path = preferred.model_dir.join(METADATA_FILENAME);
+                            self.write_metadata_projection(&metadata_path, &preferred_metadata)?;
+                            mutated = true;
+                            report.normalized_metadata_ids += 1;
+                        }
+                        let record = metadata_to_record(
+                            &preferred_model_id,
+                            &preferred.model_dir,
+                            &preferred_metadata,
+                        );
+                        mutated |= self.index.upsert(&record)?;
+                    }
+                }
+
+                if unresolved {
+                    report.unresolved_duplicate_groups += 1;
+                }
             }
         }
 
@@ -3435,7 +3534,9 @@ struct DuplicateRepoEntry {
     model_dir: PathBuf,
     path_type: String,
     metadata_type: String,
+    artifact_key: Option<String>,
     payload_file_count: usize,
+    payload_size_bytes: u64,
     download_incomplete: bool,
 }
 
@@ -3568,6 +3669,58 @@ fn normalized_repo_key_from_metadata(metadata: &ModelMetadata) -> Option<String>
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_lowercase())
+}
+
+fn duplicate_artifact_key_from_metadata(metadata: &ModelMetadata) -> Option<String> {
+    metadata
+        .selected_artifact_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_lowercase())
+        .or_else(|| {
+            let mut files = metadata.expected_files.clone().unwrap_or_default();
+            if files.is_empty() {
+                files = metadata.selected_artifact_files.clone().unwrap_or_default();
+            }
+            if files.is_empty() {
+                return metadata
+                    .selected_artifact_quant
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("quant:{}", value.to_lowercase()));
+            }
+
+            files.sort();
+            files.dedup();
+            Some(format!(
+                "files:{}",
+                files
+                    .into_iter()
+                    .map(|value| value.trim().to_lowercase())
+                    .collect::<Vec<_>>()
+                    .join("\x1f")
+            ))
+        })
+}
+
+fn duplicate_entry_groups(entries: &[DuplicateRepoEntry]) -> Vec<Vec<DuplicateRepoEntry>> {
+    if entries.iter().any(|entry| entry.artifact_key.is_none()) {
+        return vec![entries.to_vec()];
+    }
+
+    let mut by_artifact: HashMap<String, Vec<DuplicateRepoEntry>> = HashMap::new();
+    for entry in entries {
+        if let Some(artifact_key) = entry.artifact_key.as_ref() {
+            by_artifact
+                .entry(artifact_key.clone())
+                .or_default()
+                .push(entry.clone());
+        }
+    }
+
+    by_artifact.into_values().collect()
 }
 
 fn normalized_repo_key_from_value(metadata: &Value) -> Option<String> {
@@ -3944,16 +4097,80 @@ fn count_payload_files_in_model_dir(model_dir: &Path) -> usize {
         .count()
 }
 
+fn payload_size_bytes_in_model_dir(model_dir: &Path) -> u64 {
+    WalkDir::new(model_dir)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy();
+            !is_metadata_artifact_filename(&name)
+        })
+        .filter_map(|entry| entry.metadata().ok().map(|metadata| metadata.len()))
+        .sum()
+}
+
 fn duplicate_preference_score(entry: &DuplicateRepoEntry) -> i64 {
     let has_payload = usize::from(entry.payload_file_count > 0) as i64;
     let complete_bonus = usize::from(!entry.download_incomplete) as i64;
     let path_known = usize::from(entry.path_type != "unknown") as i64;
     let metadata_known = usize::from(entry.metadata_type.to_lowercase() != "unknown") as i64;
+    let payload_mib = (entry.payload_size_bytes / (1024 * 1024)).min(999) as i64;
     (has_payload * 100_000)
         + (complete_bonus * 10_000)
         + (path_known * 1_000)
         + (metadata_known * 100)
+        + payload_mib
         + entry.payload_file_count as i64
+}
+
+fn merge_partial_payload_files(source_dir: &Path, target_dir: &Path) -> Result<()> {
+    if !source_dir.exists() || !target_dir.exists() {
+        return Ok(());
+    }
+
+    for entry in WalkDir::new(source_dir)
+        .min_depth(1)
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let source_path = entry.path();
+        let name = entry.file_name().to_string_lossy();
+        if is_metadata_artifact_filename(&name) {
+            continue;
+        }
+
+        let Ok(relative_path) = source_path.strip_prefix(source_dir) else {
+            continue;
+        };
+        let target_path = target_dir.join(relative_path);
+        let source_size = entry.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+        let target_size = target_path
+            .metadata()
+            .map(|metadata| metadata.len())
+            .unwrap_or(0);
+        if target_path.exists() && target_size >= source_size {
+            continue;
+        }
+
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        if target_path.exists() {
+            std::fs::remove_file(&target_path)?;
+        }
+        match std::fs::rename(source_path, &target_path) {
+            Ok(()) => {}
+            Err(_) => {
+                std::fs::copy(source_path, &target_path)?;
+                std::fs::remove_file(source_path)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn annotate_and_dedupe_records_by_repo_id(records: &mut Vec<ModelRecord>) {
@@ -8473,6 +8690,139 @@ mod tests {
         assert_eq!(report.unresolved_duplicate_groups, 0);
         assert!(!partial_dir.exists());
         assert!(canonical_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn test_cleanup_duplicate_repo_entries_merges_same_artifact_partial_downloads() {
+        let (_, library) = setup_library().await;
+
+        let artifact_id = "mradermacher--gpt-oss-20b-heretic-v2-gguf__q4_k_m";
+        let filename = "gpt-oss-20b-heretic-v2.Q4_K_M.gguf";
+        let canonical_dir = library.build_artifact_model_path("llm", "mradermacher", artifact_id);
+        let unknown_dir = library.build_artifact_model_path("unknown", "mradermacher", artifact_id);
+        std::fs::create_dir_all(&canonical_dir).unwrap();
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(
+            canonical_dir.join(format!("{filename}.part")),
+            b"small-part",
+        )
+        .unwrap();
+        std::fs::write(
+            unknown_dir.join(format!("{filename}.part")),
+            b"larger-partial-payload",
+        )
+        .unwrap();
+
+        let canonical_metadata = ModelMetadata {
+            model_id: Some(format!("llm/mradermacher/{artifact_id}")),
+            model_type: Some("llm".to_string()),
+            family: Some("mradermacher".to_string()),
+            cleaned_name: Some(artifact_id.to_string()),
+            repo_id: Some("mradermacher/gpt-oss-20b-heretic-v2-GGUF".to_string()),
+            match_source: Some("download_partial".to_string()),
+            selected_artifact_id: Some(artifact_id.to_string()),
+            selected_artifact_files: Some(vec![filename.to_string()]),
+            selected_artifact_quant: Some("q4_k_m".to_string()),
+            expected_files: Some(vec![filename.to_string()]),
+            ..Default::default()
+        };
+        let unknown_metadata = ModelMetadata {
+            model_id: Some(format!("unknown/mradermacher/{artifact_id}")),
+            model_type: Some("unknown".to_string()),
+            family: Some("mradermacher".to_string()),
+            cleaned_name: Some(artifact_id.to_string()),
+            repo_id: Some("mradermacher/gpt-oss-20b-heretic-v2-GGUF".to_string()),
+            match_source: Some("download_partial".to_string()),
+            selected_artifact_id: Some(artifact_id.to_string()),
+            selected_artifact_files: Some(vec![filename.to_string()]),
+            selected_artifact_quant: Some("q4_k_m".to_string()),
+            expected_files: Some(vec![filename.to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&canonical_dir, &canonical_metadata)
+            .await
+            .unwrap();
+        library
+            .save_metadata(&unknown_dir, &unknown_metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&canonical_dir).await.unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let report = library.cleanup_duplicate_repo_entries().unwrap();
+        assert_eq!(report.duplicate_repo_groups, 1);
+        assert_eq!(report.removed_duplicate_dirs, 1);
+        assert_eq!(report.unresolved_duplicate_groups, 0);
+        assert!(!unknown_dir.exists());
+        assert_eq!(
+            std::fs::read(canonical_dir.join(format!("{filename}.part"))).unwrap(),
+            b"larger-partial-payload"
+        );
+        assert!(library
+            .index()
+            .get(&format!("unknown/mradermacher/{artifact_id}"))
+            .unwrap()
+            .is_none());
+        assert!(library
+            .index()
+            .get(&format!("llm/mradermacher/{artifact_id}"))
+            .unwrap()
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_prepare_artifact_download_destination_moves_unknown_partial_to_resolved_path() {
+        let (_, library) = setup_library().await;
+
+        let artifact_id = "owner--repo__q4_k_m";
+        let unknown_dir = library.build_artifact_model_path("unknown", "owner", artifact_id);
+        let target_dir = library.build_artifact_model_path("llm", "owner", artifact_id);
+        std::fs::create_dir_all(&unknown_dir).unwrap();
+        std::fs::write(unknown_dir.join("model.Q4_K_M.gguf.part"), b"partial").unwrap();
+
+        let metadata = ModelMetadata {
+            model_id: Some(format!("unknown/owner/{artifact_id}")),
+            model_type: Some("unknown".to_string()),
+            family: Some("owner".to_string()),
+            cleaned_name: Some(artifact_id.to_string()),
+            repo_id: Some("owner/repo".to_string()),
+            match_source: Some("download_partial".to_string()),
+            selected_artifact_id: Some(artifact_id.to_string()),
+            selected_artifact_files: Some(vec!["model.Q4_K_M.gguf".to_string()]),
+            selected_artifact_quant: Some("q4_k_m".to_string()),
+            expected_files: Some(vec!["model.Q4_K_M.gguf".to_string()]),
+            ..Default::default()
+        };
+        library
+            .save_metadata(&unknown_dir, &metadata)
+            .await
+            .unwrap();
+        library.index_model_dir(&unknown_dir).await.unwrap();
+
+        let prepared = library
+            .prepare_artifact_download_destination("llm", "owner", artifact_id)
+            .unwrap();
+        assert_eq!(prepared, target_dir);
+        assert!(!unknown_dir.exists());
+        assert!(target_dir.join("model.Q4_K_M.gguf.part").exists());
+
+        let moved = library.load_metadata(&target_dir).unwrap().unwrap();
+        assert_eq!(
+            moved.model_id.as_deref(),
+            Some("llm/owner/owner--repo__q4_k_m")
+        );
+        assert_eq!(moved.model_type.as_deref(), Some("llm"));
+        assert!(library
+            .index()
+            .get("unknown/owner/owner--repo__q4_k_m")
+            .unwrap()
+            .is_none());
+        assert!(library
+            .index()
+            .get("llm/owner/owner--repo__q4_k_m")
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]

@@ -20,9 +20,10 @@ use crate::model_library::types::{
     SecurityTier,
 };
 use crate::model_library::{
-    apply_download_artifact_metadata, normalize_task_signature, push_review_reason,
-    resolve_model_type_with_rules, validate_metadata_v2_with_index, AuxFilesCompleteInfo,
-    DownloadCompletionInfo, TaskNormalizationStatus,
+    apply_download_artifact_metadata, normalize_artifact_path_slug, normalize_task_signature,
+    push_review_reason, resolve_model_type_with_rules, validate_metadata_v2_with_index,
+    AuxFilesCompleteInfo, DownloadCompletionInfo, SelectedArtifactIdentity,
+    TaskNormalizationStatus,
 };
 use crate::models::resolve_inference_settings;
 use serde::{Deserialize, Serialize};
@@ -577,18 +578,36 @@ impl ModelImporter {
     /// Persist a preliminary metadata record for a queued/partial download.
     pub async fn upsert_download_metadata_stub(&self, info: &AuxFilesCompleteInfo) -> Result<()> {
         let model_dir = &info.dest_dir;
-        let cleaned_name = normalize_name(&info.download_request.official_name);
         let model_type = info
             .download_request
             .model_type
             .clone()
             .unwrap_or_else(|| "unknown".to_string());
+        let selected_artifact = SelectedArtifactIdentity::from_download_request(
+            &info.download_request,
+            Some(info.filenames.clone()),
+        );
         let model_id = self.library.get_model_id(model_dir).unwrap_or_else(|| {
-            format!(
-                "{}/{}/{}",
-                model_type, info.download_request.family, cleaned_name
+            self.library.build_artifact_model_id(
+                &model_type,
+                &info.download_request.family,
+                &selected_artifact.artifact_id,
             )
         });
+        let cleaned_name = model_id
+            .split('/')
+            .next_back()
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                normalize_artifact_path_slug(&selected_artifact.artifact_id)
+                    .trim()
+                    .to_string()
+            });
+        let cleaned_name = if cleaned_name.is_empty() {
+            normalize_name(&info.download_request.official_name)
+        } else {
+            cleaned_name
+        };
 
         let mut metadata =
             load_model_metadata_or_default(self.library.clone(), model_dir.to_path_buf()).await?;

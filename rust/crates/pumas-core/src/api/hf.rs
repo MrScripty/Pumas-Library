@@ -316,11 +316,13 @@ impl PumasApi {
                 None,
             );
             resolved_request.model_type = Some(model_type.clone());
-            let dest_dir = primary.model_library.build_model_path(
-                &model_type,
-                &architecture_family,
-                &selected_artifact.artifact_id,
-            );
+            let dest_dir = primary
+                .model_library
+                .prepare_artifact_download_destination(
+                    &model_type,
+                    &architecture_family,
+                    &selected_artifact.artifact_id,
+                )?;
             if model_type == "unknown" {
                 warn!(
                     "Download {} is starting with unknown model_type after HF metadata lookup; destination={}",

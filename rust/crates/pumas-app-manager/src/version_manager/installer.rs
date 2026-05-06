@@ -162,6 +162,9 @@ impl VersionInstaller {
         // Update progress tracker
         {
             let mut tracker = self.progress_tracker.write().await;
+            if let Err(error) = result.as_ref() {
+                tracker.set_error(&error.to_string());
+            }
             tracker.complete_installation(result.is_ok());
         }
 
@@ -275,6 +278,9 @@ impl VersionInstaller {
         // Update progress tracker
         {
             let mut tracker = self.progress_tracker.write().await;
+            if let Err(error) = result.as_ref() {
+                tracker.set_error(&error.to_string());
+            }
             tracker.complete_installation(result.is_ok());
         }
 
@@ -484,34 +490,95 @@ impl VersionInstaller {
 
     /// Find the ollama binary in the extracted directory and make it executable.
     fn finalize_ollama_binary(version_dir: &Path) -> Result<()> {
-        // Ollama archives typically extract to bin/ollama or just ollama
-        let possible_paths = [
-            version_dir.join("bin").join("ollama"),
-            version_dir.join("ollama"),
-        ];
+        let binary_name = if cfg!(windows) {
+            "ollama.exe"
+        } else {
+            "ollama"
+        };
+        let final_path = version_dir.join(binary_name);
 
-        let _binary_path = possible_paths.iter().find(|p| p.exists());
+        if !final_path.exists() {
+            let found = Self::find_ollama_binary(version_dir)?.ok_or_else(|| {
+                PumasError::InstallationFailed {
+                    message: "Could not find Ollama binary in extracted archive".to_string(),
+                }
+            })?;
+
+            if let Some(parent) = final_path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| PumasError::Io {
+                    message: format!("Failed to create binary parent directory: {}", e),
+                    path: Some(parent.to_path_buf()),
+                    source: Some(e),
+                })?;
+            }
+
+            std::fs::rename(&found, &final_path).map_err(|e| PumasError::Io {
+                message: format!("Failed to move Ollama binary into launch path: {}", e),
+                path: Some(final_path.clone()),
+                source: Some(e),
+            })?;
+            info!(
+                "Moved Ollama binary from {} to {}",
+                found.display(),
+                final_path.display()
+            );
+        }
 
         #[cfg(unix)]
-        if let Some(binary) = _binary_path {
+        {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(binary)
+            let mut perms = std::fs::metadata(&final_path)
                 .map_err(|e| PumasError::Io {
                     message: format!("Failed to get binary metadata: {}", e),
-                    path: Some(binary.clone()),
+                    path: Some(final_path.clone()),
                     source: Some(e),
                 })?
                 .permissions();
             perms.set_mode(0o755);
-            std::fs::set_permissions(binary, perms).map_err(|e| PumasError::Io {
+            std::fs::set_permissions(&final_path, perms).map_err(|e| PumasError::Io {
                 message: format!("Failed to set binary permissions: {}", e),
-                path: Some(binary.clone()),
+                path: Some(final_path.clone()),
                 source: Some(e),
             })?;
-            info!("Set executable permissions on {}", binary.display());
+            info!("Set executable permissions on {}", final_path.display());
         }
 
         Ok(())
+    }
+
+    fn find_ollama_binary(dir: &Path) -> Result<Option<PathBuf>> {
+        let binary_names = if cfg!(windows) {
+            ["ollama.exe", "ollama"]
+        } else {
+            ["ollama", "ollama.exe"]
+        };
+
+        for entry in std::fs::read_dir(dir).map_err(|e| PumasError::Io {
+            message: format!("Failed to read extracted directory: {}", e),
+            path: Some(dir.to_path_buf()),
+            source: Some(e),
+        })? {
+            let entry = entry.map_err(|e| PumasError::Io {
+                message: format!("Failed to read extracted entry: {}", e),
+                path: Some(dir.to_path_buf()),
+                source: Some(e),
+            })?;
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+                    if binary_names.contains(&name) {
+                        return Ok(Some(path));
+                    }
+                }
+            } else if path.is_dir() {
+                if let Some(found) = Self::find_ollama_binary(&path)? {
+                    return Ok(Some(found));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Finalize Ollama installation (create metadata, no Python/venv).
@@ -1354,5 +1421,31 @@ mod tests {
 
         assert_eq!(installer.slugify_tag("v1.0.0"), "v100");
         assert_eq!(installer.slugify_tag("v1.0.0-beta.1"), "v100-beta1");
+    }
+
+    #[test]
+    fn test_finalize_ollama_binary_moves_nested_binary_to_launch_path() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("v0.22.1");
+        let nested_bin_dir = version_dir.join("bin");
+        std::fs::create_dir_all(&nested_bin_dir).unwrap();
+        std::fs::write(nested_bin_dir.join("ollama"), b"binary").unwrap();
+
+        VersionInstaller::finalize_ollama_binary(&version_dir).unwrap();
+
+        let launch_binary = version_dir.join("ollama");
+        assert!(launch_binary.exists());
+        assert_eq!(std::fs::read(&launch_binary).unwrap(), b"binary");
+    }
+
+    #[test]
+    fn test_finalize_ollama_binary_fails_when_binary_missing() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let version_dir = temp_dir.path().join("v0.22.1");
+        std::fs::create_dir_all(&version_dir).unwrap();
+
+        let result = VersionInstaller::finalize_ollama_binary(&version_dir);
+
+        assert!(matches!(result, Err(PumasError::InstallationFailed { .. })));
     }
 }

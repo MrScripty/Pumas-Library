@@ -439,7 +439,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - [x] Show profile status and model running state from backend-confirmed responses.
 - [x] Show provider-specific advanced controls only when the selected provider/mode supports them.
 - [x] Avoid optimistic persistence; refresh or accept backend-pushed state after save.
-- [ ] Remove or bypass component-owned Ollama state polling for profile-backed views.
+- [x] Remove or bypass component-owned Ollama state polling for profile-backed views.
 
 **Verification:**
 - Frontend tests for rendering profile settings and saving model routes.
@@ -448,7 +448,7 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - Subscription cleanup tests for runtime/profile events.
 - Typecheck and lint.
 
-**Status:** In progress. Runtime profile snapshot/subscription state, the settings editor, and per-model route controls are available to React; polling cleanup remains.
+**Status:** Complete for the current implementation wave. Runtime profile snapshot/subscription state, the settings editor, per-model route controls, backend-confirmed status display, and Ollama model-section polling cleanup are available to React.
 
 **Implementation Notes:**
 - 2026-05-05: Added `useRuntimeProfileUpdateSubscription` and `useRuntimeProfiles` so React code can subscribe to backend-pushed runtime/profile update feeds, validate the feed shape, debounce notifications, and refresh the backend-owned runtime profile snapshot without adding component-level polling.
@@ -457,6 +457,12 @@ The Ollama page crashes when the globe/version-manager button opens installable 
 - 2026-05-05: Validated the settings section with `npm run -w frontend check:types`.
 - 2026-05-05: Added per-model runtime route controls to the model metadata modal. The new Runtime Route tab uses backend-confirmed profiles/routes/statuses, saves `ModelRuntimeRoute` assignments through the bridge, clears routes through the backend API, and refreshes the runtime profile snapshot after each mutation.
 - 2026-05-05: Validated the route editor with `npm run -w frontend check:types`.
+- 2026-05-05: Removed the Ollama model section's component-owned 10-second polling loop. The section now refreshes on initial/running-state changes, after local create/load/unload/delete operations, and when the backend runtime-profile update feed publishes a snapshot-required or event-bearing cursor.
+- 2026-05-05: Validated polling cleanup with `npm run -w frontend check:types`.
+
+**Deferred Follow-up:**
+- 2026-05-05: Ollama inventory changes made outside Pumas are no longer discovered by this component's timer. If automatic external inventory refresh is required, the backend runtime event producer should emit a profile/inventory update instead of reintroducing frontend polling.
+- 2026-05-05: Full frontend lint is currently blocked by pre-existing issues outside this slice: unsafe `any` assignments in model manager/model hook tests, max-lines violations in several existing test/component files, and `ModelMetadataModalContent` complexity/length. The changed Ollama model section passes targeted ESLint.
 
 ### Milestone 8: Integration, Documentation, and Release Validation
 

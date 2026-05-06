@@ -16,6 +16,7 @@ import { getLogger } from '../../../utils/logger';
 import { LIBRARY_MODEL_PREVIEW_LIMIT } from './libraryModelPreviewLimit';
 import { OllamaRegisteredModels } from './OllamaRegisteredModels';
 import { formatOllamaModelSize } from './ollamaModelFormatting';
+import { useRuntimeProfileUpdateSubscription } from '../../../hooks/useRuntimeProfiles';
 
 const logger = getLogger('OllamaModelSection');
 
@@ -45,6 +46,7 @@ export function OllamaModelSection({
   const [deletingModel, setDeletingModel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [runtimeProfileCursor, setRuntimeProfileCursor] = useState<string | null>(null);
 
   // Extract GGUF models from library model groups
   const ggufModels: GgufLibraryModel[] = [];
@@ -107,16 +109,23 @@ export function OllamaModelSection({
     }
   }, [connectionUrl, isRunning]);
 
+  useRuntimeProfileUpdateSubscription(
+    useCallback((notification) => {
+      if (notification.snapshot_required || notification.events.length > 0) {
+        setRuntimeProfileCursor(notification.cursor);
+      }
+    }, [])
+  );
+
   useEffect(() => {
     if (isRunning) {
       void fetchOllamaState();
-      const interval = setInterval(() => void fetchOllamaState(), 10000);
-      return () => clearInterval(interval);
+      return undefined;
     }
     setOllamaModels([]);
     setRunningModels([]);
     return undefined;
-  }, [fetchOllamaState, isRunning]);
+  }, [fetchOllamaState, isRunning, runtimeProfileCursor]);
 
   const handleCreate = async (model: GgufLibraryModel) => {
     if (!isAPIAvailable()) return;

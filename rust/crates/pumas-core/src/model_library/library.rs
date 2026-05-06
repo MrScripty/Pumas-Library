@@ -52,6 +52,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::UNIX_EPOCH;
+use tokio::sync::broadcast;
 use tokio::sync::{Mutex, RwLock};
 use walkdir::WalkDir;
 
@@ -2595,6 +2596,12 @@ impl ModelLibrary {
                 });
             }
         }
+    }
+
+    pub fn subscribe_model_library_update_events(
+        &self,
+    ) -> broadcast::Receiver<crate::models::ModelLibraryUpdateEvent> {
+        self.index.subscribe_model_library_update_events()
     }
 
     /// Append a library-wide refresh event for consumers with cached model lists.

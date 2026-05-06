@@ -7,7 +7,9 @@ mod model_library_updates;
 mod model_selector_snapshot;
 mod package_facts_cache;
 
-use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
+use crate::models::{
+    ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope, ModelLibraryUpdateEvent,
+};
 use crate::{PumasError, Result};
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
@@ -17,6 +19,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
+use tokio::sync::broadcast;
 use tracing::{debug, error, warn};
 
 use super::fts5::{FTS5Config, FTS5Manager};
@@ -232,6 +235,7 @@ pub struct ModelIndex {
     db_path: PathBuf,
     conn: Arc<Mutex<Connection>>,
     fts5_config: FTS5Config,
+    update_tx: broadcast::Sender<ModelLibraryUpdateEvent>,
 }
 
 impl ModelIndex {
@@ -251,6 +255,7 @@ impl ModelIndex {
         }
 
         let conn = Connection::open(&db_path)?;
+        let (update_tx, _) = broadcast::channel(256);
 
         // Configure connection
         Self::configure_connection(&conn)?;
@@ -262,6 +267,7 @@ impl ModelIndex {
             db_path,
             conn: Arc::new(Mutex::new(conn)),
             fts5_config: FTS5Config::default(),
+            update_tx,
         };
 
         // Ensure FTS5 is set up
@@ -275,11 +281,13 @@ impl ModelIndex {
         let db_path = db_path.into();
         let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
         Self::configure_read_only_connection(&conn)?;
+        let (update_tx, _) = broadcast::channel(1);
 
         Ok(Self {
             db_path,
             conn: Arc::new(Mutex::new(conn)),
             fts5_config: FTS5Config::default(),
+            update_tx,
         })
     }
 
@@ -435,7 +443,7 @@ impl ModelIndex {
             } else {
                 ModelLibraryChangeKind::ModelAdded
             };
-            Self::append_model_library_update_event_with_conn(
+            let event_id = Self::append_model_library_update_event_with_conn(
                 &conn,
                 &record.id,
                 change_kind,
@@ -444,6 +452,7 @@ impl ModelIndex {
                 None,
                 Some(record.updated_at.clone()),
             )?;
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
         Ok(changed)
     }
@@ -561,7 +570,9 @@ impl ModelIndex {
 
         tx.execute("DELETE FROM models WHERE id = ?1", params![old_id])?;
 
-        Self::append_model_library_update_event_with_conn(
+        let mut event_ids = Vec::new();
+
+        event_ids.push(Self::append_model_library_update_event_with_conn(
             &tx,
             old_id,
             ModelLibraryChangeKind::ModelRemoved,
@@ -569,8 +580,8 @@ impl ModelIndex {
             ModelLibraryRefreshScope::SummaryAndDetail,
             None,
             None,
-        )?;
-        Self::append_model_library_update_event_with_conn(
+        )?);
+        event_ids.push(Self::append_model_library_update_event_with_conn(
             &tx,
             &record.id,
             ModelLibraryChangeKind::ModelAdded,
@@ -578,9 +589,9 @@ impl ModelIndex {
             ModelLibraryRefreshScope::SummaryAndDetail,
             None,
             Some(record.updated_at.clone()),
-        )?;
+        )?);
         if dependency_binding_rows_remapped > 0 || dependency_binding_history_rows_remapped > 0 {
-            Self::append_model_library_update_event_with_conn(
+            event_ids.push(Self::append_model_library_update_event_with_conn(
                 &tx,
                 &record.id,
                 ModelLibraryChangeKind::DependencyBindingModified,
@@ -588,10 +599,10 @@ impl ModelIndex {
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 Some(record.updated_at.clone()),
-            )?;
+            )?);
         }
         if package_facts_cache_rows_invalidated > 0 {
-            Self::append_model_library_update_event_with_conn(
+            event_ids.push(Self::append_model_library_update_event_with_conn(
                 &tx,
                 &record.id,
                 ModelLibraryChangeKind::PackageFactsModified,
@@ -599,10 +610,13 @@ impl ModelIndex {
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 Some(record.updated_at.clone()),
-            )?;
+            )?);
         }
 
         tx.commit()?;
+        for event_id in event_ids {
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
+        }
 
         Ok(ModelIdRemapSummary {
             metadata_baseline_rows_copied,
@@ -646,7 +660,7 @@ impl ModelIndex {
 
         if rows_affected > 0 {
             debug!("Deleted model: {}", id);
-            Self::append_model_library_update_event_with_conn(
+            let event_id = Self::append_model_library_update_event_with_conn(
                 &conn,
                 id,
                 ModelLibraryChangeKind::ModelRemoved,
@@ -655,6 +669,7 @@ impl ModelIndex {
                 None,
                 None,
             )?;
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 
         Ok(rows_affected > 0)
@@ -1034,8 +1049,9 @@ impl ModelIndex {
         // AFTER DELETE trigger will find nothing to delete from the FTS5 table.
         let fts_table = &self.fts5_config.table_name;
         conn.execute_batch(&format!("DELETE FROM {}; DELETE FROM models;", fts_table))?;
+        let mut event_ids = Vec::with_capacity(removed_ids.len());
         for model_id in removed_ids {
-            Self::append_model_library_update_event_with_conn(
+            event_ids.push(Self::append_model_library_update_event_with_conn(
                 &conn,
                 &model_id,
                 ModelLibraryChangeKind::ModelRemoved,
@@ -1043,7 +1059,10 @@ impl ModelIndex {
                 ModelLibraryRefreshScope::SummaryAndDetail,
                 None,
                 None,
-            )?;
+            )?);
+        }
+        for event_id in event_ids {
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
         debug!("Cleared model index");
         Ok(())
@@ -1227,6 +1246,64 @@ mod tests {
         assert!(feed.stale_cursor);
         assert!(feed.snapshot_required);
         assert!(feed.events.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_model_library_update_broadcast_publishes_model_record_changes() {
+        let (index, _temp) = create_test_index();
+        let mut receiver = index.subscribe_model_library_update_events();
+
+        index
+            .upsert(&create_test_record(
+                "broadcast-model",
+                "Broadcast Model",
+                "llm",
+            ))
+            .unwrap();
+
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(event.model_id, "broadcast-model");
+        assert_eq!(event.change_kind, ModelLibraryChangeKind::ModelAdded);
+        assert_eq!(event.fact_family, ModelFactFamily::ModelRecord);
+        assert_eq!(
+            event.refresh_scope,
+            ModelLibraryRefreshScope::SummaryAndDetail
+        );
+    }
+
+    #[tokio::test]
+    async fn test_model_library_update_broadcast_publishes_transactional_replace_after_commit() {
+        let (index, _temp) = create_test_index();
+        index
+            .upsert(&create_test_record("old-model", "Old Model", "llm"))
+            .unwrap();
+        let mut receiver = index.subscribe_model_library_update_events();
+
+        index
+            .replace_model_id_preserving_references(
+                "old-model",
+                &create_test_record("new-model", "New Model", "llm"),
+            )
+            .unwrap();
+
+        let removed = tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let added = tokio::time::timeout(std::time::Duration::from_secs(1), receiver.recv())
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(removed.model_id, "old-model");
+        assert_eq!(removed.change_kind, ModelLibraryChangeKind::ModelRemoved);
+        assert_eq!(added.model_id, "new-model");
+        assert_eq!(added.change_kind, ModelLibraryChangeKind::ModelAdded);
+        assert!(index.get("new-model").unwrap().is_some());
+        assert!(index.get("old-model").unwrap().is_none());
     }
 
     #[test]

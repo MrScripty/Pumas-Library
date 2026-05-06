@@ -6,6 +6,7 @@ use crate::models::{
 use crate::{PumasError, Result};
 use rusqlite::types::Type;
 use rusqlite::{params, Connection, OptionalExtension};
+use tokio::sync::broadcast;
 
 const MODEL_LIBRARY_UPDATE_CURSOR_PREFIX: &str = "model-library-updates:";
 
@@ -177,7 +178,7 @@ impl ModelIndex {
             source: None,
         })?;
 
-        Self::append_model_library_update_event_with_conn(
+        let event_id = Self::append_model_library_update_event_with_conn(
             &conn,
             model_id,
             change_kind,
@@ -185,7 +186,25 @@ impl ModelIndex {
             refresh_scope,
             selected_artifact_id,
             producer_revision,
-        )
+        )?;
+        self.publish_model_library_update_event_with_conn(&conn, event_id)?;
+        Ok(event_id)
+    }
+
+    pub fn subscribe_model_library_update_events(
+        &self,
+    ) -> broadcast::Receiver<ModelLibraryUpdateEvent> {
+        self.update_tx.subscribe()
+    }
+
+    pub(super) fn publish_model_library_update_event_with_conn(
+        &self,
+        conn: &Connection,
+        event_id: i64,
+    ) -> Result<()> {
+        let event = Self::get_model_library_update_event_with_conn(conn, event_id)?;
+        let _ = self.update_tx.send(event);
+        Ok(())
     }
 
     pub fn current_model_library_update_cursor(&self) -> Result<String> {
@@ -279,6 +298,28 @@ impl ModelIndex {
             [],
             |row| row.get(0),
         )?)
+    }
+
+    fn get_model_library_update_event_with_conn(
+        conn: &Connection,
+        event_id: i64,
+    ) -> Result<ModelLibraryUpdateEvent> {
+        let record = conn.query_row(
+            "SELECT
+                event_id,
+                model_id,
+                change_kind,
+                fact_family,
+                refresh_scope,
+                selected_artifact_id,
+                producer_revision,
+                created_at
+             FROM model_library_update_events
+             WHERE event_id = ?1",
+            params![event_id],
+            row_to_update_record,
+        )?;
+        Ok(ModelLibraryUpdateEvent::from(record))
     }
 
     fn is_stale_model_library_update_cursor_with_conn(

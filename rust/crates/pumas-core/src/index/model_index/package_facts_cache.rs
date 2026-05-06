@@ -101,7 +101,7 @@ impl ModelIndex {
                 ModelPackageFactsCacheScope::Summary => ModelLibraryRefreshScope::Summary,
                 ModelPackageFactsCacheScope::Detail => ModelLibraryRefreshScope::SummaryAndDetail,
             };
-            Self::append_model_library_update_event_with_conn(
+            let event_id = Self::append_model_library_update_event_with_conn(
                 &conn,
                 &record.model_id,
                 ModelLibraryChangeKind::PackageFactsModified,
@@ -114,6 +114,7 @@ impl ModelIndex {
                 },
                 record.producer_revision.clone(),
             )?;
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
         }
 
         Ok(changed)

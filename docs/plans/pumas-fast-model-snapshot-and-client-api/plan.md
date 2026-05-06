@@ -290,7 +290,7 @@ without broad transport work.
 snapshot-to-live race.
 
 **Tasks:**
-- [ ] Move or wrap model-library update publication behind a core event bus.
+- [x] Move or wrap model-library update publication behind a core event bus.
 - [x] Add `subscribe_model_library_updates_since(cursor)`.
 - [x] Make subscription startup replay durable events after the cursor before
   yielding live events.
@@ -482,6 +482,11 @@ Update during implementation:
   explicitly leaves `live_stream_ready = false` until a core live bus is added.
   Codebase inspection confirmed no existing core broadcast bus; current GUI
   SSE polls from `None` and will be handled in later slices.
+- 2026-05-06: Milestone 4 second slice added a core `tokio::broadcast`
+  update bus owned by `ModelIndex`. Durable SQLite append remains
+  authoritative; update events publish only after append success, and
+  transactional paths publish only after commit. Tests cover direct model row
+  publication and transactional replace publication.
 
 ## Commit Cadence Notes
 
@@ -628,6 +633,12 @@ After each worker wave:
   - tested the snapshot-gap case and stale cursor behavior;
   - recorded that the live bus remains pending rather than hiding that gap
     behind the current polling SSE path.
+- Milestone 4 core update bus:
+  - added a broadcast sender/receiver to `ModelIndex`;
+  - published model-library update events after durable append/commit;
+  - exposed `ModelLibrary::subscribe_model_library_update_events`;
+  - tested live publication for model upsert and transactional model-id
+    replace.
 
 ### Deviations
 
@@ -669,6 +680,10 @@ After each worker wave:
 - Milestone 4 recovery-first subscription verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_updates_since`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
+- Milestone 4 core update bus verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update_broadcast`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
 
 ### Traceability Links

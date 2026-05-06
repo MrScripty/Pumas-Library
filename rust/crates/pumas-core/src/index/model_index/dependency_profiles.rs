@@ -338,7 +338,7 @@ impl ModelIndex {
         }
 
         if changed {
-            Self::append_model_library_update_event_with_conn(
+            let event_id = Self::append_model_library_update_event_with_conn(
                 &tx,
                 &record.model_id,
                 ModelLibraryChangeKind::DependencyBindingModified,
@@ -347,9 +347,11 @@ impl ModelIndex {
                 None,
                 Some(record.attached_at.clone()),
             )?;
+            tx.commit()?;
+            self.publish_model_library_update_event_with_conn(&conn, event_id)?;
+        } else {
+            tx.commit()?;
         }
-
-        tx.commit()?;
         Ok(changed)
     }
 

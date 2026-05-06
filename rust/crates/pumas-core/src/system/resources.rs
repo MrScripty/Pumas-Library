@@ -76,8 +76,9 @@ impl ResourceTracker {
     ///
     /// * `cache_ttl` - How long to cache resource measurements
     pub fn new(cache_ttl: Duration) -> Self {
-        let mut system = System::new_all();
-        system.refresh_all();
+        let mut system = System::new();
+        system.refresh_cpu_all();
+        system.refresh_memory();
 
         Self {
             cache_ttl,
@@ -90,8 +91,7 @@ impl ResourceTracker {
 
     /// Get a snapshot of system resources.
     pub fn get_system_resources(&self) -> Result<SystemResourceSnapshot> {
-        // Refresh system info if needed
-        self.maybe_refresh_system();
+        self.maybe_refresh_system_summary();
 
         let system = self.system.read().unwrap();
 
@@ -188,7 +188,7 @@ impl ResourceTracker {
         pid: u32,
         include_children: bool,
     ) -> Result<ProcessResources> {
-        self.maybe_refresh_system();
+        self.maybe_refresh_processes();
 
         let system = self.system.read().unwrap();
         let sysinfo_pid = Pid::from_u32(pid);
@@ -237,8 +237,27 @@ impl ResourceTracker {
         cache.remove(&pid);
     }
 
-    /// Maybe refresh system info if cache has expired.
-    fn maybe_refresh_system(&self) {
+    /// Maybe refresh summary system info if cache has expired.
+    fn maybe_refresh_system_summary(&self) {
+        let should_refresh = {
+            let last_refresh = self.last_system_refresh.read().unwrap();
+            last_refresh
+                .map(|t| t.elapsed() >= self.cache_ttl)
+                .unwrap_or(true)
+        };
+
+        if should_refresh {
+            let mut system = self.system.write().unwrap();
+            system.refresh_cpu_all();
+            system.refresh_memory();
+
+            let mut last_refresh = self.last_system_refresh.write().unwrap();
+            *last_refresh = Some(Instant::now());
+        }
+    }
+
+    /// Maybe refresh process info if cache has expired.
+    fn maybe_refresh_processes(&self) {
         let should_refresh = {
             let last_refresh = self.last_system_refresh.read().unwrap();
             last_refresh
@@ -263,14 +282,14 @@ impl ResourceTracker {
 
     /// Check if a process exists.
     pub fn process_exists(&self, pid: u32) -> bool {
-        self.maybe_refresh_system();
+        self.maybe_refresh_processes();
         let system = self.system.read().unwrap();
         system.process(Pid::from_u32(pid)).is_some()
     }
 
     /// Get all child PIDs for a process (recursively).
     pub fn get_child_pids(&self, pid: u32) -> Vec<u32> {
-        self.maybe_refresh_system();
+        self.maybe_refresh_processes();
         let system = self.system.read().unwrap();
         let parent_pid = Pid::from_u32(pid);
 
@@ -309,6 +328,17 @@ mod tests {
         assert!(resources.cpu_usage >= 0.0);
         assert!(resources.ram_total > 0);
         assert!(resources.ram_used <= resources.ram_total);
+    }
+
+    #[test]
+    fn system_resource_snapshot_does_not_refresh_process_table() {
+        let tracker = ResourceTracker::new(Duration::from_secs(60));
+        let process_count_before = tracker.system.read().unwrap().processes().len();
+
+        let _ = tracker.get_system_resources().unwrap();
+
+        let process_count_after = tracker.system.read().unwrap().processes().len();
+        assert_eq!(process_count_after, process_count_before);
     }
 
     #[test]

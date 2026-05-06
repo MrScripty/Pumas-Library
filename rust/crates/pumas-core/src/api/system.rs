@@ -196,103 +196,14 @@ impl PumasApi {
 
     /// Get system resources (CPU, GPU, RAM, disk).
     pub async fn get_system_resources(&self) -> Result<models::SystemResourcesResponse> {
-        let process_manager = {
-            let mgr_lock = self.primary().process_manager.read().await;
-            mgr_lock.clone()
-        };
-        let gpu = tokio::task::spawn_blocking(move || {
-            use sysinfo::{Disks, System};
+        let tracker = self.primary().resource_tracker.clone();
+        let snapshot = tokio::task::spawn_blocking(move || tracker.get_system_resources())
+            .await
+            .map_err(|e| {
+                PumasError::Other(format!("Failed to join get_system_resources task: {}", e))
+            })??;
 
-            let mut sys = System::new_all();
-            sys.refresh_all();
-
-            // CPU
-            let cpu_usage = sys.global_cpu_usage();
-
-            // RAM
-            let total_memory = sys.total_memory();
-            let used_memory = sys.used_memory();
-            let ram_usage = if total_memory > 0 {
-                (used_memory as f32 / total_memory as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            // Disk
-            let disks = Disks::new_with_refreshed_list();
-            let (disk_total, disk_free) = if let Some(disk) = disks.list().first() {
-                (disk.total_space(), disk.available_space())
-            } else {
-                (0, 0)
-            };
-            let disk_usage = if disk_total > 0 {
-                ((disk_total - disk_free) as f32 / disk_total as f32) * 100.0
-            } else {
-                0.0
-            };
-
-            let gpu = if let Some(mgr) = process_manager {
-                let tracker = mgr.resource_tracker();
-                match tracker.get_system_resources() {
-                    Ok(snapshot) => models::GpuResources {
-                        usage: snapshot.gpu_usage,
-                        memory: snapshot.gpu_memory_used,
-                        memory_total: snapshot.gpu_memory_total,
-                        temp: snapshot.gpu_temp,
-                    },
-                    Err(_) => models::GpuResources {
-                        usage: 0.0,
-                        memory: 0,
-                        memory_total: 0,
-                        temp: None,
-                    },
-                }
-            } else {
-                models::GpuResources {
-                    usage: 0.0,
-                    memory: 0,
-                    memory_total: 0,
-                    temp: None,
-                }
-            };
-
-            (
-                cpu_usage,
-                total_memory,
-                ram_usage,
-                disk_total,
-                disk_free,
-                disk_usage,
-                gpu,
-            )
-        })
-        .await
-        .map_err(|e| {
-            PumasError::Other(format!("Failed to join get_system_resources task: {}", e))
-        })?;
-
-        let (cpu_usage, total_memory, ram_usage, disk_total, disk_free, disk_usage, gpu) = gpu;
-
-        Ok(models::SystemResourcesResponse {
-            success: true,
-            error: None,
-            resources: models::SystemResources {
-                cpu: models::CpuResources {
-                    usage: cpu_usage,
-                    temp: None,
-                },
-                gpu,
-                ram: models::RamResources {
-                    usage: ram_usage,
-                    total: total_memory,
-                },
-                disk: models::DiskResources {
-                    usage: disk_usage,
-                    total: disk_total,
-                    free: disk_free,
-                },
-            },
-        })
+        Ok(super::resource_responses::system_resources_response_from_snapshot(snapshot))
     }
 
     // ========================================

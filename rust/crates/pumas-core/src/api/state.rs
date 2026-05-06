@@ -235,6 +235,7 @@ pub(crate) struct PrimaryState {
     pub(crate) _state: Arc<RwLock<ApiState>>,
     pub(crate) network_manager: Arc<network::NetworkManager>,
     pub(crate) process_manager: Arc<RwLock<Option<process::ProcessManager>>>,
+    pub(crate) resource_tracker: Arc<system::ResourceTracker>,
     pub(crate) system_utils: Arc<system::SystemUtils>,
     pub(crate) model_library: Arc<model_library::ModelLibrary>,
     pub(crate) model_mapper: model_library::ModelMapper,

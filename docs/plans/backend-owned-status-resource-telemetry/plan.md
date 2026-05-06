@@ -274,6 +274,22 @@ the same subscriber handoff model rather than copying the polling pattern.
 - Code review confirms `System::new_all().refresh_all()` is not in the
   `get_system_resources` request path.
 
+**Implementation Notes:**
+- 2026-05-06: First backend slice introduced a primary-owned
+  `ResourceTracker` for system resource reads and split summary refresh from
+  process-table refresh in `ResourceTracker`.
+- 2026-05-06: Standards debt found and resolved during the slice: conversion
+  from `SystemResourceSnapshot` to `SystemResourcesResponse` was initially
+  duplicated between public API and primary-state runtime helpers, then moved to
+  a shared private API response helper before commit.
+- 2026-05-06 verification for first backend slice:
+  `cargo check --manifest-path rust/Cargo.toml -p pumas-library`,
+  `cargo test --manifest-path rust/Cargo.toml -p pumas-library system_resources`,
+  `cargo test --manifest-path rust/Cargo.toml -p pumas-library resource_snapshot`,
+  and `git diff --check` passed. Code review scan confirmed
+  `System::new_all().refresh_all()` no longer appears in the system resource
+  request paths touched by this slice.
+
 ### Milestone 2 - Backend Subscriber Stream
 - Add a telemetry update subscriber in core.
 - Add an RPC SSE route with cursor/revision handoff.
@@ -457,6 +473,17 @@ the same subscriber handoff model rather than copying the polling pattern.
   implementation.
 - Electron bridge scans confirmed the existing subscriber/reconnect pattern can
   be extended without adding a second transport architecture.
+- Frontend/Electron look-over found that existing event streams are started
+  globally after backend startup. The telemetry stream must not copy that
+  behavior blindly; it needs subscriber-aware bridge lifecycle so renderer
+  absence does not keep telemetry sampling active.
+- Frontend look-over found a network status contract mismatch risk:
+  `NetworkStatusResponse.success_rate` is computed as `0.0..1.0` in Rust while
+  UI wording treats it as a percent. The telemetry DTO must normalize or
+  explicitly document the unit.
+- Frontend look-over found resource DTO duplication between `api-system.ts` and
+  `apps.ts`. The telemetry slice should reuse an existing shape rather than add
+  a third resource DTO.
 
 ## Completion Summary
 Not started.

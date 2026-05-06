@@ -386,6 +386,8 @@ impl PumasApiBuilder {
             Arc::new(RwLock::new(None))
         };
 
+        let resource_tracker = Arc::new(system::ResourceTracker::default());
+
         // Initialize system utilities
         let system_utils = Arc::new(system::SystemUtils::new(&self.launcher_root));
 
@@ -565,6 +567,7 @@ impl PumasApiBuilder {
             _state: state,
             network_manager,
             process_manager,
+            resource_tracker,
             system_utils,
             model_library,
             model_mapper,

@@ -4,6 +4,7 @@ mod dependency_profiles;
 mod governance;
 mod metadata_overlays;
 mod model_library_updates;
+mod model_selector_snapshot;
 mod package_facts_cache;
 
 use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};

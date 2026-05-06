@@ -226,9 +226,9 @@ without broad transport work.
 
 **Tasks:**
 - [x] Add selector snapshot DTOs and contract tests.
-- [ ] Add materialized selector row storage or a query projection backed by
+- [x] Add materialized selector row storage or a query projection backed by
   indexed SQLite/cache state.
-- [ ] Populate rows for existing indexed models with `PumasModelRef`,
+- [x] Populate rows for existing indexed models with `PumasModelRef`,
   selected artifact identity/path, entry path, entry path state, artifact
   state, display fields, and detail state.
 - [ ] Add direct in-process `PumasLibraryInstance` selector snapshot access.
@@ -445,6 +445,13 @@ Update during implementation:
   selected artifact identity and cached summary JSON when valid. Materialized
   selector columns remain a performance follow-up if JSON extraction cannot
   meet the direct/read-only timing target.
+- 2026-05-06: Milestone 2 Slice 2.2 added
+  `ModelIndex::list_model_library_selector_snapshot`, projecting selector rows
+  from the indexed `models` table and package-facts summary cache. The query
+  prefers selected-artifact-scoped summary rows when present and falls back to
+  existing empty selected-artifact cache rows. Partial download flags,
+  validation state, and import state now produce non-executable selector
+  artifact/entry states without filesystem inspection.
 
 ## Commit Cadence Notes
 
@@ -554,6 +561,13 @@ After each worker wave:
   - extended `PumasModelRef` with `model_ref_contract_version` to clarify that
     the version is the model-reference contract version, not a model revision;
   - documented selector invariants in the models module README.
+- Milestone 2 Slice 2.2 selector index projection:
+  - added the first SQLite-backed selector snapshot projection under
+    `ModelIndex`;
+  - joined valid package-facts summaries without regenerating facts;
+  - preserved rows when summaries are missing or invalid;
+  - derived non-ready artifact and entry states from persisted partial,
+    validation, and import metadata.
 
 ### Deviations
 
@@ -575,6 +589,9 @@ After each worker wave:
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_selector`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_ref`
+- Milestone 2 Slice 2.2 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
 
 ### Traceability Links
 

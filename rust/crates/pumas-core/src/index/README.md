@@ -11,7 +11,7 @@ building utilities that handle FTS5 special character escaping and prefix matchi
 | File | Description |
 |------|-------------|
 | `mod.rs` | Module root, re-exports public API |
-| `model_index.rs` | `ModelIndex` - SQLite storage for model records with insert, update, delete, and search |
+| `model_index.rs` | `ModelIndex` - SQLite storage for model records with insert, update, delete, search, package-fact cache, update feed, and selector snapshot projection |
 | `fts5.rs` | `FTS5Config` / `FTS5Manager` - FTS5 virtual table setup, tokenizer configuration, maintenance |
 | `query.rs` | `build_fts5_query` / `escape_fts5_term` - Query building with OR matching and prefix support |
 

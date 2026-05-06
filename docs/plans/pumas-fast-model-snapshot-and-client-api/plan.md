@@ -342,9 +342,9 @@ Rust API.
 - [x] Expose local-client selector snapshot as one transport request per
   snapshot.
 - [ ] Expose local-client subscription as one stream per subscription.
-- [ ] Choose platform transport order: Unix socket on Linux/macOS, named pipe
+- [x] Choose platform transport order: Unix socket on Linux/macOS, named pipe
   on Windows, localhost TCP fallback when needed.
-- [ ] Measure local-client selector latency against the selected transport.
+- [x] Measure local-client selector latency against the selected transport.
 
 **Verification:**
 - A second process discovers and connects to a running instance explicitly.
@@ -529,6 +529,13 @@ Update during implementation:
   `PumasLocalClient::discover_ready_instances()`. Discovery reads the platform
   registry, cleans stale rows, and returns only ready instances; explicit
   `connect` remains a separate caller action.
+- 2026-05-06: Milestone 6 transport/timing slice added platform transport
+  preference ordering: Unix socket then loopback TCP on Unix, named pipe then
+  loopback TCP on Windows, and loopback TCP fallback elsewhere. Current
+  implementation still uses loopback TCP until socket/pipe transports are
+  implemented. The focused local-client selector timing test measured
+  `0.410ms` for the one-request loopback TCP snapshot path, below the initial
+  `<= 25ms` target.
 
 ## Commit Cadence Notes
 
@@ -748,6 +755,10 @@ After each worker wave:
 - Milestone 6 local-client discovery verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
+- Milestone 6 transport order and selector timing verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library local_client_selector_snapshot_reports_transport_timing_target -- --nocapture`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library registry`
 
 ### Traceability Links

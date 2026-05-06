@@ -189,6 +189,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_client_selector_snapshot_reports_transport_timing_target() {
+        let Some(server) = IpcServer::start(Arc::new(SelectorSnapshotDispatch))
+            .await
+            .ok()
+        else {
+            eprintln!("Skipping local_client_selector_snapshot_reports_transport_timing_target");
+            return;
+        };
+
+        let client = PumasLocalClient::connect(ready_instance(server.port))
+            .await
+            .unwrap();
+        let started = std::time::Instant::now();
+        let snapshot = client
+            .model_library_selector_snapshot(ModelLibrarySelectorSnapshotRequest {
+                limit: Some(25),
+                ..ModelLibrarySelectorSnapshotRequest::default()
+            })
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        eprintln!(
+            "local_client_selector_snapshot_transport_ms={:.3}",
+            elapsed.as_secs_f64() * 1000.0
+        );
+
+        assert_eq!(snapshot.cursor, "model-library-updates:7");
+        assert!(
+            elapsed <= std::time::Duration::from_millis(25),
+            "local-client selector snapshot exceeded 25ms target: {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
     async fn local_client_rejects_non_loopback_tcp_endpoint() {
         let mut instance = ready_instance(12345);
         instance.endpoint = "0.0.0.0:12345".to_string();

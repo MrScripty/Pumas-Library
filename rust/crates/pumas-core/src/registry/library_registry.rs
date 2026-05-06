@@ -53,6 +53,23 @@ impl LocalInstanceTransportKind {
         }
     }
 
+    pub fn preferred_order() -> &'static [Self] {
+        #[cfg(unix)]
+        {
+            &[Self::UnixSocket, Self::LoopbackTcp]
+        }
+
+        #[cfg(windows)]
+        {
+            &[Self::WindowsNamedPipe, Self::LoopbackTcp]
+        }
+
+        #[cfg(not(any(unix, windows)))]
+        {
+            &[Self::LoopbackTcp]
+        }
+    }
+
     fn from_db(value: &str) -> Result<Self> {
         match value {
             "loopback_tcp" => Ok(Self::LoopbackTcp),
@@ -882,6 +899,18 @@ mod tests {
         );
         assert_eq!(instance.endpoint, "127.0.0.1:12345");
         assert!(instance.connection_token.is_some());
+    }
+
+    #[test]
+    fn test_preferred_transport_order_is_platform_specific() {
+        let order = LocalInstanceTransportKind::preferred_order();
+        assert_eq!(order.last(), Some(&LocalInstanceTransportKind::LoopbackTcp));
+
+        #[cfg(unix)]
+        assert_eq!(order[0], LocalInstanceTransportKind::UnixSocket);
+
+        #[cfg(windows)]
+        assert_eq!(order[0], LocalInstanceTransportKind::WindowsNamedPipe);
     }
 
     #[test]

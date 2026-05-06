@@ -1,13 +1,13 @@
 /**
- * Status polling hook
+ * Backend-owned status telemetry hook.
  *
- * Manages system status polling and state.
- * Extracted from App.tsx to separate concerns.
+ * Loads the current cached status/resource snapshot and then applies pushed
+ * status telemetry updates from Electron.
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { api, isAPIAvailable } from '../api/adapter';
-import type { StatusResponse } from '../types/api';
+import { api, getElectronAPI, isAPIAvailable } from '../api/adapter';
+import type { StatusResponse, StatusTelemetrySnapshot } from '../types/api';
 import type { SystemResources } from '../types/apps';
 import { getLogger } from '../utils/logger';
 import { APIError } from '../errors';
@@ -15,12 +15,11 @@ import { APIError } from '../errors';
 const logger = getLogger('useStatus');
 
 interface UseStatusOptions {
-  pollInterval?: number;
   initialLoad?: boolean;
 }
 
 export function useStatus(options: UseStatusOptions = {}) {
-  const { pollInterval = 1000, initialLoad = true } = options;
+  const { initialLoad = true } = options;
 
   const [statusData, setStatusData] = useState<StatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -30,9 +29,6 @@ export function useStatus(options: UseStatusOptions = {}) {
   const [modelLibraryLoaded, setModelLibraryLoaded] = useState<boolean | null>(null);
   const inFlightRequest = useRef<Promise<void> | null>(null);
   const pendingRefresh = useRef<{ isInitialLoad: boolean; force: boolean } | null>(null);
-  const lastResourcesFetch = useRef(0);
-  const lastNetworkFetch = useRef(0);
-  const lastLibraryFetch = useRef(0);
   const loadingDelayTimeout = useRef<NodeJS.Timeout | null>(null);
 
   const clearLoadingDelay = useCallback(() => {
@@ -42,47 +38,26 @@ export function useStatus(options: UseStatusOptions = {}) {
     }
   }, []);
 
-  const refreshSystemResources = useCallback(async (now: number) => {
-    if (now - lastResourcesFetch.current < 2000) return;
-
-    const resourcesResult = await api.get_system_resources();
-    if (resourcesResult.success) {
-      setSystemResources(resourcesResult.resources);
-    }
-    lastResourcesFetch.current = now;
+  const applySnapshot = useCallback((snapshot: StatusTelemetrySnapshot) => {
+    setStatusData(snapshot.status);
+    setSystemResources(snapshot.resources);
+    setNetworkAvailable(!snapshot.network.is_offline);
+    setModelLibraryLoaded(snapshot.model_library_loaded && snapshot.library.success);
   }, []);
 
-  const refreshNetworkStatus = useCallback(async (now: number) => {
-    if (now - lastNetworkFetch.current < 5000) return;
-
-    try {
-      const networkResult = await api.get_network_status();
-      if (networkResult.success) {
-        setNetworkAvailable(!networkResult.is_offline);
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.debug('Failed to fetch network status', { error: message });
-    }
-    lastNetworkFetch.current = now;
-  }, []);
-
-  const refreshLibraryStatus = useCallback(async (now: number) => {
-    if (now - lastLibraryFetch.current < 5000) return;
-
-    try {
-      const libraryResult = await api.get_library_status();
-      setModelLibraryLoaded(libraryResult.success);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logger.debug('Failed to fetch model library status', { error: message });
-      setModelLibraryLoaded(false);
-    }
-    lastLibraryFetch.current = now;
-  }, []);
+  const finishInitialLoad = useCallback((startedAt: number) => {
+    const elapsedTime = Date.now() - startedAt;
+    const remainingTime = Math.max(0, 800 - elapsedTime);
+    clearLoadingDelay();
+    loadingDelayTimeout.current = setTimeout(() => {
+      loadingDelayTimeout.current = null;
+      setIsLoading(false);
+      setIsCheckingDeps(false);
+    }, remainingTime);
+  }, [clearLoadingDelay]);
 
   const runStatusFetch = useCallback(async (isInitialLoad = false) => {
-    const startTime = Date.now();
+    const startedAt = Date.now();
 
     if (isInitialLoad) {
       setIsCheckingDeps(true);
@@ -96,38 +71,29 @@ export function useStatus(options: UseStatusOptions = {}) {
         return;
       }
 
-      const data = await api.get_status();
-      setStatusData(data);
-
-      const now = Date.now();
-      await refreshSystemResources(now);
-      await refreshNetworkStatus(now);
-      await refreshLibraryStatus(now);
+      const snapshot = await api.get_status_telemetry_snapshot();
+      applySnapshot(snapshot);
 
       if (isInitialLoad) {
-        const elapsedTime = Date.now() - startTime;
-        const remainingTime = Math.max(0, 800 - elapsedTime);
-        clearLoadingDelay();
-        loadingDelayTimeout.current = setTimeout(() => {
-          loadingDelayTimeout.current = null;
-          setIsLoading(false);
-          setIsCheckingDeps(false);
-        }, remainingTime);
+        finishInitialLoad(startedAt);
       } else {
         setIsLoading(false);
       }
     } catch (error) {
       if (error instanceof APIError) {
-        logger.error('API error fetching status', { error: error.message, endpoint: error.endpoint });
+        logger.error('API error fetching status telemetry', {
+          error: error.message,
+          endpoint: error.endpoint,
+        });
       } else if (error instanceof Error) {
-        logger.error('Unexpected error fetching status', { error: error.message });
+        logger.error('Unexpected error fetching status telemetry', { error: error.message });
       } else {
-        logger.error('Unknown error fetching status', { error });
+        logger.error('Unknown error fetching status telemetry', { error });
       }
       setIsLoading(false);
       setIsCheckingDeps(false);
     }
-  }, [clearLoadingDelay, refreshLibraryStatus, refreshNetworkStatus, refreshSystemResources]);
+  }, [applySnapshot, clearLoadingDelay, finishInitialLoad]);
 
   const fetchStatus = useCallback(async (isInitialLoad = false, force = false) => {
     if (inFlightRequest.current) {
@@ -153,32 +119,42 @@ export function useStatus(options: UseStatusOptions = {}) {
   }, [runStatusFetch]);
 
   useEffect(() => {
-    let interval: NodeJS.Timeout | null = null;
     let waitTimeout: NodeJS.Timeout | null = null;
+    let unsubscribeTelemetry: (() => void) | null = null;
 
-    const startPolling = () => {
+    const startTelemetry = () => {
       if (initialLoad) {
         fetchStatus(true).catch((error: unknown) => {
           if (error instanceof APIError) {
-            logger.error('Initial status fetch failed', { error: error.message, endpoint: error.endpoint });
+            logger.error('Initial status telemetry fetch failed', {
+              error: error.message,
+              endpoint: error.endpoint,
+            });
           } else if (error instanceof Error) {
-            logger.error('Unexpected error during initial fetch', { error: error.message });
+            logger.error('Unexpected error during initial telemetry fetch', {
+              error: error.message,
+            });
           } else {
-            logger.error('Unknown error during initial fetch', { error: String(error) });
+            logger.error('Unknown error during initial telemetry fetch', { error: String(error) });
           }
           setIsLoading(false);
           setIsCheckingDeps(false);
         });
       }
 
-      interval = setInterval(() => {
-        void fetchStatus(false);
-      }, pollInterval);
+      const electronAPI = getElectronAPI();
+      if (electronAPI?.onStatusTelemetryUpdate) {
+        unsubscribeTelemetry = electronAPI.onStatusTelemetryUpdate((notification) => {
+          applySnapshot(notification.snapshot);
+          setIsLoading(false);
+          setIsCheckingDeps(false);
+        });
+      }
     };
 
     const waitForApi = () => {
       if (isAPIAvailable()) {
-        startPolling();
+        startTelemetry();
         return;
       }
       waitTimeout = setTimeout(waitForApi, 100);
@@ -187,11 +163,11 @@ export function useStatus(options: UseStatusOptions = {}) {
     waitForApi();
 
     return () => {
-      if (interval) clearInterval(interval);
       if (waitTimeout) clearTimeout(waitTimeout);
+      if (unsubscribeTelemetry) unsubscribeTelemetry();
       clearLoadingDelay();
     };
-  }, [pollInterval, initialLoad, fetchStatus, clearLoadingDelay]);
+  }, [initialLoad, fetchStatus, applySnapshot, clearLoadingDelay]);
 
   return {
     status: statusData,

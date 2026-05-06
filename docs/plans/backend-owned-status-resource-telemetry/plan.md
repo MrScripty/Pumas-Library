@@ -364,6 +364,19 @@ the same subscriber handoff model rather than copying the polling pattern.
 - Model Manager network indicator tests pass without `useNetworkStatus` owning a
   polling interval.
 
+**Implementation Notes:**
+- 2026-05-06: Replaced `useStatus` polling with initial
+  `get_status_telemetry_snapshot` load plus `onStatusTelemetryUpdate`
+  subscription while preserving the hook return shape and queued `refetch`
+  behavior.
+- 2026-05-06: Replaced `useNetworkStatus` polling with the same telemetry
+  snapshot/subscription path and normalized `success_rate` from ratio to percent
+  when needed.
+- 2026-05-06 verification:
+  `npm run -w frontend test:run -- useStatus useNetworkStatus`,
+  `npm run -w frontend check:types`, `git diff --check`, and a source scan for
+  status/resource polling calls in both hooks passed.
+
 ### Milestone 5 - Expensive Resource Work Gating
 - Audit app/process panels that still need per-process resource details.
 - Keep process aggregation behind explicit app/process data calls and avoid

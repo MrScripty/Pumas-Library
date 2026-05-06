@@ -1,19 +1,13 @@
 /**
- * Network Status Hook
- *
- * Monitors network status and circuit breaker state for UI indicators.
- * Polls every 5 seconds and provides offline/rate limit warnings.
+ * Network status hook backed by status telemetry.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { importAPI } from '../api/import';
-import type { NetworkStatusResponse } from '../types/api';
+import { useState, useEffect, useCallback } from 'react';
+import { api, getElectronAPI, isAPIAvailable } from '../api/adapter';
+import type { NetworkStatusResponse, StatusTelemetrySnapshot } from '../types/api';
 import { getLogger } from '../utils/logger';
 
 const logger = getLogger('useNetworkStatus');
-
-/** Polling interval for network status (ms) */
-const POLL_INTERVAL_MS = 5000;
 
 /** Status data exposed by the hook */
 export interface NetworkStatus {
@@ -43,64 +37,65 @@ const DEFAULT_STATUS: NetworkStatus = {
   failedRequests: 0,
 };
 
+function mapNetworkStatus(response: NetworkStatusResponse): NetworkStatus {
+  const totalRequests = response.total_requests;
+  const successRate = totalRequests === 0
+    ? 100
+    : response.success_rate <= 1
+      ? response.success_rate * 100
+      : response.success_rate;
+  return {
+    isOffline: response.is_offline,
+    isRateLimited: totalRequests > 0 && successRate < 50,
+    successRate,
+    circuitBreakerRejections: response.circuit_breaker_rejections,
+    circuitStates: response.circuit_states,
+    totalRequests,
+    failedRequests: response.failed_requests,
+  };
+}
+
 export function useNetworkStatus() {
   const [status, setStatus] = useState<NetworkStatus>(DEFAULT_STATUS);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const pollingRef = useRef(false);
+
+  const applySnapshot = useCallback((snapshot: StatusTelemetrySnapshot) => {
+    setStatus(mapNetworkStatus(snapshot.network));
+    setError(null);
+    setIsLoading(false);
+  }, []);
 
   const fetchStatus = useCallback(async () => {
-    if (pollingRef.current) {
+    if (!isAPIAvailable()) {
+      setIsLoading(false);
       return;
     }
 
-    pollingRef.current = true;
     try {
-      const response: NetworkStatusResponse = await importAPI.getNetworkStatus();
-
-      if (response.success) {
-        const totalRequests = response.total_requests;
-        const successRate = totalRequests === 0
-          ? 100
-          : response.success_rate;
-        setStatus({
-          isOffline: response.is_offline,
-          isRateLimited: totalRequests > 0 && successRate < 50,
-          successRate,
-          circuitBreakerRejections: response.circuit_breaker_rejections,
-          circuitStates: response.circuit_states,
-          totalRequests,
-          failedRequests: response.failed_requests,
-        });
-        setError(null);
-      } else {
-        logger.warn('Failed to fetch network status', { error: response.error });
-        setError(response.error || 'Failed to fetch network status');
-      }
+      const snapshot = await api.get_status_telemetry_snapshot();
+      applySnapshot(snapshot);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Unknown error';
-      logger.error('Error fetching network status', { error: message });
+      logger.error('Error fetching status telemetry network state', { error: message });
       setError(message);
-    } finally {
       setIsLoading(false);
-      pollingRef.current = false;
     }
-  }, []);
+  }, [applySnapshot]);
 
-  // Initial fetch and polling
   useEffect(() => {
-    // Initial fetch
     void fetchStatus();
 
-    // Set up polling
-    const interval = setInterval(() => {
-      void fetchStatus();
-    }, POLL_INTERVAL_MS);
+    const electronAPI = getElectronAPI();
+    const unsubscribe = electronAPI?.onStatusTelemetryUpdate?.((notification) => {
+      applySnapshot(notification.snapshot);
+    });
 
-    return () => clearInterval(interval);
-  }, [fetchStatus]);
+    return () => {
+      unsubscribe?.();
+    };
+  }, [applySnapshot, fetchStatus]);
 
-  // Manual refresh
   const refresh = useCallback(() => {
     void fetchStatus();
   }, [fetchStatus]);

@@ -55,9 +55,8 @@ Expose a stable host-facing API while keeping runtime ownership, reconciliation,
 ## Invariants
 - Only the primary instance starts watcher, reconcile, and other primary-owned background work.
 - Primary-owned watcher and reconciliation tasks stay under `RuntimeTasks` ownership so shutdown can abort outstanding work deterministically.
-- `PumasApi` remains the current legacy facade boundary. New direct Rust API
-  work must split ownership roles explicitly instead of hiding client
-  transport behind the same type.
+- `PumasApi` is the owning-instance facade. Same-device clients use
+  `PumasLocalClient`, and read-only indexed access uses `PumasReadOnlyLibrary`.
 - Transport code adapts requests and responses but does not own domain state.
 - Startup establishes runtime ownership, but freshness-sensitive read paths may
   still trigger bounded reconcile work before returning state.

@@ -84,23 +84,19 @@ pub use system::{
 pub use api::PumasApiBuilder;
 
 use serde::de::DeserializeOwned;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use api::{PrimaryState, RuntimeTasks};
 
-/// Main API struct for Pumas operations.
+/// Main owning-instance API struct for Pumas operations.
 ///
 /// This is the primary entry point for programmatic access to Pumas functionality.
 /// It provides model library and system utilities for integrating Pumas functionality
 /// into other applications.
 ///
-/// Internally, `PumasApi` operates in one of two modes:
-/// - **Primary**: Owns the full state (model library, network, processes, etc.)
-///   and runs an IPC server for other instances to connect to.
-/// - **Client**: Proxies calls to a running primary instance via TCP IPC.
-///
-/// The mode is transparent to callers — the public API is identical.
+/// `PumasApi` owns a Pumas Library instance. Same-device processes that want to
+/// attach to an existing owner should use `PumasLocalClient` explicitly.
 pub struct PumasApi {
     /// Root directory for launcher data (available in both modes)
     launcher_root: PathBuf,
@@ -112,39 +108,31 @@ pub struct PumasApi {
     runtime_tasks: RuntimeTasks,
 }
 
-/// Internal dispatch: Primary owns state, Client proxies via IPC.
+/// Explicit name for an owning Pumas Library instance.
+pub type PumasLibraryInstance = PumasApi;
+
+/// Internal dispatch. `PumasApi` owns primary state; same-device client access
+/// is exposed through `PumasLocalClient`.
 enum ApiInner {
     Primary(Arc<PrimaryState>),
-    Client(Arc<ipc::IpcClient>),
 }
 
 impl PumasApi {
     /// Get a reference to the primary state, or error if in client mode.
     fn try_primary(&self) -> Result<&Arc<PrimaryState>> {
-        match &self.inner {
-            ApiInner::Primary(state) => Ok(state),
-            ApiInner::Client(_) => Err(PumasError::Other(
-                "This method is only available on primary instances".to_string(),
-            )),
-        }
+        let ApiInner::Primary(state) = &self.inner;
+        Ok(state)
     }
 
-    fn try_client(&self) -> Option<&Arc<ipc::IpcClient>> {
-        match &self.inner {
-            ApiInner::Client(client) => Some(client),
-            ApiInner::Primary(_) => None,
-        }
+    fn try_client(&self) -> Option<&ipc::IpcClient> {
+        None
     }
 
     /// Get a reference to the primary state. Panics if in client mode.
     /// Use only for methods that are guaranteed primary-only.
     fn primary(&self) -> &Arc<PrimaryState> {
-        match &self.inner {
-            ApiInner::Primary(state) => state,
-            ApiInner::Client(_) => {
-                panic!("BUG: primary-only method called on client instance")
-            }
-        }
+        let ApiInner::Primary(state) = &self.inner;
+        state
     }
 
     async fn call_client_method<T>(&self, method: &str, params: serde_json::Value) -> Result<T>
@@ -211,7 +199,7 @@ impl PumasApi {
 
     /// Returns true if this instance is the primary (owns full state).
     pub fn is_primary(&self) -> bool {
-        matches!(&self.inner, ApiInner::Primary(_))
+        true
     }
 
     /// Create a builder for PumasApi.
@@ -239,8 +227,8 @@ impl PumasApi {
     ///
     /// * `launcher_root` - Path to the launcher root directory (containing launcher-data, etc.)
     ///
-    /// If another process already owns the launcher root, this returns a
-    /// client-backed API handle instead of starting a second primary.
+    /// If another process already owns the launcher root, this returns an
+    /// error. Use `PumasLocalClient` for explicit same-device client access.
     pub async fn new(launcher_root: impl Into<PathBuf>) -> Result<Self> {
         Self::builder(launcher_root).build().await
     }
@@ -248,11 +236,11 @@ impl PumasApi {
     /// Discover and connect to an existing pumas-core instance, or return an error
     /// if no libraries are registered.
     ///
-    /// This is the entry point for host applications that don't know the library path.
-    /// It checks the global registry for a registered library and a running instance:
-    /// 1. If a library is registered and a primary already exists, attaches as a Client.
-    /// 2. If a library is registered but no primary exists, creates a new Primary.
-    /// 3. If no libraries are registered, returns `NoLibrariesRegistered`.
+    /// Open the default registered library as an owning instance.
+    ///
+    /// Host applications that need to attach to an already-running owner should
+    /// call `PumasLocalClient::discover_ready_instances` and then
+    /// `PumasLocalClient::connect` explicitly.
     pub async fn discover() -> Result<Self> {
         let registry = registry::LibraryRegistry::open().map_err(|e| {
             tracing::warn!("Failed to open registry for discovery: {}", e);
@@ -267,66 +255,6 @@ impl PumasApi {
             .ok_or(PumasError::NoLibrariesRegistered)?;
 
         Self::new(&library.path).await
-    }
-
-    pub(crate) async fn connect_or_wait_for_existing_instance(
-        launcher_root: &Path,
-    ) -> Result<Option<Self>> {
-        let timeout = config::RegistryConfig::PRIMARY_READY_TIMEOUT;
-        let deadline = tokio::time::Instant::now() + timeout;
-
-        loop {
-            let registry = registry::LibraryRegistry::open()?;
-            let _ = registry.cleanup_stale();
-            let Some(instance) = registry.get_instance(launcher_root)? else {
-                return Ok(None);
-            };
-
-            if !platform::is_process_alive(instance.pid) {
-                let _ = registry.unregister_instance(launcher_root);
-                return Ok(None);
-            }
-
-            if instance.status == registry::InstanceStatus::Claiming {
-                if tokio::time::Instant::now() >= deadline {
-                    return Err(PumasError::PrimaryInstanceStartupTimeout {
-                        library_path: launcher_root.to_path_buf(),
-                        timeout,
-                    });
-                }
-
-                tokio::time::sleep(config::RegistryConfig::PRIMARY_READY_POLL_INTERVAL).await;
-                continue;
-            }
-
-            let addr = std::net::SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, instance.port));
-            match ipc::IpcClient::connect(addr, instance.pid).await {
-                Ok(client) => {
-                    tracing::info!(
-                        "Connected to existing instance for {} (PID {} on port {})",
-                        launcher_root.display(),
-                        instance.pid,
-                        instance.port
-                    );
-                    return Ok(Some(Self {
-                        launcher_root: launcher_root.to_path_buf(),
-                        inner: ApiInner::Client(Arc::new(client)),
-                        model_watcher: None,
-                        runtime_tasks: RuntimeTasks::default(),
-                    }));
-                }
-                Err(err) => {
-                    tracing::warn!(
-                        "Failed to connect to existing instance for {} (PID {}): {}",
-                        launcher_root.display(),
-                        instance.pid,
-                        err
-                    );
-                    let _ = registry.unregister_instance(launcher_root);
-                    return Ok(None);
-                }
-            }
-        }
     }
 
     /// Start the IPC server and promote any pending startup claim to a ready instance row.
@@ -403,13 +331,12 @@ impl Drop for PumasApi {
     fn drop(&mut self) {
         self.runtime_tasks.shutdown();
         let _ = self.model_watcher.take();
-        if let ApiInner::Primary(ref state) = self.inner {
-            // Best-effort: unregister instance from the global registry
-            if let Some(ref reg) = state.registry {
-                let _ = reg.unregister_instance(&self.launcher_root);
-            }
-            // Server handle is dropped automatically via IpcServerHandle::drop
+        let ApiInner::Primary(ref state) = self.inner;
+        // Best-effort: unregister instance from the global registry
+        if let Some(ref reg) = state.registry {
+            let _ = reg.unregister_instance(&self.launcher_root);
         }
+        // Server handle is dropped automatically via IpcServerHandle::drop
     }
 }
 

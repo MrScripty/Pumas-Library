@@ -363,12 +363,12 @@ Rust API.
 entry points exist.
 
 **Tasks:**
-- [ ] Introduce or finalize `PumasLibraryInstance`, `PumasReadOnlyLibrary`, and
+- [x] Introduce or finalize `PumasLibraryInstance`, `PumasReadOnlyLibrary`, and
   `PumasLocalClient` exports.
 - [ ] Migrate internal callers from `PumasApi` to explicit roles.
-- [ ] Remove, deprecate, or narrow transparent `ApiInner::Client` dispatch.
+- [x] Remove, deprecate, or narrow transparent `ApiInner::Client` dispatch.
 - [ ] Update UniFFI/bindings guidance to use explicit roles.
-- [ ] Update crate docs and examples.
+- [x] Update crate docs and examples.
 
 **Verification:**
 - Compile and targeted Rust API tests pass.
@@ -378,7 +378,7 @@ entry points exist.
   cycle.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 8: Batch Hydration And Cheap Descriptor Split
 
@@ -544,6 +544,27 @@ Update during implementation:
   `next_notification()`. Explicit local-client selector and stream requests
   send the registry connection token, and `PrimaryState` rejects missing or
   invalid tokens for those local-client-only methods.
+- 2026-05-06: Milestone 7 first slice made same-device client attachment
+  explicit. `PumasApi::new` now rejects an occupied library root with guidance
+  to use `PumasLocalClient`; `PumasApi::discover` remains an owning-instance
+  path; the unused transparent `ApiInner::Client` variant and implicit
+  connection helper were removed. API and IPC docs now describe `PumasApi` as
+  the owning-instance facade and `PumasLocalClient` as the explicit local
+  transport role.
+
+## Discovered Issues
+
+- 2026-05-06: The RPC `refresh_model_index` handler returns a structured
+  object, but the generic `wrap_response()` path treats it as a boolean and can
+  report `success:false` even when refresh work succeeds. This is separate from
+  the fast snapshot/client API slices and should be fixed before relying on the
+  RPC response for operator feedback.
+- 2026-05-06: After removing the hidden `PumasApi` client constructor path,
+  many `PumasApi` methods still contain stale `try_client()` forwarding
+  branches. They are unreachable from public constructors now, but they keep
+  transport concerns in the owning-instance facade and should be deleted or
+  moved behind explicit `PumasLocalClient` methods in the next Milestone 7
+  cleanup slice.
 
 ## Commit Cadence Notes
 

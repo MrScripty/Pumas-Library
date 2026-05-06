@@ -341,12 +341,14 @@ impl PumasApiBuilder {
         let claim = loop {
             match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
                 registry::InstanceClaimResult::Claimed(claim) => break claim,
-                registry::InstanceClaimResult::Occupied(_) => {
-                    if let Some(client) =
-                        PumasApi::connect_or_wait_for_existing_instance(&self.launcher_root).await?
-                    {
-                        return Ok(client);
-                    }
+                registry::InstanceClaimResult::Occupied(instance) => {
+                    return Err(PumasError::InvalidParams {
+                        message: format!(
+                            "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                            self.launcher_root.display(),
+                            instance.pid
+                        ),
+                    });
                 }
             }
         };

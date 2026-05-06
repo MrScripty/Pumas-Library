@@ -6,11 +6,9 @@ explicit local clients.
 ## Purpose
 
 When multiple host applications need the same library, only the first instance
-becomes the **Primary** (running all subsystems locally). Current legacy startup
-paths let subsequent `PumasApi` constructors attach as clients and proxy calls
-over TCP. That transparent facade behavior is transitional compatibility
-behavior; new APIs should expose this module through an explicit
-`PumasLocalClient` role rather than hiding transport behind direct Rust calls.
+becomes the **Primary** (running all subsystems locally). Same-device clients
+attach through the explicit `PumasLocalClient` role rather than hiding
+transport behind direct Rust calls.
 
 IPC startup is coordinated by the registry claim flow:
 

@@ -155,14 +155,19 @@ async fn test_get_disk_space() {
 }
 
 #[tokio::test]
-async fn test_new_returns_client_for_existing_primary() {
+async fn test_new_rejects_existing_primary_without_implicit_client() {
     let temp_dir = TempDir::new().unwrap();
     let _registry = RegistryTestGuard::new(temp_dir.path());
     let primary = PumasApi::new(temp_dir.path()).await.unwrap();
     assert!(primary.is_primary());
 
-    let client = PumasApi::new(temp_dir.path()).await.unwrap();
-    assert!(!client.is_primary());
+    let err = match PumasApi::new(temp_dir.path()).await {
+        Ok(_) => panic!("second PumasApi::new should reject an existing primary"),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(err, PumasError::InvalidParams { message } if message.contains("PumasLocalClient"))
+    );
 }
 
 #[tokio::test]
@@ -177,54 +182,27 @@ async fn test_start_ipc_server_is_idempotent() {
 }
 
 #[tokio::test]
-async fn test_discover_returns_working_client_for_basic_ipc_methods() {
+async fn test_explicit_local_client_connects_to_running_primary_for_selector_snapshot() {
     let temp_dir = TempDir::new().unwrap();
     let _registry = RegistryTestGuard::new(temp_dir.path());
     let _primary = PumasApi::new(temp_dir.path()).await.unwrap();
 
-    let client = PumasApi::discover().await.unwrap();
-    assert!(!client.is_primary());
-
-    let models = tokio::time::timeout(std::time::Duration::from_secs(10), client.list_models())
+    let instances = PumasLocalClient::discover_ready_instances().unwrap();
+    assert_eq!(instances.len(), 1);
+    let client = PumasLocalClient::connect(instances[0].clone())
         .await
-        .expect("list_models timed out")
         .unwrap();
-    assert!(models.is_empty());
 
-    let search = tokio::time::timeout(
+    let snapshot = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        client.search_models("", 10, 0),
+        client.model_library_selector_snapshot(
+            crate::models::ModelLibrarySelectorSnapshotRequest::default(),
+        ),
     )
     .await
-    .expect("search_models timed out")
+    .expect("model_library_selector_snapshot timed out")
     .unwrap();
-    assert!(search.models.is_empty());
-
-    let status = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        client.get_library_status(),
-    )
-    .await
-    .expect("get_library_status timed out")
-    .unwrap();
-    assert!(status.success);
-
-    let processes = tokio::time::timeout(
-        std::time::Duration::from_secs(10),
-        client.get_running_processes(),
-    )
-    .await
-    .expect("get_running_processes timed out");
-    assert!(processes.is_empty());
-
-    let _ = client.is_online();
-    let _ = client.list_conversions();
-
-    let disk = tokio::time::timeout(std::time::Duration::from_secs(10), client.get_disk_space())
-        .await
-        .expect("get_disk_space timed out")
-        .unwrap();
-    assert!(disk.success);
+    assert!(snapshot.rows.is_empty());
 }
 
 #[tokio::test]

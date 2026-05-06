@@ -824,6 +824,90 @@ async fn test_model_library_selector_snapshot_is_direct_and_does_not_regenerate_
 }
 
 #[tokio::test]
+async fn test_subscribe_model_library_updates_since_recovers_snapshot_gap() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let selector = api
+        .model_library_selector_snapshot(ModelLibrarySelectorSnapshotRequest::default())
+        .await
+        .unwrap();
+
+    let model_id = "llm/test/subscription-gap";
+    let model_dir = temp_dir
+        .path()
+        .join("shared-resources/models")
+        .join(model_id);
+    std::fs::create_dir_all(&model_dir).unwrap();
+    std::fs::write(model_dir.join("config.json"), r#"{"model_type":"llama"}"#).unwrap();
+    std::fs::write(model_dir.join("model.safetensors"), b"test").unwrap();
+    std::fs::write(
+        model_dir.join("metadata.json"),
+        serde_json::to_string_pretty(&serde_json::json!({
+            "model_id": model_id,
+            "family": "test",
+            "model_type": "llm",
+            "official_name": "Subscription Gap",
+            "cleaned_name": "subscription-gap",
+            "files": [{"name": "model.safetensors"}]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    let models = api.list_models().await.unwrap();
+    assert!(models.iter().any(|model| model.id == model_id));
+
+    let subscription = api
+        .subscribe_model_library_updates_since(&selector.cursor)
+        .await
+        .unwrap();
+
+    assert!(!subscription.stale_cursor);
+    assert!(!subscription.snapshot_required);
+    assert_eq!(subscription.requested_cursor, selector.cursor);
+    assert!(subscription.recovered_events.iter().any(|event| {
+        event.model_id == model_id && event.change_kind == ModelLibraryChangeKind::ModelAdded
+    }));
+    assert_eq!(
+        subscription.cursor_after_recovery,
+        subscription
+            .recovered_events
+            .last()
+            .map(|event| event.cursor.clone())
+            .unwrap()
+    );
+}
+
+#[tokio::test]
+async fn test_subscribe_model_library_updates_since_reports_stale_cursor() {
+    let temp_dir = create_test_env();
+    let _registry = RegistryTestGuard::new(temp_dir.path());
+    let api = PumasApi::builder(temp_dir.path())
+        .with_hf_client(false)
+        .with_process_manager(false)
+        .build()
+        .await
+        .unwrap();
+
+    let subscription = api
+        .subscribe_model_library_updates_since("not-a-valid-cursor")
+        .await
+        .unwrap();
+
+    assert!(subscription.stale_cursor);
+    assert!(subscription.snapshot_required);
+    assert!(subscription.recovered_events.is_empty());
+    assert_eq!(subscription.requested_cursor, "not-a-valid-cursor");
+}
+
+#[tokio::test]
 async fn test_list_models_reconciliation_advances_update_feed() {
     let temp_dir = create_test_env();
     let _registry = RegistryTestGuard::new(temp_dir.path());

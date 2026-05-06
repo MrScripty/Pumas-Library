@@ -291,13 +291,13 @@ snapshot-to-live race.
 
 **Tasks:**
 - [ ] Move or wrap model-library update publication behind a core event bus.
-- [ ] Add `subscribe_model_library_updates_since(cursor)`.
-- [ ] Make subscription startup replay durable events after the cursor before
+- [x] Add `subscribe_model_library_updates_since(cursor)`.
+- [x] Make subscription startup replay durable events after the cursor before
   yielding live events.
-- [ ] Return `cursor_after_recovery` before live event processing.
-- [ ] Preserve `list_model_library_updates_since(cursor, limit)` for reconnect
+- [x] Return `cursor_after_recovery` before live event processing.
+- [x] Preserve `list_model_library_updates_since(cursor, limit)` for reconnect
   recovery.
-- [ ] Define stale cursor behavior that forces a fresh selector snapshot.
+- [x] Define stale cursor behavior that forces a fresh selector snapshot.
 
 **Verification:**
 - Test commits an update after snapshot cursor creation and before
@@ -307,7 +307,7 @@ snapshot-to-live race.
 - Disconnect/reconnect tests recover missed events or report stale cursor.
 - Atomic commit after successful verification.
 
-**Status:** Not started
+**Status:** In progress
 
 ### Milestone 5: GUI Forwarding From Core Events
 
@@ -475,6 +475,13 @@ Update during implementation:
   package-facts summary cache rows affected selector output but did not emit
   model-library update events. Summary cache changes now emit
   `PackageFactsModified` events with `refresh_scope = Summary`.
+- 2026-05-06: Milestone 4 first slice added
+  `subscribe_model_library_updates_since(cursor)` as a recovery-first typed
+  handoff. It pages the durable update feed from the snapshot cursor, returns
+  `cursor_after_recovery`, reports stale cursors with `snapshot_required`, and
+  explicitly leaves `live_stream_ready = false` until a core live bus is added.
+  Codebase inspection confirmed no existing core broadcast bus; current GUI
+  SSE polls from `None` and will be handled in later slices.
 
 ## Commit Cadence Notes
 
@@ -615,6 +622,12 @@ After each worker wave:
     summary cache updates without a selector-specific refresh job;
   - changed package-facts summary cache writes to emit model-library update
     events.
+- Milestone 4 recovery-first subscription handoff:
+  - added `ModelLibraryUpdateSubscription`;
+  - added direct owner/API recovery from a snapshot cursor;
+  - tested the snapshot-gap case and stale cursor behavior;
+  - recorded that the live bus remains pending rather than hiding that gap
+    behind the current polling SSE path.
 
 ### Deviations
 
@@ -653,6 +666,10 @@ After each worker wave:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library package_facts`
+- Milestone 4 recovery-first subscription verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library subscribe_model_library_updates_since`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library model_library_update`
 
 ### Traceability Links
 

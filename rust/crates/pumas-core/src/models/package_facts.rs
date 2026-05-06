@@ -325,6 +325,19 @@ pub struct ModelLibraryUpdateNotification {
     pub snapshot_required: bool,
 }
 
+/// Startup result for a cursor-based model-library update subscription.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub struct ModelLibraryUpdateSubscription {
+    pub requested_cursor: String,
+    pub cursor_after_recovery: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub recovered_events: Vec<ModelLibraryUpdateEvent>,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+    pub live_stream_ready: bool,
+}
+
 impl From<ModelLibraryUpdateFeed> for ModelLibraryUpdateNotification {
     fn from(feed: ModelLibraryUpdateFeed) -> Self {
         Self {

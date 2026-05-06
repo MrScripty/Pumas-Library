@@ -2549,6 +2549,54 @@ impl ModelLibrary {
         self.index.list_model_library_updates_since(cursor, limit)
     }
 
+    /// Recover model-library updates after a snapshot cursor before live delivery.
+    ///
+    /// This establishes the subscription handoff contract without pretending a
+    /// live bus exists yet. Later live-stream work can attach after this
+    /// recovery result and perform a final durable catch-up from
+    /// `cursor_after_recovery`.
+    pub async fn subscribe_model_library_updates_since(
+        &self,
+        cursor: &str,
+    ) -> Result<crate::models::ModelLibraryUpdateSubscription> {
+        const RECOVERY_PAGE_LIMIT: usize = 250;
+
+        let requested_cursor = cursor.to_string();
+        let mut next_cursor = requested_cursor.clone();
+        let mut recovered_events = Vec::new();
+
+        loop {
+            let feed = self
+                .index
+                .list_model_library_updates_since(Some(&next_cursor), RECOVERY_PAGE_LIMIT)?;
+            if feed.stale_cursor || feed.snapshot_required {
+                return Ok(crate::models::ModelLibraryUpdateSubscription {
+                    requested_cursor,
+                    cursor_after_recovery: feed.cursor,
+                    recovered_events,
+                    stale_cursor: feed.stale_cursor,
+                    snapshot_required: feed.snapshot_required,
+                    live_stream_ready: false,
+                });
+            }
+
+            next_cursor = feed.cursor.clone();
+            let event_count = feed.events.len();
+            recovered_events.extend(feed.events);
+
+            if event_count < RECOVERY_PAGE_LIMIT {
+                return Ok(crate::models::ModelLibraryUpdateSubscription {
+                    requested_cursor,
+                    cursor_after_recovery: next_cursor,
+                    recovered_events,
+                    stale_cursor: false,
+                    snapshot_required: false,
+                    live_stream_ready: false,
+                });
+            }
+        }
+    }
+
     /// Append a library-wide refresh event for consumers with cached model lists.
     ///
     /// Some list annotations are computed at read time instead of persisted in

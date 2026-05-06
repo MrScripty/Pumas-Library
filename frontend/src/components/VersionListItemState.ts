@@ -34,6 +34,15 @@ function getRingPercent(progress: InstallationProgress | null): number | null {
 }
 
 function getPackageLabel(progress: InstallationProgress | null): string {
+  if (progress?.stage === 'download') {
+    const downloadPercent = getDownloadPercent(progress);
+    if (downloadPercent !== null && (progress.downloaded_bytes > 0 || downloadPercent > 0)) {
+      return `${downloadPercent}%`;
+    }
+    if (progress.stage_progress > 0) {
+      return `${Math.round(progress.stage_progress)}%`;
+    }
+  }
   if (progress && progress.dependency_count !== null) {
     return `${progress.completed_dependencies}/${progress.dependency_count}`;
   }

@@ -182,6 +182,40 @@ describe('useInstallationManager', () => {
     expect(onRefreshVersions).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves failed completed progress so the UI can show the failed install', async () => {
+    const failedProgress: InstallationProgress = {
+      ...activeProgress,
+      completed_at: '2026-04-12T00:05:00Z',
+      success: false,
+      error: 'Could not find Ollama binary in extracted archive',
+      log_path: '/tmp/install-ollama.log',
+    };
+    normalizeInstallationProgressMock.mockImplementation((progress) => ({
+      adjustedProgress: progress,
+      networkStatus: 'failed',
+    }));
+    getInstallationProgressMock
+      .mockResolvedValueOnce(activeProgress)
+      .mockResolvedValueOnce(failedProgress);
+
+    const { result } = renderHook(() => useInstallationManager({
+      availableVersions,
+      onRefreshVersions: vi.fn(),
+    }));
+
+    await act(async () => {
+      await result.current.fetchInstallationProgress();
+    });
+
+    await act(async () => {
+      await result.current.fetchInstallationProgress();
+    });
+
+    expect(result.current.installingTag).toBeNull();
+    expect(result.current.installationProgress).toEqual(failedProgress);
+    expect(result.current.installNetworkStatus).toBe('failed');
+  });
+
   it('resets transient install state when installVersion fails before polling begins', async () => {
     installVersionApiMock.mockResolvedValue({
       success: false,

@@ -120,7 +120,7 @@ describe('Header Component', () => {
     expect(onDownloadLauncherUpdate).toHaveBeenCalledTimes(1);
   });
 
-  it('displays installation progress when installing', () => {
+  it('displays runtime download activity without taking over the header with install percent', () => {
     const installationProgress = {
       tag: 'v0.6.0',
       started_at: new Date().toISOString(),
@@ -139,8 +139,50 @@ describe('Header Component', () => {
     };
 
     render(<Header {...defaultProps} installationProgress={installationProgress} />);
-    expect(screen.getByText(/Downloading at/)).toBeInTheDocument();
-    expect(screen.getByText(/25% complete/)).toBeInTheDocument();
+    expect(screen.getByText(/Downloading 1 runtime/)).toBeInTheDocument();
+    expect(screen.getByText(/1000\.0 KB\/s/)).toBeInTheDocument();
+    expect(screen.queryByText(/25% complete/)).not.toBeInTheDocument();
+  });
+
+  it('combines model and runtime download counts and speed in the header', () => {
+    const activeModelDownload = {
+      downloadId: 'dl-1',
+      repoId: 'meta-llama/Llama-3.2-1B-Instruct',
+      status: 'downloading' as const,
+      progress: 42,
+      downloadedBytes: 2 * 1024 * 1024 * 1024,
+      totalBytes: 5 * 1024 * 1024 * 1024,
+      speed: 4 * 1024 * 1024,
+      etaSeconds: 120,
+    };
+    const installationProgress = {
+      tag: 'v0.22.1',
+      started_at: new Date().toISOString(),
+      stage: 'download' as const,
+      stage_progress: 0,
+      overall_progress: 0,
+      current_item: 'ollama-linux-amd64.tar.zst',
+      download_speed: 1.7 * 1024 * 1024,
+      eta_seconds: 60,
+      total_size: 10240000,
+      downloaded_bytes: 0,
+      dependency_count: null,
+      completed_dependencies: 0,
+      completed_items: [],
+      error: null,
+    };
+
+    render(
+      <Header
+        {...defaultProps}
+        activeModelDownload={activeModelDownload}
+        activeModelDownloadCount={1}
+        installationProgress={installationProgress}
+      />
+    );
+
+    expect(screen.getByText(/Downloading 1 model & 1 runtime/)).toBeInTheDocument();
+    expect(screen.getByText(/5\.7 MB\/s/)).toBeInTheDocument();
   });
 
   it('shows checking state while network and model library status are unresolved', () => {

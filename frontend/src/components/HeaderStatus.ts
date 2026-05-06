@@ -1,4 +1,4 @@
-import { Clock, Database, Download, Package, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
+import { Clock, Database, Download, RefreshCw, WifiOff, type LucideIcon } from 'lucide-react';
 import type { ActiveModelDownload } from '../hooks/useActiveModelDownload';
 import { formatBytes, formatSpeed } from '../utils/formatters';
 
@@ -33,46 +33,56 @@ export interface HeaderStatusInfo {
   text: string;
 }
 
-function getInstallStageName(stage: InstallationProgress['stage']): string {
-  const stageNames: Partial<Record<InstallationProgress['stage'], string>> = {
-    extract: 'Extracting',
-    setup: 'Finalizing setup',
-    venv: 'Creating environment',
-  };
-  return stageNames[stage] ?? 'Installing';
+function pluralize(count: number, singular: string): string {
+  return `${count} ${count === 1 ? singular : `${singular}s`}`;
 }
 
-function getDependencyPackageInfo(installationProgress: InstallationProgress): string {
-  if (installationProgress.dependency_count !== null) {
-    return `${installationProgress.completed_dependencies}/${installationProgress.dependency_count} packages`;
+function joinDownloadParts(parts: string[]): string {
+  if (parts.length <= 1) {
+    return parts[0] ?? '';
   }
-  return 'Installing packages';
+
+  return `${parts.slice(0, -1).join(', ')} & ${parts[parts.length - 1]}`;
 }
 
-function getInstallationStatus(installationProgress: InstallationProgress): HeaderStatusInfo {
-  if (installationProgress.stage === 'download' && installationProgress.download_speed !== null) {
-    return {
-      icon: Download,
-      spinning: false,
-      text: `Downloading at ${formatSpeed(installationProgress.download_speed)} · ${installationProgress.overall_progress}% complete`,
-    };
+function getCombinedDownloadStatus({
+  activeModelDownload,
+  activeModelDownloadCount,
+  installationProgress,
+}: {
+  activeModelDownload?: ActiveModelDownload | null;
+  activeModelDownloadCount: number;
+  installationProgress?: InstallationProgress | null;
+}): HeaderStatusInfo | null {
+  const runtimeActive = Boolean(installationProgress && !installationProgress.completed_at);
+  const modelCount = activeModelDownload ? Math.max(activeModelDownloadCount, 1) : 0;
+  const runtimeCount = runtimeActive ? 1 : 0;
+
+  if (!runtimeActive) {
+    return null;
   }
 
-  if (installationProgress.stage === 'dependencies') {
-    const speedInfo = installationProgress.download_speed !== null
-      ? ` · ${formatSpeed(installationProgress.download_speed)}`
-      : '';
-    return {
-      icon: Package,
-      spinning: false,
-      text: `Installing · ${getDependencyPackageInfo(installationProgress)}${speedInfo}`,
-    };
-  }
+  const parts = [
+    ...(modelCount > 0 ? [pluralize(modelCount, 'model')] : []),
+    ...(runtimeCount > 0 ? [pluralize(runtimeCount, 'runtime')] : []),
+  ];
+  const modelSpeed = activeModelDownload?.speed && activeModelDownload.speed > 0
+    ? activeModelDownload.speed
+    : 0;
+  const runtimeSpeed = installationProgress?.download_speed && installationProgress.download_speed > 0
+    ? installationProgress.download_speed
+    : 0;
+  const totalSpeed = modelSpeed + runtimeSpeed;
+  const speedInfo = totalSpeed > 0 ? ` @ ${formatSpeed(totalSpeed)}` : '';
+  const hasDownloadActivity =
+    Boolean(activeModelDownload?.status === 'downloading') ||
+    installationProgress?.stage === 'download' ||
+    totalSpeed > 0;
 
   return {
     icon: Download,
     spinning: false,
-    text: `${getInstallStageName(installationProgress.stage)} · ${installationProgress.overall_progress}% complete`,
+    text: `${hasDownloadActivity ? 'Downloading' : 'Installing'} ${joinDownloadParts(parts)}${speedInfo}`,
   };
 }
 
@@ -161,8 +171,13 @@ export function getHeaderStatusInfo({
   modelLibraryLoaded?: boolean | null;
   networkAvailable?: boolean | null;
 }): HeaderStatusInfo {
-  if (installationProgress && !installationProgress.completed_at) {
-    return getInstallationStatus(installationProgress);
+  const combinedDownloadStatus = getCombinedDownloadStatus({
+    activeModelDownload,
+    activeModelDownloadCount,
+    installationProgress,
+  });
+  if (combinedDownloadStatus) {
+    return combinedDownloadStatus;
   }
 
   if (activeModelDownload) {

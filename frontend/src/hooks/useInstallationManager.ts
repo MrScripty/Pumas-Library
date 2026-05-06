@@ -113,6 +113,30 @@ export function useInstallationManager({
         setInstallNetworkStatus(networkStatus);
 
         return adjustedProgress;
+      } else if (progress?.completed_at && !progress.success) {
+        const trackerState = {
+          lastDownloadTag: lastDownloadTagRef.current,
+          lastStage: lastStageRef.current,
+          networkState: networkStateRef.current,
+        };
+        const { adjustedProgress } = normalizeInstallationProgress(
+          progress,
+          availableVersions,
+          trackerState,
+          Date.now()
+        );
+        lastDownloadTagRef.current = trackerState.lastDownloadTag;
+        lastStageRef.current = trackerState.lastStage;
+
+        if (installPollRef.current) {
+          clearInterval(installPollRef.current);
+          installPollRef.current = null;
+        }
+        setInstallingTag(null);
+        setInstallationProgress(adjustedProgress);
+        setInstallNetworkStatus('failed');
+
+        return adjustedProgress;
       } else {
         // Installation completed (progress.completed_at set) or no progress
         // Clear all state and stop polling

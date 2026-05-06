@@ -29,6 +29,18 @@ const dependencyProgress: InstallationProgress = {
   error: null,
 };
 
+const downloadProgress: InstallationProgress = {
+  ...dependencyProgress,
+  stage: 'download',
+  stage_progress: 50,
+  overall_progress: 8,
+  current_item: 'ollama-linux-amd64.tar.zst',
+  downloaded_bytes: 512,
+  total_size: 1024,
+  dependency_count: null,
+  completed_dependencies: 0,
+};
+
 function getClosestButton(label: string): HTMLButtonElement {
   const button = screen.getByText(label).closest('button');
   if (!(button instanceof HTMLButtonElement)) {
@@ -136,5 +148,15 @@ describe('VersionListItem', () => {
     );
 
     expect(screen.getByText('Cancel')).toBeInTheDocument();
+  });
+
+  it('shows download percent while an install archive is downloading', () => {
+    renderVersionListItem({
+      isInstalling: true,
+      progress: downloadProgress,
+      installNetworkStatus: 'downloading',
+    });
+
+    expect(screen.getByText('50%')).toBeInTheDocument();
   });
 });

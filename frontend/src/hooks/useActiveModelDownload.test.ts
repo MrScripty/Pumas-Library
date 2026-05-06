@@ -93,6 +93,42 @@ describe('useActiveModelDownload', () => {
     });
   });
 
+  it('reports aggregate speed across active downloads', async () => {
+    listModelDownloadsMock.mockResolvedValueOnce({
+      success: true,
+      downloads: [
+        {
+          repoId: 'repo-a',
+          downloadId: 'dl-a',
+          status: 'downloading',
+          progress: 45,
+          downloadedBytes: 450,
+          totalBytes: 1000,
+          speed: 64,
+          etaSeconds: 12,
+        },
+        {
+          repoId: 'repo-b',
+          downloadId: 'dl-b',
+          status: 'downloading',
+          progress: 20,
+          downloadedBytes: 200,
+          totalBytes: 1000,
+          speed: 32,
+          etaSeconds: 20,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() => useActiveModelDownload());
+
+    await flushMicrotasks();
+
+    expect(result.current.activeDownloadCount).toBe(2);
+    expect(result.current.activeDownload?.downloadId).toBe('dl-a');
+    expect(result.current.activeDownload?.speed).toBe(96);
+  });
+
   it('refreshes the active download on the polling interval', async () => {
     listModelDownloadsMock
       .mockResolvedValueOnce({

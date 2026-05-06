@@ -129,6 +129,9 @@ export function normalizeInstallationProgress(
     completed_dependencies: progress.completed_dependencies ?? 0,
     completed_items: progress.completed_items ?? [],
     error: progress.error ?? null,
+    completed_at: progress.completed_at,
+    success: progress.success,
+    log_path: progress.log_path ?? null,
   };
 
   const networkStatus = computeNetworkStatus(

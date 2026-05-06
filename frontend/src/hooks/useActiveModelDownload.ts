@@ -76,6 +76,10 @@ export function useActiveModelDownload() {
             const bProgress = typeof b.progress === 'number' ? b.progress : 0;
             return bProgress - aProgress;
           })[0];
+        const aggregateSpeed = activeDownloads.reduce((sum, download) => {
+          const speed = typeof download.speed === 'number' ? download.speed : 0;
+          return sum + Math.max(speed, 0);
+        }, 0);
 
         if (!active || !active.downloadId) {
           if (!cancelled) setActiveDownload(null);
@@ -90,7 +94,7 @@ export function useActiveModelDownload() {
             progress: typeof active.progress === 'number' ? active.progress : 0,
             downloadedBytes: typeof active.downloadedBytes === 'number' ? active.downloadedBytes : null,
             totalBytes: typeof active.totalBytes === 'number' ? active.totalBytes : null,
-            speed: typeof active.speed === 'number' ? active.speed : null,
+            speed: aggregateSpeed > 0 ? aggregateSpeed : null,
             etaSeconds: typeof active.etaSeconds === 'number' ? active.etaSeconds : null,
           });
         }

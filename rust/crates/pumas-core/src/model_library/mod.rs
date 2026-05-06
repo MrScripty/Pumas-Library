@@ -39,6 +39,7 @@ pub mod merge;
 mod metadata_v2;
 mod model_type_resolver;
 mod naming;
+mod read_only;
 pub mod sharding;
 mod task_signature;
 mod types;
@@ -88,6 +89,7 @@ pub use model_type_resolver::{
     ModelTypeResolution,
 };
 pub use naming::normalize_name;
+pub use read_only::PumasReadOnlyLibrary;
 pub use task_signature::{
     normalize_task_signature, NormalizedTaskSignature, TaskNormalizationStatus,
 };

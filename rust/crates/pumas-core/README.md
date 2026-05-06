@@ -46,6 +46,22 @@ registry state. New API work is splitting that behavior into explicit
 `PumasLibraryInstance`, `PumasLocalClient`, and `PumasReadOnlyLibrary` roles so
 callers choose ownership and transport behavior directly.
 
+`PumasReadOnlyLibrary` is available for snapshot-style consumers that only need
+indexed state from an existing model library:
+
+```rust
+use pumas_library::{models::ModelLibrarySelectorSnapshotRequest, PumasReadOnlyLibrary, Result};
+
+fn list_selector_rows() -> Result<()> {
+    let library = PumasReadOnlyLibrary::open("/path/to/pumas/shared-resources/models")?;
+    let snapshot = library.model_library_selector_snapshot(
+        ModelLibrarySelectorSnapshotRequest::default(),
+    )?;
+    println!("Indexed rows: {}", snapshot.rows.len());
+    Ok(())
+}
+```
+
 ## Feature Flags
 
 | Feature | Default | Description |

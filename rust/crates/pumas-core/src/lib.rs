@@ -63,7 +63,7 @@ pub use metadata::MetadataManager;
 pub use model_library::sharding::{self, ShardValidation};
 pub use model_library::{
     BatchImportProgress, DownloadRequest, HfAuthStatus, HfSearchParams, HuggingFaceClient,
-    ModelImporter, ModelLibrary, ModelMapper,
+    ModelImporter, ModelLibrary, ModelMapper, PumasReadOnlyLibrary,
 };
 pub use models::{
     BundleComponentManifestEntry, BundleComponentState, BundleFormat, CommitInfo,

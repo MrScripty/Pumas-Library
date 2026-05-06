@@ -22,6 +22,9 @@ building utilities that handle FTS5 special character escaping and prefix matchi
   compatibility with international model names.
 - **Separate query builder**: FTS5 has its own query syntax with special characters that need
   escaping. Centralizing query construction prevents injection and escaping bugs.
+- **Read-only index handle**: Snapshot-style readers can open an existing
+  `models.db` with SQLite read-only flags and `PRAGMA query_only=ON` so they do
+  not create schema or mutate indexed state.
 
 ## Dependencies
 

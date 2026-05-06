@@ -23,6 +23,7 @@ full-text search via SQLite FTS5.
 | `hf_cache.rs` | `HfSearchCache` - Cached HuggingFace search results and repo details |
 | `identifier.rs` | GGUF metadata extraction and model type identification |
 | `naming.rs` | Model name normalization and base name extraction |
+| `read_only.rs` | `PumasReadOnlyLibrary` - Snapshot-only reader over an existing model index with no owner lifecycle |
 | `hashing.rs` | Dual-hash computation (SHA256 + BLAKE3) and fast-hash for dedup |
 | `link_registry.rs` | `LinkRegistry` - Tracks created symlinks/hardlinks for cascade delete |
 | `watcher.rs` | `ModelLibraryWatcher` - Filesystem watcher triggering index rebuilds on changes |
@@ -94,6 +95,9 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Selector snapshots must stay index/cache-only and expose missing, invalid,
   partial, or needs-detail state instead of performing targeted repair or
   package-fact regeneration inline.
+- `PumasReadOnlyLibrary` must open an existing SQLite index in read-only mode.
+  It must not create schema, claim a local instance, start watchers, reconcile,
+  or mutate model state.
 
 ## Revisit Triggers
 - A second persisted source of truth is introduced for model-state queries.
@@ -134,6 +138,8 @@ Provide a single backend-owned model registry that can import, classify, validat
 - Selector rows are safe list references. `indexed_path` is display/debug data,
   and `entry_path` is executable only when entry and artifact state are both
   `ready`.
+- Read-only consumers use `PumasReadOnlyLibrary` for snapshot-style access when
+  they do not own the local Pumas instance lifecycle.
 
 ## Structured Producer Contract
 

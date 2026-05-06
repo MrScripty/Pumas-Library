@@ -233,7 +233,7 @@ without broad transport work.
   state, display fields, and detail state.
 - [x] Add direct in-process selector snapshot access through the current owner
   surface. Final `PumasLibraryInstance` naming/export remains in Milestone 7.
-- [ ] Add `PumasReadOnlyLibrary` selector snapshot access with no background
+- [x] Add `PumasReadOnlyLibrary` selector snapshot access with no background
   work or registry claim.
 - [ ] Add tests proving non-ready entry/artifact states are not executable.
 - [ ] Add benchmark or timing test for 50-100 warm direct/read-only rows.
@@ -458,6 +458,10 @@ Update during implementation:
   transitional `PumasApi::model_library_selector_snapshot`. This direct surface
   intentionally does not add RPC/client dispatch; explicit local-client
   transport remains in Milestone 6 and final role naming remains in Milestone 7.
+- 2026-05-06: Milestone 2 Slice 2.4 added `PumasReadOnlyLibrary`, backed by
+  `ModelIndex::open_read_only`. It opens an existing `models.db` with SQLite
+  read-only flags and `query_only`, exposes only selector snapshots, and does
+  not create schema, claim an instance, reconcile, or start watchers.
 
 ## Commit Cadence Notes
 
@@ -580,6 +584,11 @@ After each worker wave:
     fallback;
   - covered the direct API path and proved it does not regenerate missing
     package-facts summaries.
+- Milestone 2 Slice 2.4 read-only API:
+  - added `PumasReadOnlyLibrary`;
+  - added `ModelIndex::open_read_only`;
+  - proved read-only selector access works against an existing index and does
+    not create a missing database.
 
 ### Deviations
 
@@ -606,6 +615,10 @@ After each worker wave:
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
 - Milestone 2 Slice 2.3 verification:
   - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
+- Milestone 2 Slice 2.4 verification:
+  - `cargo fmt --manifest-path rust/Cargo.toml --all`
+  - `cargo test --manifest-path rust/Cargo.toml -p pumas-library read_only`
   - `cargo test --manifest-path rust/Cargo.toml -p pumas-library selector_snapshot`
 
 ### Traceability Links

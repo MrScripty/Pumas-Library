@@ -9,7 +9,7 @@ mod package_facts_cache;
 
 use crate::models::{ModelFactFamily, ModelLibraryChangeKind, ModelLibraryRefreshScope};
 use crate::{PumasError, Result};
-use rusqlite::{params, Connection, OptionalExtension, Row};
+use rusqlite::{params, Connection, OpenFlags, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json::Value;
@@ -270,6 +270,19 @@ impl ModelIndex {
         Ok(index)
     }
 
+    /// Open an existing model index with a read-only SQLite connection.
+    pub fn open_read_only(db_path: impl Into<PathBuf>) -> Result<Self> {
+        let db_path = db_path.into();
+        let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        Self::configure_read_only_connection(&conn)?;
+
+        Ok(Self {
+            db_path,
+            conn: Arc::new(Mutex::new(conn)),
+            fts5_config: FTS5Config::default(),
+        })
+    }
+
     /// Configure connection with optimal settings.
     fn configure_connection(conn: &Connection) -> Result<()> {
         conn.execute_batch(
@@ -278,6 +291,17 @@ impl ModelIndex {
             PRAGMA journal_mode=WAL;
             PRAGMA busy_timeout=30000;
             PRAGMA synchronous=NORMAL;
+            PRAGMA temp_store=MEMORY;
+            ",
+        )?;
+        Ok(())
+    }
+
+    fn configure_read_only_connection(conn: &Connection) -> Result<()> {
+        conn.execute_batch(
+            "
+            PRAGMA foreign_keys=ON;
+            PRAGMA query_only=ON;
             PRAGMA temp_store=MEMORY;
             ",
         )?;

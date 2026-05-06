@@ -766,7 +766,7 @@ Verification:
 
 #### R1 - Backend Download Event Contract
 
-Status: Planned.
+Status: Completed on 2026-05-06.
 
 - Add a core-owned download update snapshot and subscription contract with a
   monotonic cursor.
@@ -784,6 +784,24 @@ Verification:
   identity.
 - Rust integration test showing snapshot plus subscribe-since does not miss an
   update inserted between snapshot and subscription setup.
+
+Implementation notes:
+
+- Added core download snapshot and update notification DTOs around the existing
+  `ModelDownloadProgress` shape.
+- `HuggingFaceClient` now owns a monotonic download revision and broadcast
+  sender, publishes snapshots from state transitions, and throttles chunk-level
+  progress publishing.
+- `PumasApi` exposes download snapshot, subscription, and cursor recovery
+  helpers for the RPC/Electron slice.
+- Fixed a discovered cancellation-state bug: `cancel_download` could abort the
+  task before a terminal `Cancelled` state was written or published.
+
+Verification completed:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library test_cancel_download_aborts_tracked_task -- --nocapture`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library download_notification_since -- --nocapture`
 
 #### R2 - Download Stream Through RPC And Electron
 

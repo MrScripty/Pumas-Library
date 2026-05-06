@@ -358,6 +358,54 @@ impl PumasApi {
         }
     }
 
+    /// Snapshot all HuggingFace downloads with a monotonic cursor.
+    pub async fn get_hf_download_snapshot(&self) -> models::ModelDownloadSnapshot {
+        if let Some(ref client) = self.primary().hf_client {
+            client.download_snapshot().await
+        } else {
+            models::ModelDownloadSnapshot {
+                cursor: "download:0".to_string(),
+                revision: 0,
+                downloads: Vec::new(),
+            }
+        }
+    }
+
+    /// Subscribe to backend-owned HuggingFace download state updates.
+    pub fn subscribe_hf_download_updates(
+        &self,
+    ) -> Option<tokio::sync::broadcast::Receiver<models::ModelDownloadUpdateNotification>> {
+        self.primary()
+            .hf_client
+            .as_ref()
+            .map(|client| client.subscribe_download_updates())
+    }
+
+    /// Build a recovery notification for a download update cursor.
+    pub async fn hf_download_notification_since(
+        &self,
+        cursor: Option<&str>,
+    ) -> models::ModelDownloadUpdateNotification {
+        let snapshot = self.get_hf_download_snapshot().await;
+        if let Some(ref client) = self.primary().hf_client {
+            client
+                .download_notification_since(cursor, snapshot.clone())
+                .unwrap_or(models::ModelDownloadUpdateNotification {
+                    cursor: snapshot.cursor.clone(),
+                    snapshot,
+                    stale_cursor: false,
+                    snapshot_required: false,
+                })
+        } else {
+            models::ModelDownloadUpdateNotification {
+                cursor: snapshot.cursor.clone(),
+                snapshot,
+                stale_cursor: cursor.is_some(),
+                snapshot_required: true,
+            }
+        }
+    }
+
     /// List directories with interrupted downloads (`.part` files) that have
     /// no download persistence entry and no metadata.
     ///

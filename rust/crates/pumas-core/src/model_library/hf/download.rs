@@ -15,11 +15,11 @@ use crate::model_library::types::{DownloadRequest, DownloadStatus, ModelDownload
 use crate::model_library::SelectedArtifactIdentity;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncWriteExt;
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, warn};
 
@@ -43,6 +43,8 @@ const AUXILIARY_FILE_PATTERNS: &[&str] = &[
     "scheduler_config.json",
     "model_index.json",
 ];
+const DOWNLOAD_UPDATE_CURSOR_PREFIX: &str = "download:";
+const DOWNLOAD_PROGRESS_PUBLISH_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Select auxiliary config/tokenizer files from a repo's regular (non-LFS) file list.
 fn select_auxiliary_files(regular_files: &[String]) -> Vec<String> {
@@ -183,6 +185,85 @@ fn selected_artifact_id_for_state(state: &DownloadState) -> Option<String> {
     Some(SelectedArtifactIdentity::from_download_request(request, selected_filenames).artifact_id)
 }
 
+fn download_update_cursor(revision: u64) -> String {
+    format!("{DOWNLOAD_UPDATE_CURSOR_PREFIX}{revision}")
+}
+
+fn parse_download_update_cursor(cursor: &str) -> Option<u64> {
+    cursor
+        .strip_prefix(DOWNLOAD_UPDATE_CURSOR_PREFIX)
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn progress_from_state(state: &DownloadState) -> ModelDownloadProgress {
+    ModelDownloadProgress {
+        download_id: state.download_id.clone(),
+        repo_id: Some(state.repo_id.clone()),
+        selected_artifact_id: selected_artifact_id_for_state(state),
+        model_name: state
+            .download_request
+            .as_ref()
+            .map(|request| request.official_name.clone()),
+        model_type: state
+            .download_request
+            .as_ref()
+            .and_then(|request| request.model_type.clone()),
+        status: state.status,
+        progress: Some(state.progress),
+        downloaded_bytes: Some(state.downloaded_bytes),
+        total_bytes: state.total_bytes,
+        speed: Some(state.speed),
+        eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
+            let remaining = state
+                .total_bytes
+                .unwrap()
+                .saturating_sub(state.downloaded_bytes);
+            Some(remaining as f64 / state.speed)
+        } else {
+            None
+        },
+        retry_attempt: Some(state.retry_attempt),
+        retry_limit: state.retry_limit,
+        retrying: Some(state.retrying),
+        next_retry_delay_seconds: state.next_retry_delay_seconds,
+        error: state.error.clone(),
+    }
+}
+
+async fn build_download_snapshot_from_parts(
+    downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
+    revision: u64,
+) -> crate::models::ModelDownloadSnapshot {
+    let downloads = downloads.read().await;
+    let mut progresses = downloads
+        .values()
+        .map(progress_from_state)
+        .collect::<Vec<_>>();
+    progresses.sort_by(|left, right| left.download_id.cmp(&right.download_id));
+
+    crate::models::ModelDownloadSnapshot {
+        cursor: download_update_cursor(revision),
+        revision,
+        downloads: progresses,
+    }
+}
+
+async fn publish_download_snapshot_from_parts(
+    downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
+    revision: &Arc<AtomicU64>,
+    updates: &broadcast::Sender<crate::models::ModelDownloadUpdateNotification>,
+) {
+    let next_revision = revision.fetch_add(1, Ordering::SeqCst) + 1;
+    let snapshot = build_download_snapshot_from_parts(downloads, next_revision).await;
+    let notification = crate::models::ModelDownloadUpdateNotification {
+        cursor: snapshot.cursor.clone(),
+        snapshot,
+        stale_cursor: false,
+        snapshot_required: false,
+    };
+    let _ = updates.send(notification);
+}
+
 impl HuggingFaceClient {
     fn store_download_task(&self, download_id: String, handle: JoinHandle<()>) {
         let mut tasks = self
@@ -291,6 +372,8 @@ impl HuggingFaceClient {
                 .await;
             }
         }
+
+        self.publish_download_snapshot().await;
     }
 
     /// Restore persisted downloads from disk.
@@ -394,6 +477,8 @@ impl HuggingFaceClient {
 
             downloads.insert(entry.download_id.clone(), state);
         }
+        drop(downloads);
+        self.publish_download_snapshot().await;
     }
 
     /// Start a model download (supports multi-file models).
@@ -632,6 +717,7 @@ impl HuggingFaceClient {
             .write()
             .await
             .insert(download_id.clone(), state);
+        self.publish_download_snapshot().await;
 
         // Ensure destination exists so early metadata projection can be written
         // immediately at download start.
@@ -705,6 +791,8 @@ impl HuggingFaceClient {
         // Spawn download task (uses download_client which has no total timeout)
         let client = self.download_client.clone();
         let downloads = self.downloads.clone();
+        let download_revision = self.download_revision.clone();
+        let download_updates = self.download_updates.clone();
         let download_id_clone = download_id.clone();
         let repo_id = request.repo_id.clone();
         let dest_dir = dest_dir.to_path_buf();
@@ -721,6 +809,8 @@ impl HuggingFaceClient {
             let result = Self::run_download(
                 client,
                 downloads.clone(),
+                download_revision.clone(),
+                download_updates.clone(),
                 &download_id_clone,
                 &repo_id,
                 &files,
@@ -742,11 +832,18 @@ impl HuggingFaceClient {
                     return;
                 }
                 error!("Download failed for {}: {}", repo_id, e);
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(&download_id_clone) {
+                let mut download_states = downloads.write().await;
+                if let Some(state) = download_states.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
                     state.error = Some(e.to_string());
                 }
+                drop(download_states);
+                publish_download_snapshot_from_parts(
+                    &downloads,
+                    &download_revision,
+                    &download_updates,
+                )
+                .await;
                 // Update persistence with error status (preserve for resume)
                 if let Some(ref persistence) = persistence {
                     Self::persist_status_update(
@@ -811,6 +908,8 @@ impl HuggingFaceClient {
     async fn run_download(
         client: reqwest::Client,
         downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
+        download_revision: Arc<AtomicU64>,
+        download_updates: broadcast::Sender<crate::models::ModelDownloadUpdateNotification>,
         download_id: &str,
         repo_id: &str,
         files: &[FileToDownload],
@@ -832,6 +931,8 @@ impl HuggingFaceClient {
                 state.status = DownloadStatus::Downloading;
             }
         }
+        publish_download_snapshot_from_parts(&downloads, &download_revision, &download_updates)
+            .await;
 
         tokio::fs::create_dir_all(dest_dir).await?;
 
@@ -885,6 +986,12 @@ impl HuggingFaceClient {
                         }
                     }
                 }
+                publish_download_snapshot_from_parts(
+                    &downloads,
+                    &download_revision,
+                    &download_updates,
+                )
+                .await;
                 continue;
             }
 
@@ -926,6 +1033,8 @@ impl HuggingFaceClient {
                     state.next_retry_delay_seconds = None;
                 }
             }
+            publish_download_snapshot_from_parts(&downloads, &download_revision, &download_updates)
+                .await;
 
             let url = format!("{}/{}/resolve/main/{}", HF_HUB_BASE, repo_id, filename);
 
@@ -949,10 +1058,17 @@ impl HuggingFaceClient {
                 // Check cancellation before each attempt
                 if cancel_flag.load(Ordering::Relaxed) {
                     let _ = tokio::fs::remove_file(&part_path).await;
-                    let mut downloads = downloads.write().await;
-                    if let Some(state) = downloads.get_mut(download_id) {
+                    let mut download_states = downloads.write().await;
+                    if let Some(state) = download_states.get_mut(download_id) {
                         state.status = DownloadStatus::Cancelled;
                     }
+                    drop(download_states);
+                    publish_download_snapshot_from_parts(
+                        &downloads,
+                        &download_revision,
+                        &download_updates,
+                    )
+                    .await;
                     if let Some(ref persistence) = persistence {
                         Self::remove_persisted_download(
                             persistence.clone(),
@@ -965,10 +1081,17 @@ impl HuggingFaceClient {
 
                 // Check pause before each attempt
                 if pause_flag.load(Ordering::Relaxed) {
-                    let mut downloads = downloads.write().await;
-                    if let Some(state) = downloads.get_mut(download_id) {
+                    let mut download_states = downloads.write().await;
+                    if let Some(state) = download_states.get_mut(download_id) {
                         state.status = DownloadStatus::Paused;
                     }
+                    drop(download_states);
+                    publish_download_snapshot_from_parts(
+                        &downloads,
+                        &download_revision,
+                        &download_updates,
+                    )
+                    .await;
                     if let Some(ref persistence) = persistence {
                         Self::persist_status_update(
                             persistence.clone(),
@@ -997,8 +1120,8 @@ impl HuggingFaceClient {
                     );
 
                     // Reset status to Downloading for the retry
-                    let mut downloads = downloads.write().await;
-                    if let Some(state) = downloads.get_mut(download_id) {
+                    let mut download_states = downloads.write().await;
+                    if let Some(state) = download_states.get_mut(download_id) {
                         state.status = DownloadStatus::Downloading;
                         state.error = None;
                         state.retry_attempt = attempt;
@@ -1006,11 +1129,20 @@ impl HuggingFaceClient {
                         state.retrying = false;
                         state.next_retry_delay_seconds = None;
                     }
+                    drop(download_states);
+                    publish_download_snapshot_from_parts(
+                        &downloads,
+                        &download_revision,
+                        &download_updates,
+                    )
+                    .await;
                 }
 
                 match Self::download_attempt(
                     &client,
                     &downloads,
+                    &download_revision,
+                    &download_updates,
                     download_id,
                     &url,
                     &part_path,
@@ -1098,6 +1230,12 @@ impl HuggingFaceClient {
                                 ));
                             }
                         }
+                        publish_download_snapshot_from_parts(
+                            &downloads,
+                            &download_revision,
+                            &download_updates,
+                        )
+                        .await;
                         debug!("Waiting {:?} before retry", delay);
                         tokio::time::sleep(delay).await;
                     }
@@ -1141,6 +1279,8 @@ impl HuggingFaceClient {
                     state.error = None;
                 }
             }
+            publish_download_snapshot_from_parts(&downloads, &download_revision, &download_updates)
+                .await;
 
             info!(
                 "File {}/{} complete ({}/{})",
@@ -1181,6 +1321,8 @@ impl HuggingFaceClient {
                 None
             }
         };
+        publish_download_snapshot_from_parts(&downloads, &download_revision, &download_updates)
+            .await;
 
         // Invoke completion callback for in-place import
         if let (Some(ref callback), Some(info)) = (&completion_callback, completion_info) {
@@ -1205,6 +1347,8 @@ impl HuggingFaceClient {
     async fn download_attempt(
         client: &reqwest::Client,
         downloads: &Arc<RwLock<HashMap<String, DownloadState>>>,
+        download_revision: &Arc<AtomicU64>,
+        download_updates: &broadcast::Sender<crate::models::ModelDownloadUpdateNotification>,
         download_id: &str,
         url: &str,
         part_path: &Path,
@@ -1267,16 +1411,24 @@ impl HuggingFaceClient {
         let mut downloaded: u64 = if is_resuming { resume_from_byte } else { 0 };
         let mut stream = response.bytes_stream();
         let start_time = std::time::Instant::now();
+        let mut last_publish = Instant::now();
 
         while let Some(chunk) = stream.next().await {
             if cancel_flag.load(Ordering::Relaxed) {
                 drop(file);
                 let _ = tokio::fs::remove_file(part_path).await;
 
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(download_id) {
+                let mut download_states = downloads.write().await;
+                if let Some(state) = download_states.get_mut(download_id) {
                     state.status = DownloadStatus::Cancelled;
                 }
+                drop(download_states);
+                publish_download_snapshot_from_parts(
+                    downloads,
+                    download_revision,
+                    download_updates,
+                )
+                .await;
 
                 return Err(PumasError::DownloadCancelled);
             }
@@ -1286,10 +1438,17 @@ impl HuggingFaceClient {
                 drop(file);
                 // Preserve .part file for resume
 
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(download_id) {
+                let mut download_states = downloads.write().await;
+                if let Some(state) = download_states.get_mut(download_id) {
                     state.status = DownloadStatus::Paused;
                 }
+                drop(download_states);
+                publish_download_snapshot_from_parts(
+                    downloads,
+                    download_revision,
+                    download_updates,
+                )
+                .await;
 
                 return Err(PumasError::DownloadPaused);
             }
@@ -1312,8 +1471,8 @@ impl HuggingFaceClient {
 
             let overall_downloaded = bytes_offset + downloaded;
 
-            let mut downloads = downloads.write().await;
-            if let Some(state) = downloads.get_mut(download_id) {
+            let mut download_states = downloads.write().await;
+            if let Some(state) = download_states.get_mut(download_id) {
                 state.downloaded_bytes = overall_downloaded;
                 state.speed = speed;
                 state.progress = if let Some(total) = state.total_bytes {
@@ -1321,6 +1480,17 @@ impl HuggingFaceClient {
                 } else {
                     0.0
                 };
+            }
+            drop(download_states);
+
+            if last_publish.elapsed() >= DOWNLOAD_PROGRESS_PUBLISH_INTERVAL {
+                publish_download_snapshot_from_parts(
+                    downloads,
+                    download_revision,
+                    download_updates,
+                )
+                .await;
+                last_publish = Instant::now();
             }
         }
 
@@ -1407,50 +1577,29 @@ impl HuggingFaceClient {
     pub async fn get_download_progress(&self, download_id: &str) -> Option<ModelDownloadProgress> {
         self.reconcile_inactive_active_downloads().await;
         let downloads = self.downloads.read().await;
-        downloads
-            .get(download_id)
-            .map(|state| ModelDownloadProgress {
-                download_id: state.download_id.clone(),
-                repo_id: Some(state.repo_id.clone()),
-                selected_artifact_id: selected_artifact_id_for_state(state),
-                model_name: state
-                    .download_request
-                    .as_ref()
-                    .map(|request| request.official_name.clone()),
-                model_type: state
-                    .download_request
-                    .as_ref()
-                    .and_then(|request| request.model_type.clone()),
-                status: state.status,
-                progress: Some(state.progress),
-                downloaded_bytes: Some(state.downloaded_bytes),
-                total_bytes: state.total_bytes,
-                speed: Some(state.speed),
-                eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
-                    let remaining = state.total_bytes.unwrap() - state.downloaded_bytes;
-                    Some(remaining as f64 / state.speed)
-                } else {
-                    None
-                },
-                retry_attempt: Some(state.retry_attempt),
-                retry_limit: state.retry_limit,
-                retrying: Some(state.retrying),
-                next_retry_delay_seconds: state.next_retry_delay_seconds,
-                error: state.error.clone(),
-            })
+        downloads.get(download_id).map(progress_from_state)
     }
 
     /// Cancel a download.
     pub async fn cancel_download(&self, download_id: &str) -> Result<bool> {
-        let downloads = self.downloads.read().await;
-        if let Some(state) = downloads.get(download_id) {
+        let mut downloads = self.downloads.write().await;
+        if let Some(state) = downloads.get_mut(download_id) {
             state.cancel_flag.store(true, Ordering::Relaxed);
+            state.status = DownloadStatus::Cancelling;
+            state.speed = 0.0;
             drop(downloads);
+            self.publish_download_snapshot().await;
             self.abort_download_task(download_id);
             // Remove from persistence -- cancelled downloads don't survive restart
             if let Some(ref persistence) = self.persistence {
                 Self::remove_persisted_download(persistence.clone(), download_id.to_string()).await;
             }
+            let mut downloads = self.downloads.write().await;
+            if let Some(state) = downloads.get_mut(download_id) {
+                state.status = DownloadStatus::Cancelled;
+            }
+            drop(downloads);
+            self.publish_download_snapshot().await;
             Ok(true)
         } else {
             Ok(false)
@@ -1461,41 +1610,54 @@ impl HuggingFaceClient {
     pub async fn list_downloads(&self) -> Vec<ModelDownloadProgress> {
         self.reconcile_inactive_active_downloads().await;
         let downloads = self.downloads.read().await;
-        downloads
-            .values()
-            .map(|state| ModelDownloadProgress {
-                download_id: state.download_id.clone(),
-                repo_id: Some(state.repo_id.clone()),
-                selected_artifact_id: selected_artifact_id_for_state(state),
-                model_name: state
-                    .download_request
-                    .as_ref()
-                    .map(|request| request.official_name.clone()),
-                model_type: state
-                    .download_request
-                    .as_ref()
-                    .and_then(|request| request.model_type.clone()),
-                status: state.status,
-                progress: Some(state.progress),
-                downloaded_bytes: Some(state.downloaded_bytes),
-                total_bytes: state.total_bytes,
-                speed: Some(state.speed),
-                eta_seconds: if state.speed > 0.0 && state.total_bytes.is_some() {
-                    let remaining = state
-                        .total_bytes
-                        .unwrap()
-                        .saturating_sub(state.downloaded_bytes);
-                    Some(remaining as f64 / state.speed)
-                } else {
-                    None
-                },
-                retry_attempt: Some(state.retry_attempt),
-                retry_limit: state.retry_limit,
-                retrying: Some(state.retrying),
-                next_retry_delay_seconds: state.next_retry_delay_seconds,
-                error: state.error.clone(),
-            })
-            .collect()
+        downloads.values().map(progress_from_state).collect()
+    }
+
+    /// Snapshot all tracked downloads with a monotonic cursor.
+    pub async fn download_snapshot(&self) -> crate::models::ModelDownloadSnapshot {
+        self.reconcile_inactive_active_downloads().await;
+        let revision = self.download_revision.load(Ordering::SeqCst);
+        build_download_snapshot_from_parts(&self.downloads, revision).await
+    }
+
+    /// Subscribe to download-state updates.
+    pub fn subscribe_download_updates(
+        &self,
+    ) -> broadcast::Receiver<crate::models::ModelDownloadUpdateNotification> {
+        self.download_updates.subscribe()
+    }
+
+    /// Build the recovery notification needed after a snapshot cursor.
+    pub fn download_notification_since(
+        &self,
+        cursor: Option<&str>,
+        snapshot: crate::models::ModelDownloadSnapshot,
+    ) -> Option<crate::models::ModelDownloadUpdateNotification> {
+        let requested = cursor.and_then(parse_download_update_cursor);
+        let stale_cursor = cursor.is_some() && requested.is_none();
+        let snapshot_required = requested
+            .map(|revision| revision < snapshot.revision)
+            .unwrap_or(true);
+
+        if !snapshot_required && !stale_cursor {
+            return None;
+        }
+
+        Some(crate::models::ModelDownloadUpdateNotification {
+            cursor: snapshot.cursor.clone(),
+            snapshot,
+            stale_cursor,
+            snapshot_required,
+        })
+    }
+
+    async fn publish_download_snapshot(&self) {
+        publish_download_snapshot_from_parts(
+            &self.downloads,
+            &self.download_revision,
+            &self.download_updates,
+        )
+        .await;
     }
 
     /// Find the download ID whose destination directory matches `dest_dir`.
@@ -1551,6 +1713,7 @@ impl HuggingFaceClient {
             .await?;
         }
 
+        self.publish_download_snapshot().await;
         Ok(true)
     }
 
@@ -1567,6 +1730,8 @@ impl HuggingFaceClient {
                 if let Some(state) = downloads.get_mut(download_id) {
                     state.status = DownloadStatus::Pausing;
                 }
+                drop(downloads);
+                self.publish_download_snapshot().await;
                 Ok(true)
             } else {
                 Ok(false)
@@ -1606,6 +1771,7 @@ impl HuggingFaceClient {
                 state.pause_flag.clone(),
             )
         };
+        self.publish_download_snapshot().await;
 
         // Update persistence to Queued status
         if let Some(ref persistence) = self.persistence {
@@ -1620,6 +1786,8 @@ impl HuggingFaceClient {
         // Re-spawn the download task
         let client = self.download_client.clone();
         let downloads = self.downloads.clone();
+        let download_revision = self.download_revision.clone();
+        let download_updates = self.download_updates.clone();
         let download_id_clone = download_id.to_string();
         let persistence = self.persistence.clone();
         let completion_callback = self.completion_callback.clone();
@@ -1633,6 +1801,8 @@ impl HuggingFaceClient {
             let result = Self::run_download(
                 client,
                 downloads.clone(),
+                download_revision.clone(),
+                download_updates.clone(),
                 &download_id_clone,
                 &repo_id,
                 &files,
@@ -1652,11 +1822,18 @@ impl HuggingFaceClient {
                     return;
                 }
                 error!("Download failed for {}: {}", repo_id, e);
-                let mut downloads = downloads.write().await;
-                if let Some(state) = downloads.get_mut(&download_id_clone) {
+                let mut download_states = downloads.write().await;
+                if let Some(state) = download_states.get_mut(&download_id_clone) {
                     state.status = DownloadStatus::Error;
                     state.error = Some(e.to_string());
                 }
+                drop(download_states);
+                publish_download_snapshot_from_parts(
+                    &downloads,
+                    &download_revision,
+                    &download_updates,
+                )
+                .await;
                 // Update persistence with error status
                 if let Some(ref persistence) = persistence {
                     Self::persist_status_update(
@@ -2240,6 +2417,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let client = HuggingFaceClient::new(tmp.path()).unwrap();
         let download_id = "dl-cancel".to_string();
+        let mut updates = client.subscribe_download_updates();
 
         {
             let mut downloads = client.downloads.write().await;
@@ -2282,6 +2460,23 @@ mod tests {
         client.store_download_task(download_id.clone(), task_handle);
 
         assert!(client.cancel_download(&download_id).await.unwrap());
+        let first_update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+            .await
+            .expect("download update should be published")
+            .expect("download update channel should stay open");
+        let second_update = tokio::time::timeout(Duration::from_secs(1), updates.recv())
+            .await
+            .expect("terminal download update should be published")
+            .expect("download update channel should stay open");
+
+        let published_statuses = [first_update, second_update]
+            .into_iter()
+            .flat_map(|notification| notification.snapshot.downloads)
+            .filter(|download| download.download_id == download_id)
+            .map(|download| download.status)
+            .collect::<Vec<_>>();
+        assert!(published_statuses.contains(&DownloadStatus::Cancelling));
+        assert!(published_statuses.contains(&DownloadStatus::Cancelled));
 
         let cancel_flag_set = client
             .downloads
@@ -2298,5 +2493,35 @@ mod tests {
             .expect("HF download task lock poisoned")
             .get(&download_id)
             .is_none());
+        assert_eq!(
+            client.get_download_status(&download_id).await,
+            Some(DownloadStatus::Cancelled)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_download_notification_since_current_cursor_returns_none() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let snapshot = client.download_snapshot().await;
+        let cursor = snapshot.cursor.clone();
+
+        assert!(client
+            .download_notification_since(Some(&cursor), snapshot)
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn test_download_notification_since_stale_cursor_requires_snapshot() {
+        let tmp = TempDir::new().unwrap();
+        let client = HuggingFaceClient::new(tmp.path()).unwrap();
+        let snapshot = client.download_snapshot().await;
+
+        let notification = client
+            .download_notification_since(Some("not-a-download-cursor"), snapshot)
+            .expect("invalid cursor should require snapshot recovery");
+
+        assert!(notification.stale_cursor);
+        assert!(notification.snapshot_required);
     }
 }

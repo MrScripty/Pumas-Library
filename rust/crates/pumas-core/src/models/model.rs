@@ -739,6 +739,25 @@ pub struct ModelDownloadProgress {
     pub error: Option<String>,
 }
 
+/// Snapshot of all tracked HuggingFace model downloads.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadSnapshot {
+    pub cursor: String,
+    pub revision: u64,
+    pub downloads: Vec<ModelDownloadProgress>,
+}
+
+/// Download-state notification delivered to local GUI clients.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelDownloadUpdateNotification {
+    pub cursor: String,
+    pub snapshot: ModelDownloadSnapshot,
+    pub stale_cursor: bool,
+    pub snapshot_required: bool,
+}
+
 /// Action selected when resuming a partial download.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

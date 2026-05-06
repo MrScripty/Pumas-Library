@@ -36,9 +36,10 @@ use async_trait::async_trait;
 use reqwest::Client;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{broadcast, Mutex, RwLock};
 use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 
@@ -52,6 +53,10 @@ pub struct HuggingFaceClient {
     pub(super) cache_dir: PathBuf,
     /// Active downloads
     pub(super) downloads: Arc<RwLock<HashMap<String, DownloadState>>>,
+    /// Monotonic revision for download-state snapshots.
+    pub(super) download_revision: Arc<AtomicU64>,
+    /// Broadcast channel for download-state updates.
+    pub(super) download_updates: broadcast::Sender<crate::models::ModelDownloadUpdateNotification>,
     /// Owned background download tasks keyed by download ID.
     pub(super) download_tasks: Arc<StdMutex<HashMap<String, JoinHandle<()>>>>,
     /// Per-destination mutexes so downloads targeting the same model folder
@@ -121,6 +126,8 @@ impl HuggingFaceClient {
             download_client,
             cache_dir,
             downloads: Arc::new(RwLock::new(HashMap::new())),
+            download_revision: Arc::new(AtomicU64::new(0)),
+            download_updates: broadcast::channel(64).0,
             download_tasks: Arc::new(StdMutex::new(HashMap::new())),
             dest_locks: Arc::new(RwLock::new(HashMap::new())),
             search_cache: None,

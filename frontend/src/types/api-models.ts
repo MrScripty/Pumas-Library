@@ -178,6 +178,19 @@ export interface ListModelDownloadsResponse extends BaseResponse {
   downloads: ModelDownloadStatusResponse[];
 }
 
+export interface ModelDownloadSnapshot {
+  cursor: string;
+  revision: number;
+  downloads: ModelDownloadStatusResponse[];
+}
+
+export interface ModelDownloadUpdateNotification {
+  cursor: string;
+  snapshot: ModelDownloadSnapshot;
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+}
+
 export interface InterruptedDownloadInfo {
   model_dir: string;
   model_type?: string;

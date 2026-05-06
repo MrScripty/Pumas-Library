@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   PythonBridge,
+  parseModelDownloadUpdateSseChunk,
   parseModelLibraryUpdateSseChunk,
   parseRuntimeProfileUpdateSseChunk,
   parseStatusTelemetryUpdateSseChunk,
@@ -160,6 +161,35 @@ test('parseModelLibraryUpdateSseChunk ignores unrelated and malformed events', (
   ]);
 });
 
+test('parseModelDownloadUpdateSseChunk parses split model download update events', () => {
+  let parsed = parseModelDownloadUpdateSseChunk(
+    '',
+    'event: model-download-update\ndata: {"cursor":"download:1"'
+  );
+
+  assert.deepEqual(parsed.payloads, []);
+  assert.notEqual(parsed.buffer, '');
+
+  parsed = parseModelDownloadUpdateSseChunk(
+    parsed.buffer,
+    ',"snapshot":{"cursor":"download:1","revision":1,"downloads":[]},"stale_cursor":false,"snapshot_required":true}\n\n'
+  );
+
+  assert.equal(parsed.buffer, '');
+  assert.deepEqual(parsed.payloads, [
+    {
+      cursor: 'download:1',
+      snapshot: {
+        cursor: 'download:1',
+        revision: 1,
+        downloads: [],
+      },
+      stale_cursor: false,
+      snapshot_required: true,
+    },
+  ]);
+});
+
 test('parseRuntimeProfileUpdateSseChunk parses split runtime-profile update events', () => {
   let parsed = parseRuntimeProfileUpdateSseChunk(
     '',
@@ -269,6 +299,34 @@ test('stop clears model-library update stream lifecycle', async () => {
   assert.equal(bridge.modelLibraryUpdateBuffer, '');
   assert.equal(bridge.modelLibraryUpdateCursor, null);
   assert.equal(bridge.modelLibraryUpdateReconnectTimer, null);
+  assert.equal(timers.pendingCount(), 0);
+});
+
+test('stop clears model download update stream lifecycle', async () => {
+  const timers = new FakeTimerController();
+  const bridge = createBridge(timers);
+  let destroyed = false;
+  const reconnectTimer = { id: 102 };
+
+  bridge.modelDownloadUpdateListener = () => {};
+  bridge.modelDownloadUpdateBuffer = 'partial';
+  bridge.modelDownloadUpdateCursor = 'download:42';
+  bridge.modelDownloadUpdateRequest = {
+    destroy() {
+      destroyed = true;
+    },
+  };
+  bridge.modelDownloadUpdateReconnectTimer = reconnectTimer;
+  timers.timers.push({ timer: reconnectTimer, callback: () => {}, delayMs: 1000 });
+
+  await bridge.stop();
+
+  assert.equal(destroyed, true);
+  assert.equal(bridge.modelDownloadUpdateListener, null);
+  assert.equal(bridge.modelDownloadUpdateRequest, null);
+  assert.equal(bridge.modelDownloadUpdateBuffer, '');
+  assert.equal(bridge.modelDownloadUpdateCursor, null);
+  assert.equal(bridge.modelDownloadUpdateReconnectTimer, null);
   assert.equal(timers.pendingCount(), 0);
 });
 

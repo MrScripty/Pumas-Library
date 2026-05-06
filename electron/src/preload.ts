@@ -46,6 +46,17 @@ type ModelLibraryUpdateNotificationPayload = {
   snapshot_required: boolean;
 };
 
+type ModelDownloadUpdateNotificationPayload = {
+  cursor: string;
+  snapshot: {
+    cursor: string;
+    revision: number;
+    downloads?: unknown[];
+  };
+  stale_cursor: boolean;
+  snapshot_required: boolean;
+};
+
 type RuntimeProfileUpdateNotificationPayload = {
   cursor: string;
   events?: unknown[];
@@ -134,6 +145,25 @@ function isRuntimeProfileUpdateNotificationPayload(
     typeof value['stale_cursor'] === 'boolean' &&
     typeof value['snapshot_required'] === 'boolean' &&
     (events === undefined || Array.isArray(events))
+  );
+}
+
+function isModelDownloadUpdateNotificationPayload(
+  value: unknown
+): value is ModelDownloadUpdateNotificationPayload {
+  if (!isRecord(value) || !isRecord(value['snapshot'])) {
+    return false;
+  }
+
+  const snapshot = value['snapshot'];
+  const downloads = snapshot['downloads'];
+  return (
+    typeof value['cursor'] === 'string' &&
+    typeof value['stale_cursor'] === 'boolean' &&
+    typeof value['snapshot_required'] === 'boolean' &&
+    typeof snapshot['cursor'] === 'string' &&
+    typeof snapshot['revision'] === 'number' &&
+    (downloads === undefined || Array.isArray(downloads))
   );
 }
 
@@ -762,6 +792,22 @@ const electronAPI = {
     ipcRenderer.on('model-library:update', listener);
     return () => {
       ipcRenderer.removeListener('model-library:update', listener);
+    };
+  },
+  onModelDownloadUpdate: (
+    callback: (notification: ModelDownloadUpdateNotificationPayload) => void
+  ): (() => void) => {
+    const listener = (_event: IpcRendererEvent, payload: unknown) => {
+      if (isModelDownloadUpdateNotificationPayload(payload)) {
+        callback(payload);
+      }
+    };
+
+    ipcRenderer.on('model-download:update', listener);
+    void ipcRenderer.invoke('model-download:subscribe');
+    return () => {
+      ipcRenderer.removeListener('model-download:update', listener);
+      void ipcRenderer.invoke('model-download:unsubscribe');
     };
   },
   onRuntimeProfileUpdate: (

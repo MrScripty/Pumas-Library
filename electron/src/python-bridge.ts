@@ -52,6 +52,7 @@ interface RPCResponse {
 }
 
 export type ModelLibraryUpdateListener = (payload: unknown) => void;
+export type ModelDownloadUpdateListener = (payload: unknown) => void;
 export type RuntimeProfileUpdateListener = (payload: unknown) => void;
 export type StatusTelemetryUpdateListener = (payload: unknown) => void;
 
@@ -105,6 +106,13 @@ export function parseModelLibraryUpdateSseChunk(
   return parseNamedSseChunk(previousBuffer, chunk, 'model-library-update', 'model-library');
 }
 
+export function parseModelDownloadUpdateSseChunk(
+  previousBuffer: string,
+  chunk: string
+): ParsedSseChunk {
+  return parseNamedSseChunk(previousBuffer, chunk, 'model-download-update', 'model download');
+}
+
 export function parseRuntimeProfileUpdateSseChunk(
   previousBuffer: string,
   chunk: string
@@ -133,6 +141,11 @@ export class PythonBridge {
   private modelLibraryUpdateCursor: string | null = null;
   private modelLibraryUpdateListener: ModelLibraryUpdateListener | null = null;
   private modelLibraryUpdateReconnectTimer: BridgeTimer | null = null;
+  private modelDownloadUpdateRequest: http.ClientRequest | null = null;
+  private modelDownloadUpdateBuffer = '';
+  private modelDownloadUpdateCursor: string | null = null;
+  private modelDownloadUpdateListener: ModelDownloadUpdateListener | null = null;
+  private modelDownloadUpdateReconnectTimer: BridgeTimer | null = null;
   private runtimeProfileUpdateRequest: http.ClientRequest | null = null;
   private runtimeProfileUpdateBuffer = '';
   private runtimeProfileUpdateListener: RuntimeProfileUpdateListener | null = null;
@@ -360,6 +373,7 @@ export class PythonBridge {
     this.clearHealthCheckTimer();
     this.clearRestartTimer();
     this.stopModelLibraryUpdateStream();
+    this.stopModelDownloadUpdateStream();
     this.stopRuntimeProfileUpdateStream();
     this.stopStatusTelemetryUpdateStream();
 
@@ -423,6 +437,22 @@ export class PythonBridge {
     this.modelLibraryUpdateCursor = null;
     this.closeModelLibraryUpdateStream();
     this.clearModelLibraryUpdateReconnectTimer();
+  }
+
+  startModelDownloadUpdateStream(listener: ModelDownloadUpdateListener): void {
+    this.modelDownloadUpdateListener = listener;
+    this.modelDownloadUpdateCursor = null;
+    if (!this.process) {
+      throw new Error('Backend bridge not running');
+    }
+    this.openModelDownloadUpdateStream();
+  }
+
+  stopModelDownloadUpdateStream(): void {
+    this.modelDownloadUpdateListener = null;
+    this.modelDownloadUpdateCursor = null;
+    this.closeModelDownloadUpdateStream();
+    this.clearModelDownloadUpdateReconnectTimer();
   }
 
   startRuntimeProfileUpdateStream(listener: RuntimeProfileUpdateListener): void {
@@ -540,6 +570,95 @@ export class PythonBridge {
     if (this.modelLibraryUpdateReconnectTimer) {
       this.timerController.clearTimeout(this.modelLibraryUpdateReconnectTimer);
       this.modelLibraryUpdateReconnectTimer = null;
+    }
+  }
+
+  private openModelDownloadUpdateStream(): void {
+    if (!this.process || !this.modelDownloadUpdateListener) {
+      return;
+    }
+
+    this.closeModelDownloadUpdateStream();
+    this.clearModelDownloadUpdateReconnectTimer();
+    this.modelDownloadUpdateBuffer = '';
+    const cursorQuery = this.modelDownloadUpdateCursor
+      ? `?cursor=${encodeURIComponent(this.modelDownloadUpdateCursor)}`
+      : '';
+
+    const req = http.get({
+      hostname: '127.0.0.1',
+      port: this.port,
+      path: `/events/model-download-updates${cursorQuery}`,
+      method: 'GET',
+      headers: {
+        Accept: 'text/event-stream',
+      },
+    }, (res) => {
+      res.setEncoding('utf8');
+      res.on('data', (chunk: string) => {
+        const parsed = parseModelDownloadUpdateSseChunk(this.modelDownloadUpdateBuffer, chunk);
+        this.modelDownloadUpdateBuffer = parsed.buffer;
+        for (const payload of parsed.payloads) {
+          if (
+            payload &&
+            typeof payload === 'object' &&
+            typeof (payload as { cursor?: unknown }).cursor === 'string'
+          ) {
+            this.modelDownloadUpdateCursor = (payload as { cursor: string }).cursor;
+          }
+          this.modelDownloadUpdateListener?.(payload);
+        }
+      });
+      res.on('end', () => {
+        this.modelDownloadUpdateRequest = null;
+        this.modelDownloadUpdateBuffer = '';
+        if (!this.isShuttingDown) {
+          log.warn('Model download update stream ended');
+          this.scheduleModelDownloadUpdateReconnect();
+        }
+      });
+    });
+
+    req.on('error', (error) => {
+      this.modelDownloadUpdateRequest = null;
+      this.modelDownloadUpdateBuffer = '';
+      if (!this.isShuttingDown) {
+        log.warn('Model download update stream failed:', error);
+        this.scheduleModelDownloadUpdateReconnect();
+      }
+    });
+
+    this.modelDownloadUpdateRequest = req;
+  }
+
+  private closeModelDownloadUpdateStream(): void {
+    if (this.modelDownloadUpdateRequest) {
+      this.modelDownloadUpdateRequest.destroy();
+      this.modelDownloadUpdateRequest = null;
+    }
+    this.modelDownloadUpdateBuffer = '';
+  }
+
+  private scheduleModelDownloadUpdateReconnect(): void {
+    if (
+      this.isShuttingDown ||
+      !this.process ||
+      !this.modelDownloadUpdateListener ||
+      this.modelDownloadUpdateReconnectTimer
+    ) {
+      return;
+    }
+
+    this.modelDownloadUpdateReconnectTimer = this.timerController.setTimeout(() => {
+      this.modelDownloadUpdateReconnectTimer = null;
+      this.openModelDownloadUpdateStream();
+    }, 1000);
+  }
+
+  private clearModelDownloadUpdateReconnectTimer(): void {
+    if (this.modelDownloadUpdateReconnectTimer) {
+      this.timerController.clearTimeout(this.modelDownloadUpdateReconnectTimer);
+      this.modelDownloadUpdateReconnectTimer = null;
     }
   }
 

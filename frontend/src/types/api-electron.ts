@@ -1,4 +1,5 @@
 import type { DesktopBridgeAPI } from './api-bridge';
+import type { ModelDownloadUpdateNotification } from './api-models';
 import type { ModelLibraryUpdateNotification } from './api-package-facts';
 import type { RuntimeProfileUpdateFeed } from './api-runtime-profiles';
 import type { StatusTelemetryUpdateNotification } from './api-system';
@@ -19,6 +20,10 @@ export interface ElectronWindowAPI {
   /** Subscribe to backend-owned model-library update notifications. */
   onModelLibraryUpdate(
     callback: (notification: ModelLibraryUpdateNotification) => void
+  ): () => void;
+  /** Subscribe to backend-owned model download update notifications. */
+  onModelDownloadUpdate(
+    callback: (notification: ModelDownloadUpdateNotification) => void
   ): () => void;
   /** Subscribe to backend-owned runtime profile update notifications. */
   onRuntimeProfileUpdate(

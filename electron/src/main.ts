@@ -28,6 +28,9 @@ const WINDOW_HEIGHT = 1000;
 const MIN_WINDOW_WIDTH = 360;
 const MIN_WINDOW_HEIGHT = 400;
 const MODEL_LIBRARY_UPDATE_CHANNEL = 'model-library:update';
+const MODEL_DOWNLOAD_UPDATE_CHANNEL = 'model-download:update';
+const MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL = 'model-download:subscribe';
+const MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL = 'model-download:unsubscribe';
 const RUNTIME_PROFILE_UPDATE_CHANNEL = 'runtime-profile:update';
 const STATUS_TELEMETRY_UPDATE_CHANNEL = 'status-telemetry:update';
 const STATUS_TELEMETRY_SUBSCRIBE_CHANNEL = 'status-telemetry:subscribe';
@@ -37,6 +40,7 @@ const STATUS_TELEMETRY_UNSUBSCRIBE_CHANNEL = 'status-telemetry:unsubscribe';
 let pythonBridge: PythonBridge | null = null;
 let mainWindow: BrowserWindow | null = null;
 let backendInitializationPromise: Promise<void> | null = null;
+let modelDownloadRendererSubscriptions = 0;
 let statusTelemetryRendererSubscriptions = 0;
 
 function isReleaseSmokeMode(): boolean {
@@ -302,6 +306,20 @@ function registerIPCHandlers(): void {
     }
   });
 
+  ipcMain.handle(MODEL_DOWNLOAD_SUBSCRIBE_CHANNEL, async () => {
+    modelDownloadRendererSubscriptions += 1;
+    if (modelDownloadRendererSubscriptions === 1) {
+      startModelDownloadUpdateForwarder();
+    }
+  });
+
+  ipcMain.handle(MODEL_DOWNLOAD_UNSUBSCRIBE_CHANNEL, async () => {
+    modelDownloadRendererSubscriptions = Math.max(0, modelDownloadRendererSubscriptions - 1);
+    if (modelDownloadRendererSubscriptions === 0) {
+      pythonBridge?.stopModelDownloadUpdateStream();
+    }
+  });
+
   log.info('IPC handlers registered');
 }
 
@@ -332,6 +350,21 @@ function startRuntimeProfileUpdateForwarder(): void {
     }
 
     targetWindow.webContents.send(RUNTIME_PROFILE_UPDATE_CHANNEL, payload);
+  });
+}
+
+function startModelDownloadUpdateForwarder(): void {
+  if (!pythonBridge || modelDownloadRendererSubscriptions === 0) {
+    return;
+  }
+
+  pythonBridge.startModelDownloadUpdateStream((payload) => {
+    const targetWindow = mainWindow;
+    if (!targetWindow || targetWindow.isDestroyed()) {
+      return;
+    }
+
+    targetWindow.webContents.send(MODEL_DOWNLOAD_UPDATE_CHANNEL, payload);
   });
 }
 
@@ -389,6 +422,7 @@ async function initializeBackend(): Promise<void> {
 
     await pythonBridge.start();
     startModelLibraryUpdateForwarder();
+    startModelDownloadUpdateForwarder();
     startRuntimeProfileUpdateForwarder();
     startStatusTelemetryUpdateForwarder();
     log.info('Backend bridge initialized');

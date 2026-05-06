@@ -805,7 +805,7 @@ Verification completed:
 
 #### R2 - Download Stream Through RPC And Electron
 
-Status: In progress.
+Status: Completed on 2026-05-06.
 
 - Expose the backend download subscription through the existing RPC/SSE
   transport.
@@ -822,12 +822,17 @@ Verification:
 Implementation notes:
 
 - 2026-05-06: Added the RPC `/events/model-download-updates` SSE endpoint with
-  initial snapshot delivery. Electron bridge lifecycle remains pending.
+  initial snapshot delivery.
+- 2026-05-06: Added subscriber-counted Electron bridge/preload forwarding for
+  model-download update notifications.
 
 Verification completed:
 
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc test_model_download_update_event_stream_emits_initial_snapshot -- --nocapture`
+- `npm run -w electron validate`
+- `npm run -w electron test`
+- `npm run -w frontend check:types`
 
 #### R3 - Frontend Download Poll Removal
 

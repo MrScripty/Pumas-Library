@@ -1,0 +1,60 @@
+name: Setup Windows RAM disk
+description: Create a Windows RAM disk and route temporary/cache-heavy paths through it.
+
+inputs:
+  drive-letter:
+    description: Drive letter to mount the RAM disk on.
+    default: R
+  size:
+    description: RAM disk size accepted by ImDisk, such as 3072M.
+    default: 3072M
+
+runs:
+  using: composite
+  steps:
+    - name: Create RAM disk
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $driveLetter = "${{ inputs.drive-letter }}".TrimEnd(":")
+        $drive = "${driveLetter}:"
+        $root = "${drive}\"
+
+        choco install imdisk-toolkit --yes --no-progress
+
+        $imdisk = (Get-Command imdisk.exe -ErrorAction SilentlyContinue).Source
+        if (-not $imdisk) {
+          $candidate = Join-Path $env:SystemRoot "System32\imdisk.exe"
+          if (Test-Path $candidate) {
+            $imdisk = $candidate
+          }
+        }
+        if (-not $imdisk) {
+          throw "imdisk.exe was not found after installing imdisk-toolkit"
+        }
+
+        & $imdisk -a -s "${{ inputs.size }}" -m $drive -p "/fs:ntfs /q /y"
+        if ($LASTEXITCODE -ne 0) {
+          throw "Failed to create RAM disk ${drive}"
+        }
+        if (-not (Test-Path $root)) {
+          throw "RAM disk ${root} is not mounted"
+        }
+
+        $tempDir = Join-Path $root "temp"
+        $pnpmStore = Join-Path $root "pnpm-store"
+        $npmCache = Join-Path $root "npm-cache"
+        foreach ($path in @($tempDir, $pnpmStore, $npmCache)) {
+          New-Item -ItemType Directory -Force -Path $path | Out-Null
+        }
+
+        @(
+          "PUMAS_RAMDISK_ROOT=$root",
+          "TEMP=$tempDir",
+          "TMP=$tempDir",
+          "TMPDIR=$tempDir",
+          "NPM_CONFIG_CACHE=$npmCache",
+          "NPM_CONFIG_STORE_DIR=$pnpmStore"
+        ) | Add-Content -Path $env:GITHUB_ENV
+
+        Write-Host "Created Windows RAM disk ${root} (${{ inputs.size }}) for temporary files and package caches."

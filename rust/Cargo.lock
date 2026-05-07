@@ -2091,7 +2091,7 @@ dependencies = [
 
 [[package]]
 name = "pumas-app-manager"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2117,7 +2117,7 @@ dependencies = [
 
 [[package]]
 name = "pumas-library"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2161,7 +2161,7 @@ dependencies = [
 
 [[package]]
 name = "pumas-rpc"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -2184,7 +2184,7 @@ dependencies = [
 
 [[package]]
 name = "pumas-uniffi"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "pumas-library",
  "serde",
@@ -2196,7 +2196,7 @@ dependencies = [
 
 [[package]]
 name = "pumas_rustler"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "pumas-library",
  "rustler",

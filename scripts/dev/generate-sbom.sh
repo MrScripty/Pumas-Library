@@ -25,7 +25,7 @@ export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 
 if ! command -v node >/dev/null 2>&1; then
-    echo "Error: Node.js not found. Install Node.js 24 LTS via nvm."
+    echo "Error: Node.js not found. Install Node.js 24.15.0 via nvm."
     exit 1
 fi
 

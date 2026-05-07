@@ -47,7 +47,7 @@ Toolchain pins used by local development and CI:
 | Tool | Pin Source | Current Pin |
 | ---- | ---------- | ----------- |
 | Rust | `rust-toolchain.toml` | `1.92.0` |
-| Node.js | `.node-version` | `24.12.0` |
+| Node.js | `.node-version` | `24.15.0` |
 | pnpm | root `package.json#packageManager` | `10.33.0` |
 | Python | `.python-version` | `3.12.3` |
 

@@ -1752,7 +1752,8 @@ mod tests {
                 "--models-dir".to_string(),
                 temp_dir
                     .path()
-                    .join("shared-resources/models")
+                    .join("shared-resources")
+                    .join("models")
                     .to_string_lossy()
                     .to_string(),
                 "--n-gpu-layers".to_string(),

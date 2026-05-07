@@ -92,7 +92,6 @@ dirs = { workspace = true }
 
 # File system watching
 notify = { workspace = true }
-notify-debouncer-mini = { workspace = true }
 
 # Cross-language bindings (optional)
 uniffi = { workspace = true, optional = true }

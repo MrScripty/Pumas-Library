@@ -106,7 +106,6 @@ dirs = "5"
 
 # File system watching
 notify = "7"
-notify-debouncer-mini = "0.5"
 
 # Cross-language bindings
 uniffi = "0.28"

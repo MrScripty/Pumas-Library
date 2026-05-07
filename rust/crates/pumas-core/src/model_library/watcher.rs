@@ -3,10 +3,8 @@
 //! Watches the model library directory for changes and triggers
 //! index rebuilds when files are added, modified, or removed.
 
-use crate::config::NetworkConfig;
 use crate::error::Result;
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, Debouncer};
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,8 +31,8 @@ pub type ChangeCallback = Box<dyn Fn(Vec<PathBuf>) + Send + Sync + 'static>;
 /// Watches for file changes and triggers callbacks when model files
 /// are added, modified, or removed.
 pub struct ModelLibraryWatcher {
-    /// The debounced file watcher
-    _debouncer: Debouncer<RecommendedWatcher>,
+    /// The raw file watcher. Kept alive for the lifetime of the watcher.
+    _watcher: RecommendedWatcher,
     /// Channel to stop the watcher
     stop_tx: mpsc::Sender<()>,
 }
@@ -55,17 +53,22 @@ impl ModelLibraryWatcher {
         let library_root = library_root.as_ref().to_path_buf();
         let (stop_tx, mut stop_rx) = mpsc::channel::<()>(1);
 
-        // Create a channel for debounced events
+        // Create a channel for raw watcher events. We keep raw event kinds so
+        // reconciliation reads do not feed access events back into the watcher.
         let (event_tx, event_rx) = std::sync::mpsc::channel();
 
-        // Create the debounced watcher
-        let mut debouncer = new_debouncer(debounce_duration, event_tx).map_err(|e| {
+        let mut watcher = RecommendedWatcher::new(
+            move |result| {
+                let _ = event_tx.send(result);
+            },
+            Config::default(),
+        )
+        .map_err(|e| {
             crate::error::PumasError::Other(format!("Failed to create file watcher: {}", e))
         })?;
 
         // Start watching the library root
-        debouncer
-            .watcher()
+        watcher
             .watch(&library_root, RecursiveMode::Recursive)
             .map_err(|e| {
                 crate::error::PumasError::Other(format!("Failed to watch directory: {}", e))
@@ -78,6 +81,7 @@ impl ModelLibraryWatcher {
         let on_change_clone = Arc::clone(&on_change);
 
         std::thread::spawn(move || {
+            let mut pending_paths = Vec::<PathBuf>::new();
             loop {
                 // Check for stop signal (non-blocking)
                 match stop_rx.try_recv() {
@@ -88,32 +92,12 @@ impl ModelLibraryWatcher {
                     Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 }
 
-                // Check for file events with timeout
-                match event_rx.recv_timeout(NetworkConfig::FILE_WATCHER_DEBOUNCE) {
-                    Ok(result) => {
-                        if let Ok(events) = result {
-                            // Filter and coalesce relevant paths.
-                            let mut relevant_paths: Vec<PathBuf> = events
-                                .iter()
-                                .filter_map(|event| {
-                                    if is_relevant_change(&event.path) {
-                                        Some(event.path.clone())
-                                    } else {
-                                        None
-                                    }
-                                })
-                                .collect();
-
-                            if !relevant_paths.is_empty() {
-                                relevant_paths.sort();
-                                relevant_paths.dedup();
-                                debug!("Detected relevant model library changes");
-                                on_change_clone(relevant_paths);
-                            }
-                        }
-                    }
+                // Check for file events with timeout and flush accumulated
+                // paths only after the debounce window goes quiet.
+                match event_rx.recv_timeout(debounce_duration) {
+                    Ok(result) => handle_watcher_event(result, &mut pending_paths),
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                        // No events, continue
+                        flush_relevant_paths(&on_change_clone, &mut pending_paths);
                     }
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
                         warn!("File watcher channel disconnected");
@@ -124,7 +108,7 @@ impl ModelLibraryWatcher {
         });
 
         Ok(Self {
-            _debouncer: debouncer,
+            _watcher: watcher,
             stop_tx,
         })
     }
@@ -133,6 +117,47 @@ impl ModelLibraryWatcher {
     pub async fn stop(&self) {
         let _ = self.stop_tx.send(()).await;
     }
+}
+
+fn handle_watcher_event(result: notify::Result<Event>, pending_paths: &mut Vec<PathBuf>) {
+    match result {
+        Ok(event) => {
+            if !is_relevant_event_kind(&event.kind) {
+                return;
+            }
+
+            pending_paths.extend(
+                event
+                    .paths
+                    .into_iter()
+                    .filter(|path| is_relevant_change(path)),
+            );
+        }
+        Err(error) => {
+            warn!("File watcher event error: {}", error);
+        }
+    }
+}
+
+fn flush_relevant_paths(on_change: &ChangeCallback, pending_paths: &mut Vec<PathBuf>) {
+    if pending_paths.is_empty() {
+        return;
+    }
+
+    pending_paths.sort();
+    pending_paths.dedup();
+    debug!(
+        "Detected relevant model library changes: path_count={}",
+        pending_paths.len()
+    );
+    on_change(std::mem::take(pending_paths));
+}
+
+fn is_relevant_event_kind(kind: &EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::Any | EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+    )
 }
 
 /// Check if a path change is relevant (model file or metadata).
@@ -172,5 +197,25 @@ mod tests {
         )));
         assert!(!is_relevant_change(Path::new("/models/readme.md")));
         assert!(!is_relevant_change(Path::new("/models/test.txt")));
+    }
+
+    #[test]
+    fn test_access_events_are_not_relevant() {
+        use notify::event::{AccessKind, AccessMode};
+
+        assert!(!is_relevant_event_kind(&EventKind::Access(
+            AccessKind::Close(AccessMode::Read)
+        )));
+    }
+
+    #[test]
+    fn test_mutating_events_are_relevant() {
+        use notify::event::{CreateKind, DataChange, ModifyKind, RemoveKind};
+
+        assert!(is_relevant_event_kind(&EventKind::Create(CreateKind::File)));
+        assert!(is_relevant_event_kind(&EventKind::Modify(
+            ModifyKind::Data(DataChange::Content)
+        )));
+        assert!(is_relevant_event_kind(&EventKind::Remove(RemoveKind::File)));
     }
 }

@@ -986,14 +986,15 @@ Verification completed:
 - `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc rpc_host_validation -- --nocapture`
 
-Deferred to R7:
+Deferred to R7/R11:
 
 - Measure final idle thread count from the release binary after all remediation
   slices are built.
 
 #### R7 - Release Verification And Completion
 
-Status: Failed verification on 2026-05-06; remediation continues in R8-R10.
+Status: Failed verification on 2026-05-06; direct-backend idle verification
+passed after R11.
 
 - Build release binaries and frontend after all remediation slices.
 - Run the GUI idle for at least 60 seconds after startup settle with no active
@@ -1113,7 +1114,7 @@ Verification completed:
 
 #### R10 - Resource Sampler Narrowing
 
-Status: Completed on 2026-05-06.
+Status: Completed on 2026-05-06; live idle acceptance still failed.
 
 - If idle CPU remains above target after duplicate subscriptions and per-update
   enrichment are removed, split cheap status/network facts from heavier
@@ -1146,6 +1147,91 @@ Verification completed:
 - `cargo test --manifest-path rust/Cargo.toml -p pumas-library status_telemetry -- --nocapture`
 - Restarted-app idle sample remains pending because the app must be restarted
   onto the rebuilt release binary.
+
+Post-R10 trace update:
+
+- 2026-05-06 release-app sample after R10 still showed `pumas-rpc` near
+  `92.65%` average CPU with `48` threads. Four `pumas-rpc` runtime workers
+  stayed hot at about `18%..19%` each.
+- Running `pumas-rpc` directly with no Electron renderer reproduced the issue:
+  the backend alone averaged about `88.80%` CPU with the same four-hot-worker
+  shape. This rules out frontend status/download/runtime-profile polling as the
+  remaining dominant source.
+- Running the release backend with `--debug` showed repeated
+  `Detected relevant model library changes` messages followed by targeted
+  reconciliation for many or nearly all model IDs every debounce window.
+- Root cause hypothesis validated by the trace: the model-library watcher uses
+  `notify-debouncer-mini`, which discards event kind. Reconciliation reads and
+  scans the library tree, those reads can produce filesystem access events, and
+  the watcher treats the resulting paths as meaningful model changes. That
+  creates an idle watcher/reconciliation feedback loop.
+
+#### R11 - Model Watcher Event Filtering
+
+Status: Completed on 2026-05-06.
+
+- Replace or narrow the current mini-debouncer watcher path so the model
+  library watcher can distinguish mutating filesystem events from access/read
+  events.
+- Ignore non-mutating `Access` and watcher `Other` events before classifying
+  model paths.
+- Preserve mutating `Create`, `Modify`, `Remove`, and precise rename/write
+  events so external model additions, deletions, metadata writes, and completed
+  downloads still trigger reconciliation.
+- Keep watcher debounce and callback ownership inside
+  `ModelLibraryWatcher`; do not move polling or filesystem classification into
+  the frontend or RPC layer.
+- Add focused tests for event-kind filtering and path relevance so access-only
+  scans cannot reintroduce the feedback loop.
+- Re-run a direct release-backend idle sample before declaring R7 complete.
+
+Verification:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library watcher -- --nocapture`
+- Direct backend sample:
+  `rust/target/release/pumas-rpc --debug --port 45678 --launcher-root <repo>`
+  should not emit repeated watcher-triggered reconciliation while idle.
+- `pidstat -p <pumas-rpc-pid> -t 1 20` should average below the R7 idle CPU
+  target after startup settle.
+
+Implementation notes:
+
+- Replaced `notify-debouncer-mini` in `ModelLibraryWatcher` with raw
+  `notify::RecommendedWatcher` plus local debounce so Pumas keeps event kind
+  information through the watcher boundary.
+- Ignored `Access` and `Other` watcher events before path classification.
+  Reconciliation scans no longer feed access/read events back into targeted
+  model reconciliation.
+- Preserved `Any`, `Create`, `Modify`, and `Remove` events as relevant event
+  categories for external writers and platform-specific notify behavior.
+- Removed the now-unused `notify-debouncer-mini` dependency from the Rust
+  workspace and lockfile.
+
+Verification completed:
+
+- `cargo fmt --manifest-path rust/Cargo.toml --all`
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library watcher -- --nocapture`
+- `bash launcher.sh --build-release`
+- Rebuilt direct backend sample:
+  `rust/target/release/pumas-rpc --debug --port 45678 --launcher-root <repo>`
+  started cleanly and emitted no repeated watcher-triggered reconciliation
+  logs after startup settle.
+- `pidstat -p 2576994 -t 1 20` averaged `0.00%` CPU for `pumas-rpc`; all
+  backend and notify threads sampled at `0.00%`.
+
+Standards notes:
+
+- This slice keeps backend-owned reconciliation in the backend and fixes the
+  event source instead of adding another debounce layer at a higher transport or
+  UI level.
+- The watcher remains an owned lifecycle resource on the primary instance.
+  There is no new global polling loop.
+- The blast radius is intentionally narrow:
+  `rust/crates/pumas-core/src/model_library/watcher.rs` and any direct watcher
+  tests, with reconciliation code unchanged unless verification exposes another
+  feedback path.
 
 ### Concurrency And Runtime Requirements
 

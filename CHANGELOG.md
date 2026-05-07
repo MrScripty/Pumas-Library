@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Updated the repo Node.js toolchain pin and Node typings to 24.15.0 while opting GitHub JavaScript actions into the Node 24 runner runtime.
-- Added a Windows CI RAM disk setup for temporary files and package-manager caches in Windows build/package jobs.
+- Added a Windows CI RAM disk setup for temporary files in Windows build/package jobs.
 
 ### Fixed
 

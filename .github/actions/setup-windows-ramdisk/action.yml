@@ -1,5 +1,5 @@
 name: Setup Windows RAM disk
-description: Create a Windows RAM disk and route temporary/cache-heavy paths through it.
+description: Create a Windows RAM disk and route temporary files through it.
 
 inputs:
   drive-letter:
@@ -42,9 +42,8 @@ runs:
         }
 
         $tempDir = Join-Path $root "temp"
-        $pnpmStore = Join-Path $root "pnpm-store"
         $npmCache = Join-Path $root "npm-cache"
-        foreach ($path in @($tempDir, $pnpmStore, $npmCache)) {
+        foreach ($path in @($tempDir, $npmCache)) {
           New-Item -ItemType Directory -Force -Path $path | Out-Null
         }
 
@@ -53,8 +52,7 @@ runs:
           "TEMP=$tempDir",
           "TMP=$tempDir",
           "TMPDIR=$tempDir",
-          "NPM_CONFIG_CACHE=$npmCache",
-          "NPM_CONFIG_STORE_DIR=$pnpmStore"
+          "NPM_CONFIG_CACHE=$npmCache"
         ) | Add-Content -Path $env:GITHUB_ENV
 
-        Write-Host "Created Windows RAM disk ${root} (${{ inputs.size }}) for temporary files and package caches."
+        Write-Host "Created Windows RAM disk ${root} (${{ inputs.size }}) for temporary files."

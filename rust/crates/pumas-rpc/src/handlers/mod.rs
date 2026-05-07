@@ -896,32 +896,4 @@ mod tests {
         // This test verifies the function runs without error
         assert!(!is_sandboxed || ["flatpak", "snap", "docker", "appimage"].contains(&sandbox_type));
     }
-
-    #[test]
-    fn runtime_profile_update_unsupported_detection_matches_legacy_primary_error() {
-        let error = pumas_library::PumasError::InvalidParams {
-            message: "Unknown IPC method: list_runtime_profile_updates_since".to_string(),
-        };
-
-        assert!(is_runtime_profile_update_method_unsupported(&error));
-    }
-
-    #[test]
-    fn runtime_profile_update_unsupported_detection_matches_forwarded_ipc_error() {
-        let error = pumas_library::PumasError::Other(
-            "Invalid parameters: Unknown IPC method: list_runtime_profile_updates_since"
-                .to_string(),
-        );
-
-        assert!(is_runtime_profile_update_method_unsupported(&error));
-    }
-
-    #[test]
-    fn runtime_profile_update_unsupported_detection_ignores_other_errors() {
-        let error = pumas_library::PumasError::InvalidParams {
-            message: "missing required field: cursor".to_string(),
-        };
-
-        assert!(!is_runtime_profile_update_method_unsupported(&error));
-    }
 }

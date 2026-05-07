@@ -283,8 +283,22 @@ impl ResourceTracker {
     /// Check if a process exists.
     pub fn process_exists(&self, pid: u32) -> bool {
         self.maybe_refresh_processes();
-        let system = self.system.read().unwrap();
-        system.process(Pid::from_u32(pid)).is_some()
+        let sysinfo_pid = Pid::from_u32(pid);
+        {
+            let system = self.system.read().unwrap();
+            if system.process(sysinfo_pid).is_some() {
+                return true;
+            }
+        }
+
+        let mut system = self.system.write().unwrap();
+        let pids = [sysinfo_pid];
+        system.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&pids),
+            true,
+            ProcessRefreshKind::new(),
+        );
+        system.process(sysinfo_pid).is_some()
     }
 
     /// Get all child PIDs for a process (recursively).

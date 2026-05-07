@@ -266,31 +266,31 @@ impl IpcServer {
         }
     }
 
-    fn parse_request_frame(frame: Vec<u8>) -> std::result::Result<IpcRequest, IpcResponse> {
+    fn parse_request_frame(frame: Vec<u8>) -> std::result::Result<IpcRequest, Box<IpcResponse>> {
         let request_str = String::from_utf8(frame).map_err(|_| {
-            IpcResponse::error(
+            Box::new(IpcResponse::error(
                 None,
                 -32600,
                 "Invalid Request: invalid UTF-8 in IPC frame".to_string(),
-            )
+            ))
         })?;
         let request: IpcRequest = match serde_json::from_str(&request_str) {
             Ok(req) => req,
             Err(e) => {
-                return Err(IpcResponse::error(
+                return Err(Box::new(IpcResponse::error(
                     None,
                     -32700,
                     format!("Parse error: {}", e),
-                ));
+                )));
             }
         };
 
         if request.jsonrpc != "2.0" {
-            return Err(IpcResponse::error(
+            return Err(Box::new(IpcResponse::error(
                 request.id,
                 -32600,
                 "Invalid Request: expected jsonrpc 2.0".to_string(),
-            ));
+            )));
         }
 
         Ok(request)

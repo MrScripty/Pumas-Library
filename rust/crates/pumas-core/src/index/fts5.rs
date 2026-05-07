@@ -73,10 +73,10 @@ impl<'a> FTS5Manager<'a> {
             let Some(sql) = sql else {
                 return Ok(false);
             };
-            if trigger_name.ends_with("_ai") || trigger_name.ends_with("_au") {
-                if !sql.contains("$.architecture_family") {
-                    return Ok(false);
-                }
+            if (trigger_name.ends_with("_ai") || trigger_name.ends_with("_au"))
+                && !sql.contains("$.architecture_family")
+            {
+                return Ok(false);
             }
         }
 

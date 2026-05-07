@@ -339,18 +339,16 @@ impl PumasApiBuilder {
             .and_then(|name| name.to_str())
             .unwrap_or("pumas-library");
         let _ = registry.register(&self.launcher_root, library_name)?;
-        let claim = loop {
-            match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
-                registry::InstanceClaimResult::Claimed(claim) => break claim,
-                registry::InstanceClaimResult::Occupied(instance) => {
-                    return Err(PumasError::InvalidParams {
-                        message: format!(
-                            "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
-                            self.launcher_root.display(),
-                            instance.pid
-                        ),
-                    });
-                }
+        let claim = match registry.try_claim_instance(&self.launcher_root, std::process::id())? {
+            registry::InstanceClaimResult::Claimed(claim) => claim,
+            registry::InstanceClaimResult::Occupied(instance) => {
+                return Err(PumasError::InvalidParams {
+                    message: format!(
+                        "Pumas library instance is already running for {} (pid {}). Use PumasLocalClient for explicit local-client access.",
+                        self.launcher_root.display(),
+                        instance.pid
+                    ),
+                });
             }
         };
         let mut claim_guard = InstanceClaimGuard::new(registry.clone(), claim.library_path.clone());

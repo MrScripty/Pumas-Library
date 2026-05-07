@@ -4469,7 +4469,7 @@ fn record_is_download_incomplete(record: &ModelRecord) -> bool {
     record
         .metadata
         .as_object()
-        .is_some_and(|obj| metadata_object_is_download_incomplete(obj))
+        .is_some_and(metadata_object_is_download_incomplete)
 }
 
 fn metadata_object_is_download_incomplete(obj: &serde_json::Map<String, Value>) -> bool {

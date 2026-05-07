@@ -22,7 +22,7 @@ async fn get_primary_model_file(
 
 pub async fn ollama_list_models(_state: &AppState, params: &Value) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
-    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
+    let client = ollama_client_for_connection_url(connection_url)?;
     let models = client.list_models().await?;
     Ok(json!({
         "success": true,
@@ -300,7 +300,7 @@ pub async fn ollama_delete_model(
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
+    let client = ollama_client_for_connection_url(connection_url)?;
     client.delete_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -310,7 +310,7 @@ pub async fn ollama_load_model(_state: &AppState, params: &Value) -> pumas_libra
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
+    let client = ollama_client_for_connection_url(connection_url)?;
     client.load_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -323,7 +323,7 @@ pub async fn ollama_unload_model(
     let model_name = require_str_param(params, "model_name", "modelName")?;
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
+    let client = ollama_client_for_connection_url(connection_url)?;
     client.unload_model(&model_name).await?;
 
     Ok(json!({ "success": true }))
@@ -335,7 +335,7 @@ pub async fn ollama_list_running(
 ) -> pumas_library::Result<Value> {
     let connection_url = get_str_param(params, "connection_url", "connectionUrl");
 
-    let client = ollama_client_for_connection_url(connection_url.as_deref())?;
+    let client = ollama_client_for_connection_url(connection_url)?;
     let models = client.list_running_models().await?;
 
     Ok(json!({ "success": true, "models": models }))

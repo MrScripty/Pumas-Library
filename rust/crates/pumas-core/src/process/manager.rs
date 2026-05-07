@@ -30,6 +30,11 @@ pub struct ProcessInfo {
     pub gpu_memory: f32,
 }
 
+#[derive(Debug, Clone, Default)]
+struct CachedProcessStatus {
+    running: bool,
+}
+
 /// Process manager for ComfyUI and other managed applications.
 #[derive(Clone)]
 pub struct ProcessManager {
@@ -43,6 +48,12 @@ pub struct ProcessManager {
     last_launch_log: Arc<Mutex<Option<PathBuf>>>,
     /// Last launch error message (exclusive access only).
     last_launch_error: Arc<Mutex<Option<String>>>,
+    /// Cached ComfyUI liveness from startup, launch, stop, or explicit refresh.
+    comfyui_status: Arc<Mutex<CachedProcessStatus>>,
+    /// Cached Ollama liveness from startup, launch, stop, or explicit refresh.
+    ollama_status: Arc<Mutex<CachedProcessStatus>>,
+    /// Cached Torch liveness from startup, launch, stop, or explicit refresh.
+    torch_status: Arc<Mutex<CachedProcessStatus>>,
 }
 
 impl ProcessManager {
@@ -57,30 +68,52 @@ impl ProcessManager {
         version_paths: Option<HashMap<String, PathBuf>>,
     ) -> Result<Self> {
         let root_dir = root_dir.as_ref().to_path_buf();
+        let detector = ProcessDetector::new(&root_dir, version_paths.unwrap_or_default());
+
+        let comfyui_status = CachedProcessStatus {
+            running: detector.is_any_running(),
+        };
+        let ollama_status = CachedProcessStatus {
+            running: Self::detect_ollama_running(&root_dir),
+        };
+        let torch_status = CachedProcessStatus {
+            running: Self::detect_torch_running(&root_dir),
+        };
 
         Ok(Self {
             root_dir: root_dir.clone(),
-            detector: Arc::new(RwLock::new(ProcessDetector::new(
-                &root_dir,
-                version_paths.unwrap_or_default(),
-            ))),
+            detector: Arc::new(RwLock::new(detector)),
             resource_tracker: Arc::new(ResourceTracker::default()),
             last_launch_log: Arc::new(Mutex::new(None)),
             last_launch_error: Arc::new(Mutex::new(None)),
+            comfyui_status: Arc::new(Mutex::new(comfyui_status)),
+            ollama_status: Arc::new(Mutex::new(ollama_status)),
+            torch_status: Arc::new(Mutex::new(torch_status)),
         })
     }
 
     /// Update the known version paths.
     pub fn set_version_paths(&self, version_paths: HashMap<String, PathBuf>) {
-        let mut detector = self.detector.write().unwrap();
-        detector.set_version_paths(version_paths);
+        {
+            let mut detector = self.detector.write().unwrap();
+            detector.set_version_paths(version_paths);
+        }
+        self.refresh_comfyui_running();
     }
 
-    /// Check if any managed process is running.
+    /// Return cached ComfyUI liveness.
     pub fn is_running(&self) -> bool {
-        let detector = self.detector.read().unwrap();
-        let processes = detector.detect_processes();
-        !processes.is_empty()
+        self.comfyui_status.lock().unwrap().running
+    }
+
+    /// Explicitly refresh ComfyUI liveness by detecting managed processes.
+    pub fn refresh_comfyui_running(&self) -> bool {
+        let running = {
+            let detector = self.detector.read().unwrap();
+            detector.is_any_running()
+        };
+        self.set_comfyui_status(running);
+        running
     }
 
     /// Get all running processes with resource information.
@@ -170,6 +203,7 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
+            self.set_comfyui_status(true);
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -258,6 +292,12 @@ impl ProcessManager {
             info!("Stopped {} browser app windows", browser_windows);
         }
 
+        if stopped_any {
+            self.set_comfyui_status(false);
+        } else {
+            self.refresh_comfyui_running();
+        }
+
         info!("stop_all completed, stopped_any={}", stopped_any);
         Ok(stopped_any)
     }
@@ -317,6 +357,7 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
+            self.set_ollama_status(true);
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -368,14 +409,39 @@ impl ProcessManager {
             stopped_any = true;
         }
 
+        if stopped_any {
+            self.set_ollama_status(false);
+        } else {
+            self.refresh_ollama_running();
+        }
+
         info!("stop_ollama completed, stopped_any={}", stopped_any);
         Ok(stopped_any)
     }
 
-    /// Check if Ollama is running by looking for PID files or running processes.
+    /// Return cached Ollama liveness.
+    ///
+    /// This is intentionally a non-scanning read. Expensive process-table
+    /// fallback detection happens only at startup or explicit refresh points.
     pub fn is_ollama_running(&self) -> bool {
+        self.ollama_status.lock().unwrap().running
+    }
+
+    /// Explicitly refresh Ollama liveness by looking for PID files or running processes.
+    pub fn refresh_ollama_running(&self) -> bool {
+        let running = Self::detect_ollama_running(&self.root_dir);
+        self.set_ollama_status(running);
+        running
+    }
+
+    fn set_ollama_status(&self, running: bool) {
+        let mut status = self.ollama_status.lock().unwrap();
+        status.running = running;
+    }
+
+    fn detect_ollama_running(root_dir: &Path) -> bool {
         // Check for PID files in ollama-versions directory
-        let versions_dir = self.root_dir.join("ollama-versions");
+        let versions_dir = root_dir.join("ollama-versions");
         if versions_dir.exists() {
             if let Ok(entries) = fs::read_dir(&versions_dir) {
                 for entry in entries.flatten() {
@@ -403,6 +469,11 @@ impl ProcessManager {
         }
 
         false
+    }
+
+    fn set_comfyui_status(&self, running: bool) {
+        let mut status = self.comfyui_status.lock().unwrap();
+        status.running = running;
     }
 
     /// Launch the Torch inference server.
@@ -460,6 +531,7 @@ impl ProcessManager {
         if result.success {
             let mut log = self.last_launch_log.lock().unwrap();
             *log = result.log_path.clone();
+            self.set_torch_status(true);
         } else if let Some(ref error) = result.error {
             let mut last_error = self.last_launch_error.lock().unwrap();
             *last_error = Some(error.clone());
@@ -509,14 +581,36 @@ impl ProcessManager {
             stopped_any = true;
         }
 
+        if stopped_any {
+            self.set_torch_status(false);
+        } else {
+            self.refresh_torch_running();
+        }
+
         info!("stop_torch completed, stopped_any={}", stopped_any);
         Ok(stopped_any)
     }
 
-    /// Check if the Torch inference server is running.
+    /// Return cached Torch liveness.
     pub fn is_torch_running(&self) -> bool {
+        self.torch_status.lock().unwrap().running
+    }
+
+    /// Explicitly refresh Torch liveness by checking known PID files.
+    pub fn refresh_torch_running(&self) -> bool {
+        let running = Self::detect_torch_running(&self.root_dir);
+        self.set_torch_status(running);
+        running
+    }
+
+    fn set_torch_status(&self, running: bool) {
+        let mut status = self.torch_status.lock().unwrap();
+        status.running = running;
+    }
+
+    fn detect_torch_running(root_dir: &Path) -> bool {
         // Check for PID files in torch-versions directory
-        let versions_dir = self.root_dir.join("torch-versions");
+        let versions_dir = root_dir.join("torch-versions");
         if versions_dir.exists() {
             if let Ok(entries) = fs::read_dir(&versions_dir) {
                 for entry in entries.flatten() {
@@ -684,5 +778,60 @@ mod tests {
         // Initially should be None
         assert!(manager.last_launch_log().is_none());
         assert!(manager.last_launch_error().is_none());
+    }
+
+    #[test]
+    fn ollama_liveness_read_uses_cache_until_explicit_refresh() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
+        let initial_running = manager.is_ollama_running();
+        let version_dir = temp_dir.path().join("ollama-versions").join("test");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(
+            version_dir.join("ollama.pid"),
+            std::process::id().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(manager.is_ollama_running(), initial_running);
+
+        assert!(manager.refresh_ollama_running());
+        assert!(manager.is_ollama_running());
+    }
+
+    #[test]
+    fn comfyui_liveness_read_uses_cache_until_explicit_refresh() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
+        let initial_running = manager.is_running();
+        fs::write(
+            temp_dir.path().join("comfyui.pid"),
+            std::process::id().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(manager.is_running(), initial_running);
+
+        assert!(manager.refresh_comfyui_running());
+        assert!(manager.is_running());
+    }
+
+    #[test]
+    fn torch_liveness_read_uses_cache_until_explicit_refresh() {
+        let temp_dir = TempDir::new().unwrap();
+        let manager = ProcessManager::new(temp_dir.path(), None).unwrap();
+        let initial_running = manager.is_torch_running();
+        let version_dir = temp_dir.path().join("torch-versions").join("test");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(
+            version_dir.join("torch.pid"),
+            std::process::id().to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(manager.is_torch_running(), initial_running);
+
+        assert!(manager.refresh_torch_running());
+        assert!(manager.is_torch_running());
     }
 }

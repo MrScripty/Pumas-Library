@@ -908,7 +908,7 @@ Verification completed:
 
 #### R5 - Process Status Ownership
 
-Status: Planned.
+Status: In progress.
 
 - Move Ollama/llama.cpp process liveness into an explicit process-status owner
   with cached facts and a clear refresh trigger.
@@ -923,6 +923,30 @@ Verification:
 - Integration tests for runtime-profile display using cached status.
 - `rg` confirms `find_processes_by_cmdline` is not reachable from idle
   update-stream loops.
+
+Implementation notes:
+
+- First slice moved ComfyUI, Ollama, and Torch liveness reads in
+  `ProcessManager` to cached facts updated by startup detection, launch/stop
+  operations, and explicit refresh methods.
+- `is_running`, `is_ollama_running`, and `is_torch_running` are now
+  non-scanning reads, so status telemetry sampling no longer reaches
+  process-table fallback scans for basic app liveness.
+- Process-table fallback remains in explicit refresh/cleanup paths such as
+  startup detection, `refresh_*_running`, and stop-by-pattern cleanup.
+
+Discovered issue:
+
+- Managed child-process exit is not yet observed through a wait-handle owner.
+  If a managed ComfyUI, Ollama, or Torch process exits outside an explicit stop
+  path, the cached liveness fact can remain stale until an explicit refresh.
+  Resolve this with launch-owned child exit observation or another
+  lifecycle-owned backend mechanism rather than restoring UI/request polling.
+
+Verification completed for first slice:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-library`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-library liveness_read_uses_cache_until_explicit_refresh -- --nocapture`
 
 #### R6 - Runtime And Thread Budget
 

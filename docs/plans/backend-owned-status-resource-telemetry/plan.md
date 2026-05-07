@@ -950,7 +950,7 @@ Verification completed for first slice:
 
 #### R6 - Runtime And Thread Budget
 
-Status: Planned.
+Status: Completed on 2026-05-06.
 
 - Replace the default `#[tokio::main]` runtime setup in `pumas-rpc` with an
   explicit runtime builder at the composition root.
@@ -968,6 +968,26 @@ Verification:
 - Release smoke test confirms downloads and API calls do not starve.
 - Idle thread count is measured and recorded. The target is fewer than `64`
   backend threads while idle unless a higher count is justified in this plan.
+
+Implementation notes:
+
+- `pumas-rpc` now uses an explicit Tokio runtime builder at the process
+  composition root instead of `#[tokio::main]`.
+- The RPC runtime is capped at `4` worker threads and `16` blocking threads,
+  with a named `pumas-rpc` thread prefix.
+- Intentionally long-lived work remains owned by existing services: Axum server
+  handle, IPC accept/per-connection tasks, status telemetry sampler, model
+  library watcher, and active workload tasks for downloads/conversion/install.
+
+Verification completed:
+
+- `cargo check --manifest-path rust/Cargo.toml -p pumas-rpc`
+- `cargo test --manifest-path rust/Cargo.toml -p pumas-rpc rpc_host_validation -- --nocapture`
+
+Deferred to R7:
+
+- Measure final idle thread count from the release binary after all remediation
+  slices are built.
 
 #### R7 - Release Verification And Completion
 

@@ -15,8 +15,12 @@ use pumas_library::{AppId, PluginLoader};
 use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use tokio::runtime::Builder;
 use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
+
+const RPC_WORKER_THREADS: usize = 4;
+const RPC_MAX_BLOCKING_THREADS: usize = 16;
 
 #[derive(Parser, Debug)]
 #[command(name = "pumas-rpc")]
@@ -43,8 +47,7 @@ struct Args {
     launcher_root: Option<PathBuf>,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args = Args::parse();
     validate_rpc_host(&args.host, args.allow_lan)?;
 
@@ -61,6 +64,17 @@ async fn main() -> Result<()> {
         .compact()
         .init();
 
+    let runtime = Builder::new_multi_thread()
+        .enable_all()
+        .worker_threads(RPC_WORKER_THREADS)
+        .max_blocking_threads(RPC_MAX_BLOCKING_THREADS)
+        .thread_name("pumas-rpc")
+        .build()?;
+
+    runtime.block_on(run(args))
+}
+
+async fn run(args: Args) -> Result<()> {
     info!("Starting Pumas RPC Server");
 
     // Determine launcher root
